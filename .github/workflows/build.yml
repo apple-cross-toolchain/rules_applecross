@@ -1,0 +1,40 @@
+name: build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: sudo tools/install-mandatory-tools.sh
+      - run: tools/set-developer-dir.sh
+      - run: bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld //examples/ios/HelloWorldSwiftUI:Tests //examples/ios/HelloWorldSwiftUI:UITests
+      - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
+      - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
+      - uses: actions/upload-artifact@v2
+        with:
+          name: Tests
+          path: Tests.tar.xz
+          retention-days: 1
+      - uses: actions/upload-artifact@v2
+        with:
+          name: UITests
+          path: UITests.tar.xz
+          retention-days: 1
+  run_tests:
+    needs: build
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: Tests
+      - run: (tar -xf Tests.tar.xz && cd Tests.runfiles/com_github_apple_cross_toolchain_rules_applecross && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/Tests)
+      - uses: actions/download-artifact@v2
+        with:
+          name: UITests
+      - run: (tar -xf UITests.tar.xz && cd UITests.runfiles/com_github_apple_cross_toolchain_rules_applecross && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/UITests)

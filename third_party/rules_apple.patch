@@ -1,0 +1,26 @@
+diff --git i/tools/environment_plist/environment_plist.sh w/tools/environment_plist/environment_plist.sh
+index 61b3733..1dd0103 100755
+--- i/tools/environment_plist/environment_plist.sh
++++ w/tools/environment_plist/environment_plist.sh
+@@ -79,14 +79,12 @@ xcode_version_string=$(echo "${xcodebuild_version_output}" | grep Xcode | cut -d
+ # Converts '7.1' -> 0710, and '7.1.1' -> 0711.
+ xcode_version=$(/usr/bin/printf '%02d%d%d\n' $(echo "${xcode_version_string//./ }"))
+ 
+-/usr/libexec/PlistBuddy \
+-    -c "Add :DTPlatformBuild string ${platform_build:-""}" \
+-    -c "Add :DTSDKBuild string ${sdk_build:-""}" \
+-    -c "Add :DTPlatformVersion string ${platform_version:-""}" \
+-    -c "Add :DTXcode string ${xcode_version:-""}" \
+-    -c "Add :DTXcodeBuild string ${xcode_build:-""}" \
+-    -c "Add :DTCompiler string ${compiler:-""}" \
+-    -c "Add :BuildMachineOSBuild string ${os_build:-""}" \
+-    "$PLIST" > /dev/null
++/usr/libexec/PlistBuddy -c "Add :DTPlatformBuild string ${platform_build:-""}" "$PLIST" > /dev/null
++/usr/libexec/PlistBuddy -c "Add :DTSDKBuild string ${sdk_build:-""}" "$PLIST" > /dev/null
++/usr/libexec/PlistBuddy -c "Add :DTPlatformVersion string ${platform_version:-""}" "$PLIST" > /dev/null
++/usr/libexec/PlistBuddy -c "Add :DTXcode string ${xcode_version:-""}" "$PLIST" > /dev/null
++/usr/libexec/PlistBuddy -c "Add :DTXcodeBuild string ${xcode_build:-""}" "$PLIST" > /dev/null
++/usr/libexec/PlistBuddy -c "Add :DTCompiler string ${compiler:-""}" "$PLIST" > /dev/null
++/usr/libexec/PlistBuddy -c "Add :BuildMachineOSBuild string ${os_build:-""}" "$PLIST" > /dev/null
+ 
+ plutil -convert binary1 -o "${OUTPUT}" -s  -- "${PLIST}"

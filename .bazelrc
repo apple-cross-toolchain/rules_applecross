@@ -1,0 +1,9 @@
+build --define=RULES_SWIFT_BUILD_DUMMY_WORKER=1
+build --strategy=SwiftCompile=sandboxed,local
+
+build --apple_crosstool_top=@apple_cross_toolchain//:toolchain
+build --incompatible_strict_action_env
+build --subcommands
+build --use_top_level_targets_for_symlinks
+build --verbose_failures
+build --xcode_version_config=//xcode_config:host_xcodes
