@@ -13,9 +13,9 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "rules_applecross",
-    sha256 = "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5",
-    strip_prefix = "rules_applecross-0.0.1",
-    url = "https://github.com/apple-cross-toolchain/rules_applecross/archive/refs/tags/0.0.1.tar.gz",
+    sha256 = "3c6b017792789714323d75f29569239855cfb223ce28768df39a910fe7842863",
+    strip_prefix = "rules_applecross-0.0.2",
+    url = "https://github.com/apple-cross-toolchain/rules_applecross/archive/refs/tags/0.0.2.tar.gz",
 )
 
 http_archive(
