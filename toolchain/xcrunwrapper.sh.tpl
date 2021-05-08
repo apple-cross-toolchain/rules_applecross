@@ -40,23 +40,12 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   }
 fi
 
-WRAPPER_SRCROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WRAPPER_BASENAME="$(basename "${BASH_SOURCE[0]}")"
-WRAPPER_REALPATH="$(realpath "${WRAPPER_SRCROOT}/${WRAPPER_BASENAME}")"
-REPO_REALPATH="$(dirname "${WRAPPER_REALPATH}")"
-
 TOOLNAME=$1
 shift
 
-# If DEVELOPER_DIR variable is provided in the C++ toolchain config, use that.
-if [[ -z "${DEVELOPER_DIR:-}" ]] ; then
-  # If it's not provided, try the bundled Xcode path, if exists.
-  DEVELOPER_DIR="$REPO_REALPATH/Xcode.app/Contents/Developer"
-fi
-# And then finally fallback to the active developer directory setting locally.
 # This is equivalent to spawning `xcode-select -p` and getting its result, but
-# faster as we don't need to spawn another sub-process.
-if [[ ! -d "${DEVELOPER_DIR}" ]] ; then
+# 4 times faster.
+if [[ -z "${DEVELOPER_DIR:-}" ]] ; then
   DEVELOPER_DIR="$(realpath /var/db/xcode_select_link)"
 fi
 export DEVELOPER_DIR

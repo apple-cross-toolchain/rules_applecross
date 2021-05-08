@@ -387,24 +387,16 @@ int main(int argc, char *argv[]) {
   // If it's provided in the C++ toolchain config, use that.
   std::string developer_dir = GetEnvVar("DEVELOPER_DIR");
   if (developer_dir == "") {
+    // Fallback to the active developer directory setting locally. This is
+    // equivalent to spawning `xcode-select -p` and getting its result, but
+    // 4 times faster.
     char buf[PATH_MAX];
-    // Try the bundled Xcode path first.
-    char *res =
-      realpath("%{toolchain_path_prefix}Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist", buf);
-    if (!res) {
-      // If the user didn't request downloading Xcode, fallback to the active
-      // developer directory setting locally. This is equivalent to spawning
-      // `xcode-select -p` and getting its result, but faster as we don't need
-      // to spawn another sub-process.
-      res = realpath("/var/db/xcode_select_link", buf);
-    }
-    if (res) {
-      developer_dir = Dirname(Dirname(Dirname(res)));
-      setenv("DEVELOPER_DIR", developer_dir.c_str(), 0 /* no overwrite */);
-    } else {
-      std::cerr << "Error: could not find active developer directory.\n";
-      abort();
-    }
+    developer_dir = realpath("/var/db/xcode_select_link", buf);
+    setenv("DEVELOPER_DIR", developer_dir.c_str(), 0 /* no overwrite */);
+  }
+  if (developer_dir == "") {
+    std::cerr << "Error: could not find active developer directory.\n";
+    abort();
   }
 
   std::string sdk_root = GetEnvVar("SDKROOT");
