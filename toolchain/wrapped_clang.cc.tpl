@@ -362,6 +362,7 @@ void ProcessArgument(const std::string arg, const std::string developer_dir,
 }  // namespace
 
 int main(int argc, char *argv[]) {
+  char path_buffer[PATH_MAX];
   std::string tool_name;
 
   std::string binary_name = Basename(argv[0]);
@@ -390,8 +391,7 @@ int main(int argc, char *argv[]) {
     // Fallback to the active developer directory setting locally. This is
     // equivalent to spawning `xcode-select -p` and getting its result, but
     // 4 times faster.
-    char buf[PATH_MAX];
-    developer_dir = realpath("/var/db/xcode_select_link", buf);
+    developer_dir = realpath("/var/db/xcode_select_link", path_buffer);
     setenv("DEVELOPER_DIR", developer_dir.c_str(), 0 /* no overwrite */);
   }
   if (developer_dir == "") {
@@ -415,7 +415,9 @@ int main(int argc, char *argv[]) {
   std::string linked_binary, dsym_path;
 
   const std::string cwd = GetCurrentDirectory();
-  std::vector<std::string> invocation_args = {"/usr/bin/xcrun", tool_name};
+  const std::string tool_path = "%{tools_path_prefix}" + tool_name;
+  const std::string tool_realpath = realpath(tool_path.c_str(), path_buffer);
+  std::vector<std::string> invocation_args = {tool_realpath};
   std::vector<std::string> processed_args = {};
 
   bool relative_ast_path = getenv("RELATIVE_AST_PATH") != nullptr;
@@ -464,8 +466,9 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  std::vector<std::string> dsymutil_args = {"/usr/bin/xcrun",
-                                            "dsymutil",
+  const std::string dsymutil_realpath = realpath("%{tools_path_prefix}dsymutil",
+                                                 path_buffer);
+  std::vector<std::string> dsymutil_args = {dsymutil_realpath,
                                             linked_binary,
                                             "-o",
                                             dsym_path,
