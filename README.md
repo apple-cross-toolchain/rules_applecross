@@ -68,19 +68,30 @@ swift_rules_extra_dependencies()
     build --xcode_version_config=@rules_applecross//xcode_config:host_xcodes # or your own `xcode_config` target
     ```
 
-3. From your terminal, run these two commands:
+3. From your terminal, run these commands:
 
-   ```
-   sudo tools/install-mandatory-tools.sh
-   tools/set-developer-dir.sh
-   ```
+    ```
+    git clone https://github.com/apple-cross-toolchain/rules_applecross.git
+    cd rules_applecross
+    sudo tools/install-mandatory-tools.sh
+    ```
 
-The first command installs tools required by Apple rules (e.g. `xcrun`) onto
-the system PATH, as they are not available in non-Apple platforms. The second
-command triggers the auto-configuration of the toolchain and selects the active
-developer directory. There is currently no other way to avoid this kind of
-workaround, because Apple rules don't include tools in their action inputs, but
-rely on `xcrun` to invoke tools.
+This installs tools required by Apple rules (e.g. `xcrun`) onto the system
+PATH, as they are not available in non-Apple platforms.
+
+4. From your workspace, run these commands:
+
+    ```
+    bazel fetch @rules_applecross//tests/data:dummy_lib
+    DEVELOPER_DIR="$(bazel info output_base)/external/apple_cross_toolchain/Xcode.app/Contents/Developer"
+    sudo xcode-select -s "$DEVELOPER_DIR"
+
+    ```
+
+These commands triggers the auto-configuration of the toolchain and selects the
+active developer directory. There is currently no other way to avoid this kind
+of workaround, because Apple rules don't include tools in their action inputs,
+but rely on `xcrun` to invoke tools.
 
 Note: 
 - You can use a different `rules_apple` version, but it will need a patch like
