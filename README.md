@@ -6,7 +6,18 @@ Current supported host is x86_64 Linux only.
 
 ## Setup
 
-1. Add the following to your `WORKSPACE` file.
+1. First, clone this repository and provision your OS with:
+
+    ```
+    git clone https://github.com/apple-cross-toolchain/rules_applecross.git
+    cd rules_applecross
+    sudo tools/install-mandatory-tools.sh
+    ```
+
+This installs tools required by Apple rules (e.g. `xcrun`) onto the system
+PATH, as they are not available on non-Apple platforms.
+
+2. Add the following to your `WORKSPACE` file.
 
 ```starlark
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
@@ -61,23 +72,12 @@ load("@build_bazel_rules_swift//swift:extras.bzl", "swift_rules_extra_dependenci
 swift_rules_extra_dependencies()
 ```
 
-2. Add the following to your `.bazelrc` file:
+3. Add the following to your `.bazelrc` file:
 
     ```
     build --apple_crosstool_top=@apple_cross_toolchain//:toolchain
     build --xcode_version_config=@rules_applecross//xcode_config:host_xcodes # or your own `xcode_config` target
     ```
-
-3. From your terminal, run these commands:
-
-    ```
-    git clone https://github.com/apple-cross-toolchain/rules_applecross.git
-    cd rules_applecross
-    sudo tools/install-mandatory-tools.sh
-    ```
-
-This installs tools required by Apple rules (e.g. `xcrun`) onto the system
-PATH, as they are not available in non-Apple platforms.
 
 4. From your workspace, run these commands:
 
@@ -85,7 +85,6 @@ PATH, as they are not available in non-Apple platforms.
     bazel fetch @rules_applecross//tests/data:dummy_lib
     DEVELOPER_DIR="$(bazel info output_base)/external/apple_cross_toolchain/Xcode.app/Contents/Developer"
     sudo xcode-select -s "$DEVELOPER_DIR"
-
     ```
 
 These commands triggers the auto-configuration of the toolchain and selects the
