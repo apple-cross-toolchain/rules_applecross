@@ -150,3 +150,7 @@ Now you can build your target with `--config=remote`.
 bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld
 bazel build --config=remote //examples/ios/HelloWorldSwiftUI:HelloWorld
 ```
+
+See the [examples
+repository](https://github.com/apple-cross-toolchain/examples) for more
+real-world examples.
