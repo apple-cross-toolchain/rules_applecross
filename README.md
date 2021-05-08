@@ -75,6 +75,13 @@ swift_rules_extra_dependencies()
    tools/set-developer-dir.sh
    ```
 
+The first command installs tools required by Apple rules (e.g. `xcrun`) onto
+the system PATH, as they are not available in non-Apple platforms. The second
+command triggers the auto-configuration of the toolchain and selects the active
+developer directory. There is currently no other way to avoid this kind of
+workaround, because Apple rules don't include tools in their action inputs, but
+rely on `xcrun` to invoke tools.
+
 Note: 
 - You can use a different `rules_apple` version, but it will need a patch like
   [third_party/rules_apple.patch](third_party/rules_apple.patch) because the
@@ -86,8 +93,50 @@ Note:
   only contain what we need) to speed up the decompression during the toolchain
   configuration.
 
+## Remote Build Execution Setup (for BuildBuddy)
+
+1. Define a `platform` target; for example, in `platforms/BUILD`:
+
+```starlark
+platform(
+    name = "docker_image_platform",
+    constraint_values = [
+        "@bazel_tools//platforms:x86_64",
+        "@bazel_tools//platforms:linux",
+        "@bazel_tools//tools/cpp:clang",
+    ],
+    exec_properties = {
+        "OSFamily": "Linux",
+        "container-image": "docker://ghcr.io/apple-cross-toolchain/xcode:12.4",
+    },
+)
+```
+
+2. Download BuildBuddy client certificate and key and put them at the top level
+   directory of your workspace as `buildbuddy-cert.pem` and
+   `buildbuddy-key.pem` (make sure they aren't tracked by your version control
+   system).
+
+3. Add the following to your `.bazelrc` file:
+
+```
+build:remote --bes_backend=grpcs://cloud.buildbuddy.io
+build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+build:remote --host_platform=//platforms:docker_image_platform
+build:remote --jobs=100
+build:remote --remote_download_toplevel
+build:remote --remote_executor=grpcs://cloud.buildbuddy.io
+build:remote --remote_timeout=3600
+build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
+build:remote --tls_client_certificate=buildbuddy-cert.pem
+build:remote --tls_client_key=buildbuddy-key.pem
+```
+
+Now you can build your target with `--config=remote`.
+
 ## Examples
 
 ```
 bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld
+bazel build --config=remote //examples/ios/HelloWorldSwiftUI:HelloWorld
 ```
