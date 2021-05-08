@@ -69,15 +69,15 @@ def _apple_cross_toolchain_impl(rctx):
         "@build_bazel_rules_swift//tools/worker:work_processor.cc",
         "@build_bazel_rules_swift//tools/worker:work_processor.h",
         "@build_bazel_rules_swift//tools/worker:worker_main.cc",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:BUILD.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:cc_toolchain_config.bzl.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:cc_wrapper.sh.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:swift_toolchain.bzl.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:repositories.bzl.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:swift_autoconfiguration.bzl.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:swift_runner.cc.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:wrapped_clang.cc.tpl",
-        "@com_github_apple_cross_toolchain_rules_applecross//toolchain:xcrunwrapper.sh.tpl",
+        "@rules_applecross//toolchain:BUILD.tpl",
+        "@rules_applecross//toolchain:cc_toolchain_config.bzl.tpl",
+        "@rules_applecross//toolchain:cc_wrapper.sh.tpl",
+        "@rules_applecross//toolchain:swift_toolchain.bzl.tpl",
+        "@rules_applecross//toolchain:repositories.bzl.tpl",
+        "@rules_applecross//toolchain:swift_autoconfiguration.bzl.tpl",
+        "@rules_applecross//toolchain:swift_runner.cc.tpl",
+        "@rules_applecross//toolchain:wrapped_clang.cc.tpl",
+        "@rules_applecross//toolchain:xcrunwrapper.sh.tpl",
     ])
 
     repo_path = str(rctx.path(""))
@@ -101,22 +101,22 @@ def _apple_cross_toolchain_impl(rctx):
     # Setup C++ toolchain
     rctx.template(
         "BUILD",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:BUILD.tpl"],
+        paths["@rules_applecross//toolchain:BUILD.tpl"],
         substitutions,
     )
     rctx.template(
         "cc_toolchain_config.bzl",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:cc_toolchain_config.bzl.tpl"],
+        paths["@rules_applecross//toolchain:cc_toolchain_config.bzl.tpl"],
         substitutions,
     )
     rctx.template(
         "cc_wrapper.sh",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:cc_wrapper.sh.tpl"],
+        paths["@rules_applecross//toolchain:cc_wrapper.sh.tpl"],
         substitutions,
     )
     rctx.template(
         "xcrunwrapper.sh",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:xcrunwrapper.sh.tpl"],
+        paths["@rules_applecross//toolchain:xcrunwrapper.sh.tpl"],
         substitutions,
     )
     rctx.template(
@@ -218,7 +218,7 @@ def _apple_cross_toolchain_impl(rctx):
     )
     rctx.template(
         "wrapped_clang.cc",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:wrapped_clang.cc.tpl"],
+        paths["@rules_applecross//toolchain:wrapped_clang.cc.tpl"],
         substitutions,
     )
     wrapped_clang_src_path = str(rctx.path("wrapped_clang.cc"))
@@ -234,24 +234,24 @@ def _apple_cross_toolchain_impl(rctx):
     # Setup Swift toolchain
     rctx.template(
         "swift_toolchain.bzl",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:swift_toolchain.bzl.tpl"],
+        paths["@rules_applecross//toolchain:swift_toolchain.bzl.tpl"],
         substitutions,
     )
     rctx.template(
         "repositories.bzl",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:repositories.bzl.tpl"],
+        paths["@rules_applecross//toolchain:repositories.bzl.tpl"],
         substitutions,
     )
     rctx.template(
         "swift_autoconfiguration.bzl",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:swift_autoconfiguration.bzl.tpl"],
+        paths["@rules_applecross//toolchain:swift_autoconfiguration.bzl.tpl"],
         substitutions,
     )
 
     # We use a modified version of swift_runner.cc
     rctx.template(
         "tools/worker/swift_runner.cc",
-        paths["@com_github_apple_cross_toolchain_rules_applecross//toolchain:swift_runner.cc.tpl"],
+        paths["@rules_applecross//toolchain:swift_runner.cc.tpl"],
         substitutions,
     )
 

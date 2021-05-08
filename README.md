@@ -12,7 +12,7 @@ Current supported host is x86_64 Linux only.
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
-    name = "com_github_apple_cross_toolchain_rules_applecross",
+    name = "rules_applecross",
     sha256 = "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5",
     strip_prefix = "rules_applecross-0.0.1",
     url = "https://github.com/apple-cross-toolchain/rules_applecross/archive/refs/tags/0.0.1.tar.gz",
@@ -21,7 +21,7 @@ http_archive(
 http_archive(
     name = "build_bazel_rules_apple",
     patch_args = ["-p1"],
-    patches = ["@com_github_apple_cross_toolchain_rules_applecross//third_party:rules_apple.patch"],
+    patches = ["@rules_applecross//third_party:rules_apple.patch"],
     sha256 = "5fed4c90b82006176b28d44d7642f520aa2fb9a32d30e24b22071fabcd24cbeb",
     strip_prefix = "rules_apple-0a67f1bd6c4cb9bd1bee5c51ac8d6632da537310",
     url = "https://github.com/bazelbuild/rules_apple/archive/0a67f1bd6c4cb9bd1bee5c51ac8d6632da537310.tar.gz",
@@ -32,7 +32,7 @@ load("@build_bazel_rules_apple//apple:repositories.bzl", "apple_rules_dependenci
 apple_rules_dependencies()
 
 load(
-    "@com_github_apple_cross_toolchain_rules_applecross//toolchain:apple_cross_toolchain.bzl",
+    "@rules_applecross//toolchain:apple_cross_toolchain.bzl",
     "apple_cross_toolchain",
 )
 
@@ -65,7 +65,7 @@ swift_rules_extra_dependencies()
 
     ```
     build --apple_crosstool_top=@apple_cross_toolchain//:toolchain
-    build --xcode_version_config=@com_github_apple_cross_toolchain_rules_applecross//xcode_config:host_xcodes # or your own `xcode_config` target
+    build --xcode_version_config=@rules_applecross//xcode_config:host_xcodes # or your own `xcode_config` target
     ```
 
 3. From your terminal, run these two commands:

@@ -33,11 +33,11 @@ jobs:
       - uses: actions/download-artifact@v2
         with:
           name: Tests
-      - run: (tar -xf Tests.tar.xz && cd Tests.runfiles/com_github_apple_cross_toolchain_rules_applecross && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/Tests)
+      - run: (tar -xf Tests.tar.xz && cd Tests.runfiles/rules_applecross && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/Tests)
       - uses: actions/download-artifact@v2
         with:
           name: UITests
-      - run: (tar -xf UITests.tar.xz && cd UITests.runfiles/com_github_apple_cross_toolchain_rules_applecross && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/UITests)
+      - run: (tar -xf UITests.tar.xz && cd UITests.runfiles/rules_applecross && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/UITests)
   remote_build:
     runs-on: ubuntu-latest
     steps:

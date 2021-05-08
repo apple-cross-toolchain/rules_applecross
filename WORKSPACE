@@ -1,4 +1,4 @@
-workspace(name = "com_github_apple_cross_toolchain_rules_applecross")
+workspace(name = "rules_applecross")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
@@ -19,14 +19,14 @@ load(
 apple_rules_dependencies()
 
 load(
-    "@com_github_apple_cross_toolchain_rules_applecross//toolchain:repositories.bzl",
+    "@rules_applecross//toolchain:repositories.bzl",
     "apple_cross_toolchain_config_dependencies",
 )
 
 apple_cross_toolchain_config_dependencies()
 
 load(
-    "@com_github_apple_cross_toolchain_rules_applecross//toolchain:apple_cross_toolchain.bzl",
+    "@rules_applecross//toolchain:apple_cross_toolchain.bzl",
     "apple_cross_toolchain",
 )
 
