@@ -171,6 +171,7 @@ def _apple_cross_toolchain_impl(rctx):
             "mv",
             "tmp_swift/usr/bin/swift",
             "tmp_swift/usr/bin/swiftc",
+            "tmp_swift/usr/bin/swift-build",
             xcode_toolchain_bindir,
         ])
         rctx.delete("tmp_swift")

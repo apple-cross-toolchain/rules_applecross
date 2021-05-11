@@ -35,9 +35,9 @@ apple_cross_toolchain(
     clang_sha256 = "8f50330cfa4c609841e73286a3a056cff95cf55ec04b3f1280d0cd0052e96c2a",
     clang_strip_prefix = "clang+llvm-12.0.0-x86_64-linux-gnu-ubuntu-20.04",
     clang_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.6/clang+llvm-12.0.0-x86_64-linux-gnu-ubuntu-20.04-stripped.tar.xz"],
-    swift_sha256 = "869edb04a932c9831922541cb354102244ca33be0aa6325d28b0f14ac0a32a4d",
+    swift_sha256 = "57dd2731779386f747d9228e2d9f6bdb27c262e1cc3849f39543f1ea28946069",
     swift_strip_prefix = "swift-5.3.3-RELEASE-ubuntu20.04",
-    swift_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.6/swift-5.3.3-RELEASE-ubuntu20.04-stripped.tar.xz"],
+    swift_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.12/swift-5.3.3-RELEASE-ubuntu20.04-stripped.tar.xz"],
     xcode_sha256 = "44221c0f4acd48d7a33ee7e51143433dee94c649cfee44cfff3c7915ac54fdd2",
     xcode_urls = ["https://github.com/apple-cross-toolchain/apple-sdks/releases/download/0.0.4/apple-sdks-xcode-12.4.tar.xz"],
 )
