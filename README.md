@@ -6,7 +6,43 @@ Current supported host is x86_64 Linux only.
 
 ## Setup
 
-1. First, clone this repository and provision your OS with:
+1. Install required packages (Ubuntu 20.04)
+
+    ```
+    sudo apt install \
+        binutils \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        doxygen \
+        git \
+        gnupg2 \
+        gobjc \
+        libc6-dev \
+        libcurl4 \
+        libedit2 \
+        libgcc-9-dev \
+        libpng-dev \
+        libpython2.7 \
+        libsqlite3-0 \
+        libstdc++-9-dev \
+        libxml2 \
+        libxml2-dev \ 
+        libz3-dev \
+        ninja-build \
+        patchelf \
+        pkg-config \
+        python \
+        python3 \
+        tzdata \
+        unzip \
+        vim-tiny \
+        zip \
+        zlib1g-dev
+    ```
+
+2. Clone this repository and provision your OS with:
 
     ```
     git clone https://github.com/apple-cross-toolchain/rules_applecross.git
@@ -17,7 +53,7 @@ Current supported host is x86_64 Linux only.
 This installs tools required by Apple rules (e.g. `xcrun`) onto the system
 PATH, as they are not available on non-Apple platforms.
 
-2. Add the following to your `WORKSPACE` file.
+3. Add the following to your `WORKSPACE` file.
 
 ```starlark
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
@@ -72,14 +108,14 @@ load("@build_bazel_rules_swift//swift:extras.bzl", "swift_rules_extra_dependenci
 swift_rules_extra_dependencies()
 ```
 
-3. Add the following to your `.bazelrc` file:
+4. Add the following to your `.bazelrc` file:
 
     ```
     build --apple_crosstool_top=@apple_cross_toolchain//:toolchain
     build --xcode_version_config=@rules_applecross//xcode_config:host_xcodes # or your own `xcode_config` target
     ```
 
-4. From your workspace, run these commands:
+5. From your workspace, run these commands:
 
     ```
     bazel fetch @rules_applecross//tests/data:dummy_lib
