@@ -54,8 +54,7 @@ def _apple_cross_toolchain_impl(rctx):
         "@build_bazel_rules_swift//tools/common:path_utils.h",
         "@build_bazel_rules_swift//tools/common:process.cc",
         "@build_bazel_rules_swift//tools/common:process.h",
-        "@build_bazel_rules_swift//tools/common:string_utils.cc",
-        "@build_bazel_rules_swift//tools/common:string_utils.h",
+        "@build_bazel_rules_swift//tools/common:bazel_substitutions.h",
         "@build_bazel_rules_swift//tools/common:temp_file.h",
         "@build_bazel_rules_swift//tools/worker:BUILD",
         "@build_bazel_rules_swift//tools/worker:compile_with_worker.cc",
@@ -66,16 +65,17 @@ def _apple_cross_toolchain_impl(rctx):
         "@build_bazel_rules_swift//tools/worker:output_file_map.cc",
         "@build_bazel_rules_swift//tools/worker:output_file_map.h",
         "@build_bazel_rules_swift//tools/worker:swift_runner.h",
+        "@build_bazel_rules_swift//tools/worker:swift_runner.cc",
         "@build_bazel_rules_swift//tools/worker:work_processor.cc",
         "@build_bazel_rules_swift//tools/worker:work_processor.h",
         "@build_bazel_rules_swift//tools/worker:worker_main.cc",
         "@rules_applecross//toolchain:BUILD.tpl",
+        "@rules_applecross//toolchain:bazel_substitutions.cc.tpl",
         "@rules_applecross//toolchain:cc_toolchain_config.bzl.tpl",
         "@rules_applecross//toolchain:cc_wrapper.sh.tpl",
         "@rules_applecross//toolchain:swift_toolchain.bzl.tpl",
         "@rules_applecross//toolchain:repositories.bzl.tpl",
         "@rules_applecross//toolchain:swift_autoconfiguration.bzl.tpl",
-        "@rules_applecross//toolchain:swift_runner.cc.tpl",
         "@rules_applecross//toolchain:wrapped_clang.cc.tpl",
         "@rules_applecross//toolchain:xcrunwrapper.sh.tpl",
     ])
@@ -186,14 +186,13 @@ def _apple_cross_toolchain_impl(rctx):
         "third_party/bazel_protos/BUILD": "@build_bazel_rules_swift//third_party/bazel_protos:BUILD",
         "third_party/bazel_protos/worker_protocol.proto": "@build_bazel_rules_swift//third_party/bazel_protos:worker_protocol.proto",
         "tools/common/BUILD": "@build_bazel_rules_swift//tools/common:BUILD",
+        "tools/common/bazel_substitutions.h": "@build_bazel_rules_swift//tools/common:bazel_substitutions.h",
         "tools/common/file_system.cc": "@build_bazel_rules_swift//tools/common:file_system.cc",
         "tools/common/file_system.h": "@build_bazel_rules_swift//tools/common:file_system.h",
         "tools/common/path_utils.cc": "@build_bazel_rules_swift//tools/common:path_utils.cc",
         "tools/common/path_utils.h": "@build_bazel_rules_swift//tools/common:path_utils.h",
         "tools/common/process.cc": "@build_bazel_rules_swift//tools/common:process.cc",
         "tools/common/process.h": "@build_bazel_rules_swift//tools/common:process.h",
-        "tools/common/string_utils.cc": "@build_bazel_rules_swift//tools/common:string_utils.cc",
-        "tools/common/string_utils.h": "@build_bazel_rules_swift//tools/common:string_utils.h",
         "tools/common/temp_file.h": "@build_bazel_rules_swift//tools/common:temp_file.h",
         "tools/worker/BUILD": "@build_bazel_rules_swift//tools/worker:BUILD",
         "tools/worker/compile_with_worker.cc": "@build_bazel_rules_swift//tools/worker:compile_with_worker.cc",
@@ -204,6 +203,7 @@ def _apple_cross_toolchain_impl(rctx):
         "tools/worker/output_file_map.cc": "@build_bazel_rules_swift//tools/worker:output_file_map.cc",
         "tools/worker/output_file_map.h": "@build_bazel_rules_swift//tools/worker:output_file_map.h",
         "tools/worker/swift_runner.h": "@build_bazel_rules_swift//tools/worker:swift_runner.h",
+        "tools/worker/swift_runner.cc": "@build_bazel_rules_swift//tools/worker:swift_runner.cc",
         "tools/worker/work_processor.cc": "@build_bazel_rules_swift//tools/worker:work_processor.cc",
         "tools/worker/work_processor.h": "@build_bazel_rules_swift//tools/worker:work_processor.h",
         "tools/worker/worker_main.cc": "@build_bazel_rules_swift//tools/worker:worker_main.cc",
@@ -249,10 +249,10 @@ def _apple_cross_toolchain_impl(rctx):
         substitutions,
     )
 
-    # We use a modified version of swift_runner.cc
+    # We use a modified version of bazel_substitutions.cc
     rctx.template(
-        "tools/worker/swift_runner.cc",
-        paths["@rules_applecross//toolchain:swift_runner.cc.tpl"],
+        "tools/common/bazel_substitutions.cc",
+        paths["@rules_applecross//toolchain:bazel_substitutions.cc.tpl"],
         substitutions,
     )
 
