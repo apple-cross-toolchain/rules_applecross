@@ -785,7 +785,7 @@ def _swift_toolchain_impl(ctx):
                 ctx.attr.implicit_deps,
             ),
             linker_opts_producer = linker_opts_producer,
-            linker_supports_filelist = True,
+            linker_supports_filelist = False,
             object_format = "macho",
             requested_features = requested_features,
             supports_objc_interop = True,
