@@ -1,23 +1,26 @@
+load("@build_bazel_apple_support//xcode:xcode_config.bzl", "xcode_config")
+load("@build_bazel_apple_support//xcode:xcode_version.bzl", "xcode_version")
+
 package(default_visibility = ["//visibility:public"])
 
 xcode_version(
-    name = "version12_4_0_12D4e",
+    name = "version26_2_17C52",
     aliases = [
-        "12.4",
-        "12.4.0",
-        "12.4.0.12D4e",
+        "26.2",
+        "26.2.0",
     ],
-    default_ios_sdk_version = "14.4",
-    default_macos_sdk_version = "11.1",
-    default_tvos_sdk_version = "14.3",
-    default_watchos_sdk_version = "7.2",
-    version = "12.4.0.12D4e",
+    default_ios_sdk_version = "26.2",
+    default_macos_sdk_version = "26.2",
+    default_tvos_sdk_version = "26.2",
+    default_visionos_sdk_version = "26.2",
+    default_watchos_sdk_version = "26.2",
+    version = "26.2.0.17C52",
 )
 
 xcode_config(
     name = "host_xcodes",
-    default = ":version12_4_0_12D4e",
+    default = ":version26_2_17C52",
     versions = [
-        ":version12_4_0_12D4e",
+        ":version26_2_17C52",
     ],
 )

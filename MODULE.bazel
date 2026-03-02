@@ -1,0 +1,56 @@
+module(name = "rules_applecross", version = "0.0.3")
+
+bazel_dep(name = "apple_support", version = "2.3.0", repo_name = "build_bazel_apple_support")
+bazel_dep(name = "rules_apple", version = "4.3.3", repo_name = "build_bazel_rules_apple")
+git_override(
+    module_name = "rules_apple",
+    remote = "https://github.com/bazelbuild/rules_apple.git",
+    commit = "d930c4c6eaeed91c8275604a428407d123a85216",
+    patches = ["//patches:rules_apple_no_exec_platform_constraint.patch"],
+    patch_strip = 1,
+)
+bazel_dep(name = "rules_swift", version = "3.4.2", repo_name = "build_bazel_rules_swift")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "platforms", version = "1.0.0")
+
+apple_cross_toolchain = use_extension(
+    "//toolchain:extensions.bzl",
+    "apple_cross_toolchain",
+)
+apple_cross_toolchain.configure(
+    name = "apple_cross_toolchain",
+    clang_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/LLVM-22.1.0-Linux-X64-stripped.tar.xz"],
+    clang_sha256 = "80999517f47908c70da76ec461ae6206e996852d5c16c799f0de3a3955c66439",
+    clang_strip_prefix = "LLVM-22.1.0-Linux-X64",
+    swift_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"],
+    swift_sha256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5",
+    swift_strip_prefix = "swift-6.2.3-RELEASE-ubuntu24.04",
+    xcode_urls = ["https://api.github.com/repos/apple-cross-toolchain/apple-sdks/releases/assets/363597199"],
+    xcode_archive_type = "tar.xz",
+)
+use_repo(apple_cross_toolchain, "apple_cross_toolchain")
+
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-darwin_x86_64")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-darwin_arm64")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-darwin_arm64e")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-ios_arm64")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-ios_arm64e")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-ios_x86_64")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-tvos_arm64")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-tvos_x86_64")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-watchos_arm64_32")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-watchos_armv7k")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-watchos_x86_64")
+
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-darwin_x86_64")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-darwin_arm64")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-darwin_arm64e")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_arm64")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_arm64e")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_x86_64")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-tvos_arm64")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-tvos_x86_64")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-watchos_arm64_32")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-watchos_armv7k")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-watchos_x86_64")

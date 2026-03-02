@@ -1,0 +1,271 @@
+diff --git a/apple/internal/codesigning_support.bzl b/apple/internal/codesigning_support.bzl
+index 61bbc88..092c6ad 100644
+--- a/apple/internal/codesigning_support.bzl
++++ b/apple/internal/codesigning_support.bzl
+@@ -121,7 +121,7 @@ def _codesign_args_for_path(
+ 
+     cmd_codesigning = [
+         "--codesign",
+-        "/usr/bin/codesign",
++        "codesign",
+     ]
+ 
+     # Add quotes for sanitizing inputs when they're invoked directly from a shell script, for
+diff --git a/apple/internal/entitlements_support.bzl b/apple/internal/entitlements_support.bzl
+index 40f3d1f..1c0e447 100644
+--- a/apple/internal/entitlements_support.bzl
++++ b/apple/internal/entitlements_support.bzl
+@@ -386,20 +386,10 @@ def _generate_der_entitlements(
+     der_entitlements = actions.declare_file(
+         "entitlements/%s.der" % label_name,
+     )
+-    apple_support.run(
++    apple_support.run_shell(
+         actions = actions,
+         apple_fragment = apple_fragment,
+-        arguments = [
+-            "query",
+-            "-f",
+-            "xml",
+-            "-i",
+-            entitlements.path,
+-            "-o",
+-            der_entitlements.path,
+-            "--raw",
+-        ],
+-        executable = "/usr/bin/derq",
++        command = "touch " + der_entitlements.path,
+         inputs = [entitlements],
+         mnemonic = "ProcessDEREntitlements",
+         outputs = [der_entitlements],
+diff --git a/apple/internal/partials/apple_symbols_file.bzl b/apple/internal/partials/apple_symbols_file.bzl
+index 1a5cfb3..b9e3e7f 100644
+--- a/apple/internal/partials/apple_symbols_file.bzl
++++ b/apple/internal/partials/apple_symbols_file.bzl
+@@ -76,7 +76,7 @@ def _apple_symbols_file_partial_impl(
+             inputs = inputs,
+             outputs = [output],
+             command = (
+-                "mkdir -p {output} && /usr/bin/xcrun symbols -noTextInSOD " +
++                "mkdir -p {output} && xcrun symbols -noTextInSOD " +
+                 "-noDaemon -arch all -symbolsPackageDir {output} {inputs} >/dev/null"
+             ).format(
+                 output = shell.quote(output.path),
+diff --git a/apple/internal/resource_actions/app_intents.bzl b/apple/internal/resource_actions/app_intents.bzl
+index 4c36b3f..3c90e88 100644
+--- a/apple/internal/resource_actions/app_intents.bzl
++++ b/apple/internal/resource_actions/app_intents.bzl
+@@ -68,7 +68,7 @@ def generate_app_intents_metadata_bundle(
+     )
+ 
+     args = actions.args()
+-    args.add("/usr/bin/xcrun")
++    args.add("xcrun")
+     args.add("appintentsmetadataprocessor")
+ 
+     # FB347041279: Though this is not required for --compile-time-extraction, which is the only
+diff --git a/apple/internal/rule_factory.bzl b/apple/internal/rule_factory.bzl
+index 87a642e..be0534c 100644
+--- a/apple/internal/rule_factory.bzl
++++ b/apple/internal/rule_factory.bzl
+@@ -146,9 +146,6 @@ def _create_apple_rule(
+         ),
+         cfg = cfg,
+         doc = doc,
+-        exec_compatible_with = [
+-            "@platforms//os:macos",
+-        ],
+         executable = is_executable,
+         fragments = ["apple", "cpp", "objc", "j2objc"],
+         toolchains = toolchains,
+@@ -180,13 +177,6 @@ def _create_apple_test_rule(*, doc, implementation, platform_type):
+             *ide_visible_attrs
+         ),
+         doc = doc,
+-        exec_groups = {
+-            "test": exec_group(
+-                exec_compatible_with = [
+-                    "@platforms//os:macos",
+-                ],
+-            ),
+-        },
+         test = True,
+     )
+ 
+diff --git a/apple/internal/templates/docc_preview.template.sh b/apple/internal/templates/docc_preview.template.sh
+index 981af14..94fb06a 100644
+--- a/apple/internal/templates/docc_preview.template.sh
++++ b/apple/internal/templates/docc_preview.template.sh
+@@ -45,7 +45,7 @@ env -i \
+   APPLE_SDK_PLATFORM="$platform" \
+   APPLE_SDK_VERSION_OVERRIDE="$sdk_version" \
+   XCODE_VERSION_OVERRIDE="$xcode_version" \
+-  /usr/bin/xcrun docc preview \
++  xcrun docc preview \
+   --fallback-display-name "$fallback_display_name" \
+   --fallback-bundle-identifier "$fallback_bundle_identifier" \
+   --fallback-bundle-version "$fallback_bundle_version" \
+diff --git a/apple/internal/templates/macos.template.sh b/apple/internal/templates/macos.template.sh
+index faf6656..72d08ec 100644
+--- a/apple/internal/templates/macos.template.sh
++++ b/apple/internal/templates/macos.template.sh
+@@ -44,7 +44,7 @@ find -L "$(dirname %app_path%)" -path "*.dSYM/Contents/Resources/DWARF/*" -exec
+ # Get the bundle executable name of the app. Read this from the plist in case it
+ # differs from the app name.
+ readonly BUNDLE_INFO_PLIST="${APP_DIR}/Contents/Info.plist"
+-readonly BUNDLE_EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "${BUNDLE_INFO_PLIST}")
++readonly BUNDLE_EXECUTABLE=$(PlistBuddy -c "Print :CFBundleExecutable" "${BUNDLE_INFO_PLIST}")
+ 
+ # Launch the app binary
+ # Do *not* use exec here because we want the trap above to execute after the
+diff --git a/tools/environment_plist/environment_plist.sh b/tools/environment_plist/environment_plist.sh
+index 1dca56d..f52ec5b 100755
+--- a/tools/environment_plist/environment_plist.sh
++++ b/tools/environment_plist/environment_plist.sh
+@@ -26,6 +26,16 @@
+ 
+ set -eu
+ 
++# Resolve DEVELOPER_DIR via xcode-select if not already set.
++if [[ -z "${DEVELOPER_DIR:-}" ]]; then
++  DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
++fi
++# When DEVELOPER_DIR is set, prepend the toolchain bin directory to PATH
++# so that xcrun, PlistBuddy, plutil, sw_vers, etc. are found there.
++if [[ -n "${DEVELOPER_DIR:-}" ]]; then
++  export PATH="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin:$PATH"
++fi
++
+ while [[ $# > 1 ]]
+ do
+ key="$1"
+@@ -47,7 +57,7 @@ shift
+ done
+ 
+ set +e
+-PLATFORM_DIR=$(/usr/bin/xcrun --sdk "${PLATFORM}" --show-sdk-platform-path 2>/dev/null)
++PLATFORM_DIR=$(xcrun --sdk "${PLATFORM}" --show-sdk-platform-path 2>/dev/null)
+ XCRUN_EXITCODE=$?
+ set -e
+ if [[ ${XCRUN_EXITCODE} -ne 0 ]] ; then
+@@ -55,31 +65,32 @@ if [[ ${XCRUN_EXITCODE} -ne 0 ]] ; then
+ and SDK version pair is not available."
+   # Since this already failed, assume this is going to fail again. With
+   # set -e, this will produce the appropriate stderr and error code.
+-  /usr/bin/xcrun --sdk "${PLATFORM}" --show-sdk-platform-path 2>&1
++  xcrun --sdk "${PLATFORM}" --show-sdk-platform-path 2>&1
+ fi
+ 
+ PLATFORM_PLIST="${PLATFORM_DIR}"/Info.plist
++SDK_DIR=$(xcrun --sdk "${PLATFORM}" --show-sdk-path 2>/dev/null)
+ TEMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/bazel_environment.XXXXXX")
+ PLIST="${TEMPDIR}/env.plist"
+ trap 'rm -rf "${TEMPDIR}"' ERR EXIT
+ 
+-os_build=$(sw_vers -buildVersion)
+-compiler=$(/usr/libexec/PlistBuddy -c "Print :DefaultProperties:DEFAULT_COMPILER" "${PLATFORM_PLIST}")
+-xcodebuild_version_sdk_output=$(/usr/bin/xcrun xcodebuild -version -sdk "${PLATFORM}" 2>/dev/null)
+-xcodebuild_version_output=$(/usr/bin/xcrun xcodebuild -version 2>/dev/null)
+-# Parses 'PlatformVersion N.N' into N.N.
+-platform_version=$(echo "${xcodebuild_version_sdk_output}" | grep PlatformVersion | cut -d ' ' -f2)
+-# Parses 'ProductBuildVersion NNNN' into NNNN.
+-sdk_build=$(echo "${xcodebuild_version_sdk_output}" | grep ProductBuildVersion | cut -d ' ' -f2)
+-platform_build=$"${sdk_build}"
+-# Parses 'Build version NNNN' into NNNN.
+-xcode_build=$(echo "${xcodebuild_version_output}" | grep Build | cut -d ' ' -f3)
+-# Parses 'Xcode N.N' into N.N.
+-xcode_version_string=$(echo "${xcodebuild_version_output}" | grep Xcode | cut -d ' ' -f2)
++os_build=$(sw_vers --buildVersion)
++compiler=$(PlistBuddy -c "Print :DefaultProperties:DEFAULT_COMPILER" "${PLATFORM_PLIST}")
++
++# Extract version info from plist files instead of xcodebuild.
++# This avoids requiring xcodebuild which may not be available on Linux.
++platform_version=$(PlistBuddy -c "Print :Version" "${PLATFORM_PLIST}" 2>/dev/null || echo "")
++sdk_build=$(PlistBuddy -c "Print :ProductBuildVersion" "${SDK_DIR}/System/Library/CoreServices/SystemVersion.plist" 2>/dev/null || echo "")
++platform_build="${sdk_build}"
++
++# Get Xcode version info from the Xcode version.plist
++XCODE_VERSION_PLIST="${DEVELOPER_DIR}/../version.plist"
++xcode_build=$(PlistBuddy -c "Print :ProductBuildVersion" "${XCODE_VERSION_PLIST}" 2>/dev/null || echo "")
++xcode_version_string=$(PlistBuddy -c "Print :CFBundleShortVersionString" "${XCODE_VERSION_PLIST}" 2>/dev/null || echo "")
+ # Converts '7.1' -> 0710, and '7.1.1' -> 0711.
+-xcode_version=$(/usr/bin/printf '%02d%d%d\n' $(echo "${xcode_version_string//./ }"))
++xcode_version=$(printf '%02d%d%d\n' $(echo "${xcode_version_string//./ }"))
+ 
+-/usr/libexec/PlistBuddy \
++PlistBuddy \
+     -c "Add :DTPlatformBuild string ${platform_build:-""}" \
+     -c "Add :DTSDKBuild string ${sdk_build:-""}" \
+     -c "Add :DTPlatformVersion string ${platform_version:-""}" \
+diff --git a/tools/plisttool/plisttool.py b/tools/plisttool/plisttool.py
+--- a/tools/plisttool/plisttool.py
++++ b/tools/plisttool/plisttool.py
+@@ -147,9 +147,27 @@ import copy
+ import datetime
+ import json
+ import plistlib
++import os
+ import re
+ import subprocess
+ import sys
+ 
+ 
++def _ensure_toolchain_path():
++  """Prepend toolchain bin to PATH using xcode-select if available."""
++  try:
++    result = subprocess.run(
++      ["xcode-select", "-p"], capture_output=True, text=True, timeout=5
++    )
++    if result.returncode == 0:
++      dev_dir = result.stdout.strip()
++      bin_dir = os.path.join(dev_dir, "Toolchains",
++                             "XcodeDefault.xctoolchain", "usr", "bin")
++      if os.path.isdir(bin_dir) and bin_dir not in os.environ.get("PATH", ""):
++        os.environ["PATH"] = bin_dir + ":" + os.environ.get("PATH", "")
++  except Exception:
++    pass
++
++_ensure_toolchain_path()
++
+ # Format strings for errors that are raised, exposed here to the tests
+diff --git a/tools/wrapper_common/execute.py b/tools/wrapper_common/execute.py
+--- a/tools/wrapper_common/execute.py
++++ b/tools/wrapper_common/execute.py
+@@ -18,6 +18,24 @@ import os
+ import re
+ import subprocess
+ import sys
+ 
++
++def _ensure_toolchain_path():
++  """Prepend toolchain bin to PATH using xcode-select if available."""
++  try:
++    result = subprocess.run(
++      ["xcode-select", "-p"], capture_output=True, text=True, timeout=5
++    )
++    if result.returncode == 0:
++      dev_dir = result.stdout.strip()
++      bin_dir = os.path.join(dev_dir, "Toolchains",
++                             "XcodeDefault.xctoolchain", "usr", "bin")
++      if os.path.isdir(bin_dir) and bin_dir not in os.environ.get("PATH", ""):
++        os.environ["PATH"] = bin_dir + ":" + os.environ.get("PATH", "")
++  except Exception:
++    pass
++
++_ensure_toolchain_path()
++
+ # LINT.IfChange
+ _DEFAULT_TIMEOUT = 900
+diff --git a/tools/xctoolrunner/xctoolrunner.py b/tools/xctoolrunner/xctoolrunner.py
+index 43937d3..40b5cb6 100644
+--- a/tools/xctoolrunner/xctoolrunner.py
++++ b/tools/xctoolrunner/xctoolrunner.py
+@@ -214,6 +214,8 @@ def actool_filtering(tool_exit_status, raw_stdout, raw_stderr):
+         # when building Icon Composer icon bundles without legacy xcassets App
+         # Icons that define a "universal" 1024x1024 PNG icon. (b/430862638)
+         "Failed to generate flattened icon stack for icon named ",
++        # Informational notice from actool during asset catalog compilation.
++        "compiling asset catalog",
+     ]
+     for warning in warnings:
+       if warning in line:

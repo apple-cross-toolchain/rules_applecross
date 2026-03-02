@@ -35,7 +35,7 @@ ios_application(
         "ipad",
     ],
     infoplists = ["Sources/Info.plist"],
-    minimum_os_version = "14.0",
+    minimum_os_version = "16.0",
     version = ":Version",
     deps = [":HelloWorldSwiftUI"],
 )
@@ -48,7 +48,7 @@ swift_library(
 
 ios_unit_test(
     name = "Tests",
-    minimum_os_version = "14.0",
+    minimum_os_version = "16.0",
     deps = [":TestsLib"],
 )
 
@@ -60,7 +60,7 @@ swift_library(
 
 ios_ui_test(
     name = "UITests",
-    minimum_os_version = "14.0",
+    minimum_os_version = "16.0",
     deps = [":UITestsLib"],
     test_host = ":HelloWorld",
 )

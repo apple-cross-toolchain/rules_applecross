@@ -43,10 +43,9 @@ fi
 TOOLNAME=$1
 shift
 
-# This is equivalent to spawning `xcode-select -p` and getting its result, but
-# 4 times faster.
+# Resolve DEVELOPER_DIR via xcode-select if not already set.
 if [[ -z "${DEVELOPER_DIR:-}" ]] ; then
-  DEVELOPER_DIR="$(realpath /var/db/xcode_select_link)"
+  DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
 fi
 export DEVELOPER_DIR
 
@@ -61,10 +60,17 @@ UPDATED_ARGS=()
 for ARG in "$@" ; do
   ARG="${ARG//__BAZEL_XCODE_DEVELOPER_DIR__/${DEVELOPER_DIR}}"
   ARG="${ARG//__BAZEL_XCODE_SDKROOT__/${SDKROOT}}"
+  ARG="${ARG//__BAZEL_EXECUTION_ROOT__/${PWD}}"
   UPDATED_ARGS+=("${ARG}")
 done
 
-# Workaround for an xcrun bug
-unset SDKROOT
-
-/usr/bin/xcrun "${TOOLNAME}" "${UPDATED_ARGS[@]}"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # Workaround for an xcrun bug
+  unset SDKROOT
+  /usr/bin/xcrun "${TOOLNAME}" "${UPDATED_ARGS[@]}"
+else
+  # On Linux, use the ported xcrun from the toolchain with SDKROOT set so that
+  # it propagates the sysroot to the underlying tool for both compile and link.
+  export SDKROOT
+  "${DEVELOPER_DIR}/Toolchains/XcodeDefault.xctoolchain/usr/bin/xcrun" "${TOOLNAME}" "${UPDATED_ARGS[@]}"
+fi

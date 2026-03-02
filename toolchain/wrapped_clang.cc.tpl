@@ -15,14 +15,12 @@
 // wrapped_clang.cc: Pass args to 'xcrun clang' and zip dsym files.
 //
 // wrapped_clang passes its args to clang, but also supports a separate set of
-// invocations to generate dSYM files.  If "DSYM_HINT" flags are passed in, they
-// are used to construct that separate set of invocations (instead of being
-// passed to clang).
-// The following "DSYM_HINT" flags control dsym generation.  If any one if these
-// are passed in, then they all must be passed in.
-// "DSYM_HINT_LINKED_BINARY": Workspace-relative path to binary output of the
+// invocations to generate dSYM files.  If "LINKED_BINARY" and/or "DSYM_PATH"
+// flags are passed in, they are used to construct that separate set of
+// invocations (instead of being passed to clang).
+// "LINKED_BINARY": Workspace-relative path to binary output of the
 //    link action generating the dsym file.
-// "DSYM_HINT_DSYM_PATH": Workspace-relative path to dSYM dwarf file.
+// "DSYM_PATH": Workspace-relative path to dSYM dwarf file.
 
 #include <libgen.h>
 #include <limits.h>
@@ -122,8 +120,8 @@ std::vector<const char *> ConvertToCArgs(const std::vector<std::string> &args) {
 }
 
 // Spawns a subprocess for given arguments args. The first argument is used
-// for the executable path.
-void RunSubProcess(const std::vector<std::string> &args) {
+// for the executable path. Returns true on success, false on failure.
+bool RunSubProcess(const std::vector<std::string> &args) {
   std::vector<const char *> exec_argv = ConvertToCArgs(args);
   pid_t pid;
   int status = posix_spawn(&pid, args[0].c_str(), nullptr, nullptr,
@@ -136,18 +134,25 @@ void RunSubProcess(const std::vector<std::string> &args) {
     if (wait_status < 0) {
       std::cerr << "Error waiting on child process '" << args[0] << "'. "
                 << strerror(errno) << "\n";
-      abort();
+      return false;
     }
-    if (WEXITSTATUS(status) != 0) {
-      std::cerr << "Error in child process '" << args[0] << "'. "
-                << WEXITSTATUS(status) << "\n";
-      abort();
+    if (WIFEXITED(status)) {
+      if (WEXITSTATUS(status) != 0) {
+        std::cerr << "Error in child process '" << args[0] << "'. "
+                  << WEXITSTATUS(status) << "\n";
+        return false;
+      }
+    } else if (WIFSIGNALED(status)) {
+      std::cerr << "Error in child process '" << args[0]
+                << "'. Terminated by signal " << WTERMSIG(status) << "\n";
+      return false;
     }
   } else {
     std::cerr << "Error forking process '" << args[0] << "'. "
               << strerror(status) << "\n";
-    abort();
+    return false;
   }
+  return true;
 }
 
 // Finds and replaces all instances of oldsub with newsub, in-place on str.
@@ -274,15 +279,39 @@ static std::unique_ptr<TempFile> WriteResponseFile(
   return response_file;
 }
 
+// Writes a VFS overlay file for layering check support with module maps.
+static std::unique_ptr<TempFile> AddLayeringCheckVFS(
+    const std::string &module_map_path) {
+  auto vfs_file = TempFile::Create("layering_check_vfs.XXXXXX");
+  if (!vfs_file) {
+    return nullptr;
+  }
+
+  std::ofstream vfs_stream(vfs_file->GetPath());
+  vfs_stream << "{\n"
+             << "  'version': 0,\n"
+             << "  'roots': [{\n"
+             << "    'name': '__BAZEL_XCODE_SDKROOT__/usr/include/module.modulemap',\n"
+             << "    'type': 'file',\n"
+             << "    'external-contents': '" << module_map_path << "'\n"
+             << "  }]\n"
+             << "}\n";
+  vfs_stream.close();
+
+  return vfs_file;
+}
+
 void ProcessArgument(const std::string arg, const std::string developer_dir,
                      const std::string sdk_root, const std::string cwd,
-                     bool relative_ast_path, std::string &linked_binary,
+                     bool relative_ast_path, bool &strip_debug_symbols,
+                     std::string &linked_binary,
                      std::string &dsym_path,
                      std::function<void(const std::string &)> consumer);
 
 bool ProcessResponseFile(const std::string arg, const std::string developer_dir,
                          const std::string sdk_root, const std::string cwd,
-                         bool relative_ast_path, std::string &linked_binary,
+                         bool relative_ast_path, bool &strip_debug_symbols,
+                         std::string &linked_binary,
                          std::string &dsym_path,
                          std::function<void(const std::string &)> consumer) {
   auto path = arg.substr(1);
@@ -297,7 +326,8 @@ bool ProcessResponseFile(const std::string arg, const std::string developer_dir,
     // Arguments in response files might be quoted/escaped, so we need to
     // unescape them ourselves.
     ProcessArgument(Unescape(arg_from_file), developer_dir, sdk_root, cwd,
-                    relative_ast_path, linked_binary, dsym_path, consumer);
+                    relative_ast_path, strip_debug_symbols, linked_binary,
+                    dsym_path, consumer);
   }
 
   return true;
@@ -313,35 +343,33 @@ std::string GetCurrentDirectory() {
 
 void ProcessArgument(const std::string arg, const std::string developer_dir,
                      const std::string sdk_root, const std::string cwd,
-                     bool relative_ast_path, std::string &linked_binary,
+                     bool relative_ast_path, bool &strip_debug_symbols,
+                     std::string &linked_binary,
                      std::string &dsym_path,
                      std::function<void(const std::string &)> consumer) {
   auto new_arg = arg;
   if (arg[0] == '@') {
     if (ProcessResponseFile(arg, developer_dir, sdk_root, cwd,
-                            relative_ast_path, linked_binary, dsym_path,
-                            consumer)) {
+                            relative_ast_path, strip_debug_symbols,
+                            linked_binary, dsym_path, consumer)) {
       return;
     }
   }
 
-  if (SetArgIfFlagPresent(arg, "DSYM_HINT_LINKED_BINARY", &linked_binary)) {
+  if (SetArgIfFlagPresent(arg, "LINKED_BINARY", &linked_binary)) {
     return;
   }
-  if (SetArgIfFlagPresent(arg, "DSYM_HINT_DSYM_PATH", &dsym_path)) {
+  if (SetArgIfFlagPresent(arg, "DSYM_PATH", &dsym_path)) {
     return;
   }
-
-  std::string dest_dir, bitcode_symbol_map;
-  if (SetArgIfFlagPresent(arg, "DEBUG_PREFIX_MAP_PWD", &dest_dir)) {
-    new_arg = "-fdebug-prefix-map=" + cwd + "=" + dest_dir;
-  }
-  if (arg.compare("OSO_PREFIX_MAP_PWD") == 0) {
-    new_arg = "-Wl,-oso_prefix," + cwd + "/";
+  if (arg == "STRIP_DEBUG_SYMBOLS") {
+    strip_debug_symbols = true;
+    return;
   }
 
   FindAndReplace("__BAZEL_XCODE_DEVELOPER_DIR__", developer_dir, &new_arg);
   FindAndReplace("__BAZEL_XCODE_SDKROOT__", sdk_root, &new_arg);
+  FindAndReplace("__BAZEL_EXECUTION_ROOT__", cwd, &new_arg);
 
   // Make the `add_ast_path` options used to embed Swift module references
   // absolute to enable Swift debugging without dSYMs: see
@@ -362,6 +390,13 @@ void ProcessArgument(const std::string arg, const std::string developer_dir,
 }  // namespace
 
 int main(int argc, char *argv[]) {
+  // If HEADER_PARSING_OUTPUT is set, create an empty file at that path.
+  const char *header_parsing_output = getenv("HEADER_PARSING_OUTPUT");
+  if (header_parsing_output) {
+    std::ofstream hp_file(header_parsing_output);
+    hp_file.close();
+  }
+
   std::string tool_name;
 
   std::string binary_name = Basename(argv[0]);
@@ -380,32 +415,29 @@ int main(int argc, char *argv[]) {
   std::string developer_dir = GetMandatoryEnvVar("DEVELOPER_DIR");
   std::string sdk_root = GetMandatoryEnvVar("SDKROOT");
 #else
-  // On non-Apple platforms, since Bazel doesn't inject the DEVELOPER_DIR and
-  // SDKROOT environment variables to the compile invocation environment, we
-  // have to figure them out ourselves.
-  //
-  // If it's provided in the C++ toolchain config, use that.
+  // On non-Apple platforms, get DEVELOPER_DIR from the environment (set by
+  // the CC toolchain config's apple_env feature) and compute SDKROOT.
   std::string developer_dir = GetEnvVar("DEVELOPER_DIR");
   if (developer_dir == "") {
-    // Fallback to the active developer directory setting locally. This is
-    // equivalent to spawning `xcode-select -p` and getting its result, but
-    // 4 times faster.
-    char buf[PATH_MAX];
-    developer_dir = realpath("/var/db/xcode_select_link", buf);
-    setenv("DEVELOPER_DIR", developer_dir.c_str(), 0 /* no overwrite */);
+    // Fallback: compute from our own binary location.
+    // wrapped_clang lives in the toolchain repo root, developer_dir is
+    // under Xcode.app/Contents/Developer relative to that.
+    char exe_buf[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (len > 0) {
+      exe_buf[len] = '\0';
+      developer_dir = Dirname(std::string(exe_buf)) +
+                       "/Xcode.app/Contents/Developer";
+    }
   }
   if (developer_dir == "") {
-    std::cerr << "Error: could not find active developer directory.\n";
+    std::cerr << "Error: could not find active developer directory. "
+              << "Set DEVELOPER_DIR.\n";
     abort();
   }
 
   std::string sdk_root = GetEnvVar("SDKROOT");
   if (sdk_root == "") {
-    // Construct the path to the SDK root directory. This is less future-proof
-    // than querying it with
-    // `xcrun --sdk <sdk name> --show-sdk-path`, but invoking that command
-    // everytime is expensive, and it's unlikely that the location of SDKs
-    // inside Xcode is going to change soon.
     std::string sdk_platform = GetMandatoryEnvVar("APPLE_SDK_PLATFORM");
     std::string sdk_version = GetMandatoryEnvVar("APPLE_SDK_VERSION_OVERRIDE");
     sdk_root = developer_dir + "/Platforms/" + sdk_platform +
@@ -413,9 +445,20 @@ int main(int argc, char *argv[]) {
   }
 #endif
   std::string linked_binary, dsym_path;
+  bool strip_debug_symbols = false;
 
   const std::string cwd = GetCurrentDirectory();
+#if __APPLE__
   std::vector<std::string> invocation_args = {"/usr/bin/xcrun", tool_name};
+#else
+  // On Linux, use the ported xcrun from the toolchain. Setting SDKROOT lets
+  // xcrun propagate it to clang so that both compile and link actions see the
+  // sysroot, matching the macOS behavior.
+  std::string xcrun_path = developer_dir +
+      "/Toolchains/XcodeDefault.xctoolchain/usr/bin/xcrun";
+  setenv("SDKROOT", sdk_root.c_str(), 1);
+  std::vector<std::string> invocation_args = {xcrun_path, tool_name};
+#endif
   std::vector<std::string> processed_args = {};
 
   bool relative_ast_path = getenv("RELATIVE_AST_PATH") != nullptr;
@@ -426,7 +469,18 @@ int main(int argc, char *argv[]) {
     std::string arg(argv[i]);
 
     ProcessArgument(arg, developer_dir, sdk_root, cwd, relative_ast_path,
-                    linked_binary, dsym_path, consumer);
+                    strip_debug_symbols, linked_binary, dsym_path, consumer);
+  }
+
+  // Handle APPLE_SUPPORT_MODULEMAP VFS overlay for layering check support.
+  const char *module_map_env = getenv("APPLE_SUPPORT_MODULEMAP");
+  std::unique_ptr<TempFile> vfs_file;
+  if (module_map_env) {
+    vfs_file = AddLayeringCheckVFS(module_map_env);
+    if (vfs_file) {
+      processed_args.push_back("-ivfsoverlay");
+      processed_args.push_back(vfs_file->GetPath());
+    }
   }
 
   // Special mode that only prints the command. Used for testing.
@@ -441,36 +495,48 @@ int main(int argc, char *argv[]) {
   invocation_args.push_back("@" + response_file->GetPath());
 
   // Check to see if we should postprocess with dsymutil.
-  bool postprocess = false;
-  if ((!linked_binary.empty()) || (!dsym_path.empty())) {
-    if ((linked_binary.empty()) || (dsym_path.empty())) {
-      const char *missing_dsym_flag;
-      if (linked_binary.empty()) {
-        missing_dsym_flag = "DSYM_HINT_LINKED_BINARY";
-      } else {
-        missing_dsym_flag = "DSYM_HINT_DSYM_PATH";
-      }
-      std::cerr << "Error in clang wrapper: If any dsym "
-                   "hint is defined, then "
-                << missing_dsym_flag << " must be defined\n";
-      abort();
-    } else {
-      postprocess = true;
-    }
-  }
+  bool postprocess = !linked_binary.empty();
 
-  RunSubProcess(invocation_args);
+  if (!RunSubProcess(invocation_args)) {
+    return 1;
+  }
   if (!postprocess) {
     return 0;
   }
 
-  std::vector<std::string> dsymutil_args = {"/usr/bin/xcrun",
-                                            "dsymutil",
-                                            linked_binary,
-                                            "-o",
-                                            dsym_path,
-                                            "--flat",
-                                            "--no-swiftmodule-timestamp"};
-  RunSubProcess(dsymutil_args);
+#if __APPLE__
+  std::string dsym_xcrun = "/usr/bin/xcrun";
+#else
+  std::string dsym_xcrun = developer_dir +
+      "/Toolchains/XcodeDefault.xctoolchain/usr/bin/xcrun";
+#endif
+
+  // Generate dSYM if dsym_path is set.
+  if (!dsym_path.empty()) {
+    std::vector<std::string> dsymutil_args = {dsym_xcrun,
+                                              "dsymutil",
+                                              linked_binary,
+                                              "-o",
+                                              dsym_path,
+                                              "--no-swiftmodule-timestamp"};
+    // If dsym_path ends with .dSYM, generate a bundle; otherwise use --flat.
+    if (dsym_path.size() < 5 ||
+        dsym_path.compare(dsym_path.size() - 5, 5, ".dSYM") != 0) {
+      dsymutil_args.push_back("--flat");
+    }
+    if (!RunSubProcess(dsymutil_args)) {
+      return 1;
+    }
+  }
+
+  // Strip debug symbols if requested.
+  if (strip_debug_symbols) {
+    std::vector<std::string> strip_args = {dsym_xcrun, "strip", "-S",
+                                           linked_binary};
+    if (!RunSubProcess(strip_args)) {
+      return 2;
+    }
+  }
+
   return 0;
 }

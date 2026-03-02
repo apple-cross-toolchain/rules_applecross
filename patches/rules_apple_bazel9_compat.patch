@@ -1,0 +1,11 @@
+--- a/apple/internal/platform_support.bzl
++++ b/apple/internal/platform_support.bzl
+@@ -93,7 +93,7 @@
+       A struct representing the collected platform information.
+     """
+     platform_type_attr = getattr(apple_common.platform_type, platform_type_string)
+-    platform = apple_fragment.multi_arch_platform(platform_type_attr)
++    platform = apple_fragment.single_arch_platform
+
+     if explicit_minimum_os:
+         minimum_os = explicit_minimum_os
