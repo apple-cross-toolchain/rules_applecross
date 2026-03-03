@@ -5,22 +5,35 @@ load("//toolchain:apple_cross_toolchain.bzl", _apple_cross_toolchain_rule = "app
 def _apple_cross_toolchain_impl(module_ctx):
     for mod in module_ctx.modules:
         for config in mod.tags.configure:
-            _apple_cross_toolchain_rule(
-                name = config.name,
-                apple_sdk_path = config.apple_sdk_path,
-                apple_sdk_urls = config.apple_sdk_urls,
-                apple_sdk_sha256 = config.apple_sdk_sha256,
-                apple_sdk_strip_prefix = config.apple_sdk_strip_prefix,
-                apple_sdk_archive_type = config.apple_sdk_archive_type,
-                llvm_path = config.llvm_path,
-                llvm_urls = config.llvm_urls,
-                llvm_sha256 = config.llvm_sha256,
-                llvm_strip_prefix = config.llvm_strip_prefix,
-                swift_path = config.swift_path,
-                swift_urls = config.swift_urls,
-                swift_sha256 = config.swift_sha256,
-                swift_strip_prefix = config.swift_strip_prefix,
-            )
+            kwargs = {
+                "name": config.name,
+                "apple_sdk_path": config.apple_sdk_path,
+                "apple_sdk_urls": config.apple_sdk_urls,
+                "apple_sdk_sha256": config.apple_sdk_sha256,
+                "apple_sdk_strip_prefix": config.apple_sdk_strip_prefix,
+                "apple_sdk_archive_type": config.apple_sdk_archive_type,
+            }
+
+            # Only pass llvm_*/swift_* when explicitly set, so the
+            # repository rule's built-in defaults are used otherwise.
+            if config.llvm_path:
+                kwargs["llvm_path"] = config.llvm_path
+            if config.llvm_urls:
+                kwargs["llvm_urls"] = config.llvm_urls
+            if config.llvm_sha256:
+                kwargs["llvm_sha256"] = config.llvm_sha256
+            if config.llvm_strip_prefix:
+                kwargs["llvm_strip_prefix"] = config.llvm_strip_prefix
+            if config.swift_path:
+                kwargs["swift_path"] = config.swift_path
+            if config.swift_urls:
+                kwargs["swift_urls"] = config.swift_urls
+            if config.swift_sha256:
+                kwargs["swift_sha256"] = config.swift_sha256
+            if config.swift_strip_prefix:
+                kwargs["swift_strip_prefix"] = config.swift_strip_prefix
+
+            _apple_cross_toolchain_rule(**kwargs)
 
 _configure_tag = tag_class(
     attrs = {
