@@ -11,14 +11,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Create .netrc
+      - name: Prepare env
         run: |
           cat > ~/.netrc <<EOF
           machine api.github.com
-          login ${{ secrets.APPLE_SDKS_GH_PAT_USER }}
-          password ${{ secrets.APPLE_SDKS_GH_PAT_PASSWORD }}
+          login ${{ secrets.SDKS_USER }}
+          password ${{ secrets.SDKS_PASSWORD }}
           EOF
           chmod 600 ~/.netrc
+          sed -i 's|SDKS_URL|${{ secrets.SDKS_URL }}|g' MODULE.bazel
       - run: sudo tools/install-mandatory-tools.sh
       - run: tools/set-developer-dir.sh
       - run: bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld //examples/ios/HelloWorldSwiftUI:Tests //examples/ios/HelloWorldSwiftUI:UITests

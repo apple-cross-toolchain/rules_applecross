@@ -33,47 +33,53 @@ SDK_EXCLUDES=(
   --exclude "Python.framework"
 )
 
+# Change into DEVELOPER_DIR so that rsync --relative uses short relative
+# paths ("./Platforms/...") instead of absolute ones.  macOS openrsync
+# ignores the /path/./ marker inside absolute paths, which caused the
+# entire source prefix to be recreated at the destination.
+cd "$DEVELOPER_DIR"
+
 ## Copy SDKs
 for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS AppleTVSimulator XROS XRSimulator; do
   # xcrun relies on this Info.plist to find and invoke tools
-  rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/Info.plist" "$NEW_DEVELOPER_DIR"
+  rsync -a --relative "./Platforms/$sdk.platform/Info.plist" "$NEW_DEVELOPER_DIR"
 
-  rsync -a --relative "${SDK_EXCLUDES[@]}" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/SDKs/" "$NEW_DEVELOPER_DIR"
+  rsync -a --relative "${SDK_EXCLUDES[@]}" "./Platforms/$sdk.platform/Developer/SDKs/" "$NEW_DEVELOPER_DIR"
 
-  if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/usr/lib" ]]; then
-    rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
+  if [[ -d "Platforms/$sdk.platform/usr/lib" ]]; then
+    rsync -a --relative --exclude "*.a" "./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
-  if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/usr/lib" ]]; then
-    rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
+  if [[ -d "Platforms/$sdk.platform/Developer/usr/lib" ]]; then
+    rsync -a --relative --exclude "*.a" "./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
-  if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/Library/Frameworks" ]]; then
-    rsync -a --relative "${SDK_EXCLUDES[@]}" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/Frameworks/" "$NEW_DEVELOPER_DIR"
+  if [[ -d "Platforms/$sdk.platform/Developer/Library/Frameworks" ]]; then
+    rsync -a --relative "${SDK_EXCLUDES[@]}" "./Platforms/$sdk.platform/Developer/Library/Frameworks/" "$NEW_DEVELOPER_DIR"
   fi
 
   # PrivateFrameworks contains XCTestCore.framework, XCTAutomationSupport.framework,
   # etc. that XCTest.framework re-exports. Without these the linker fails with
   # "unable to locate re-export".
-  if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/Library/PrivateFrameworks" ]]; then
-    rsync -a --relative "${SDK_EXCLUDES[@]}" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/PrivateFrameworks/" "$NEW_DEVELOPER_DIR"
+  if [[ -d "Platforms/$sdk.platform/Developer/Library/PrivateFrameworks" ]]; then
+    rsync -a --relative "${SDK_EXCLUDES[@]}" "./Platforms/$sdk.platform/Developer/Library/PrivateFrameworks/" "$NEW_DEVELOPER_DIR"
   fi
 done
 
 # Copy toolchain libraries
-rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist" "$NEW_DEVELOPER_DIR"
-rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/include/" "$NEW_DEVELOPER_DIR"
-if [[ -d "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib/arc" ]]; then
-  rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/" "$NEW_DEVELOPER_DIR"
+rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist" "$NEW_DEVELOPER_DIR"
+rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/include/" "$NEW_DEVELOPER_DIR"
+if [[ -d "Toolchains/XcodeDefault.xctoolchain/usr/lib/arc" ]]; then
+  rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/" "$NEW_DEVELOPER_DIR"
 fi
-rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/" "$NEW_DEVELOPER_DIR"
+rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/" "$NEW_DEVELOPER_DIR"
 # Exclude .a from Swift runtime dirs — the cross-compilation toolchain uses its
 # own Swift and these back-deployment compatibility archives (libswiftCompatibility*.a)
 # come from the separate Swift toolchain instead.  Keep .tbd stubs and .swiftmodule/
 # .swiftinterface files which are still needed.
-rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
-if [[ -d "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0" ]]; then
-  rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
+rsync -a --relative --exclude "*.a" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
+if [[ -d "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0" ]]; then
+  rsync -a --relative --exclude "*.a" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
 fi
 
 # Create a placeholder bin directory
@@ -85,4 +91,4 @@ find "$PROJECT_ROOT/Xcode.app" -type l -exec sh -c 'test "$(readlink "$1")" = ".
 
 XCODE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_ROOT/Xcode.app/Contents/version.plist")"
 
-tar -Jcf "apple-sdks-xcode-$XCODE_VERSION.tar.xz" Xcode.app
+tar -C "$PROJECT_ROOT" -Jcf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.xz" Xcode.app
