@@ -18,16 +18,8 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "apple_sdk_archive_type": config.apple_sdk_archive_type,
             }
 
-            # Only pass llvm_*/swift_* when explicitly set, so the
+            # Only pass swift_* when explicitly set, so the
             # repository rule's built-in defaults are used otherwise.
-            if config.llvm_path:
-                kwargs["llvm_path"] = config.llvm_path
-            if config.llvm_urls:
-                kwargs["llvm_urls"] = config.llvm_urls
-            if config.llvm_sha256:
-                kwargs["llvm_sha256"] = config.llvm_sha256
-            if config.llvm_strip_prefix:
-                kwargs["llvm_strip_prefix"] = config.llvm_strip_prefix
             if config.swift_path:
                 kwargs["swift_path"] = config.swift_path
             if config.swift_urls:
@@ -47,10 +39,6 @@ _configure_tag = tag_class(
         "apple_sdk_sha256": attr.string(),
         "apple_sdk_strip_prefix": attr.string(),
         "apple_sdk_archive_type": attr.string(),
-        "llvm_path": attr.string(),
-        "llvm_urls": attr.string_list(),
-        "llvm_sha256": attr.string(),
-        "llvm_strip_prefix": attr.string(),
         "swift_path": attr.string(),
         "swift_urls": attr.string_list(),
         "swift_sha256": attr.string(),

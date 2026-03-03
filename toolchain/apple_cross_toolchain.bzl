@@ -45,28 +45,28 @@ def _github_asset_download(rctx, urls, sha256, strip_prefix):
             stripPrefix = strip_prefix or "",
         )
 
-def _compile_cc_file(rctx, developer_dir, src_name, out_name):
+def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None):
     rctx.report_progress("Compiling {}".format(paths.basename(src_name)))
-    env = rctx.os.environ
-    if developer_dir:
-        bin_root = str(rctx.path(developer_dir + "/Toolchains/XcodeDefault.xctoolchain/usr/bin"))
-    else:
-        bin_root = rctx.which("clang").dirname
-    cc = "{}/clang".format(bin_root)
+    cc = None
+    link_flags = ["-lstdc++"]
+    if toolchain_bindir:
+        toolchain_clang = toolchain_bindir + "clang"
+        result = rctx.execute(["test", "-x", toolchain_clang])
+        if result.return_code == 0:
+            cc = toolchain_clang
+            link_flags = ["-fuse-ld=lld", "-lstdc++"]
+    if not cc:
+        cc = str(rctx.which("cc") or rctx.which("gcc") or rctx.which("clang"))
+        if not cc:
+            fail("No C compiler found on PATH. Need cc, gcc, or clang to compile " + out_name)
     result = rctx.execute([
         cc,
-    ] + ([
-        "-B",
-        bin_root,
-        "-fuse-ld=lld",
-    ] if developer_dir else []) + [
         "-std=c++11",
-        "-lstdc++",
         "-O3",
         "-o",
         out_name,
         src_name,
-    ], 30)
+    ] + link_flags, 30)
     if (result.return_code != 0):
         error_msg = (
             "return code {code}, stderr: {err}, stdout: {out}"
@@ -127,62 +127,11 @@ def _apple_cross_toolchain_impl(rctx):
     elif rctx.attr.apple_sdk_urls:
         _github_asset_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
-    # Extract LLVM/Clang - either from local path or URL
-    if rctx.attr.llvm_path:
-        llvm_tarball = rctx.workspace_root.get_child(rctx.attr.llvm_path)
-        rctx.extract(
-            archive = llvm_tarball,
-            stripPrefix = rctx.attr.llvm_strip_prefix or "",
-            output = "tmp_clang",
-        )
-    elif rctx.attr.llvm_urls:
-        rctx.download_and_extract(
-            url = rctx.attr.llvm_urls,
-            sha256 = rctx.attr.llvm_sha256,
-            stripPrefix = rctx.attr.llvm_strip_prefix,
-            output = "tmp_clang",
-        )
-
-    if rctx.attr.llvm_path or rctx.attr.llvm_urls:
-        # Move all clang/LLVM binaries to the toolchain bin directory.
-        # Uses cp -a to preserve symlinks, then deletes the temp dir.
-        xcode_toolchain_dir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
-        rctx.execute([
-            "bash", "-c",
-            "cp -a tmp_clang/bin/* " + xcode_toolchain_bindir,
-        ])
-        # Also copy clang resource headers (lib/clang/<ver>/include/) if present
-        result = rctx.execute(["test", "-d", "tmp_clang/lib"])
-        if result.return_code == 0:
-            rctx.execute([
-                "bash", "-c",
-                "cp -a tmp_clang/lib/* " + xcode_toolchain_dir + "lib/",
-            ])
-        rctx.delete("tmp_clang")
-
-        # Ensure the clang resource directory matches the actual clang version.
-        # The Xcode SDK ships clang resource headers under lib/clang/<sdk_ver>/
-        # but our LLVM binary expects lib/clang/<llvm_ver>/. Create a symlink
-        # so the LLVM clang can find the headers from the Xcode SDK.
-        clang_lib_dir = xcode_toolchain_dir + "lib/clang/"
-        result = rctx.execute([
-            "bash", "-c",
-            "ls -1 " + clang_lib_dir + " 2>/dev/null | head -1",
-        ])
-        sdk_clang_ver = result.stdout.strip()
-        if sdk_clang_ver:
-            result = rctx.execute([
-                xcode_toolchain_bindir + "clang", "--version",
-            ])
-            # Extract major version from "clang version X.Y.Z"
-            for line in result.stdout.split("\n"):
-                if "clang version" in line:
-                    llvm_ver = line.split("clang version")[1].strip().split(".")[0]
-                    if llvm_ver != sdk_clang_ver:
-                        rctx.execute([
-                            "ln", "-sfn", sdk_clang_ver, clang_lib_dir + llvm_ver,
-                        ])
-                    break
+    # Resolve the @llvm_prebuilt repo (same URL+SHA as @llvm's own prebuilt;
+    # Bazel's download cache deduplicates the network fetch).
+    llvm_prebuilt_bin = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname)
+    llvm_prebuilt_lib = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname.dirname) + "/lib"
+    xcode_toolchain_dir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
 
     # Extract Swift - either from local path or URL
     if rctx.attr.swift_path:
@@ -230,33 +179,108 @@ def _apple_cross_toolchain_impl(rctx):
         output = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/",
     )
 
+    # Copy LLVM binaries from @llvm's prebuilt repo AFTER ported-tools
+    # extraction so they take precedence.
+    result = rctx.execute([
+        "bash", "-c",
+        "cp -a " + llvm_prebuilt_bin + "/* " + xcode_toolchain_bindir,
+    ])
+    if result.return_code != 0:
+        fail("Failed to copy LLVM binaries: " + result.stderr)
+    # Also copy clang resource headers (lib/clang/<ver>/include/) if present
+    result = rctx.execute(["test", "-d", llvm_prebuilt_lib])
+    if result.return_code == 0:
+        rctx.execute([
+            "bash", "-c",
+            "cp -a " + llvm_prebuilt_lib + "/* " + xcode_toolchain_dir + "lib/",
+        ])
+
+    # Create lib/swift/ symlinks so Swift binaries can find their runtime
+    # libraries.  Swift binaries have RUNPATH $ORIGIN/../lib/swift/linux
+    # and $ORIGIN/../lib/swift/host/compiler, but the ported-tools tarball
+    # places the libraries at lib/linux/ and lib/host/ respectively.
+    swift_lib_dir = xcode_toolchain_dir + "lib/swift"
+    result = rctx.execute(["test", "-d", swift_lib_dir])
+    if result.return_code != 0:
+        rctx.execute(["mkdir", "-p", swift_lib_dir])
+        result = rctx.execute(["test", "-d", xcode_toolchain_dir + "lib/linux"])
+        if result.return_code == 0:
+            rctx.execute(["ln", "-sfn", "../linux", swift_lib_dir + "/linux"])
+        result = rctx.execute(["test", "-d", xcode_toolchain_dir + "lib/host"])
+        if result.return_code == 0:
+            rctx.execute(["ln", "-sfn", "../host", swift_lib_dir + "/host"])
+
+    # Ensure the clang resource directory matches the actual clang version.
+    # The Xcode SDK ships clang resource headers and compiler-rt builtins
+    # under lib/clang/<sdk_ver>/ but our LLVM binary expects
+    # lib/clang/<llvm_ver>/. Bridge the version gap so clang finds both.
+    clang_lib_dir = xcode_toolchain_dir + "lib/clang/"
+    result = rctx.execute([
+        "bash", "-c",
+        "ls -1 " + clang_lib_dir + " 2>/dev/null | head -1",
+    ])
+    sdk_clang_ver = result.stdout.strip()
+    if sdk_clang_ver:
+        result = rctx.execute([
+            xcode_toolchain_bindir + "clang", "--version",
+        ])
+        # Extract major version from "clang version X.Y.Z"
+        for line in result.stdout.split("\n"):
+            if "clang version" in line:
+                llvm_ver = line.split("clang version")[1].strip().split(".")[0]
+                if llvm_ver != sdk_clang_ver:
+                    llvm_clang_dir = clang_lib_dir + llvm_ver
+                    sdk_clang_dir = clang_lib_dir + sdk_clang_ver
+                    result = rctx.execute(["test", "-d", llvm_clang_dir])
+                    if result.return_code != 0:
+                        # LLVM version dir doesn't exist at all — symlink it
+                        # to the SDK version.
+                        rctx.execute([
+                            "ln", "-sfn", sdk_clang_ver, llvm_clang_dir,
+                        ])
+                    else:
+                        # LLVM version dir exists (from prebuilt) with headers
+                        # but the SDK's compiler-rt builtins (lib/darwin/) are
+                        # under the SDK version. Symlink missing subdirs.
+                        result = rctx.execute(["test", "-d", sdk_clang_dir + "/lib"])
+                        if result.return_code == 0:
+                            result = rctx.execute(["test", "-e", llvm_clang_dir + "/lib"])
+                            if result.return_code != 0:
+                                rctx.execute([
+                                    "ln", "-sfn",
+                                    "../" + sdk_clang_ver + "/lib",
+                                    llvm_clang_dir + "/lib",
+                                ])
+                break
+
     # Create Apple-compatible symlinks for LLVM tools so that
     # toolchain configs and xcrunwrapper can invoke them by their
     # traditional Apple names. Done AFTER all extractions so that
     # symlinks don't interfere with tarball extraction.
-    if rctx.attr.llvm_path or rctx.attr.llvm_urls:
-        _llvm_symlinks = {
-            "libtool": "llvm-libtool-darwin",
-            "install_name_tool": "llvm-install-name-tool",
-            "lipo": "llvm-lipo",
-            "ar": "llvm-ar",
-            "ranlib": "llvm-ranlib",
-            "otool": "llvm-otool",
-            "strip": "llvm-strip",
-            "nm": "llvm-nm",
-            "objdump": "llvm-objdump",
-        }
-        for apple_name, llvm_name in _llvm_symlinks.items():
-            target = xcode_toolchain_bindir + llvm_name
-            link = xcode_toolchain_bindir + apple_name
-            result = rctx.execute(["test", "-e", target])
-            if result.return_code == 0:
-                rctx.execute(["bash", "-c", "ln -sf " + llvm_name + " " + link])
-            else:
-                # LLVM tool not available; fall back to system tool if it exists
-                sys_tool = rctx.which(apple_name)
-                if sys_tool:
-                    rctx.execute(["bash", "-c", "rm -f " + link + " && cp " + str(sys_tool) + " " + link])
+    _llvm_symlinks = {
+        # NOTE: "libtool" is intentionally omitted — the llvm multicall binary
+        # doesn't recognize "libtool" as a subcommand (only "libtool-darwin").
+        # The libtool template script from libtool.sh handles this instead.
+        "install_name_tool": "llvm-install-name-tool",
+        "lipo": "llvm-lipo",
+        "ar": "llvm-ar",
+        "ranlib": "llvm-ranlib",
+        "otool": "llvm-otool",
+        "strip": "llvm-strip",
+        "nm": "llvm-nm",
+        "objdump": "llvm-objdump",
+    }
+    for apple_name, llvm_name in _llvm_symlinks.items():
+        target = xcode_toolchain_bindir + llvm_name
+        link = xcode_toolchain_bindir + apple_name
+        result = rctx.execute(["test", "-e", target])
+        if result.return_code == 0:
+            rctx.execute(["bash", "-c", "ln -sf " + llvm_name + " " + link])
+        else:
+            # LLVM tool not available; fall back to system tool if it exists
+            sys_tool = rctx.which(apple_name)
+            if sys_tool:
+                rctx.execute(["bash", "-c", "rm -f " + link + " && cp " + str(sys_tool) + " " + link])
 
     # Create an Apple-compatible libtool shim if llvm-libtool-darwin is not
     # available. Apple's libtool -static creates a static archive like ar rcs.
@@ -305,9 +329,9 @@ exec "$AR" "rcs${DETERMINISTIC}" "$OUTPUT" "${INPUTS[@]}"
     rctx.template("wrapped_clang.cc", wrapped_clang_tpl, substitutions)
     _compile_cc_file(
         rctx,
-        developer_dir,
         str(rctx.path("wrapped_clang.cc")),
         "wrapped_clang",
+        toolchain_bindir = xcode_toolchain_bindir,
     )
     rctx.delete("wrapped_clang.cc")
     rctx.symlink("wrapped_clang", "wrapped_clang_pp")
@@ -317,9 +341,6 @@ exec "$AR" "rcs${DETERMINISTIC}" "$OUTPUT" "${INPUTS[@]}"
     rctx.template("repositories.bzl", repositories_tpl, substitutions)
     rctx.template("swift_autoconfiguration.bzl", swift_autoconfig_tpl, substitutions)
 
-_DEFAULT_LLVM_URLS = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/LLVM-22.1.0-Linux-X64-stripped.tar.xz"]
-_DEFAULT_LLVM_SHA256 = "80999517f47908c70da76ec461ae6206e996852d5c16c799f0de3a3955c66439"
-_DEFAULT_LLVM_STRIP_PREFIX = "LLVM-22.1.0-Linux-X64"
 _DEFAULT_SWIFT_URLS = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"]
 _DEFAULT_SWIFT_SHA256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5"
 _DEFAULT_SWIFT_STRIP_PREFIX = "swift-6.2.3-RELEASE-ubuntu24.04"
@@ -339,18 +360,6 @@ apple_cross_toolchain = repository_rule(
         "apple_sdk_archive_type": attr.string(
             doc = "Archive type (e.g. 'tar.xz') when it can't be inferred from the URL.",
             mandatory = False,
-        ),
-        "llvm_path": attr.string(
-            doc = "Workspace-relative path to a local LLVM/Clang tarball.",
-        ),
-        "llvm_urls": attr.string_list(
-            default = _DEFAULT_LLVM_URLS,
-        ),
-        "llvm_sha256": attr.string(
-            default = _DEFAULT_LLVM_SHA256,
-        ),
-        "llvm_strip_prefix": attr.string(
-            default = _DEFAULT_LLVM_STRIP_PREFIX,
         ),
         "swift_path": attr.string(
             doc = "Workspace-relative path to a local Swift tarball.",
