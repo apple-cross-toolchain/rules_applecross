@@ -14,12 +14,29 @@ mkdir -p "$NEW_DEVELOPER_DIR"
 cp -a "$DEVELOPER_DIR/../Info.plist" "$NEW_DEVELOPER_DIR/.."
 cp -a "$DEVELOPER_DIR/../version.plist" "$NEW_DEVELOPER_DIR/.."
 
+## Excludes applied to all SDK rsync operations.
+## These remove content that is not needed for cross-compilation linking.
+SDK_EXCLUDES=(
+  # Documentation and resource data
+  --exclude "usr/share"
+  --exclude "*.lproj"
+  # Code signatures (not verified during cross-compilation)
+  --exclude "_CodeSignature"
+  # Swift documentation blobs (compiler needs .swiftmodule/.swiftinterface only)
+  --exclude "*.swiftdoc"
+  # Scripting frameworks never used by the toolchain
+  --exclude "Ruby.framework"
+  --exclude "Perl.framework"
+  --exclude "Python3.framework"
+  --exclude "Python.framework"
+)
+
 ## Copy SDKs
 for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS AppleTVSimulator XROS XRSimulator; do
   # xcrun relies on this Info.plist to find and invoke tools
   rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/Info.plist" "$NEW_DEVELOPER_DIR"
 
-  rsync -a --relative --exclude "$sdk.sdk/usr/share" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/SDKs/" "$NEW_DEVELOPER_DIR"
+  rsync -a --relative "${SDK_EXCLUDES[@]}" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/SDKs/" "$NEW_DEVELOPER_DIR"
 
   if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/usr/lib" ]]; then
     rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
@@ -30,14 +47,14 @@ for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS Appl
   fi
 
   if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/Library/Frameworks" ]]; then
-    rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/Frameworks/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative "${SDK_EXCLUDES[@]}" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/Frameworks/" "$NEW_DEVELOPER_DIR"
   fi
 
   # PrivateFrameworks contains XCTestCore.framework, XCTAutomationSupport.framework,
   # etc. that XCTest.framework re-exports. Without these the linker fails with
   # "unable to locate re-export".
   if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/Library/PrivateFrameworks" ]]; then
-    rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/PrivateFrameworks/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative "${SDK_EXCLUDES[@]}" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/PrivateFrameworks/" "$NEW_DEVELOPER_DIR"
   fi
 done
 
