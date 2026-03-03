@@ -6,11 +6,12 @@
 set -euo pipefail
 
 bazel fetch @apple_cross_toolchain//:all
-DEVELOPER_DIR="$(bazel info output_base)/external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer"
+EXTERNAL="$(bazel info output_base)/external"
+DEVELOPER_DIR="$(find "$EXTERNAL" -maxdepth 2 -type d -name Xcode.app -path "*apple_cross_toolchain*" 2>/dev/null | head -1)/Contents/Developer"
 
 if [[ ! -d "$DEVELOPER_DIR" ]]; then
-  echo "ERROR: DEVELOPER_DIR not found at $DEVELOPER_DIR" >&2
-  echo "Run 'bazel fetch //tests/data:dummy_lib' first." >&2
+  echo "ERROR: DEVELOPER_DIR not found under $EXTERNAL" >&2
+  echo "Make sure 'bazel fetch @apple_cross_toolchain//:all' succeeded." >&2
   exit 1
 fi
 

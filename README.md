@@ -56,8 +56,9 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
 5. Fetch the toolchain and configure the developer directory:
 
     ```
-    bazel fetch //...
-    sudo tools/set-developer-dir.sh
+    bazel fetch @apple_cross_toolchain//:all
+    DEVELOPER_DIR="$(find "$(bazel info output_base)/external" -maxdepth 2 -type d -name Xcode.app -path "*apple_cross_toolchain*" | head -1)/Contents/Developer"
+    sudo xcode-select -s "$DEVELOPER_DIR"
     ```
 
     This points `xcode-select` at the extracted developer directory. No
