@@ -35,14 +35,8 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
     )
     apple_cross_toolchain.configure(
         name = "apple_cross_toolchain",
-        xcode_urls = ["<url-to-xcode-sdk-archive>"],
-        xcode_archive_type = "tar.xz",  # if not inferrable from URL
-        clang_urls = ["<url-to-clang-archive>"],
-        clang_sha256 = "<sha256>",
-        clang_strip_prefix = "<prefix>",
-        swift_urls = ["<url-to-swift-archive>"],
-        swift_sha256 = "<sha256>",
-        swift_strip_prefix = "<prefix>",
+        apple_sdk_urls = ["<url-to-apple-sdk-archive>"],
+        apple_sdk_archive_type = "tar.xz",  # if not inferrable from URL
     )
     use_repo(apple_cross_toolchain, "apple_cross_toolchain")
 

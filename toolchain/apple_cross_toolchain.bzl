@@ -35,7 +35,7 @@ def _github_asset_download(rctx, urls, sha256, strip_prefix):
             url = urls,
             sha256 = sha256 or "",
             stripPrefix = strip_prefix or "",
-            type = rctx.attr.xcode_archive_type or "",
+            type = rctx.attr.apple_sdk_archive_type or "",
             headers = headers,
         )
     else:
@@ -97,7 +97,7 @@ def _apple_cross_toolchain_impl(rctx):
     developer_dir = ""
     tools_path_prefix = ""
     xcode_toolchain_bindir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/"
-    if rctx.attr.xcode_urls or rctx.attr.xcode_path:
+    if rctx.attr.apple_sdk_urls or rctx.attr.apple_sdk_path:
         developer_dir = "Xcode.app/Contents/Developer"
         tools_path_prefix = toolchain_path_prefix + xcode_toolchain_bindir
 
@@ -116,16 +116,16 @@ def _apple_cross_toolchain_impl(rctx):
     rctx.template("xcrunwrapper.sh", xcrunwrapper_tpl, substitutions)
     rctx.template("libtool", libtool_sh, substitutions)
 
-    # Extract Xcode SDKs - either from local path or URL
-    if rctx.attr.xcode_path:
+    # Extract Apple SDKs - either from local path or URL
+    if rctx.attr.apple_sdk_path:
         # Local tarball
-        xcode_tarball = rctx.workspace_root.get_child(rctx.attr.xcode_path)
+        apple_sdk_tarball = rctx.workspace_root.get_child(rctx.attr.apple_sdk_path)
         rctx.extract(
-            archive = xcode_tarball,
-            stripPrefix = rctx.attr.xcode_strip_prefix or "",
+            archive = apple_sdk_tarball,
+            stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
         )
-    elif rctx.attr.xcode_urls:
-        _github_asset_download(rctx, rctx.attr.xcode_urls, rctx.attr.xcode_sha256, rctx.attr.xcode_strip_prefix)
+    elif rctx.attr.apple_sdk_urls:
+        _github_asset_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
     # The tarball may have a nested structure:
     # Xcode.app/Contents/Developer/Applications/Xcode_26.2.app/Contents/Developer/
@@ -158,23 +158,23 @@ def _apple_cross_toolchain_impl(rctx):
         "find Xcode.app -type l -exec sh -c 'test \"$(readlink \"$1\")\" = \".\" && rm \"$1\"' _ {} \\;",
     ])
 
-    # Extract Clang - either from local path or URL
-    if rctx.attr.clang_path:
-        clang_tarball = rctx.workspace_root.get_child(rctx.attr.clang_path)
+    # Extract LLVM/Clang - either from local path or URL
+    if rctx.attr.llvm_path:
+        llvm_tarball = rctx.workspace_root.get_child(rctx.attr.llvm_path)
         rctx.extract(
-            archive = clang_tarball,
-            stripPrefix = rctx.attr.clang_strip_prefix or "",
+            archive = llvm_tarball,
+            stripPrefix = rctx.attr.llvm_strip_prefix or "",
             output = "tmp_clang",
         )
-    elif rctx.attr.clang_urls:
+    elif rctx.attr.llvm_urls:
         rctx.download_and_extract(
-            url = rctx.attr.clang_urls,
-            sha256 = rctx.attr.clang_sha256,
-            stripPrefix = rctx.attr.clang_strip_prefix,
+            url = rctx.attr.llvm_urls,
+            sha256 = rctx.attr.llvm_sha256,
+            stripPrefix = rctx.attr.llvm_strip_prefix,
             output = "tmp_clang",
         )
 
-    if rctx.attr.clang_path or rctx.attr.clang_urls:
+    if rctx.attr.llvm_path or rctx.attr.llvm_urls:
         # Move all clang/LLVM binaries to the toolchain bin directory.
         # Uses cp -a to preserve symlinks, then deletes the temp dir.
         xcode_toolchain_dir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
@@ -264,7 +264,7 @@ def _apple_cross_toolchain_impl(rctx):
     # toolchain configs and xcrunwrapper can invoke them by their
     # traditional Apple names. Done AFTER all extractions so that
     # symlinks don't interfere with tarball extraction.
-    if rctx.attr.clang_path or rctx.attr.clang_urls:
+    if rctx.attr.llvm_path or rctx.attr.llvm_urls:
         _llvm_symlinks = {
             "libtool": "llvm-libtool-darwin",
             "install_name_tool": "llvm-install-name-tool",
@@ -347,41 +347,52 @@ exec "$AR" "rcs${DETERMINISTIC}" "$OUTPUT" "${INPUTS[@]}"
     rctx.template("repositories.bzl", repositories_tpl, substitutions)
     rctx.template("swift_autoconfiguration.bzl", swift_autoconfig_tpl, substitutions)
 
+_DEFAULT_LLVM_URLS = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/LLVM-22.1.0-Linux-X64-stripped.tar.xz"]
+_DEFAULT_LLVM_SHA256 = "80999517f47908c70da76ec461ae6206e996852d5c16c799f0de3a3955c66439"
+_DEFAULT_LLVM_STRIP_PREFIX = "LLVM-22.1.0-Linux-X64"
+_DEFAULT_SWIFT_URLS = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"]
+_DEFAULT_SWIFT_SHA256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5"
+_DEFAULT_SWIFT_STRIP_PREFIX = "swift-6.2.3-RELEASE-ubuntu24.04"
+
 apple_cross_toolchain = repository_rule(
     attrs = {
-        "xcode_path": attr.string(
-            doc = "Workspace-relative path to a local Xcode SDK tarball.",
+        "apple_sdk_path": attr.string(
+            doc = "Workspace-relative path to a local Apple SDK tarball.",
         ),
-        "xcode_urls": attr.string_list(),
-        "xcode_sha256": attr.string(
+        "apple_sdk_urls": attr.string_list(),
+        "apple_sdk_sha256": attr.string(
             mandatory = False,
         ),
-        "xcode_strip_prefix": attr.string(
+        "apple_sdk_strip_prefix": attr.string(
             mandatory = False,
         ),
-        "xcode_archive_type": attr.string(
+        "apple_sdk_archive_type": attr.string(
             doc = "Archive type (e.g. 'tar.xz') when it can't be inferred from the URL.",
             mandatory = False,
         ),
-        "clang_path": attr.string(
-            doc = "Workspace-relative path to a local Clang tarball.",
+        "llvm_path": attr.string(
+            doc = "Workspace-relative path to a local LLVM/Clang tarball.",
         ),
-        "clang_urls": attr.string_list(),
-        "clang_sha256": attr.string(
-            mandatory = False,
+        "llvm_urls": attr.string_list(
+            default = _DEFAULT_LLVM_URLS,
         ),
-        "clang_strip_prefix": attr.string(
-            mandatory = False,
+        "llvm_sha256": attr.string(
+            default = _DEFAULT_LLVM_SHA256,
+        ),
+        "llvm_strip_prefix": attr.string(
+            default = _DEFAULT_LLVM_STRIP_PREFIX,
         ),
         "swift_path": attr.string(
             doc = "Workspace-relative path to a local Swift tarball.",
         ),
-        "swift_urls": attr.string_list(),
+        "swift_urls": attr.string_list(
+            default = _DEFAULT_SWIFT_URLS,
+        ),
         "swift_sha256": attr.string(
-            mandatory = False,
+            default = _DEFAULT_SWIFT_SHA256,
         ),
         "swift_strip_prefix": attr.string(
-            mandatory = False,
+            default = _DEFAULT_SWIFT_STRIP_PREFIX,
         ),
     },
     environ = ["HOME", "PATH"],

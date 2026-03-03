@@ -20,15 +20,9 @@ apple_cross_toolchain = use_extension(
 )
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
-    clang_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/LLVM-22.1.0-Linux-X64-stripped.tar.xz"],
-    clang_sha256 = "80999517f47908c70da76ec461ae6206e996852d5c16c799f0de3a3955c66439",
-    clang_strip_prefix = "LLVM-22.1.0-Linux-X64",
-    swift_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"],
-    swift_sha256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5",
-    swift_strip_prefix = "swift-6.2.3-RELEASE-ubuntu24.04",
-    xcode_urls = ["https://api.github.com/repos/apple-cross-toolchain/apple-sdks/releases/assets/366021069"],
-    xcode_sha256 = "64a4c28c1ef620158954b431c510fa0e6b36991a32cc74c2593da8c00e897414",
-    xcode_archive_type = "tar.xz",
+    apple_sdk_urls = ["https://api.github.com/repos/apple-cross-toolchain/apple-sdks/releases/assets/366021069"],
+    apple_sdk_sha256 = "64a4c28c1ef620158954b431c510fa0e6b36991a32cc74c2593da8c00e897414",
+    apple_sdk_archive_type = "tar.xz",
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")
 
