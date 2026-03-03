@@ -127,6 +127,37 @@ def _apple_cross_toolchain_impl(rctx):
     elif rctx.attr.apple_sdk_urls:
         _github_asset_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
+    # The tarball may have a nested structure:
+    # Xcode.app/Contents/Developer/Applications/Xcode_26.2.app/Contents/Developer/
+    # We need to flatten it so that Xcode.app/Contents/Developer/ has the actual SDKs.
+    nested_dev_dir = "Xcode.app/Contents/Developer/Applications"
+    result = rctx.execute(["test", "-d", nested_dev_dir])
+    if result.return_code == 0:
+        result = rctx.execute(["ls", nested_dev_dir])
+        if result.return_code == 0:
+            nested_apps = result.stdout.strip().split("\n")
+            for app in nested_apps:
+                if app.endswith(".app"):
+                    nested_developer = nested_dev_dir + "/" + app + "/Contents/Developer"
+                    result = rctx.execute(["ls", nested_developer])
+                    if result.return_code == 0:
+                        for item in result.stdout.strip().split("\n"):
+                            if item:
+                                rctx.execute([
+                                    "cp", "-a",
+                                    nested_developer + "/" + item,
+                                    "Xcode.app/Contents/Developer/",
+                                ])
+                    break
+            rctx.execute(["rm", "-rf", nested_dev_dir])
+
+    # Remove self-referencing symlinks that cause infinite glob loops
+    # (e.g. Ruby.framework/Headers/ruby/ruby -> .)
+    rctx.execute([
+        "bash", "-c",
+        "find Xcode.app -type l -exec sh -c 'test \"$(readlink \"$1\")\" = \".\" && rm \"$1\"' _ {} \\;",
+    ])
+
     # Extract LLVM/Clang - either from local path or URL
     if rctx.attr.llvm_path:
         llvm_tarball = rctx.workspace_root.get_child(rctx.attr.llvm_path)
