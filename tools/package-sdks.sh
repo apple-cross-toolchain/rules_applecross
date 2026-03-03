@@ -24,6 +24,8 @@ SDK_EXCLUDES=(
   --exclude "_CodeSignature"
   # Swift documentation blobs (compiler needs .swiftmodule/.swiftinterface only)
   --exclude "*.swiftdoc"
+  # Static archives — the SDK provides .tbd text stubs for linking
+  --exclude "*.a"
   # Scripting frameworks never used by the toolchain
   --exclude "Ruby.framework"
   --exclude "Perl.framework"
@@ -39,11 +41,11 @@ for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS Appl
   rsync -a --relative "${SDK_EXCLUDES[@]}" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/SDKs/" "$NEW_DEVELOPER_DIR"
 
   if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/usr/lib" ]]; then
-    rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
   if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/usr/lib" ]]; then
-    rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
   if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/Library/Frameworks" ]]; then
@@ -65,9 +67,13 @@ if [[ -d "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib/arc" ]]; th
   rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/" "$NEW_DEVELOPER_DIR"
 fi
 rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/" "$NEW_DEVELOPER_DIR"
-rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
+# Exclude .a from Swift runtime dirs — the cross-compilation toolchain uses its
+# own Swift and these back-deployment compatibility archives (libswiftCompatibility*.a)
+# come from the separate Swift toolchain instead.  Keep .tbd stubs and .swiftmodule/
+# .swiftinterface files which are still needed.
+rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
 if [[ -d "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0" ]]; then
-  rsync -a --relative "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
+  rsync -a --relative --exclude "*.a" "$DEVELOPER_DIR/./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
 fi
 
 # Create a placeholder bin directory
