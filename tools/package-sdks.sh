@@ -32,6 +32,13 @@ for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS Appl
   if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/Library/Frameworks" ]]; then
     rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/Frameworks/" "$NEW_DEVELOPER_DIR"
   fi
+
+  # PrivateFrameworks contains XCTestCore.framework, XCTAutomationSupport.framework,
+  # etc. that XCTest.framework re-exports. Without these the linker fails with
+  # "unable to locate re-export".
+  if [[ -d "$DEVELOPER_DIR/Platforms/$sdk.platform/Developer/Library/PrivateFrameworks" ]]; then
+    rsync -a --relative "$DEVELOPER_DIR/./Platforms/$sdk.platform/Developer/Library/PrivateFrameworks/" "$NEW_DEVELOPER_DIR"
+  fi
 done
 
 # Copy toolchain libraries

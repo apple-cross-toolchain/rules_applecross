@@ -178,11 +178,14 @@ def _make_tool_configs(additional_tools):
 def _swift_linkopts_cc_info(toolchain_root, swift_platform_name, sdk_platform, sdk_dir, developer_dir, toolchain_label):
     """Returns a CcInfo with linker flags for Swift standard library linking."""
     swift_lib_dir = developer_dir + "/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" + swift_platform_name
-    platform_developer_framework_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer/Library/Frameworks"
+    platform_developer_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer"
+    platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
+    platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
 
     linkopts = [
         "-L" + swift_lib_dir,
         "-L/usr/lib/swift",
+        "-L" + platform_developer_lib_dir,
         "-Wl,-objc_abi_version,2",
         "-F" + platform_developer_framework_dir,
     ]
@@ -200,13 +203,16 @@ def _swift_linkopts_cc_info(toolchain_root, swift_platform_name, sdk_platform, s
 
 def _test_linking_context(sdk_platform, developer_dir, toolchain_label):
     """Returns a CcLinkingContext with linker flags for test binaries."""
-    platform_developer_framework_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer/Library/Frameworks"
+    platform_developer_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer"
+    platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
+    platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
 
     linkopts = [
         "-Wl,-weak_framework,XCTest",
         "-Wl,-weak-lXCTestSwiftSupport",
         "-Wl,-rpath," + platform_developer_framework_dir,
         "-F" + platform_developer_framework_dir,
+        "-L" + platform_developer_lib_dir,
     ]
 
     return cc_common.create_linking_context(
@@ -275,6 +281,11 @@ def _swift_toolchain_impl(ctx):
         _SWIFT_ACTION_PRECOMPILE_C_MODULE,
     ]
 
+    # Platform developer paths (needed for XCTest and other developer frameworks)
+    platform_developer_dir = _DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer"
+    platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
+    platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
+
     action_configs = [
         # Target triple
         ActionConfigInfo(
@@ -285,6 +296,18 @@ def _swift_toolchain_impl(ctx):
         ActionConfigInfo(
             actions = sdk_actions,
             configurators = [add_arg("-sdk", sdk_dir)],
+        ),
+        # Platform developer framework search path (for XCTest.framework, etc.)
+        ActionConfigInfo(
+            actions = [
+                _SWIFT_ACTION_COMPILE,
+                _SWIFT_ACTION_DERIVE_FILES,
+                _SWIFT_ACTION_DUMP_AST,
+            ],
+            configurators = [
+                add_arg("-F", platform_developer_framework_dir),
+                add_arg("-I", platform_developer_lib_dir),
+            ],
         ),
         # Resource directory
         ActionConfigInfo(
@@ -337,6 +360,7 @@ def _swift_toolchain_impl(ctx):
     requested_features = list(ctx.features)
     requested_features.extend([
         "swift.bundled_xctests",
+        "swift.enable_testing",
         "swift.module_map_no_private_headers",
         "swift.enable_batch_mode",
         "swift.use_response_files",

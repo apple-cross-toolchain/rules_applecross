@@ -26,7 +26,8 @@ apple_cross_toolchain.configure(
     swift_urls = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"],
     swift_sha256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5",
     swift_strip_prefix = "swift-6.2.3-RELEASE-ubuntu24.04",
-    xcode_urls = ["https://api.github.com/repos/apple-cross-toolchain/apple-sdks/releases/assets/363597199"],
+    xcode_urls = ["https://api.github.com/repos/apple-cross-toolchain/apple-sdks/releases/assets/366021069"],
+    xcode_sha256 = "64a4c28c1ef620158954b431c510fa0e6b36991a32cc74c2593da8c00e897414",
     xcode_archive_type = "tar.xz",
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")
