@@ -3,8 +3,12 @@
 load("//toolchain:apple_cross_toolchain.bzl", _apple_cross_toolchain_rule = "apple_cross_toolchain")
 
 def _apple_cross_toolchain_impl(module_ctx):
+    created = {}
     for mod in module_ctx.modules:
         for config in mod.tags.configure:
+            if config.name in created:
+                continue
+            created[config.name] = True
             kwargs = {
                 "name": config.name,
                 "apple_sdk_path": config.apple_sdk_path,
