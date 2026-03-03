@@ -256,16 +256,3 @@ diff --git a/tools/wrapper_common/execute.py b/tools/wrapper_common/execute.py
 +
  # LINT.IfChange
  _DEFAULT_TIMEOUT = 900
-diff --git a/tools/xctoolrunner/xctoolrunner.py b/tools/xctoolrunner/xctoolrunner.py
-index 43937d3..40b5cb6 100644
---- a/tools/xctoolrunner/xctoolrunner.py
-+++ b/tools/xctoolrunner/xctoolrunner.py
-@@ -214,6 +214,8 @@ def actool_filtering(tool_exit_status, raw_stdout, raw_stderr):
-         # when building Icon Composer icon bundles without legacy xcassets App
-         # Icons that define a "universal" 1024x1024 PNG icon. (b/430862638)
-         "Failed to generate flattened icon stack for icon named ",
-+        # Informational notice from actool during asset catalog compilation.
-+        "compiling asset catalog",
-     ]
-     for warning in warnings:
-       if warning in line:

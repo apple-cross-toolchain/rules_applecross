@@ -256,7 +256,8 @@ def _apple_cross_toolchain_impl(rctx):
             rctx.delete(swift_lib + "/" + overlay)
 
     rctx.download_and_extract(
-        url = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/ported-tools-linux-x86_64.tar.xz"],
+        url = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.22/ported-tools-linux-x86_64.tar.xz"],
+        sha256 = "a41beff504746258ffd62d012b4ab8f09ab38136696472252dbc623f92a09a01",
         output = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/",
     )
 
