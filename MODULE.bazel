@@ -14,6 +14,15 @@ bazel_dep(name = "rules_cc", version = "0.2.17")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "llvm", version = "0.6.1")
 bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "xctestrunner", version = "0.0.1")
+git_override(
+    module_name = "xctestrunner",
+    remote = "https://github.com/apple-cross-toolchain/xctestrunner-bash.git",
+    commit = "d13471650825a816d94798693bd77805bf3062b1",
+)
+
+non_module_deps = use_extension("@build_bazel_rules_apple//apple:extensions.bzl", "non_module_deps")
+override_repo(non_module_deps, xctestrunner = "xctestrunner")
 
 register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64")
 
