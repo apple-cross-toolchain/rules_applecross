@@ -6,16 +6,7 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
 
 ## Setup
 
-1. Install system tools (one-time, requires root):
-
-    ```
-    sudo tools/install-mandatory-tools.sh
-    ```
-
-    This installs `xcrun` and `xcode-select` onto the system PATH. All other
-    ported tools are resolved automatically at runtime.
-
-2. Add the dependency to your `MODULE.bazel`:
+1. Add the dependency to your `MODULE.bazel`:
 
     ```starlark
     bazel_dep(name = "rules_applecross", version = "0.0.3")
@@ -26,7 +17,7 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
     )
     ```
 
-3. Configure the toolchain in `MODULE.bazel`:
+2. Configure the toolchain in `MODULE.bazel`:
 
     ```starlark
     apple_cross_toolchain = use_extension(
@@ -47,32 +38,23 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
     # ... add more platforms as needed (darwin, tvos, watchos)
     ```
 
-4. Add the following to your `.bazelrc`:
+3. Add the following to your `.bazelrc`:
 
     ```
     build --xcode_version_config=@rules_applecross//xcode_config:host_xcodes
+    build --action_env=DEVELOPER_DIR=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+    build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
     ```
 
-5. Fetch the toolchain and configure the developer directory:
+4. Build an example:
 
     ```
-    bazel fetch @apple_cross_toolchain//:all
-    DEVELOPER_DIR="$(find "$(bazel info output_base)/external" -maxdepth 2 -type d -name Xcode.app -path "*apple_cross_toolchain*" | head -1)/Contents/Developer"
-    sudo xcode-select -s "$DEVELOPER_DIR"
-    ```
-
-    This points `xcode-select` at the extracted developer directory. No
-    `DEVELOPER_DIR` or `PATH` environment variables are needed after this.
-
-6. Build:
-
-    ```
-    bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld
+    bazel build @rules_applecross//examples/ios/HelloWorldSwiftUI:HelloWorld
     ```
 
 ## Notes
 
-- Xcode SDK archives are not publicly available. If you have access to macOS, you
+- Apple SDKs archives are not publicly available. If you have access to macOS, you
   can build one yourself by running `tools/package-sdks.sh`.
 
 ## Remote Build Execution Setup (for BuildBuddy)
@@ -88,7 +70,7 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
         ],
         exec_properties = {
             "OSFamily": "Linux",
-            "container-image": "<your-docker-image-with-xcrun-and-xcode-select-installed>",
+            "container-image": "<your-docker-image>",
         },
     )
     ```
@@ -111,5 +93,5 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
 3. Build with `--config=remote`:
 
     ```
-    bazel build --config=remote //examples/ios/HelloWorldSwiftUI:HelloWorld
+    bazel build --config=remote @rules_applecross//examples/ios/HelloWorldSwiftUI:HelloWorld
     ```

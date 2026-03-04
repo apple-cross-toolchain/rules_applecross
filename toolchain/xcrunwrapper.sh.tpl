@@ -43,9 +43,10 @@ fi
 TOOLNAME=$1
 shift
 
-# Resolve DEVELOPER_DIR via xcode-select if not already set.
+# Resolve DEVELOPER_DIR: prefer env var, then compute from script location.
 if [[ -z "${DEVELOPER_DIR:-}" ]] ; then
-  DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
+  MY_LOCATION="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  DEVELOPER_DIR="${MY_LOCATION}/Xcode.app/Contents/Developer"
 fi
 export DEVELOPER_DIR
 

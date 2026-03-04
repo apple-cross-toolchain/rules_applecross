@@ -6,6 +6,8 @@ build --subcommands
 build --use_top_level_targets_for_symlinks
 build --verbose_failures
 build --xcode_version_config=//xcode_config:host_xcodes
+build --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
 
 build:remote --bes_backend=grpcs://cloud.buildbuddy.io
 build:remote --bes_results_url=https://app.buildbuddy.io/invocation/

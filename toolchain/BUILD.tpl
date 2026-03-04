@@ -58,6 +58,24 @@ filegroup(
     srcs = glob(["Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/*"]),
 )
 
+# Minimal set of SDK files needed by rules_apple actions (environment_plist,
+# plisttool, etc.) in sandboxed and remote execution.  Includes the ported
+# tools plus platform/SDK metadata plists — NOT the full SDK.
+filegroup(
+    name = "sdk_tool_files",
+    srcs = glob(
+        include = [
+            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/*",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Info.plist",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/CoreServices/SystemVersion.plist",
+            "Xcode.app/Contents/version.plist",
+        ],
+        allow_empty = True,
+    ),
+)
+
 filegroup(
     name = "cc_wrapper",
     srcs = ["cc_wrapper.sh"],

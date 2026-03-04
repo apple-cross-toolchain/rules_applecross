@@ -20,8 +20,6 @@ jobs:
           EOF
           chmod 600 ~/.netrc
           sed -i 's|SDKS_URL|${{ secrets.SDKS_URL }}|g' MODULE.bazel
-      - run: sudo tools/install-mandatory-tools.sh
-      - run: tools/set-developer-dir.sh
       - run: bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld //examples/ios/HelloWorldSwiftUI:Tests //examples/ios/HelloWorldSwiftUI:UITests
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
