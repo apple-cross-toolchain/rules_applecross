@@ -30,6 +30,8 @@ _DEVELOPER_DIR = "%{toolchain_path_prefix}Xcode.app/Contents/Developer"
 
 def _arch(cpu):
     _, _, arch = cpu.partition("_")
+    if arch.startswith("sim_"):
+        arch = arch[len("sim_"):]
     return arch
 
 def _target_apple_platform(cpu):
@@ -39,10 +41,12 @@ def _target_apple_platform(cpu):
     return platform
 
 def _target_system_name(cpu):
-    platform, _, cpu = cpu.partition("_")
+    platform, _, arch = cpu.partition("_")
     if platform == "darwin":
         platform = "macosx"
-    return "{}-apple-{}".format(cpu, platform)
+    if arch.startswith("sim_"):
+        arch = arch[len("sim_"):]
+    return "{}-apple-{}".format(arch, platform)
 
 def _target_libc(cpu):
     platform, _, cpu = cpu.partition("_")
@@ -52,7 +56,7 @@ def _target_libc(cpu):
 
 def _apple_sdk_platform(cpu):
     """Returns the Apple SDK platform name (e.g., iPhoneOS, MacOSX) for the CPU."""
-    platform, _, _ = cpu.partition("_")
+    platform, _, cpu_arch = cpu.partition("_")
     simulator_cpus = [
         "ios_i386",
         "ios_x86_64",
@@ -60,7 +64,7 @@ def _apple_sdk_platform(cpu):
         "watchos_i386",
         "watchos_x86_64",
     ]
-    is_sim = cpu in simulator_cpus
+    is_sim = cpu_arch.startswith("sim_") or cpu in simulator_cpus
     if platform == "darwin":
         return "MacOSX"
     elif platform == "ios":
@@ -88,7 +92,8 @@ def _impl(ctx):
     target_libc = _target_libc(target_cpu)
     target_system_name = _target_system_name(target_cpu)
     toolchain_identifier = target_cpu
-    is_simulator = target_cpu in [
+    _, _, target_arch = target_cpu.partition("_")
+    is_simulator = target_arch.startswith("sim_") or target_cpu in [
         "ios_i386",
         "ios_x86_64",
         "tvos_x86_64",

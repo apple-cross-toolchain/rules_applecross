@@ -20,7 +20,7 @@ jobs:
           EOF
           chmod 600 ~/.netrc
           sed -i 's|SDKS_URL|${{ secrets.SDKS_URL }}|g' MODULE.bazel
-      - run: bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld //examples/ios/HelloWorldSwiftUI:Tests //examples/ios/HelloWorldSwiftUI:UITests
+      - run: bazel build --ios_multi_cpus=sim_arm64 //examples/ios/HelloWorldSwiftUI:HelloWorld //examples/ios/HelloWorldSwiftUI:Tests //examples/ios/HelloWorldSwiftUI:UITests
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
       - uses: actions/upload-artifact@v4
@@ -40,11 +40,27 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: Tests
-      - run: (tar -xf Tests.tar.xz && cd Tests.runfiles/_main && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/Tests)
+      - run: |
+          tar -xf Tests.tar.xz && cd Tests.runfiles/_main
+          tmpdir=$(mktemp -d)
+          exec env - PATH=/bin:/usr/bin \
+            TEST_PREMATURE_EXIT_FILE="$tmpdir/premature_exit" \
+            TEST_SRCDIR="$PWD" \
+            TEST_UNDECLARED_OUTPUTS_DIR="$tmpdir/outputs" \
+            XML_OUTPUT_FILE="$tmpdir/tests.xml" \
+            examples/ios/HelloWorldSwiftUI/Tests
       - uses: actions/download-artifact@v4
         with:
           name: UITests
-      - run: (tar -xf UITests.tar.xz && cd UITests.runfiles/_main && exec env - PATH=/bin:/usr/bin examples/ios/HelloWorldSwiftUI/UITests)
+      - run: |
+          tar -xf UITests.tar.xz && cd UITests.runfiles/_main
+          tmpdir=$(mktemp -d)
+          exec env - PATH=/bin:/usr/bin \
+            TEST_PREMATURE_EXIT_FILE="$tmpdir/premature_exit" \
+            TEST_SRCDIR="$PWD" \
+            TEST_UNDECLARED_OUTPUTS_DIR="$tmpdir/outputs" \
+            XML_OUTPUT_FILE="$tmpdir/uitests.xml" \
+            examples/ios/HelloWorldSwiftUI/UITests
   # remote_build:
   #   runs-on: ubuntu-latest
   #   steps:

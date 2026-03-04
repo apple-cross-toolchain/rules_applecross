@@ -1,0 +1,34 @@
+diff --git a/apple/testing/default_runner/ios_xctestrun_runner.bzl b/apple/testing/default_runner/ios_xctestrun_runner.bzl
+--- a/apple/testing/default_runner/ios_xctestrun_runner.bzl
++++ b/apple/testing/default_runner/ios_xctestrun_runner.bzl
+@@ -80,7 +80,7 @@
+     runfiles = ctx.runfiles(files = [
+         ctx.file._xctestrun_template,
+         ctx.file._xctrunner_entitlements_template,
+-    ]).merge(ctx.attr._simulator_creator[DefaultInfo].default_runfiles)
++    ]).merge(ctx.attr.create_simulator_action[DefaultInfo].default_runfiles)
+
+     default_action_binary = "/usr/bin/true"
+
+@@ -100,7 +100,7 @@
+             create_xcresult_bundle = "true" if ctx.attr.create_xcresult_bundle else "false",
+             device_type = device_type,
+             os_version = os_version,
+-            simulator_creator = ctx.executable._simulator_creator.short_path,
++            simulator_creator = ctx.executable.create_simulator_action.short_path,
+             random = ctx.attr.random,
+             xcodebuild_args = " ".join(ctx.attr.xcodebuild_args) if ctx.attr.xcodebuild_args else "",
+             command_line_args = " ".join(ctx.attr.command_line_args) if ctx.attr.command_line_args else "",
+@@ -193,10 +193,11 @@
+ When true, the exit code of the test run will be set to the exit code of the post action. This is useful for tests that need to fail the test run based on their own criteria.
+ """,
+         ),
+-        "_simulator_creator": attr.label(
++        "create_simulator_action": attr.label(
+             default = Label(
+                 "//apple/testing/default_runner:simulator_creator",
+             ),
++            doc = "A binary that creates or reuses a simulator and prints its UDID to stdout.",
+             executable = True,
+             cfg = "exec",
+         ),

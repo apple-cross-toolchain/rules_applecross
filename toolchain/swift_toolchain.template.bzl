@@ -234,7 +234,12 @@ def _swift_toolchain_impl(ctx):
     if not info:
         fail("Unsupported cpu: " + cpu)
 
-    is_simulator = cpu in _SIMULATOR_CPUS
+    # Handle simulator CPUs: "sim_" prefix (e.g. "ios_sim_arm64") or legacy x86/i386
+    if arch.startswith("sim_"):
+        arch = arch[len("sim_"):]
+        is_simulator = True
+    else:
+        is_simulator = cpu in _SIMULATOR_CPUS
 
     # Get xcode_config for version info
     xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]

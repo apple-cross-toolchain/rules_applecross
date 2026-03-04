@@ -6,7 +6,10 @@ git_override(
     module_name = "rules_apple",
     remote = "https://github.com/bazelbuild/rules_apple.git",
     commit = "d930c4c6eaeed91c8275604a428407d123a85216",
-    patches = ["//patches:rules_apple_no_exec_platform_constraint.patch"],
+    patches = [
+        "//patches:rules_apple_no_exec_platform_constraint.patch",
+        "//patches:rules_apple_create_simulator_action.patch",
+    ],
     patch_strip = 1,
 )
 bazel_dep(name = "rules_swift", version = "3.4.2", repo_name = "build_bazel_rules_swift")
@@ -18,12 +21,13 @@ bazel_dep(name = "xctestrunner", version = "0.0.1")
 git_override(
     module_name = "xctestrunner",
     remote = "https://github.com/apple-cross-toolchain/xctestrunner-bash.git",
-    commit = "d13471650825a816d94798693bd77805bf3062b1",
+    commit = "9548d93f29a2a93315d7a0458622682c0f76e6fe",
 )
 
 non_module_deps = use_extension("@build_bazel_rules_apple//apple:extensions.bzl", "non_module_deps")
 override_repo(non_module_deps, xctestrunner = "xctestrunner")
 
+register_toolchains("//testing:ios_test_toolchain")
 register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64")
 
 llvm_prebuilt_ext = use_extension("//toolchain:llvm_prebuilt.bzl", "llvm_prebuilt")
@@ -45,6 +49,7 @@ register_toolchains("@apple_cross_toolchain//:cc-toolchain-darwin_x86_64")
 register_toolchains("@apple_cross_toolchain//:cc-toolchain-darwin_arm64")
 register_toolchains("@apple_cross_toolchain//:cc-toolchain-darwin_arm64e")
 register_toolchains("@apple_cross_toolchain//:cc-toolchain-ios_arm64")
+register_toolchains("@apple_cross_toolchain//:cc-toolchain-ios_sim_arm64")
 register_toolchains("@apple_cross_toolchain//:cc-toolchain-ios_arm64e")
 register_toolchains("@apple_cross_toolchain//:cc-toolchain-ios_x86_64")
 register_toolchains("@apple_cross_toolchain//:cc-toolchain-tvos_arm64")
@@ -57,6 +62,7 @@ register_toolchains("@apple_cross_toolchain//:swift-toolchain-darwin_x86_64")
 register_toolchains("@apple_cross_toolchain//:swift-toolchain-darwin_arm64")
 register_toolchains("@apple_cross_toolchain//:swift-toolchain-darwin_arm64e")
 register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_arm64")
+register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_sim_arm64")
 register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_arm64e")
 register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_x86_64")
 register_toolchains("@apple_cross_toolchain//:swift-toolchain-tvos_arm64")

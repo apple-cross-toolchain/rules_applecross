@@ -18,6 +18,7 @@ OSX_TOOLS_ARCHS = [
     "darwin_arm64",
     "darwin_arm64e",
     "ios_arm64",
+    "ios_sim_arm64",
     "ios_arm64e",
     "ios_armv7",
     "ios_i386",
