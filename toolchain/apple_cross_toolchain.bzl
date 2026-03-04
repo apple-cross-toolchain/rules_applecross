@@ -82,14 +82,14 @@ def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None):
 def _apple_cross_toolchain_impl(rctx):
     # Resolve label paths
     libtool_sh = rctx.path(Label("@rules_applecross//toolchain:libtool.sh"))
-    build_tpl = rctx.path(Label("@rules_applecross//toolchain:BUILD.tpl"))
-    cc_toolchain_config_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_toolchain_config.bzl.tpl"))
-    cc_wrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_wrapper.sh.tpl"))
-    swift_toolchain_tpl = rctx.path(Label("@rules_applecross//toolchain:swift_toolchain.bzl.tpl"))
-    repositories_tpl = rctx.path(Label("@rules_applecross//toolchain:repositories.bzl.tpl"))
-    swift_autoconfig_tpl = rctx.path(Label("@rules_applecross//toolchain:swift_autoconfiguration.bzl.tpl"))
-    wrapped_clang_tpl = rctx.path(Label("@rules_applecross//toolchain:wrapped_clang.cc.tpl"))
-    xcrunwrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:xcrunwrapper.sh.tpl"))
+    build_tpl = rctx.path(Label("@rules_applecross//toolchain:BUILD.template.bzl"))
+    cc_toolchain_config_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_toolchain_config.template.bzl"))
+    cc_wrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_wrapper.template.sh"))
+    swift_toolchain_tpl = rctx.path(Label("@rules_applecross//toolchain:swift_toolchain.template.bzl"))
+    repositories_tpl = rctx.path(Label("@rules_applecross//toolchain:repositories.template.bzl"))
+    swift_autoconfig_tpl = rctx.path(Label("@rules_applecross//toolchain:swift_autoconfiguration.template.bzl"))
+    wrapped_clang_tpl = rctx.path(Label("@rules_applecross//toolchain:wrapped_clang.template.cc"))
+    xcrunwrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:xcrunwrapper.template.sh"))
 
     repo_path = str(rctx.path(""))
     relative_path_prefix = "external/{}/".format(rctx.name)
