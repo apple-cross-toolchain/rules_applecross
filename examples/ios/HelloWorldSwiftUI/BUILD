@@ -49,6 +49,7 @@ swift_library(
 ios_unit_test(
     name = "Tests",
     minimum_os_version = "16.0",
+    runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
     deps = [":TestsLib"],
 )
 
@@ -61,6 +62,7 @@ swift_library(
 ios_ui_test(
     name = "UITests",
     minimum_os_version = "16.0",
+    runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
     deps = [":UITestsLib"],
     test_host = ":HelloWorld",
 )
