@@ -1113,6 +1113,7 @@ def _impl(ctx):
     _linker_search_flags = [
         "-fuse-ld=lld",
         "--ld-path=%{tools_path_prefix}ld64.lld",
+        "-Wl,-force_load_swift_libs",
     ] if "%{tools_path_prefix}" else []
 
     if platform_name == "macos":
@@ -1168,6 +1169,19 @@ def _impl(ctx):
                             ] + _linker_search_flags,
                         ),
                     ],
+                ),
+                flag_set(
+                    actions = [
+                        ACTION_NAMES.cpp_link_dynamic_library,
+                        ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+                        # iOS frameworks use objc_executable to create dylibs.
+                        # ld64.lld needs -undefined dynamic_lookup to allow weak
+                        # undefined Swift FORCE_LOAD symbols (naming convention
+                        # mismatch between Swift 6.x compiler and compat libs).
+                        ACTION_NAMES.objc_executable,
+                        _OBJCPP_EXECUTABLE,
+                    ],
+                    flag_groups = [flag_group(flags = ["-undefined", "dynamic_lookup"])],
                 ),
             ],
         )

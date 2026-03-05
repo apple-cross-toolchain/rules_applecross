@@ -109,9 +109,8 @@ def _apple_cross_toolchain_impl(rctx):
         "%{tools_path_prefix}": tools_path_prefix,
     }
 
-    # Setup C++ toolchain
-    rctx.template("BUILD", build_tpl, substitutions)
-    rctx.template("cc_toolchain_config.bzl", cc_toolchain_config_tpl, substitutions)
+    # Setup C++ toolchain helpers (BUILD and cc_toolchain_config are deferred
+    # until after clang version detection so we can populate include dirs).
     rctx.template("cc_wrapper.sh", cc_wrapper_tpl, substitutions)
     rctx.template("xcrunwrapper.sh", xcrunwrapper_tpl, substitutions)
     rctx.template("libtool", libtool_sh, substitutions)
@@ -215,6 +214,7 @@ def _apple_cross_toolchain_impl(rctx):
     # under lib/clang/<sdk_ver>/ but our LLVM binary expects
     # lib/clang/<llvm_ver>/. Bridge the version gap so clang finds both.
     clang_lib_dir = xcode_toolchain_dir + "lib/clang/"
+    llvm_ver = ""
     result = rctx.execute([
         "bash", "-c",
         "ls -1 " + clang_lib_dir + " 2>/dev/null | head -1",
@@ -252,6 +252,13 @@ def _apple_cross_toolchain_impl(rctx):
                                     llvm_clang_dir + "/lib",
                                 ])
                 break
+
+    # Populate cxx_builtin_include_directories with the absolute repo path so
+    # that Bazel's include scanner matches resolved absolute include paths from
+    # the compiler (clang resource dir, SDK headers, framework headers, etc.).
+    substitutions["%{cxx_builtin_include_directories}"] = repo_path
+    rctx.template("BUILD", build_tpl, substitutions)
+    rctx.template("cc_toolchain_config.bzl", cc_toolchain_config_tpl, substitutions)
 
     # Create Apple-compatible symlinks for LLVM tools so that
     # toolchain configs and xcrunwrapper can invoke them by their
@@ -325,6 +332,191 @@ exec "$AR" "rcs${DETERMINISTIC}" "$OUTPUT" "${INPUTS[@]}"
 """,
             executable = True,
         )
+
+    # Create metal/metallib stubs for Linux (Metal compiler is macOS-only).
+    for _tool_name in ["metal", "metallib"]:
+        _tool_path = xcode_toolchain_bindir + _tool_name
+        result = rctx.execute(["test", "-e", _tool_path])
+        if result.return_code != 0:
+            rctx.file(
+                _tool_path,
+                content = """\
+#!/bin/bash
+# Stub: {tool} is not available on Linux. Creates empty output.
+OUTPUT=""
+for arg in "$@"; do
+  if [[ "$prev" == "-o" ]]; then OUTPUT="$arg"; fi
+  prev="$arg"
+done
+if [[ -n "$OUTPUT" ]]; then touch "$OUTPUT"; fi
+""".format(tool = _tool_name),
+                executable = True,
+            )
+
+    # Create intentbuilderc stub for Linux.
+    _intentbuilderc_path = xcode_toolchain_bindir + "intentbuilderc"
+    result = rctx.execute(["test", "-e", _intentbuilderc_path])
+    if result.return_code != 0:
+        rctx.file(
+            _intentbuilderc_path,
+            content = """\
+#!/bin/bash
+# Stub: intentbuilderc is not available on Linux.
+OUTPUT_DIR=""
+LANGUAGE=""
+for arg in "$@"; do
+  if [[ "$prev" == "-output" ]]; then OUTPUT_DIR="$arg"; fi
+  if [[ "$prev" == "-language" ]]; then LANGUAGE="$arg"; fi
+  prev="$arg"
+done
+if [[ -n "$OUTPUT_DIR" ]]; then
+  mkdir -p "$OUTPUT_DIR"
+  if [[ "$LANGUAGE" == "Swift" ]]; then
+    touch "$OUTPUT_DIR/Intents.swift"
+  fi
+fi
+""",
+            executable = True,
+        )
+
+    # Create codesign stub for Linux (ad-hoc signing no-op).
+    _codesign_path = xcode_toolchain_bindir + "codesign"
+    result = rctx.execute(["test", "-e", _codesign_path])
+    if result.return_code != 0:
+        rctx.file(
+            _codesign_path,
+            content = """\
+#!/bin/bash
+# Stub: codesign is not available on Linux. No-op for cross-compilation.
+exit 0
+""",
+            executable = True,
+        )
+
+    # Create codesign_allocate stub for Linux.
+    _codesign_allocate_path = xcode_toolchain_bindir + "codesign_allocate"
+    result = rctx.execute(["test", "-e", _codesign_allocate_path])
+    if result.return_code != 0:
+        rctx.file(
+            _codesign_allocate_path,
+            content = """\
+#!/bin/bash
+# Stub: codesign_allocate is not available on Linux. No-op for cross-compilation.
+exit 0
+""",
+            executable = True,
+        )
+
+    # Create security stub for Linux (handles mobileprovision parsing).
+    _security_path = xcode_toolchain_bindir + "security"
+    result = rctx.execute(["test", "-e", _security_path])
+    if result.return_code != 0:
+        rctx.file(
+            _security_path,
+            content = """\
+#!/usr/bin/env python3
+\"\"\"Minimal security stub for cross-compilation on Linux.
+Handles the subset of macOS 'security' commands used by rules_apple codesigningtool.\"\"\"
+import subprocess, sys, os
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        sys.exit(0)
+    # security cms -D -i <file>: extract plist from PKCS#7 signed mobileprovision
+    if args[0] == "cms" and "-D" in args and "-i" in args:
+        idx = args.index("-i")
+        if idx + 1 < len(args):
+            mp_file = args[idx + 1]
+            # Try openssl to extract the signed content
+            try:
+                result = subprocess.run(
+                    ["openssl", "smime", "-inform", "DER", "-verify", "-noverify", "-in", mp_file],
+                    capture_output=True
+                )
+                if result.returncode == 0 and result.stdout:
+                    sys.stdout.buffer.write(result.stdout)
+                    sys.exit(0)
+            except FileNotFoundError:
+                pass
+            # Fallback: return a minimal empty plist
+            print('<?xml version="1.0" encoding="UTF-8"?>')
+            print('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">')
+            print('<plist version="1.0"><dict>')
+            print('<key>DeveloperCertificates</key><array></array>')
+            print('</dict></plist>')
+            sys.exit(0)
+    # security find-identity -p codesigning: return a fake identity
+    if args[0] == "find-identity":
+        print("  1) AABBCCDDAABBCCDDAABBCCDDAABBCCDDAABBCCDD \\"Apple Development: Cross Compilation\\"")
+        print("     1 valid identities found")
+        sys.exit(0)
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
+""",
+            executable = True,
+        )
+
+    # Create stub Swift compatibility libraries with FORCE_LOAD symbols.
+    _swift_compat_symbols = {
+        "libswiftCompatibility51.a": "_swift_FORCE_LOAD_$_swiftCompatibility51",
+        "libswiftCompatibility56.a": "_swift_FORCE_LOAD_$_swiftCompatibility56",
+        "libswiftCompatibilityConcurrency.a": "_swift_FORCE_LOAD_$_swiftCompatibilityConcurrency",
+        "libswiftCompatibilityDynamicReplacements.a": "_swift_FORCE_LOAD_$_swiftCompatibilityDynamicReplacements",
+        "libswiftCompatibilityPacks.a": "_swift_FORCE_LOAD_$_swiftCompatibilityPacks",
+    }
+    _clang = xcode_toolchain_bindir + "clang"
+    _ar = xcode_toolchain_bindir + "ar"
+    _xcode_toolchain_libdir = xcode_toolchain_bindir + "../lib/swift/"
+    for _platform_info in [("iphoneos", "arm64-apple-ios13.0"), ("iphonesimulator", "arm64-apple-ios13.0-simulator"), ("macosx", "arm64-apple-macos11.0")]:
+        _platform_name = _platform_info[0]
+        _target_triple = _platform_info[1]
+        _swift_platform_lib = _xcode_toolchain_libdir + _platform_name
+        result = rctx.execute(["test", "-d", _swift_platform_lib])
+        if result.return_code == 0:
+            _sdk_platform = "iPhoneOS" if _platform_name == "iphoneos" else ("iPhoneSimulator" if _platform_name == "iphonesimulator" else "MacOSX")
+            _sdk_path = developer_dir + "/Platforms/" + _sdk_platform + ".platform/Developer/SDKs/" + _sdk_platform + ".sdk"
+            for _compat_lib, _symbol in _swift_compat_symbols.items():
+                _lib_path = _swift_platform_lib + "/" + _compat_lib
+                result = rctx.execute(["test", "-e", _lib_path])
+                if result.return_code != 0:
+                    _c_symbol = _symbol.lstrip("_")
+                    _stub_c = _swift_platform_lib + "/_compat_stub.c"
+                    _stub_o = _swift_platform_lib + "/_compat_stub.o"
+                    rctx.file(_stub_c, content = "void " + _c_symbol + "(void) {}\n")
+                    rctx.execute([_clang, "-target", _target_triple, "-isysroot", _sdk_path, "-c", _stub_c, "-o", _stub_o])
+                    rctx.execute([_ar, "rcs", _lib_path, _stub_o])
+                    rctx.delete(_stub_c)
+                    rctx.delete(_stub_o)
+
+    # Create arm64 swiftinterface files for arm64e-only frameworks.
+    # Some SDK frameworks (especially cross-import overlays like
+    # _Translation_SwiftUI) ship only arm64e swiftinterfaces. The Swift
+    # compiler won't load these when targeting arm64, causing "has no
+    # member" errors. Create arm64 copies with the target triple replaced.
+    for _sdk_info in [("iPhoneOS", "iPhoneOS"), ("iPhoneSimulator", "iPhoneSimulator")]:
+        _sdk_platform_name = _sdk_info[0]
+        _sdk_name = _sdk_info[1]
+        _sdk_fw_dir = developer_dir + "/Platforms/" + _sdk_platform_name + ".platform/Developer/SDKs/" + _sdk_name + ".sdk/System/Library/Frameworks"
+        result = rctx.execute([
+            "bash", "-c",
+            "find '" + _sdk_fw_dir + "' -type d -name '*.swiftmodule' 2>/dev/null",
+        ])
+        if result.return_code == 0:
+            for _swiftmod_dir in result.stdout.strip().split("\n"):
+                if not _swiftmod_dir:
+                    continue
+                _arm64e = _swiftmod_dir + "/arm64e-apple-ios.swiftinterface"
+                _arm64 = _swiftmod_dir + "/arm64-apple-ios.swiftinterface"
+                r1 = rctx.execute(["test", "-e", _arm64e])
+                r2 = rctx.execute(["test", "-e", _arm64])
+                if r1.return_code == 0 and r2.return_code != 0:
+                    rctx.execute([
+                        "bash", "-c",
+                        "sed 's/arm64e-apple-ios/arm64-apple-ios/g' '" + _arm64e + "' > '" + _arm64 + "'",
+                    ])
 
     rctx.template("wrapped_clang.cc", wrapped_clang_tpl, substitutions)
     _compile_cc_file(
