@@ -24,10 +24,10 @@ git_override(
     commit = "9548d93f29a2a93315d7a0458622682c0f76e6fe",
 )
 
-non_module_deps = use_extension("@build_bazel_rules_apple//apple:extensions.bzl", "non_module_deps")
+non_module_deps = use_extension("@build_bazel_rules_apple//apple:extensions.bzl", "non_module_deps", dev_dependency = True)
 override_repo(non_module_deps, xctestrunner = "xctestrunner")
 
-register_toolchains("//testing:ios_test_toolchain")
+register_toolchains("//testing:ios_test_toolchain", dev_dependency = True)
 register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64")
 
 llvm_prebuilt_ext = use_extension("//toolchain:llvm_prebuilt.bzl", "llvm_prebuilt")
