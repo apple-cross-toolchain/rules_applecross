@@ -47,18 +47,15 @@ def _github_asset_download(rctx, urls, sha256, strip_prefix):
 
 def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None):
     rctx.report_progress("Compiling {}".format(paths.basename(src_name)))
-    cc = None
-    link_flags = ["-lstdc++"]
-    if toolchain_bindir:
-        toolchain_clang = toolchain_bindir + "clang"
-        result = rctx.execute(["test", "-x", toolchain_clang])
-        if result.return_code == 0:
-            cc = toolchain_clang
-            link_flags = ["-fuse-ld=lld", "-lstdc++"]
-    if not cc:
-        cc = str(rctx.which("cc") or rctx.which("gcc") or rctx.which("clang"))
-        if not cc:
-            fail("No C compiler found on PATH. Need cc, gcc, or clang to compile " + out_name)
+    if not toolchain_bindir:
+        fail("toolchain_bindir is required to compile " + out_name + " hermetically")
+
+    cc = toolchain_bindir + "clang"
+    result = rctx.execute(["test", "-x", cc])
+    if result.return_code != 0:
+        fail("Expected hermetic host clang at " + cc + " while compiling " + out_name)
+
+    link_flags = ["-fuse-ld=lld", "-lstdc++"]
     result = rctx.execute([
         cc,
         "-std=c++11",
@@ -78,6 +75,59 @@ def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None):
         fail(out_name + " failed to generate. Please file an issue at " +
              "https://github.com/apple-cross-toolchain/rules_applecross/issues with the following:\n" +
              error_msg)
+
+def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_dir):
+    """Create Swift compatibility stub archives expected by Apple linkers."""
+    clang = toolchain_bindir + "clang"
+    llvm_ar = toolchain_bindir + "llvm-ar"
+    if rctx.execute(["test", "-x", clang]).return_code != 0:
+        return
+    if rctx.execute(["test", "-x", llvm_ar]).return_code != 0:
+        return
+
+    compatibility_targets = {
+        "iphoneos": "arm64-apple-ios13.0",
+        "iphonesimulator": "arm64-apple-ios13.0-simulator",
+        "macosx": "arm64-apple-macosx10.15",
+    }
+    compatibility_libs = [
+        "swiftCompatibility51",
+        "swiftCompatibility56",
+        "swiftCompatibilityConcurrency",
+        "swiftCompatibilityDynamicReplacements",
+        "swiftCompatibilityPacks",
+    ]
+
+    for platform_dir, target in compatibility_targets.items():
+        swift_platform_dir = toolchain_dir + "lib/swift/" + platform_dir
+        if rctx.execute(["test", "-d", swift_platform_dir]).return_code != 0:
+            continue
+
+        for lib in compatibility_libs:
+            archive = swift_platform_dir + "/lib" + lib + ".a"
+            if rctx.execute(["test", "-e", archive]).return_code == 0:
+                continue
+
+            src = "_{}_{}.S".format(platform_dir, lib)
+            obj = "_{}_{}.o".format(platform_dir, lib)
+            symbol = "_swift_FORCE_LOAD_$_" + lib
+            rctx.file(src, content = """\
+.globl {symbol}
+.p2align 2
+{symbol}:
+  ret
+""".format(symbol = symbol))
+
+            result = rctx.execute([clang, "-target", target, "-c", src, "-o", obj])
+            if result.return_code != 0:
+                fail("Failed to compile Swift compatibility stub {}: {}".format(archive, result.stderr or result.stdout))
+
+            result = rctx.execute([llvm_ar, "rcs", archive, obj])
+            if result.return_code != 0:
+                fail("Failed to create Swift compatibility archive {}: {}".format(archive, result.stderr or result.stdout))
+
+            rctx.delete(src)
+            rctx.delete(obj)
 
 def _apple_cross_toolchain_impl(rctx):
     # Resolve label paths
@@ -193,6 +243,8 @@ def _apple_cross_toolchain_impl(rctx):
             "bash", "-c",
             "cp -a " + llvm_prebuilt_lib + "/* " + xcode_toolchain_dir + "lib/",
         ])
+
+    _ensure_swift_compatibility_stub_archives(rctx, xcode_toolchain_bindir, xcode_toolchain_dir)
 
     # Create lib/swift/ symlinks so Swift binaries can find their runtime
     # libraries.  Swift binaries have RUNPATH $ORIGIN/../lib/swift/linux
