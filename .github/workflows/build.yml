@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Prepare env
@@ -20,7 +23,18 @@ jobs:
           EOF
           chmod 600 ~/.netrc
           sed -i 's|SDKS_URL|${{ secrets.SDKS_URL }}|g' MODULE.bazel
-      - run: bazel build --ios_multi_cpus=sim_arm64 //examples/ios/HelloWorldSwiftUI:HelloWorld //examples/ios/HelloWorldSwiftUI:Tests //examples/ios/HelloWorldSwiftUI:UITests
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - run: >-
+          bazel build --ios_multi_cpus=sim_arm64
+          //examples/ios/HelloWorldSwiftUI:HelloWorld
+          //examples/ios/HelloWorldSwiftUI:Tests
+          //examples/ios/HelloWorldSwiftUI:UITests
+          --remote_cache=${{ secrets.BAZEL_REMOTE_CACHE }}
+          --google_default_credentials
+          --remote_upload_local_results=true
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
       - uses: actions/upload-artifact@v4
