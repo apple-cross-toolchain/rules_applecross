@@ -7,5 +7,5 @@ set -eu
 
 MY_LOCATION="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Use xcrunwrapper to invoke libtool with proper Xcode env setup
-exec "${MY_LOCATION}/xcrunwrapper.sh" libtool "$@"
+# Use xcrunwrapper to invoke llvm-libtool-darwin with proper Xcode env setup
+exec "${MY_LOCATION}/xcrunwrapper.sh" llvm-libtool-darwin "$@"

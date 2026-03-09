@@ -319,7 +319,7 @@ def _apple_cross_toolchain_impl(rctx):
     _llvm_symlinks = {
         # NOTE: "libtool" is intentionally omitted — the llvm multicall binary
         # doesn't recognize "libtool" as a subcommand (only "libtool-darwin").
-        # The libtool template script from libtool.sh handles this instead.
+        # The libtool wrapper script from libtool.sh handles this instead.
         "install_name_tool": "llvm-install-name-tool",
         "lipo": "llvm-lipo",
         "ar": "llvm-ar",
@@ -340,50 +340,6 @@ def _apple_cross_toolchain_impl(rctx):
             sys_tool = rctx.which(apple_name)
             if sys_tool:
                 rctx.execute(["bash", "-c", "rm -f " + link + " && cp " + str(sys_tool) + " " + link])
-
-    # Create an Apple-compatible libtool shim if llvm-libtool-darwin is not
-    # available. Apple's libtool -static creates a static archive like ar rcs.
-    _libtool_path = xcode_toolchain_bindir + "libtool"
-    result = rctx.execute(["test", "-e", _libtool_path])
-    if result.return_code != 0:
-        rctx.file(
-            _libtool_path,
-            content = """\
-#!/bin/bash
-# Apple libtool shim: translates Apple libtool flags to ar.
-# Usage: libtool -static -o output [-D] [-no_warning_for_no_symbols] inputs...
-set -eu
-OUTPUT=""
-DETERMINISTIC=""
-INPUTS=()
-SKIP_NEXT=0
-for arg in "$@"; do
-  if [[ $SKIP_NEXT -eq 1 ]]; then
-    OUTPUT="$arg"
-    SKIP_NEXT=0
-  elif [[ "$arg" == "-o" ]]; then
-    SKIP_NEXT=1
-  elif [[ "$arg" == "-static" || "$arg" == "-no_warning_for_no_symbols" || "$arg" == "-warning_for_no_symbols" ]]; then
-    :
-  elif [[ "$arg" == "-D" ]]; then
-    DETERMINISTIC="D"
-  else
-    INPUTS+=("$arg")
-  fi
-done
-if [[ -z "$OUTPUT" ]]; then
-  echo "error: libtool: no output specified" >&2
-  exit 1
-fi
-MYDIR="$(cd "$(dirname "$0")" && pwd)"
-AR="$MYDIR/ar"
-if [[ ! -x "$AR" ]]; then
-  AR=ar
-fi
-exec "$AR" "rcs${DETERMINISTIC}" "$OUTPUT" "${INPUTS[@]}"
-""",
-            executable = True,
-        )
 
     # Create metal/metallib stubs for Linux (Metal compiler is macOS-only).
     for _tool_name in ["metal", "metallib"]:
