@@ -168,7 +168,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     # Compute Apple SDK paths
     sdk_platform_str = _sdk_name(platform_type, is_simulator)
     sdk_version_str = str(sdk_version)
-    xcode_version_str = str(xcode_config.xcode_version()) if xcode_config.xcode_version() else ""
     sdk_dir_str = _DEVELOPER_DIR + "/Platforms/" + sdk_platform_str + ".platform/Developer/SDKs/" + sdk_platform_str + sdk_version_str + ".sdk"
     sdk_framework_dir_str = sdk_dir_str + "/System/Library/Frameworks"
     platform_developer_framework_dir_str = _DEVELOPER_DIR + "/Platforms/" + sdk_platform_str + ".platform/Developer/Library/Frameworks"
@@ -212,7 +211,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "compiler_output_flags",
@@ -245,18 +243,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     objc_compile_action = action_config(
         action_name = ACTION_NAMES.objc_compile,
         enabled = True,
-        flag_sets = [
-            flag_set(
-                flag_groups = [flag_group(flags = [
-                    "-arch",
-                    arch,
-                    "-target",
-                    target_system_name,
-                ])],
-            ),
-        ],
         implies = [
-            "compiler_input_flags",
             "compiler_output_flags",
             "apply_default_compiler_flags",
             "apply_default_warnings",
@@ -265,7 +252,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "apply_simulator_compiler_flags",
@@ -301,7 +287,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "input_param_flags",
             "strip_debug_symbols",
             "linker_param_file",
-            "apple_env",
         ],
         tools = [
             tool(
@@ -316,7 +301,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         implies = [
             "input_param_flags",
             "linker_param_file",
-            "apple_env",
         ],
         flag_sets = [
             flag_set(
@@ -349,7 +333,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "compiler_input_flags",
@@ -370,7 +353,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "compiler_input_flags",
@@ -391,19 +373,14 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                 flag_groups = [
                     flag_group(
                         flags = [
-                            "-arch",
-                            arch,
                             "-stdlib=libc++",
                             "-std=gnu++17",
-                            "-target",
-                            target_system_name,
                         ],
                     ),
                 ],
             ),
         ],
         implies = [
-            "compiler_input_flags",
             "compiler_output_flags",
             "apply_default_compiler_flags",
             "apply_default_warnings",
@@ -412,7 +389,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "apply_simulator_compiler_flags",
@@ -431,7 +407,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "objc_arc",
             "no_objc_arc",
             "include_system_dirs",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "compiler_input_flags",
@@ -452,7 +427,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "compiler_input_flags",
@@ -510,7 +484,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "framework_paths",
             "strip_debug_symbols",
-            "apple_env",
             "apply_implicit_frameworks",
         ],
         tools = [
@@ -531,7 +504,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "force_pic_flags",
             "strip_debug_symbols",
             "linker_param_file",
-            "apple_env",
         ],
         tools = [
             tool(
@@ -548,7 +520,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "compiler_input_flags",
@@ -569,7 +540,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             "include_system_dirs",
             "objc_arc",
             "no_objc_arc",
-            "apple_env",
             "user_compile_flags",
             "unfiltered_compile_flags",
             "compiler_input_flags",
@@ -616,7 +586,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                 ],
             ),
         ],
-        implies = ["apple_env"],
         tools = [
             tool(
                 path = "libtool",
@@ -928,6 +897,49 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         enabled = bazel_features.cc.fixed_dsym_path_quoting,
     )
 
+    if xcode_config.xcode_version():
+        apple_env = {
+            "DEVELOPER_DIR": _DEVELOPER_DIR,
+            "XCODE_VERSION_OVERRIDE": str(xcode_config.xcode_version()),
+            # TODO: Remove once we drop bazel 7.x support
+            "APPLE_SDK_VERSION_OVERRIDE": str(sdk_version),
+            "APPLE_SDK_PLATFORM": _sdk_name(platform_type, is_simulator),
+            "ZERO_AR_DATE": "1",
+        }
+    else:
+        apple_env = {
+            "DEVELOPER_DIR": _DEVELOPER_DIR,
+            "ZERO_AR_DATE": "1",
+        }
+
+    default_required_flags = feature(
+        name = "default_required_flags",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = ACTION_NAME_GROUPS.all_cc_compile_actions + _DYNAMIC_LINK_ACTIONS,
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-no-canonical-prefixes",
+                            "-target",
+                            target_system_name,
+                        ],
+                    ),
+                ],
+            ),
+        ],
+        env_sets = [
+            env_set(
+                actions = ACTION_NAME_GROUPS.all_cc_compile_actions + _DYNAMIC_LINK_ACTIONS + _STATIC_LINK_ACTIONS,
+                env_entries = [
+                    env_entry(key = key, value = value)
+                    for key, value in (apple_env | ctx.attr.extra_env).items()
+                ],
+            ),
+        ],
+    )
+
     # When tools_path_prefix is set, tell clang to use ld64.lld from the
     # toolchain bin directory when linking.
     _linker_search_flags = [
@@ -939,19 +951,12 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     default_link_flags_feature = feature(
         name = "default_link_flags",
         enabled = True,
-        flag_sets = [
+        flag_sets = ([
             flag_set(
                 actions = _DYNAMIC_LINK_ACTIONS,
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            "-no-canonical-prefixes",
-                            "-target",
-                            target_system_name,
-                        ] + _linker_search_flags,
-                    ),
-                ],
+                flag_groups = [flag_group(flags = _linker_search_flags)],
             ),
+        ] if _linker_search_flags else []) + [
             flag_set(
                 actions = _DYNAMIC_LINK_ACTIONS,
                 flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
@@ -1360,38 +1365,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ],
     )
 
-    apple_env_feature = feature(
-        name = "apple_env",
-        env_sets = [
-            env_set(
-                actions = ACTION_NAME_GROUPS.all_cc_compile_actions +
-                          _DYNAMIC_LINK_ACTIONS + _STATIC_LINK_ACTIONS,
-                env_entries = [
-                    env_entry(
-                        key = "DEVELOPER_DIR",
-                        value = _DEVELOPER_DIR,
-                    ),
-                    env_entry(
-                        key = "XCODE_VERSION_OVERRIDE",
-                        value = xcode_version_str,
-                    ),
-                    env_entry(
-                        key = "APPLE_SDK_VERSION_OVERRIDE",
-                        value = sdk_version_str,
-                    ),
-                    env_entry(
-                        key = "APPLE_SDK_PLATFORM",
-                        value = sdk_platform_str,
-                    ),
-                    env_entry(
-                        key = "ZERO_AR_DATE",
-                        value = "1",
-                    ),
-                ] + [env_entry(key = key, value = value) for key, value in ctx.attr.extra_env.items()],
-            ),
-        ],
-    )
-
     if (ctx.attr.cpu == "ios_arm64" or
         ctx.attr.cpu == "ios_arm64e" or
         ctx.attr.cpu == "ios_x86_64" or
@@ -1591,13 +1564,10 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                 flag_groups = [
                     flag_group(
                         flags = [
-                            "-no-canonical-prefixes",
                             "-Wno-builtin-macro-redefined",
                             "-D__DATE__=\"redacted\"",
                             "-D__TIMESTAMP__=\"redacted\"",
                             "-D__TIME__=\"redacted\"",
-                            "-target",
-                            target_system_name,
                         ],
                     ),
                 ],
@@ -1703,7 +1673,9 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
-                flag_groups = [flag_group(flags = ["-fdebug-prefix-map=__BAZEL_XCODE_DEVELOPER_DIR__=DEVELOPER_DIR"])],
+                flag_groups = [flag_group(flags = [
+                    "-fdebug-prefix-map=__BAZEL_XCODE_DEVELOPER_DIR__=/PLACEHOLDER_DEVELOPER_DIR",
+                ])],
             ),
         ],
     )
@@ -2519,8 +2491,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         objc_arc_feature,
         no_objc_arc_feature,
         gcc_quoting_for_param_files_feature,
-        apple_env_feature,
         user_link_flags_feature,
+        default_required_flags,
         default_link_flags_feature,
         no_deduplicate_feature,
         dead_strip_feature,
