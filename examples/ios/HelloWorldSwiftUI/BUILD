@@ -1,6 +1,4 @@
-load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application")
-load("@build_bazel_rules_apple//apple:ios.bzl", "ios_ui_test")
-load("@build_bazel_rules_apple//apple:ios.bzl", "ios_unit_test")
+load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application", "ios_ui_test", "ios_unit_test")
 load("@build_bazel_rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
 
@@ -19,6 +17,7 @@ swift_library(
         "-Wl,-framework,SwiftUI",
     ],
     module_name = "HelloWorldSwiftUI",
+    tags = ["manual"],
 )
 
 apple_bundle_version(
@@ -43,6 +42,7 @@ ios_application(
 swift_library(
     name = "TestsLib",
     srcs = glob(["Tests/*.swift"]),
+    tags = ["manual"],
     deps = [":HelloWorldSwiftUI"],
 )
 
@@ -56,6 +56,7 @@ ios_unit_test(
 swift_library(
     name = "UITestsLib",
     srcs = glob(["UITests/*.swift"]),
+    tags = ["manual"],
     deps = [":HelloWorldSwiftUI"],
 )
 
@@ -63,6 +64,6 @@ ios_ui_test(
     name = "UITests",
     minimum_os_version = "16.0",
     runner = "//testing:ios_xctestrun_ordered_runner",
-    deps = [":UITestsLib"],
     test_host = ":HelloWorld",
+    deps = [":UITestsLib"],
 )

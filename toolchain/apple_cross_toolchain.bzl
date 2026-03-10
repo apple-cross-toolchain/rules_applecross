@@ -387,6 +387,72 @@ fi
             executable = True,
         )
 
+    # Create xcstringtool stub for Linux (compiles .xcstrings to .strings).
+    _xcstringtool_path = xcode_toolchain_bindir + "xcstringtool"
+    result = rctx.execute(["test", "-e", _xcstringtool_path])
+    if result.return_code != 0:
+        rctx.file(
+            _xcstringtool_path,
+            content = """\
+#!/usr/bin/env python3
+\"\"\"Minimal xcstringtool stub for cross-compilation on Linux.
+Handles 'compile' subcommand to convert .xcstrings JSON to .strings files.\"\"\"
+import json, os, plistlib, sys
+
+def compile_xcstrings(args):
+    output_dir = None
+    input_file = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--output-directory" and i + 1 < len(args):
+            output_dir = args[i + 1]
+            i += 2
+        else:
+            input_file = args[i]
+            i += 1
+    if not output_dir or not input_file:
+        print("Usage: xcstringtool compile --output-directory <dir> <input>", file=sys.stderr)
+        return 1
+    with open(input_file, "r") as f:
+        data = json.load(f)
+    source_lang = data.get("sourceLanguage", "en")
+    strings = data.get("strings", {})
+    # Collect all languages
+    langs = set()
+    for key, info in strings.items():
+        for lang in info.get("localizations", {}):
+            langs.add(lang)
+    if not langs:
+        langs.add(source_lang)
+    base_name = os.path.splitext(os.path.basename(input_file))[0]
+    for lang in langs:
+        lproj = os.path.join(output_dir, lang + ".lproj")
+        os.makedirs(lproj, exist_ok=True)
+        entries = {}
+        for key, info in strings.items():
+            loc = info.get("localizations", {}).get(lang, {})
+            su = loc.get("stringUnit", {})
+            value = su.get("value", key)
+            entries[key] = value
+        out_path = os.path.join(lproj, base_name + ".strings")
+        with open(out_path, "wb") as f:
+            plistlib.dump(entries, f, fmt=plistlib.FMT_BINARY)
+    return 0
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(1)
+    if sys.argv[1] == "compile":
+        sys.exit(compile_xcstrings(sys.argv[2:]))
+    print("Unknown subcommand: " + sys.argv[1], file=sys.stderr)
+    sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+""",
+            executable = True,
+        )
+
     # Create codesign stub for Linux (ad-hoc signing no-op).
     _codesign_path = xcode_toolchain_bindir + "codesign"
     result = rctx.execute(["test", "-e", _codesign_path])

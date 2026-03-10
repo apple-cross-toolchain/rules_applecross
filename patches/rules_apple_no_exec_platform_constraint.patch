@@ -409,3 +409,66 @@ index 4a4e211..c48855d 100644
          inputs = ctx.files.srcs + ctx.files.hdrs,
          mnemonic = "MetallibCompile",
          outputs = [out],
+diff --git a/apple/internal/stub_support.bzl b/apple/internal/stub_support.bzl
+--- a/apple/internal/stub_support.bzl
++++ b/apple/internal/stub_support.bzl
+@@ -19,8 +19,8 @@
+     "apple_support",
+ )
+ load(
+-    "@build_bazel_apple_support//lib:lipo.bzl",
+-    "lipo",
++    "@bazel_skylib//lib:shell.bzl",
++    "shell",
+ )
+ load(
+     "//apple/internal:intermediates.bzl",
+@@ -34,6 +34,7 @@
+         output_discriminator = None,
+         platform_prerequisites,
+         rule_label,
++        sdk_tool_files = [],
+         xcode_stub_path):
+     """Returns a symlinked stub binary from the Xcode distribution.
+ 
+@@ -60,13 +61,24 @@
+     )
+ 
+     if archs_for_lipo:
+-        lipo.extract_or_thin(
++        if len(archs_for_lipo) == 1:
++            lipo_args = "-thin " + archs_for_lipo[0]
++        else:
++            lipo_args = " ".join(["-extract " + a for a in archs_for_lipo])
++        apple_support.run_shell(
+             actions = actions,
+-            input_shell_expression = "\"$SDKROOT/{xcode_stub_path}\"".format(
+-                xcode_stub_path = xcode_stub_path,
++            command = (
++                "SDKROOT=\"$DEVELOPER_DIR/Platforms/$APPLE_SDK_PLATFORM.platform/Developer/SDKs/$APPLE_SDK_PLATFORM.sdk\" && " +
++                "mkdir -p {dir} && \"$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo\" \"$SDKROOT/{stub}\" {args} -output {out}"
++            ).format(
++                dir = shell.quote(binary_artifact.dirname),
++                stub = xcode_stub_path,
++                args = lipo_args,
++                out = shell.quote(binary_artifact.path),
+             ),
+-            archs = archs_for_lipo,
+-            output = binary_artifact,
++            execution_requirements = {"no-sandbox": "1"},
++            mnemonic = "AppleLipoExtract",
++            outputs = [binary_artifact],
+             apple_fragment = platform_prerequisites.apple_fragment,
+             xcode_config = platform_prerequisites.xcode_version_config,
+         )
+diff --git a/apple/internal/watchos_rules.bzl b/apple/internal/watchos_rules.bzl
+--- a/apple/internal/watchos_rules.bzl
++++ b/apple/internal/watchos_rules.bzl
+@@ -842,6 +842,7 @@
+         archs_for_lipo = sets.to_list(requested_archs),
+         platform_prerequisites = platform_prerequisites,
+         rule_label = label,
++        sdk_tool_files = ctx.files._sdk_tool_files,
+         xcode_stub_path = rule_descriptor.stub_binary_path,
+     )
+ 

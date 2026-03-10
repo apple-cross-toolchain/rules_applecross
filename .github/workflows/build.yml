@@ -28,10 +28,11 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       - run: >-
-          bazel build --ios_multi_cpus=sim_arm64
-          //examples/ios/HelloWorldSwiftUI:HelloWorld
-          //examples/ios/HelloWorldSwiftUI:Tests
-          //examples/ios/HelloWorldSwiftUI:UITests
+          bazel build
+          --ios_multi_cpus=sim_arm64
+          --tvos_cpus=sim_arm64
+          --watchos_cpus=arm64
+          //examples/...
           --remote_cache=${{ secrets.BAZEL_REMOTE_CACHE }}
           --google_default_credentials
           --remote_upload_local_results=true
