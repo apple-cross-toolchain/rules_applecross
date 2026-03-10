@@ -142,6 +142,7 @@ filegroup(
         cxx_builtin_include_directories = [
             "%{cxx_builtin_include_directories}",
         ],
+        libtool = ":libtool",
         tool_paths_overrides = {},
     )
     for arch in _APPLE_ARCHS

@@ -56,7 +56,7 @@ def _sdk_download(rctx, urls, sha256, strip_prefix):
 
     rctx.download_and_extract(**kwargs)
 
-def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None):
+def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None, std = "c++11"):
     rctx.report_progress("Compiling {}".format(paths.basename(src_name)))
     if not toolchain_bindir:
         fail("toolchain_bindir is required to compile " + out_name + " hermetically")
@@ -69,7 +69,7 @@ def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None):
     link_flags = ["-fuse-ld=lld", "-lstdc++"]
     result = rctx.execute([
         cc,
-        "-std=c++11",
+        "-std=" + std,
         "-O3",
         "-o",
         out_name,
@@ -142,7 +142,7 @@ def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_
 
 def _apple_cross_toolchain_impl(rctx):
     # Resolve label paths
-    libtool_sh = rctx.path(Label("@rules_applecross//toolchain:libtool.sh"))
+    libtool_cc = rctx.path(Label("@rules_applecross//toolchain:libtool.cc"))
     build_tpl = rctx.path(Label("@rules_applecross//toolchain:BUILD.template.bzl"))
     cc_toolchain_config_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_toolchain_config.template.bzl"))
     cc_wrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_wrapper.template.sh"))
@@ -174,7 +174,6 @@ def _apple_cross_toolchain_impl(rctx):
     # until after clang version detection so we can populate include dirs).
     rctx.template("cc_wrapper.sh", cc_wrapper_tpl, substitutions)
     rctx.template("xcrunwrapper.sh", xcrunwrapper_tpl, substitutions)
-    rctx.template("libtool", libtool_sh, substitutions)
 
     # Extract Apple SDKs - either from local path or URL
     if rctx.attr.apple_sdk_path:
@@ -330,7 +329,7 @@ def _apple_cross_toolchain_impl(rctx):
     _llvm_symlinks = {
         # NOTE: "libtool" is intentionally omitted — the llvm multicall binary
         # doesn't recognize "libtool" as a subcommand (only "libtool-darwin").
-        # The libtool wrapper script from libtool.sh handles this instead.
+        # The libtool wrapper (libtool.cc) handles this instead.
         "install_name_tool": "llvm-install-name-tool",
         "lipo": "llvm-lipo",
         "ar": "llvm-ar",
@@ -602,6 +601,14 @@ if __name__ == "__main__":
                         "bash", "-c",
                         "sed 's/arm64e-apple-ios/arm64-apple-ios/g' '" + _arm64e + "' > '" + _arm64 + "'",
                     ])
+
+    _compile_cc_file(
+        rctx,
+        str(libtool_cc),
+        "libtool",
+        toolchain_bindir = xcode_toolchain_bindir,
+        std = "c++17",
+    )
 
     rctx.template("wrapped_clang.cc", wrapped_clang_tpl, substitutions)
     _compile_cc_file(

@@ -320,7 +320,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ],
         tools = [
             tool(
-                path = "libtool",
+                tool = ctx.file.libtool,
                 execution_requirements = xcode_execution_requirements,
             ),
         ],
@@ -588,7 +588,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ],
         tools = [
             tool(
-                path = "libtool",
+                tool = ctx.file.libtool,
                 execution_requirements = xcode_execution_requirements,
             ),
         ],
@@ -2540,7 +2540,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     ]
 
     tool_paths = {
-        "ar": "libtool",
+        "ar": ctx.file.libtool.path,
         "cpp": "/usr/bin/cpp",
         "dwp": "/usr/bin/dwp",
         "gcc": "cc_wrapper.sh",
@@ -2584,6 +2584,10 @@ cc_toolchain_config = rule(
         "cxx_builtin_include_directories": attr.string_list(),
         "cxx_flags": attr.string_list(),
         "extra_env": attr.string_dict(),
+        "libtool": attr.label(
+            allow_single_file = True,
+            mandatory = True,
+        ),
         "link_flags": attr.string_list(),
         "module_map": attr.label(),
         "tool_paths_overrides": attr.string_dict(),
