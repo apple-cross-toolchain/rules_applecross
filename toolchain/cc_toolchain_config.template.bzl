@@ -17,8 +17,10 @@ load(
     "variable_with_value",
     "with_feature_set",
 )
+load("@bazel_features//:features.bzl", "bazel_features")
 load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES", "ACTION_NAME_GROUPS")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
 
 _DYNAMIC_LINK_ACTIONS = ACTION_NAME_GROUPS.cc_link_executable_actions + ACTION_NAME_GROUPS.dynamic_library_link_actions
 _STATIC_LINK_ACTIONS = [
@@ -33,162 +35,143 @@ _CPP_DYNAMIC_LINK_ACTIONS = [
 # %{toolchain_path_prefix} is replaced by the template engine with the repo path.
 _DEVELOPER_DIR = "%{toolchain_path_prefix}Xcode.app/Contents/Developer"
 
-def _arch(cpu):
-    _, _, arch = cpu.partition("_")
-    if arch.startswith("sim_"):
-        arch = arch[len("sim_"):]
-    return arch
+def _sdk_version_for_platform(xcode_config, platform_type):
+    if platform_type == apple_common.platform_type.ios:
+        return xcode_config.sdk_version_for_platform(apple_common.platform.ios_device)
+    elif platform_type == apple_common.platform_type.tvos:
+        return xcode_config.sdk_version_for_platform(apple_common.platform.tvos_device)
+    elif platform_type == getattr(apple_common.platform_type, "visionos", None):
+        return xcode_config.sdk_version_for_platform(apple_common.platform.visionos_device)
+    elif platform_type == apple_common.platform_type.watchos:
+        return xcode_config.sdk_version_for_platform(apple_common.platform.watchos_device)
+    elif platform_type == apple_common.platform_type.macos:
+        return xcode_config.sdk_version_for_platform(apple_common.platform.macos)
+    else:
+        fail("Unhandled platform type: {}".format(platform_type))
 
-def _target_apple_platform(cpu):
-    platform, _, cpu = cpu.partition("_")
-    if platform == "darwin":
-        platform = "macos"
-    return platform
-
-def _target_system_name(cpu):
-    platform, _, arch = cpu.partition("_")
-    if platform == "darwin":
-        platform = "macosx"
-    if arch.startswith("sim_"):
-        arch = arch[len("sim_"):]
-    return "{}-apple-{}".format(arch, platform)
-
-def _target_libc(cpu):
-    platform, _, cpu = cpu.partition("_")
-    if platform == "darwin":
-        platform = "macosx"
-    return platform
-
-def _apple_sdk_platform(cpu):
-    """Returns the Apple SDK platform name (e.g., iPhoneOS, MacOSX) for the CPU."""
-    platform, _, cpu_arch = cpu.partition("_")
-    simulator_cpus = [
-        "ios_i386",
-        "ios_x86_64",
-        "tvos_x86_64",
-        "watchos_i386",
-        "watchos_x86_64",
-    ]
-    is_sim = cpu_arch.startswith("sim_") or cpu in simulator_cpus
-    if platform == "darwin":
+def _sdk_name(platform_type, is_simulator):
+    if platform_type == apple_common.platform_type.ios and is_simulator:
+        return "iPhoneSimulator"
+    elif platform_type == apple_common.platform_type.ios:
+        return "iPhoneOS"
+    elif platform_type == getattr(apple_common.platform_type, "visionos", None) and is_simulator:
+        return "XRSimulator"
+    elif platform_type == getattr(apple_common.platform_type, "visionos", None):
+        return "XROS"
+    elif platform_type == apple_common.platform_type.watchos and is_simulator:
+        return "WatchSimulator"
+    elif platform_type == apple_common.platform_type.watchos:
+        return "WatchOS"
+    elif platform_type == apple_common.platform_type.tvos and is_simulator:
+        return "AppleTVSimulator"
+    elif platform_type == apple_common.platform_type.tvos:
+        return "AppleTVOS"
+    elif platform_type == apple_common.platform_type.macos:
         return "MacOSX"
-    elif platform == "ios":
-        return "iPhoneSimulator" if is_sim else "iPhoneOS"
-    elif platform == "tvos":
-        return "AppleTVSimulator" if is_sim else "AppleTVOS"
-    elif platform == "watchos":
-        return "WatchSimulator" if is_sim else "WatchOS"
-    return ""
-
-_PLATFORM_TYPE_MAP = {
-    "ios": apple_common.platform_type.ios,
-    "macos": apple_common.platform_type.macos,
-    "tvos": apple_common.platform_type.tvos,
-    "watchos": apple_common.platform_type.watchos,
-}
+    else:
+        fail("Unhandled platform type: {}".format(platform_type))
 
 def _impl(ctx):
-    target_cpu = ctx.attr.cpu
+    if ctx.attr.cpu.startswith("darwin"):
+        platform_type = apple_common.platform_type.macos
+    elif ctx.attr.cpu.startswith("ios"):
+        platform_type = apple_common.platform_type.ios
+    elif ctx.attr.cpu.startswith("tvos"):
+        platform_type = apple_common.platform_type.tvos
+    elif ctx.attr.cpu.startswith("watchos"):
+        platform_type = apple_common.platform_type.watchos
+    elif ctx.attr.cpu.startswith("visionos"):
+        platform_type = apple_common.platform_type.visionos
+    else:
+        fail("""\
+Unknown CPU: {cpu}. Please update 'apple_support' to the latest version. If \
+you are sure you are on the latest version, try 'bazel shutdown' to work \
+around a Bazel staleness bug. Finally, if you still encounter this error, \
+please file an issue at https://github.com/bazelbuild/apple_support/issues/new
+""".format(cpu = ctx.attr.cpu))
 
-    arch = _arch(target_cpu)
-    compiler = "compiler"
-    host_system_name = "local"
-    platform_name = _target_apple_platform(target_cpu)
-    target_libc = _target_libc(target_cpu)
-    target_system_name = _target_system_name(target_cpu)
-    toolchain_identifier = target_cpu
-    _, _, target_arch = target_cpu.partition("_")
-    is_simulator = target_arch.startswith("sim_") or target_cpu in [
-        "ios_i386",
-        "ios_x86_64",
-        "tvos_x86_64",
-        "watchos_i386",
-        "watchos_x86_64",
-    ]
-
-    # Append minimum OS version to target triple (e.g. arm64-apple-ios16.0)
     xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
     xcode_execution_requirements = xcode_config.execution_info().keys()
-    platform_type = _PLATFORM_TYPE_MAP.get(platform_name)
-    if platform_type:
-        min_os = str(xcode_config.minimum_os_for_platform_type(platform_type))
-        if min_os:
-            environment_suffix = "-simulator" if is_simulator else ""
-            target_system_name = target_system_name + min_os + environment_suffix
-    is_tvos = platform_name == "tvos"
+    target_os_version = xcode_config.minimum_os_for_platform_type(platform_type)
+    sdk_version = _sdk_version_for_platform(xcode_config, platform_type)
 
-    if (ctx.attr.cpu == "darwin_x86_64"):
+    is_simulator = False
+    if (ctx.attr.cpu == "ios_arm64"):
+        target_system_name = "arm64-apple-ios{}".format(target_os_version)
+    elif (ctx.attr.cpu == "tvos_arm64"):
+        target_system_name = "arm64-apple-tvos{}".format(target_os_version)
+    elif (ctx.attr.cpu == "visionos_arm64"):
+        target_system_name = "arm64-apple-xros{}".format(target_os_version)
+    elif (ctx.attr.cpu == "watchos_arm64_32"):
+        target_system_name = "arm64_32-apple-watchos{}".format(target_os_version)
+    elif (ctx.attr.cpu == "ios_arm64e"):
+        target_system_name = "arm64e-apple-ios{}".format(target_os_version)
+    elif (ctx.attr.cpu == "watchos_armv7k"):
+        target_system_name = "armv7k-apple-watchos{}".format(target_os_version)
+    elif (ctx.attr.cpu == "ios_x86_64"):
+        target_system_name = "x86_64-apple-ios{}-simulator".format(target_os_version)
+        is_simulator = True
+    elif (ctx.attr.cpu == "ios_sim_arm64"):
+        target_system_name = "arm64-apple-ios{}-simulator".format(target_os_version)
+        is_simulator = True
+    elif (ctx.attr.cpu == "tvos_sim_arm64"):
+        target_system_name = "arm64-apple-tvos{}-simulator".format(target_os_version)
+        is_simulator = True
+    elif (ctx.attr.cpu == "visionos_sim_arm64"):
+        target_system_name = "arm64-apple-xros{}-simulator".format(target_os_version)
+        is_simulator = True
+    elif (ctx.attr.cpu == "watchos_arm64"):
+        target_system_name = "arm64-apple-watchos{}-simulator".format(target_os_version)
+        is_simulator = True
+    elif (ctx.attr.cpu == "watchos_device_arm64"):
+        target_system_name = "arm64-apple-watchos{}".format(target_os_version)
+    elif (ctx.attr.cpu == "watchos_device_arm64e"):
+        target_system_name = "arm64e-apple-watchos{}".format(target_os_version)
+    elif (ctx.attr.cpu == "darwin_x86_64"):
+        target_system_name = "x86_64-apple-macosx{}".format(target_os_version)
+    elif (ctx.attr.cpu == "darwin_arm64"):
+        target_system_name = "arm64-apple-macosx{}".format(target_os_version)
+    elif (ctx.attr.cpu == "darwin_arm64e"):
+        target_system_name = "arm64e-apple-macosx{}".format(target_os_version)
+    elif (ctx.attr.cpu == "tvos_x86_64"):
+        target_system_name = "x86_64-apple-tvos{}-simulator".format(target_os_version)
+        is_simulator = True
+    elif (ctx.attr.cpu == "watchos_x86_64"):
+        target_system_name = "x86_64-apple-watchos{}-simulator".format(target_os_version)
+        is_simulator = True
+    else:
+        fail("""\
+Unknown CPU: {cpu}. Please update 'apple_support' to the latest version. If \
+you are sure you are on the latest version, try 'bazel shutdown' to work \
+around a Bazel staleness bug. Finally, if you still encounter this error, \
+please file an issue at https://github.com/bazelbuild/apple_support/issues/new
+""".format(cpu = ctx.attr.cpu))
+
+    if ctx.attr.cpu.startswith("darwin_"):
+        target_libc = "macosx"
+    else:
+        target_libc = ctx.attr.cpu.split("_")[0]
+
+    if ctx.attr.cpu == "darwin_x86_64":
+        abi_libc_version = "darwin_x86_64"
         abi_version = "darwin_x86_64"
     else:
+        abi_libc_version = "local"
         abi_version = "local"
 
-    if (ctx.attr.cpu == "darwin_x86_64"):
-        abi_libc_version = "darwin_x86_64"
-    else:
-        abi_libc_version = "local"
-
-    cc_target_os = "apple"
-
-    # Compute Apple environment values for env_entries.
-    xcode_version_str = str(xcode_config.xcode_version()) if xcode_config.xcode_version() else ""
-    sdk_platform_str = _apple_sdk_platform(target_cpu)
-    xcode_parts = xcode_version_str.split(".")
-    sdk_version_str = ".".join(xcode_parts[:2]) if len(xcode_parts) >= 2 else xcode_version_str
+    arch = ctx.attr.cpu.split("_", 1)[-1]
+    if ctx.attr.cpu in ["ios_sim_arm64", "tvos_sim_arm64", "visionos_sim_arm64", "watchos_arm64", "watchos_device_arm64"]:
+        arch = "arm64"
+    elif ctx.attr.cpu in ["watchos_device_arm64e"]:
+        arch = "arm64e"
 
     # Compute Apple SDK paths
+    sdk_platform_str = _sdk_name(platform_type, is_simulator)
+    sdk_version_str = str(sdk_version)
+    xcode_version_str = str(xcode_config.xcode_version()) if xcode_config.xcode_version() else ""
     sdk_dir_str = _DEVELOPER_DIR + "/Platforms/" + sdk_platform_str + ".platform/Developer/SDKs/" + sdk_platform_str + sdk_version_str + ".sdk"
     sdk_framework_dir_str = sdk_dir_str + "/System/Library/Frameworks"
     platform_developer_framework_dir_str = _DEVELOPER_DIR + "/Platforms/" + sdk_platform_str + ".platform/Developer/Library/Frameworks"
-
-    builtin_sysroot = None
-
-    all_compile_actions = [
-        ACTION_NAMES.c_compile,
-        ACTION_NAMES.cpp_compile,
-        ACTION_NAMES.linkstamp_compile,
-        ACTION_NAMES.assemble,
-        ACTION_NAMES.preprocess_assemble,
-        ACTION_NAMES.cpp_header_parsing,
-        ACTION_NAMES.cpp_module_compile,
-        ACTION_NAMES.cpp_module_codegen,
-        ACTION_NAMES.clif_match,
-        ACTION_NAMES.lto_backend,
-    ]
-
-    all_cpp_compile_actions = [
-        ACTION_NAMES.cpp_compile,
-        ACTION_NAMES.linkstamp_compile,
-        ACTION_NAMES.cpp_header_parsing,
-        ACTION_NAMES.cpp_module_compile,
-        ACTION_NAMES.cpp_module_codegen,
-        ACTION_NAMES.clif_match,
-    ]
-
-    preprocessor_compile_actions = [
-        ACTION_NAMES.c_compile,
-        ACTION_NAMES.cpp_compile,
-        ACTION_NAMES.linkstamp_compile,
-        ACTION_NAMES.preprocess_assemble,
-        ACTION_NAMES.cpp_header_parsing,
-        ACTION_NAMES.cpp_module_compile,
-        ACTION_NAMES.clif_match,
-    ]
-
-    codegen_compile_actions = [
-        ACTION_NAMES.c_compile,
-        ACTION_NAMES.cpp_compile,
-        ACTION_NAMES.linkstamp_compile,
-        ACTION_NAMES.assemble,
-        ACTION_NAMES.preprocess_assemble,
-        ACTION_NAMES.cpp_module_codegen,
-        ACTION_NAMES.lto_backend,
-    ]
-
-    all_link_actions = [
-        ACTION_NAMES.cpp_link_executable,
-        ACTION_NAMES.cpp_link_dynamic_library,
-        ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-    ]
 
     strip_action = action_config(
         action_name = ACTION_NAMES.strip,
@@ -231,11 +214,10 @@ def _impl(ctx):
             "no_objc_arc",
             "apple_env",
             "user_compile_flags",
-            "sysroot",
             "unfiltered_compile_flags",
             "compiler_output_flags",
             "header_parsing_env",
-        ] + (["unfiltered_cxx_flags"] if is_tvos else []),
+        ],
         flag_sets = [
             flag_set(
                 flag_groups = [
@@ -260,27 +242,9 @@ def _impl(ctx):
         ],
     )
 
-    objc_compile_action_implies = [
-        "compiler_input_flags",
-        "compiler_output_flags",
-        "objc_actions",
-        "apply_default_compiler_flags",
-        "apply_default_warnings",
-        "framework_paths",
-        "preprocessor_defines",
-        "include_system_dirs",
-        "objc_arc",
-        "no_objc_arc",
-        "apple_env",
-        "user_compile_flags",
-        "sysroot",
-        "unfiltered_compile_flags",
-    ]
-    if is_simulator:
-        objc_compile_action_implies.append("apply_simulator_compiler_flags")
-
     objc_compile_action = action_config(
         action_name = ACTION_NAMES.objc_compile,
+        enabled = True,
         flag_sets = [
             flag_set(
                 flag_groups = [flag_group(flags = [
@@ -291,7 +255,21 @@ def _impl(ctx):
                 ])],
             ),
         ],
-        implies = objc_compile_action_implies,
+        implies = [
+            "compiler_input_flags",
+            "compiler_output_flags",
+            "apply_default_compiler_flags",
+            "apply_default_warnings",
+            "framework_paths",
+            "preprocessor_defines",
+            "include_system_dirs",
+            "objc_arc",
+            "no_objc_arc",
+            "apple_env",
+            "user_compile_flags",
+            "unfiltered_compile_flags",
+            "apply_simulator_compiler_flags",
+        ],
         tools = [
             tool(
                 path = "wrapped_clang",
@@ -315,7 +293,6 @@ def _impl(ctx):
     cpp_link_dynamic_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_dynamic_library,
         implies = [
-            "contains_objc_source",
             "has_configured_linker_path",
             "shared_flag",
             "linkstamps",
@@ -325,8 +302,7 @@ def _impl(ctx):
             "strip_debug_symbols",
             "linker_param_file",
             "apple_env",
-            "sysroot",
-        ] + (["cpp_linker_flags"] if is_tvos else []),
+        ],
         tools = [
             tool(
                 path = "cc_wrapper.sh",
@@ -375,11 +351,10 @@ def _impl(ctx):
             "no_objc_arc",
             "apple_env",
             "user_compile_flags",
-            "sysroot",
             "unfiltered_compile_flags",
             "compiler_input_flags",
             "compiler_output_flags",
-        ] + (["unfiltered_cxx_flags"] if is_tvos else []),
+        ],
         tools = [
             tool(
                 path = "wrapped_clang",
@@ -397,11 +372,10 @@ def _impl(ctx):
             "no_objc_arc",
             "apple_env",
             "user_compile_flags",
-            "sysroot",
             "unfiltered_compile_flags",
             "compiler_input_flags",
             "compiler_output_flags",
-        ] + (["unfiltered_cxx_flags"] if is_tvos else []),
+        ],
         tools = [
             tool(
                 path = "wrapped_clang_pp",
@@ -409,24 +383,6 @@ def _impl(ctx):
             ),
         ],
     )
-
-    objcpp_compile_action_implies = [
-        "compiler_input_flags",
-        "compiler_output_flags",
-        "apply_default_compiler_flags",
-        "apply_default_warnings",
-        "framework_paths",
-        "preprocessor_defines",
-        "include_system_dirs",
-        "objc_arc",
-        "no_objc_arc",
-        "apple_env",
-        "user_compile_flags",
-        "sysroot",
-        "unfiltered_compile_flags",
-    ]
-    if is_simulator:
-        objcpp_compile_action_implies.append("apply_simulator_compiler_flags")
 
     objcpp_compile_action = action_config(
         action_name = ACTION_NAMES.objcpp_compile,
@@ -446,7 +402,21 @@ def _impl(ctx):
                 ],
             ),
         ],
-        implies = objcpp_compile_action_implies,
+        implies = [
+            "compiler_input_flags",
+            "compiler_output_flags",
+            "apply_default_compiler_flags",
+            "apply_default_warnings",
+            "framework_paths",
+            "preprocessor_defines",
+            "include_system_dirs",
+            "objc_arc",
+            "no_objc_arc",
+            "apple_env",
+            "user_compile_flags",
+            "unfiltered_compile_flags",
+            "apply_simulator_compiler_flags",
+        ],
         tools = [
             tool(
                 path = "wrapped_clang_pp",
@@ -463,11 +433,10 @@ def _impl(ctx):
             "include_system_dirs",
             "apple_env",
             "user_compile_flags",
-            "sysroot",
             "unfiltered_compile_flags",
             "compiler_input_flags",
             "compiler_output_flags",
-        ] + (["unfiltered_cxx_flags"] if is_tvos else []),
+        ],
         tools = [
             tool(
                 path = "wrapped_clang",
@@ -485,11 +454,10 @@ def _impl(ctx):
             "no_objc_arc",
             "apple_env",
             "user_compile_flags",
-            "sysroot",
             "unfiltered_compile_flags",
             "compiler_input_flags",
             "compiler_output_flags",
-        ] + (["unfiltered_cxx_flags"] if is_tvos else []),
+        ],
         tools = [
             tool(
                 path = "wrapped_clang",
@@ -518,19 +486,11 @@ def _impl(ctx):
                 flag_groups = [
                     flag_group(flags = ["-arch", arch]),
                     flag_group(
-                        flags = ["-framework", "%{framework_names}"],
-                        iterate_over = "framework_names",
-                    ),
-                    flag_group(
-                        flags = ["-weak_framework", "%{weak_framework_names}"],
-                        iterate_over = "weak_framework_names",
-                    ),
-                    flag_group(
                         flags = ["-l%{library_names}"],
                         iterate_over = "library_names",
                     ),
                     flag_group(flags = ["-filelist", "%{filelist}"]),
-                    flag_group(flags = ["-o", "%{linked_binary}"]),
+                    flag_group(flags = ["-o", "%{linked_binary}", "LINKED_BINARY=%{linked_binary}"]),
                     flag_group(
                         flags = ["-force_load", "%{force_load_exec_paths}"],
                         iterate_over = "force_load_exec_paths",
@@ -564,7 +524,6 @@ def _impl(ctx):
     cpp_link_executable_action = action_config(
         action_name = ACTION_NAMES.cpp_link_executable,
         implies = [
-            "contains_objc_source",
             "linkstamps",
             "output_execpath_flags",
             "runtime_root_flags",
@@ -573,8 +532,7 @@ def _impl(ctx):
             "strip_debug_symbols",
             "linker_param_file",
             "apple_env",
-            "sysroot",
-        ] + (["cpp_linker_flags"] if is_tvos else []),
+        ],
         tools = [
             tool(
                 path = "cc_wrapper.sh",
@@ -592,7 +550,6 @@ def _impl(ctx):
             "no_objc_arc",
             "apple_env",
             "user_compile_flags",
-            "sysroot",
             "unfiltered_compile_flags",
             "compiler_input_flags",
             "compiler_output_flags",
@@ -614,37 +571,13 @@ def _impl(ctx):
             "no_objc_arc",
             "apple_env",
             "user_compile_flags",
-            "sysroot",
             "unfiltered_compile_flags",
             "compiler_input_flags",
             "compiler_output_flags",
-        ] + (["unfiltered_cxx_flags"] if is_tvos else []),
+        ],
         tools = [
             tool(
                 path = "wrapped_clang",
-                execution_requirements = xcode_execution_requirements,
-            ),
-        ],
-    )
-
-    cpp_link_nodeps_dynamic_library_action = action_config(
-        action_name = ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-        implies = [
-            "contains_objc_source",
-            "has_configured_linker_path",
-            "shared_flag",
-            "linkstamps",
-            "output_execpath_flags",
-            "runtime_root_flags",
-            "input_param_flags",
-            "strip_debug_symbols",
-            "linker_param_file",
-            "apple_env",
-            "sysroot",
-        ] + (["cpp_linker_flags"] if is_tvos else []),
-        tools = [
-            tool(
-                path = "cc_wrapper.sh",
                 execution_requirements = xcode_execution_requirements,
             ),
         ],
@@ -706,32 +639,20 @@ def _impl(ctx):
         objc_executable_action,
         cpp_link_executable_action,
         cpp_link_dynamic_library_action,
-        cpp_link_nodeps_dynamic_library_action,
         cpp_link_static_library_action,
         objc_fully_link_action,
     ]
 
-    if platform_name == "macos":
-        apply_default_compiler_flags_feature = feature(
-            name = "apply_default_compiler_flags",
-            flag_sets = [
-                flag_set(
-                    actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
-                    flag_groups = [flag_group(flags = ["-DOS_MACOSX", "-fno-autolink"])],
-                ),
-            ],
-        )
-    elif is_tvos:
-        apply_default_compiler_flags_feature = feature(
-            name = "apply_default_compiler_flags",
-            flag_sets = [
-                flag_set(
-                    actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
-                    flag_groups = [flag_group(flags = ["-DOS_TVOS", "-fno-autolink"])],
-                ),
-            ],
-        )
-    else:
+    if (ctx.attr.cpu == "ios_arm64" or
+        ctx.attr.cpu == "ios_arm64e" or
+        ctx.attr.cpu == "ios_sim_arm64" or
+        ctx.attr.cpu == "ios_x86_64" or
+        ctx.attr.cpu == "watchos_arm64_32" or
+        ctx.attr.cpu == "watchos_device_arm64" or
+        ctx.attr.cpu == "watchos_device_arm64e" or
+        ctx.attr.cpu == "watchos_armv7k" or
+        ctx.attr.cpu == "watchos_x86_64" or
+        ctx.attr.cpu == "watchos_arm64"):
         apply_default_compiler_flags_feature = feature(
             name = "apply_default_compiler_flags",
             flag_sets = [
@@ -741,6 +662,50 @@ def _impl(ctx):
                 ),
             ],
         )
+    elif (ctx.attr.cpu == "darwin_x86_64" or
+          ctx.attr.cpu == "darwin_arm64" or
+          ctx.attr.cpu == "darwin_arm64e"):
+        apply_default_compiler_flags_feature = feature(
+            name = "apply_default_compiler_flags",
+            flag_sets = [
+                flag_set(
+                    actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
+                    flag_groups = [flag_group(flags = ["-DOS_MACOSX", "-fno-autolink"])],
+                ),
+            ],
+        )
+    elif (ctx.attr.cpu == "tvos_arm64" or
+          ctx.attr.cpu == "tvos_x86_64" or
+          ctx.attr.cpu == "tvos_sim_arm64"):
+        apply_default_compiler_flags_feature = feature(
+            name = "apply_default_compiler_flags",
+            flag_sets = [
+                flag_set(
+                    actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
+                    flag_groups = [flag_group(flags = ["-DOS_TVOS", "-fno-autolink"])],
+                ),
+            ],
+        )
+    elif (
+        ctx.attr.cpu == "visionos_arm64" or
+        ctx.attr.cpu == "visionos_sim_arm64"
+    ):
+        apply_default_compiler_flags_feature = feature(
+            name = "apply_default_compiler_flags",
+            flag_sets = [
+                flag_set(
+                    actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
+                    flag_groups = [flag_group(flags = ["-fno-autolink"])],
+                ),
+            ],
+        )
+    else:
+        fail("""\
+Unknown CPU: {cpu}. Please update 'apple_support' to the latest version. If \
+you are sure you are on the latest version, try 'bazel shutdown' to work \
+around a Bazel staleness bug. Finally, if you still encounter this error, \
+please file an issue at https://github.com/bazelbuild/apple_support/issues/new
+""".format(cpu = ctx.attr.cpu))
 
     runtime_root_flags_feature = feature(
         name = "runtime_root_flags",
@@ -757,25 +722,6 @@ def _impl(ctx):
                         ],
                         iterate_over = "runtime_library_search_directories",
                         expand_if_available = "runtime_library_search_directories",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-    use_objc_modules_feature = feature(
-        name = "use_objc_modules",
-        flag_sets = [
-            flag_set(
-                actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            "-fmodule-name=%{module_name}",
-                            "-iquote",
-                            "%{module_maps_dir}",
-                            "-fmodules-cache-path=%{modules_cache_path}",
-                        ],
                     ),
                 ],
             ),
@@ -806,45 +752,12 @@ def _impl(ctx):
         ],
     )
 
-    if is_tvos:
-        unfiltered_cxx_flags_feature = feature(
-            name = "unfiltered_cxx_flags",
-            flag_sets = [
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.c_compile,
-                        ACTION_NAMES.cpp_compile,
-                        ACTION_NAMES.cpp_module_compile,
-                        ACTION_NAMES.cpp_header_parsing,
-                        ACTION_NAMES.assemble,
-                        ACTION_NAMES.preprocess_assemble,
-                    ],
-                    flag_groups = [
-                        flag_group(flags = ["-no-canonical-prefixes", "-pthread"]),
-                    ],
-                ),
-            ],
-        )
-    else:
-        unfiltered_cxx_flags_feature = feature(name = "unfiltered_cxx_flags")
-
     compiler_input_flags_feature = feature(
         name = "compiler_input_flags",
         enabled = True,
         flag_sets = [
             flag_set(
-                actions = [
-                    ACTION_NAMES.assemble,
-                    ACTION_NAMES.preprocess_assemble,
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.linkstamp_compile,
-                    ACTION_NAMES.cpp_header_parsing,
-                    ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.objc_compile,
-                    ACTION_NAMES.objcpp_compile,
-                ],
+                actions = ACTION_NAME_GROUPS.all_cc_compile_actions,
                 flag_groups = [
                     flag_group(
                         flags = ["-c", "%{source_file}"],
@@ -944,45 +857,16 @@ def _impl(ctx):
                     ),
                 ],
             ),
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS,
+                flag_groups = ([
+                    flag_group(
+                        flags = ctx.attr.link_flags,
+                    ),
+                ] if ctx.attr.link_flags else []),
+            ),
         ],
     )
-
-    if platform_name == "macos":
-        contains_objc_source_feature = feature(
-            name = "contains_objc_source",
-            flag_sets = [
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.cpp_link_dynamic_library,
-                        ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                        ACTION_NAMES.cpp_link_executable,
-                    ],
-                    flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
-                ),
-            ],
-        )
-    else:
-        contains_objc_source_feature = feature(
-            name = "contains_objc_source",
-            flag_sets = [
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.cpp_link_dynamic_library,
-                        ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                        ACTION_NAMES.cpp_link_executable,
-                    ],
-                    flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
-                ),
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.cpp_link_dynamic_library,
-                        ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                        ACTION_NAMES.cpp_link_executable,
-                    ],
-                    flag_groups = [flag_group(flags = ["-framework", "UIKit"])],
-                ),
-            ],
-        )
 
     includes_feature = feature(
         name = "includes",
@@ -1039,6 +923,11 @@ def _impl(ctx):
         requires = [feature_set(features = ["coverage"])],
     )
 
+    gcc_quoting_for_param_files_feature = feature(
+        name = "gcc_quoting_for_param_files",
+        enabled = bazel_features.cc.fixed_dsym_path_quoting,
+    )
+
     # When tools_path_prefix is set, tell clang to use ld64.lld from the
     # toolchain bin directory when linking.
     _linker_search_flags = [
@@ -1047,91 +936,56 @@ def _impl(ctx):
         "-Wl,-force_load_swift_libs",
     ] if "%{tools_path_prefix}" else []
 
-    if platform_name == "macos":
-        default_link_flags_feature = feature(
-            name = "default_link_flags",
-            enabled = True,
-            flag_sets = [
-                flag_set(
-                    actions = _DYNAMIC_LINK_ACTIONS,
-                    flag_groups = [
-                        flag_group(
-                            flags = [
-                                "-no-canonical-prefixes",
-                                "-target",
-                                target_system_name,
-                            ] + _linker_search_flags,
-                        ),
-                    ],
-                ),
-                flag_set(
-                    actions = _DYNAMIC_LINK_ACTIONS,
-                    flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
-                ),
-                flag_set(
-                    actions = _DYNAMIC_LINK_ACTIONS,
-                    flag_groups = [flag_group(flags = ["-dead_strip"])],
-                    with_features = [with_feature_set(features = ["opt"])],
-                ),
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.cpp_link_dynamic_library,
-                        ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                    ],
-                    flag_groups = [flag_group(flags = ["-undefined", "dynamic_lookup"])],
-                ),
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.cpp_link_executable,
-                        ACTION_NAMES.objc_executable,
-                    ],
-                    flag_groups = [flag_group(flags = ["-undefined", "dynamic_lookup"])],
-                    with_features = [with_feature_set(features = ["dynamic_linking_mode"])],
-                ),
-            ],
-        )
-    else:
-        default_link_flags_feature = feature(
-            name = "default_link_flags",
-            enabled = True,
-            flag_sets = [
-                flag_set(
-                    actions = _DYNAMIC_LINK_ACTIONS,
-                    flag_groups = [
-                        flag_group(
-                            flags = [
-                                "-no-canonical-prefixes",
-                                "-target",
-                                target_system_name,
-                            ] + _linker_search_flags,
-                        ),
-                    ],
-                ),
-                flag_set(
-                    actions = _DYNAMIC_LINK_ACTIONS,
-                    flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
-                ),
-                flag_set(
-                    actions = _DYNAMIC_LINK_ACTIONS,
-                    flag_groups = [flag_group(flags = ["-dead_strip"])],
-                    with_features = [with_feature_set(features = ["opt"])],
-                ),
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.cpp_link_dynamic_library,
-                        ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                        # iOS frameworks use objc_executable to create dylibs.
-                        # ld64.lld needs -undefined dynamic_lookup to allow weak
-                        # undefined Swift FORCE_LOAD symbols (naming convention
-                        # mismatch between Swift 6.x compiler and compat libs).
-                        ACTION_NAMES.objc_executable,
-                    ],
-                    flag_groups = [flag_group(flags = ["-undefined", "dynamic_lookup"])],
-                ),
-            ],
-        )
+    default_link_flags_feature = feature(
+        name = "default_link_flags",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS,
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-no-canonical-prefixes",
+                            "-target",
+                            target_system_name,
+                        ] + _linker_search_flags,
+                    ),
+                ],
+            ),
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS,
+                flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
+            ),
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS,
+                flag_groups = [flag_group(flags = ["-dead_strip"])],
+                with_features = [with_feature_set(features = ["opt"])],
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.cpp_link_dynamic_library,
+                    # iOS frameworks use objc_executable to create dylibs.
+                    # ld64.lld needs -undefined dynamic_lookup to allow weak
+                    # undefined Swift FORCE_LOAD symbols (naming convention
+                    # mismatch between Swift 6.x compiler and compat libs).
+                    ACTION_NAMES.objc_executable,
+                ],
+                flag_groups = [flag_group(flags = ["-undefined", "dynamic_lookup"])],
+            ),
+        ],
+    )
 
     # We need to pass -object_path_lto in order to get debug symbols when building with LTO.
+    # In a perfect world, we would only pass it when the thin_lto or full_lto features are enabled.
+    # However, when these features are enabled, bazel will follow the linking steps expected by
+    # the traditional llvm tools, which doesn't work on Apple platforms.
+    # On MacOS, passing -flto (or -flto=thin) to the compiler is mostly enough for the linker to
+    # do the right thing. The only thing left is to tell ld64 to keep the intermediate .o file,
+    # so dsymutil can find it.
+    # We're doing that here by passing -object_path_lto to every linking action. If LTO is disabled,
+    # it will be a no-op for the linker. But if it is enabled, it will allow dsymutil to find the
+    # symbols and put it in the .dSYM folder. Luckily for us, both ld64 and dsymutil run in the same
+    # action, so the fact that it's not declared as an output is not a problem.
     lto_object_path_feature = feature(
         name = "lto_object_path",
         enabled = True,
@@ -1189,17 +1043,6 @@ def _impl(ctx):
         ],
     )
 
-    no_enable_modules_feature = feature(
-        name = "no_enable_modules",
-        flag_sets = [
-            flag_set(
-                actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
-                flag_groups = [flag_group(flags = ["-fmodule-maps"])],
-            ),
-        ],
-        requires = [feature_set(features = ["use_objc_modules"])],
-    )
-
     pic_feature = feature(
         name = "pic",
         enabled = True,
@@ -1245,6 +1088,14 @@ def _impl(ctx):
                     flag_group(
                         flags = ["-F%{framework_paths}"],
                         iterate_over = "framework_paths",
+                    ),
+                    flag_group(
+                        flags = ["-framework", "%{framework_names}"],
+                        iterate_over = "framework_names",
+                    ),
+                    flag_group(
+                        flags = ["-weak_framework", "%{weak_framework_names}"],
+                        iterate_over = "weak_framework_names",
                     ),
                 ],
             ),
@@ -1341,8 +1192,7 @@ def _impl(ctx):
         name = "input_param_flags",
         flag_sets = [
             flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.cpp_link_static_library],
+                actions = _CPP_DYNAMIC_LINK_ACTIONS,
                 flag_groups = [
                     flag_group(
                         flags = ["-L%{library_search_directories}"],
@@ -1352,7 +1202,7 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = all_link_actions +
+                actions = _CPP_DYNAMIC_LINK_ACTIONS +
                           [ACTION_NAMES.cpp_link_static_library],
                 flag_groups = [
                     flag_group(
@@ -1363,8 +1213,7 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.cpp_link_static_library],
+                actions = _CPP_DYNAMIC_LINK_ACTIONS,
                 flag_groups = [
                     flag_group(
                         flags = ["-Wl,-force_load,%{whole_archive_linker_params}"],
@@ -1374,7 +1223,7 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = all_link_actions +
+                actions = _CPP_DYNAMIC_LINK_ACTIONS +
                           [ACTION_NAMES.cpp_link_static_library],
                 flag_groups = [
                     flag_group(
@@ -1385,7 +1234,7 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = all_link_actions +
+                actions = _CPP_DYNAMIC_LINK_ACTIONS +
                           [ACTION_NAMES.cpp_link_static_library],
                 flag_groups = [
                     flag_group(
@@ -1543,19 +1392,21 @@ def _impl(ctx):
         ],
     )
 
-    if platform_name == "macos":
-        apply_implicit_frameworks_feature = feature(
-            name = "apply_implicit_frameworks",
-            enabled = True,
-            flag_sets = [
-                flag_set(
-                    actions = _DYNAMIC_LINK_ACTIONS,
-                    flag_groups = [flag_group(flags = ["-framework", "Foundation"])],
-                    with_features = [with_feature_set(not_features = ["kernel_extension"])],
-                ),
-            ],
-        )
-    else:
+    if (ctx.attr.cpu == "ios_arm64" or
+        ctx.attr.cpu == "ios_arm64e" or
+        ctx.attr.cpu == "ios_x86_64" or
+        ctx.attr.cpu == "ios_sim_arm64" or
+        ctx.attr.cpu == "tvos_arm64" or
+        ctx.attr.cpu == "tvos_x86_64" or
+        ctx.attr.cpu == "tvos_sim_arm64" or
+        ctx.attr.cpu == "visionos_arm64" or
+        ctx.attr.cpu == "visionos_sim_arm64" or
+        ctx.attr.cpu == "watchos_arm64_32" or
+        ctx.attr.cpu == "watchos_device_arm64" or
+        ctx.attr.cpu == "watchos_device_arm64e" or
+        ctx.attr.cpu == "watchos_armv7k" or
+        ctx.attr.cpu == "watchos_x86_64" or
+        ctx.attr.cpu == "watchos_arm64"):
         apply_implicit_frameworks_feature = feature(
             name = "apply_implicit_frameworks",
             enabled = True,
@@ -1570,6 +1421,22 @@ def _impl(ctx):
                 ),
             ],
         )
+    elif (ctx.attr.cpu == "darwin_x86_64" or
+          ctx.attr.cpu == "darwin_arm64" or
+          ctx.attr.cpu == "darwin_arm64e"):
+        apply_implicit_frameworks_feature = feature(
+            name = "apply_implicit_frameworks",
+            enabled = True,
+            flag_sets = [
+                flag_set(
+                    actions = _DYNAMIC_LINK_ACTIONS,
+                    flag_groups = [flag_group(flags = ["-framework", "Foundation"])],
+                    with_features = [with_feature_set(not_features = ["kernel_extension"])],
+                ),
+            ],
+        )
+    else:
+        apply_implicit_frameworks_feature = feature(name = "apply_implicit_frameworks")
 
     llvm_coverage_map_format_feature = feature(
         name = "llvm_coverage_map_format",
@@ -1620,6 +1487,16 @@ def _impl(ctx):
         requires = [feature_set(features = ["coverage"])],
     )
 
+    # A private feature that is used to embed absolute source paths in coverage builds.
+    #
+    # If enabled, coverage builds will use a `-coverage-prefix-map` that remaps
+    # the current working directory to a canonical location, which permits
+    # coverage representation in non-sandboxed builds with tools that expect
+    # absolute paths such as Xcode.
+    #
+    # This feature should only be used with non-sandboxed builds inside tools such as
+    # Xcode, and enabling it effectively breaks Bazel's ability to rely on the
+    # remote cache those builds. It should not be enabled by users of the toolchain.
     coverage_prefix_map_absolute_sources_non_hermetic_private_feature = feature(
         name = "_coverage_prefix_map_absolute_sources_non_hermetic",
         flag_sets = [
@@ -1675,35 +1552,6 @@ def _impl(ctx):
         ],
     )
 
-    sysroot_feature = feature(
-        name = "sysroot",
-        flag_sets = [
-            flag_set(
-                actions = [
-                    ACTION_NAMES.assemble,
-                    ACTION_NAMES.preprocess_assemble,
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.objc_compile,
-                    ACTION_NAMES.objcpp_compile,
-                    ACTION_NAMES.cpp_header_parsing,
-                    ACTION_NAMES.cpp_link_executable,
-                    ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                    ACTION_NAMES.linkstamp_compile,
-                    ACTION_NAMES.clif_match,
-                ],
-                flag_groups = [
-                    flag_group(
-                        flags = ["--sysroot=%{sysroot}"],
-                        expand_if_available = "sysroot",
-                    ),
-                ],
-            ),
-        ],
-    )
-
     autofdo_feature = feature(
         name = "autofdo",
         flag_sets = [
@@ -1735,38 +1583,11 @@ def _impl(ctx):
         ],
     )
 
-    objc_actions_feature = feature(
-        name = "objc_actions",
-        implies = [
-            "objc-compile",
-            "objc++-compile",
-            "objc-fully-link",
-            ACTION_NAMES.objc_executable,
-            "assemble",
-            "preprocess-assemble",
-            "c-compile",
-            "c++-compile",
-            "c++-link-static-library",
-            "c++-link-dynamic-library",
-            "c++-link-nodeps-dynamic-library",
-            "c++-link-executable",
-        ],
-    )
-
     unfiltered_compile_flags_feature = feature(
         name = "unfiltered_compile_flags",
         flag_sets = [
             flag_set(
-                actions = [
-                    ACTION_NAMES.assemble,
-                    ACTION_NAMES.preprocess_assemble,
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_header_parsing,
-                    ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.linkstamp_compile,
-                ],
+                actions = ACTION_NAME_GROUPS.all_cc_compile_actions,
                 flag_groups = [
                     flag_group(
                         flags = [
@@ -1799,41 +1620,6 @@ def _impl(ctx):
         ],
     )
 
-    relative_ast_path_feature = feature(
-        name = "relative_ast_path",
-        env_sets = [
-            env_set(
-                actions = _DYNAMIC_LINK_ACTIONS,
-                env_entries = [
-                    env_entry(
-                        key = "RELATIVE_AST_PATH",
-                        value = "true",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-    archiver_flags_feature = feature(
-        name = "archiver_flags",
-        flag_sets = [
-            flag_set(
-                actions = [ACTION_NAMES.cpp_link_static_library],
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            "-D",
-                            "-no_warning_for_no_symbols",
-                            "-static",
-                            "-o",
-                            "%{output_execpath}",
-                        ],
-                        expand_if_available = "output_execpath",
-                    ),
-                ],
-            ),
-        ],
-    )
 
     fdo_optimize_feature = feature(
         name = "fdo_optimize",
@@ -1880,26 +1666,6 @@ def _impl(ctx):
         ],
     )
 
-    if is_tvos:
-        cpp_linker_flags_feature = feature(
-            name = "cpp_linker_flags",
-            flag_sets = [
-                flag_set(
-                    actions = [
-                        ACTION_NAMES.cpp_link_executable,
-                        ACTION_NAMES.cpp_link_dynamic_library,
-                    ],
-                    flag_groups = [
-                        flag_group(
-                            flags = ["-lc++", "-target", target_system_name],
-                        ),
-                    ],
-                ),
-            ],
-        )
-    else:
-        cpp_linker_flags_feature = feature(name = "cpp_linker_flags")
-
     debug_prefix_map_pwd_is_dot_feature = feature(
         name = "debug_prefix_map_pwd_is_dot",
         enabled = True,
@@ -1916,9 +1682,7 @@ def _impl(ctx):
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
-                flag_groups = [flag_group(flags = [
-                    "-fdebug-prefix-map=__BAZEL_EXECUTION_ROOT__=.",
-                ])],
+                flag_groups = [flag_group(flags = ["-fdebug-prefix-map=__BAZEL_EXECUTION_ROOT__=."])],
             ),
         ],
     )
@@ -1939,9 +1703,7 @@ def _impl(ctx):
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
-                flag_groups = [flag_group(flags = [
-                    "-fdebug-prefix-map=__BAZEL_XCODE_DEVELOPER_DIR__=DEVELOPER_DIR",
-                ])],
+                flag_groups = [flag_group(flags = ["-fdebug-prefix-map=__BAZEL_XCODE_DEVELOPER_DIR__=DEVELOPER_DIR"])],
             ),
         ],
     )
@@ -2164,18 +1926,8 @@ def _impl(ctx):
                         flags = [
                             "DSYM_HINT_DSYM_PATH=%{dsym_path}",
                         ],
+                        # We need to check this for backwards compatibility with bazel 7
                         expand_if_available = "dsym_path",
-                    ),
-                ],
-            ),
-            flag_set(
-                actions = [ACTION_NAMES.objc_executable],
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            "LINKED_BINARY=%{linked_binary}",
-                            "DSYM_PATH=%{dsym_path}",
-                        ],
                     ),
                 ],
             ),
@@ -2319,7 +2071,6 @@ def _impl(ctx):
                     ACTION_NAMES.c_compile,
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
                     ACTION_NAMES.cpp_link_executable,
                 ],
                 flag_groups = [
@@ -2336,7 +2087,9 @@ def _impl(ctx):
         provides = ["profile"],
     )
 
-    if platform_name == "macos":
+    if (ctx.attr.cpu == "darwin_x86_64" or
+        ctx.attr.cpu == "darwin_arm64" or
+        ctx.attr.cpu == "darwin_arm64e"):
         link_cocoa_feature = feature(
             name = "link_cocoa",
             flag_sets = [
@@ -2360,7 +2113,45 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
+                    ACTION_NAMES.linkstamp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = ([
+                    flag_group(
+                        flags = ctx.attr.c_flags,
+                    ),
+                ] if ctx.attr.c_flags else []),
+            ),
+            flag_set(
+                actions = [ACTION_NAMES.c_compile],
+                flag_groups = ([
+                    flag_group(
+                        flags = ctx.attr.conly_flags,
+                    ),
+                ] if ctx.attr.conly_flags else []),
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.linkstamp_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
+                ],
+                flag_groups = ([
+                    flag_group(
+                        flags = ctx.attr.cxx_flags,
+                    ),
+                ] if ctx.attr.cxx_flags else []),
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.assemble,
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
                     ACTION_NAMES.linkstamp_compile,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
@@ -2610,7 +2401,64 @@ def _impl(ctx):
         ],
     )
 
-    dynamic_linking_mode_feature = feature(name = "dynamic_linking_mode")
+    modulemaps = ctx.attr.module_map[DefaultInfo].files.to_list() if ctx.attr.module_map else []
+    if modulemaps:
+        if len(modulemaps) != 1:
+            fail("internal error: expected 1 modulemap got:", modulemaps)
+        layering_check_feature = feature(
+            name = "layering_check",
+            flag_sets = [
+                flag_set(
+                    actions = [
+                        ACTION_NAMES.c_compile,
+                        ACTION_NAMES.cpp_compile,
+                        ACTION_NAMES.cpp_header_parsing,
+                        ACTION_NAMES.cpp_module_compile,
+                        ACTION_NAMES.objc_compile,
+                        ACTION_NAMES.objcpp_compile,
+                    ],
+                    flag_groups = [
+                        flag_group(
+                            flags = [
+                                "-fmodules-strict-decluse",
+                                "-Wprivate-header",
+                                "-Xclang",
+                                "-fmodule-name=%{module_name}",
+                                "-Xclang",
+                                "-fmodule-map-file=%{module_map_file}",
+                            ],
+                        ),
+                        flag_group(
+                            iterate_over = "dependent_module_map_files",
+                            flags = [
+                                "-Xclang",
+                                "-fmodule-map-file=%{dependent_module_map_files}",
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+            env_sets = [
+                env_set(
+                    actions = [
+                        ACTION_NAMES.c_compile,
+                        ACTION_NAMES.cpp_compile,
+                        ACTION_NAMES.cpp_header_parsing,
+                        ACTION_NAMES.cpp_module_compile,
+                        ACTION_NAMES.objc_compile,
+                        ACTION_NAMES.objcpp_compile,
+                    ],
+                    env_entries = [
+                        env_entry(
+                            key = "APPLE_SUPPORT_MODULEMAP",
+                            value = modulemaps[0].path,
+                        ),
+                    ],
+                ),
+            ],
+        )
+    else:
+        layering_check_feature = feature(name = "layering_check")
 
     features = [
         # Marker features
@@ -2628,7 +2476,6 @@ def _impl(ctx):
         feature(name = "opt"),
         feature(name = "parse_headers"),
         feature(name = "no_dotd_file"),
-        feature(name = "supports_pic", enabled = True),
 
         # Features with more configuration
         link_libcpp_feature,
@@ -2639,25 +2486,19 @@ def _impl(ctx):
         generate_dsym_file_feature,
         generate_linkmap_feature,
         oso_prefix_feature,
-        contains_objc_source_feature,
-        objc_actions_feature,
         strip_debug_symbols_feature,
         shared_flag_feature,
         kernel_extension_feature,
         linkstamps_feature,
         output_execpath_flags_feature,
-        archiver_flags_feature,
         runtime_root_flags_feature,
         input_param_flags_feature,
         objc_link_flag_feature,
         force_pic_flags_feature,
         pch_feature,
-        use_objc_modules_feature,
-        no_enable_modules_feature,
         apply_default_warnings_feature,
         includes_feature,
         include_paths_feature,
-        sysroot_feature,
         dependency_file_feature,
         serialized_diagnostics_file_feature,
         pic_feature,
@@ -2677,17 +2518,15 @@ def _impl(ctx):
         headerpad_feature,
         objc_arc_feature,
         no_objc_arc_feature,
+        gcc_quoting_for_param_files_feature,
         apple_env_feature,
-        relative_ast_path_feature,
         user_link_flags_feature,
         default_link_flags_feature,
         no_deduplicate_feature,
         dead_strip_feature,
-        cpp_linker_flags_feature,
         apply_implicit_frameworks_feature,
         link_cocoa_feature,
         apply_simulator_compiler_flags_feature,
-        unfiltered_cxx_flags_feature,
         user_compile_flags_feature,
         unfiltered_compile_flags_feature,
         linker_param_file_feature,
@@ -2701,12 +2540,15 @@ def _impl(ctx):
         suppress_warnings_feature,
         treat_warnings_as_errors_feature,
         no_warn_duplicate_libraries_feature,
+        layering_check_feature,
         external_include_paths_feature,
         header_parsing_env_feature,
     ]
 
-    if platform_name == "macos":
-        features.append(dynamic_linking_mode_feature)
+    if (ctx.attr.cpu == "darwin_x86_64" or
+        ctx.attr.cpu == "darwin_arm64" or
+        ctx.attr.cpu == "darwin_arm64e"):
+        features.append(feature(name = "dynamic_linking_mode"))
 
     # macOS artifact name patterns differ from the defaults only for dynamic
     # libraries.
@@ -2739,8 +2581,6 @@ def _impl(ctx):
 
     tool_paths.update(ctx.attr.tool_paths_overrides)
 
-    out = ctx.actions.declare_file(ctx.label.name)
-    ctx.actions.write(out, "Fake executable")
     return [
         cc_common.create_cc_toolchain_config_info(
             ctx = ctx,
@@ -2748,37 +2588,41 @@ def _impl(ctx):
             action_configs = action_configs,
             artifact_name_patterns = artifact_name_patterns,
             cxx_builtin_include_directories = ctx.attr.cxx_builtin_include_directories,
-            toolchain_identifier = toolchain_identifier,
-            host_system_name = host_system_name,
+            toolchain_identifier = ctx.attr.cpu,
+            host_system_name = "local",
             target_system_name = target_system_name,
-            target_cpu = target_cpu,
+            target_cpu = ctx.attr.cpu,
             target_libc = target_libc,
-            compiler = compiler,
+            compiler = "compiler",
             abi_version = abi_version,
             abi_libc_version = abi_libc_version,
             tool_paths = [tool_path(name = name, path = path) for (name, path) in tool_paths.items()],
             make_variables = make_variables,
-            builtin_sysroot = builtin_sysroot,
-            cc_target_os = cc_target_os,
-        ),
-        DefaultInfo(
-            executable = out,
+            builtin_sysroot = None,
         ),
     ]
 
 cc_toolchain_config = rule(
+    implementation = _impl,
     attrs = {
+        "c_flags": attr.string_list(),
         "compiler": attr.string(),
+        "conly_flags": attr.string_list(),
         "cpu": attr.string(mandatory = True),
         "cxx_builtin_include_directories": attr.string_list(),
+        "cxx_flags": attr.string_list(),
         "extra_env": attr.string_dict(),
+        "link_flags": attr.string_list(),
+        "module_map": attr.label(),
         "tool_paths_overrides": attr.string_dict(),
         "_xcode_config": attr.label(default = configuration_field(
             fragment = "apple",
             name = "xcode_config_label",
         )),
     },
-    executable = True,
-    fragments = ["apple", "cpp"],
-    implementation = _impl,
+    provides = [CcToolchainConfigInfo],
+    fragments = [
+        "apple",
+        "cpp",
+    ],
 )
