@@ -16,17 +16,21 @@ exports_files([
 _APPLE_ARCHS = APPLE_PLATFORMS_CONSTRAINTS.keys()
 
 CC_TOOLCHAINS = [(
-    cpu + "|compiler",
+    cpu + "|clang",
     ":cc-compiler-" + cpu,
 ) for cpu in _APPLE_ARCHS] + [(
     cpu,
     ":cc-compiler-" + cpu,
 ) for cpu in _APPLE_ARCHS] + [
-    ("k8|compiler", ":cc-compiler-darwin_x86_64"),
-    ("darwin|compiler", ":cc-compiler-darwin_x86_64"),
+    ("k8|clang", ":cc-compiler-darwin_x86_64"),
+    ("darwin|clang", ":cc-compiler-darwin_x86_64"),
     ("k8", ":cc-compiler-darwin_x86_64"),
     ("darwin", ":cc-compiler-darwin_x86_64"),
 ]
+
+cc_library(
+    name = "link_extra_lib",
+)
 
 cc_library(
     name = "malloc",
@@ -36,6 +40,8 @@ filegroup(
     name = "empty",
     srcs = [],
 )
+
+# Cross-compile: bundled SDK and toolchain files
 
 # Expose the toolchain's bin directory (xcrun, PlistBuddy, plutil, sw_vers, etc.)
 filegroup(
@@ -59,11 +65,6 @@ filegroup(
         ],
         allow_empty = True,
     ),
-)
-
-filegroup(
-    name = "cc_wrapper",
-    srcs = ["cc_wrapper.sh"],
 )
 
 filegroup(
@@ -106,12 +107,12 @@ cc_toolchain_suite(
 filegroup(
     name = "tools",
     srcs = [
-        ":cc_wrapper",
         ":libtool",
         ":toolchain_files",
         ":wrapped_clang",
         ":wrapped_clang_pp",
         ":xcrunwrapper.sh",
+        "cc_wrapper.sh",
     ],
 )
 
@@ -126,6 +127,7 @@ filegroup(
         linker_files = ":tools",
         objcopy_files = ":empty",
         strip_files = ":tools",
+        supports_header_parsing = 1,
         supports_param_files = 1,
         toolchain_config = ":" + arch,
         toolchain_identifier = arch,
@@ -136,7 +138,6 @@ filegroup(
 [
     cc_toolchain_config(
         name = arch,
-        compiler = "compiler",
         cpu = arch,
         cxx_builtin_include_directories = [
             "%{cxx_builtin_include_directories}",

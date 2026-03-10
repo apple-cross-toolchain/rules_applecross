@@ -2565,7 +2565,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             target_system_name = target_system_name,
             target_cpu = ctx.attr.cpu,
             target_libc = target_libc,
-            compiler = "compiler",
+            compiler = "clang",
             abi_version = abi_version,
             abi_libc_version = abi_libc_version,
             tool_paths = [tool_path(name = name, path = path) for (name, path) in tool_paths.items()],
