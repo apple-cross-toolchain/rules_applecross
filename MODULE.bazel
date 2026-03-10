@@ -1,5 +1,6 @@
 module(name = "rules_applecross", version = "0.0.3")
 
+bazel_dep(name = "bazel_features", version = "1.27.0")
 bazel_dep(name = "apple_support", version = "2.3.0", repo_name = "build_bazel_apple_support")
 bazel_dep(name = "rules_apple", version = "4.5.0", repo_name = "build_bazel_rules_apple")
 git_override(
