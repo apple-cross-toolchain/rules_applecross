@@ -103,32 +103,29 @@ cc_toolchain_suite(
     toolchains = dict(CC_TOOLCHAINS),
 )
 
-[
-    filegroup(
-        name = "osx_tools_" + arch,
-        srcs = [
-            ":cc_wrapper",
-            ":libtool",
-            ":toolchain_files",
-            ":wrapped_clang",
-            ":wrapped_clang_pp",
-            ":xcrunwrapper.sh",
-        ],
-    )
-    for arch in _APPLE_ARCHS
-]
+filegroup(
+    name = "tools",
+    srcs = [
+        ":cc_wrapper",
+        ":libtool",
+        ":toolchain_files",
+        ":wrapped_clang",
+        ":wrapped_clang_pp",
+        ":xcrunwrapper.sh",
+    ],
+)
 
 [
     cc_toolchain(
         name = "cc-compiler-" + arch,
-        all_files = ":osx_tools_" + arch,
-        ar_files = ":osx_tools_" + arch,
-        as_files = ":osx_tools_" + arch,
-        compiler_files = ":osx_tools_" + arch,
+        all_files = ":tools",
+        ar_files = ":tools",
+        as_files = ":tools",
+        compiler_files = ":tools",
         dwp_files = ":empty",
-        linker_files = ":osx_tools_" + arch,
+        linker_files = ":tools",
         objcopy_files = ":empty",
-        strip_files = ":osx_tools_" + arch,
+        strip_files = ":tools",
         supports_param_files = 1,
         toolchain_config = ":" + arch,
         toolchain_identifier = arch,
