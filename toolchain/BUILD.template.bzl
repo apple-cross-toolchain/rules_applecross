@@ -13,33 +13,15 @@ exports_files([
     "xcrunwrapper.sh",
 ])
 
-OSX_TOOLS_ARCHS = [
-    "darwin_x86_64",
-    "darwin_arm64",
-    "darwin_arm64e",
-    "ios_arm64",
-    "ios_sim_arm64",
-    "ios_arm64e",
-    "ios_armv7",
-    "ios_i386",
-    "ios_x86_64",
-    "tvos_arm64",
-    "tvos_sim_arm64",
-    "tvos_x86_64",
-    "watchos_arm64",
-    "watchos_arm64_32",
-    "watchos_armv7k",
-    "watchos_i386",
-    "watchos_x86_64",
-]
+_APPLE_ARCHS = APPLE_PLATFORMS_CONSTRAINTS.keys()
 
 CC_TOOLCHAINS = [(
     cpu + "|compiler",
     ":cc-compiler-" + cpu,
-) for cpu in OSX_TOOLS_ARCHS] + [(
+) for cpu in _APPLE_ARCHS] + [(
     cpu,
     ":cc-compiler-" + cpu,
-) for cpu in OSX_TOOLS_ARCHS] + [
+) for cpu in _APPLE_ARCHS] + [
     ("k8|compiler", ":cc-compiler-darwin_x86_64"),
     ("darwin|compiler", ":cc-compiler-darwin_x86_64"),
     ("k8", ":cc-compiler-darwin_x86_64"),
@@ -133,7 +115,7 @@ cc_toolchain_suite(
             ":xcrunwrapper.sh",
         ],
     )
-    for arch in OSX_TOOLS_ARCHS
+    for arch in _APPLE_ARCHS
 ]
 
 [
@@ -151,7 +133,7 @@ cc_toolchain_suite(
         toolchain_config = ":" + arch,
         toolchain_identifier = arch,
     )
-    for arch in OSX_TOOLS_ARCHS
+    for arch in _APPLE_ARCHS
 ]
 
 [
@@ -164,7 +146,7 @@ cc_toolchain_suite(
         ],
         tool_paths_overrides = {},
     )
-    for arch in OSX_TOOLS_ARCHS
+    for arch in _APPLE_ARCHS
 ]
 
 [
@@ -178,8 +160,7 @@ cc_toolchain_suite(
         toolchain = ":cc-compiler-" + arch,
         toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
     )
-    for arch in OSX_TOOLS_ARCHS
-    if arch in APPLE_PLATFORMS_CONSTRAINTS
+    for arch in _APPLE_ARCHS
 ]
 
 # Swift toolchains (one per target platform)
@@ -189,8 +170,7 @@ cc_toolchain_suite(
         name = "swift-compiler-" + arch,
         cpu = arch,
     )
-    for arch in OSX_TOOLS_ARCHS
-    if arch in APPLE_PLATFORMS_CONSTRAINTS
+    for arch in _APPLE_ARCHS
 ]
 
 [
@@ -204,6 +184,5 @@ cc_toolchain_suite(
         toolchain = ":swift-compiler-" + arch,
         toolchain_type = "@build_bazel_rules_swift//toolchains:toolchain_type",
     )
-    for arch in OSX_TOOLS_ARCHS
-    if arch in APPLE_PLATFORMS_CONSTRAINTS
+    for arch in _APPLE_ARCHS
 ]
