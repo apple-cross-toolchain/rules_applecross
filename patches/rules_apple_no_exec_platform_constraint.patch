@@ -52,11 +52,9 @@ index 1a5cfb3..b9e3e7f 100644
              ).format(
                  output = shell.quote(output.path),
 diff --git a/apple/internal/resource_actions/app_intents.bzl b/apple/internal/resource_actions/app_intents.bzl
-index 4c36b3f..3c90e88 100644
 --- a/apple/internal/resource_actions/app_intents.bzl
 +++ b/apple/internal/resource_actions/app_intents.bzl
-@@ -68,7 +68,7 @@ def generate_app_intents_metadata_bundle(
-     )
+@@ -87,6 +87,6 @@ def generate_app_intents_metadata_bundle(
  
      args = actions.args()
 -    args.add("/usr/bin/xcrun")
