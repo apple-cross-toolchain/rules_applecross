@@ -17,13 +17,23 @@ load(
     "variable_with_value",
     "with_feature_set",
 )
-load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
+load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES", "ACTION_NAME_GROUPS")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 
 # In Bazel 9, objcpp_executable and objc_archive were removed from ACTION_NAMES.
 # Define them as string constants for backward compatibility in action configs.
 _OBJCPP_EXECUTABLE = "objcpp-executable"
 _OBJC_ARCHIVE = "objc-archive"
+
+_DYNAMIC_LINK_ACTIONS = ACTION_NAME_GROUPS.cc_link_executable_actions + ACTION_NAME_GROUPS.dynamic_library_link_actions
+_STATIC_LINK_ACTIONS = [
+    ACTION_NAMES.objc_fully_link,
+    ACTION_NAMES.cpp_link_static_library,
+]
+_CPP_DYNAMIC_LINK_ACTIONS = [
+    ACTION_NAMES.cpp_link_executable,
+    ACTION_NAMES.cpp_link_dynamic_library,
+]
 
 # %{toolchain_path_prefix} is replaced by the template engine with the repo path.
 _DEVELOPER_DIR = "%{toolchain_path_prefix}Xcode.app/Contents/Developer"
@@ -102,10 +112,11 @@ def _impl(ctx):
     ]
 
     # Append minimum OS version to target triple (e.g. arm64-apple-ios16.0)
-    xcode_config_for_version = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
+    xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
+    xcode_execution_requirements = xcode_config.execution_info().keys()
     platform_type = _PLATFORM_TYPE_MAP.get(platform_name)
     if platform_type:
-        min_os = str(xcode_config_for_version.minimum_os_for_platform_type(platform_type))
+        min_os = str(xcode_config.minimum_os_for_platform_type(platform_type))
         if min_os:
             environment_suffix = "-simulator" if is_simulator else ""
             target_system_name = target_system_name + min_os + environment_suffix
@@ -124,7 +135,6 @@ def _impl(ctx):
     cc_target_os = "apple"
 
     # Compute Apple environment values for env_entries.
-    xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
     xcode_version_str = str(xcode_config.xcode_version()) if xcode_config.xcode_version() else ""
     sdk_platform_str = _apple_sdk_platform(target_cpu)
     xcode_parts = xcode_version_str.split(".")
@@ -202,8 +212,20 @@ def _impl(ctx):
         tools = [tool(path = "strip")],
     )
 
-    xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
-    xcode_execution_requirements = xcode_config.execution_info().keys()
+    header_parsing_env_feature = feature(
+        name = "header_parsing_env",
+        env_sets = [
+            env_set(
+                actions = [ACTION_NAMES.cpp_header_parsing],
+                env_entries = [
+                    env_entry(
+                        key = "HEADER_PARSING_OUTPUT",
+                        value = "%{output_file}",
+                    ),
+                ],
+            ),
+        ],
+    )
 
     cpp_header_parsing_action = action_config(
         action_name = ACTION_NAMES.cpp_header_parsing,
@@ -216,9 +238,25 @@ def _impl(ctx):
             "user_compile_flags",
             "sysroot",
             "unfiltered_compile_flags",
-            "compiler_input_flags",
             "compiler_output_flags",
+            "header_parsing_env",
         ] + (["unfiltered_cxx_flags"] if is_tvos else []),
+        flag_sets = [
+            flag_set(
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            # Note: This treats all headers as C++ headers, which may lead to
+                            # parsing failures for C headers that are not valid C++.
+                            # For such headers, use features = ["-parse_headers"] to selectively
+                            # disable parsing.
+                            "-xc++-header",
+                            "-fsyntax-only",
+                        ],
+                    ),
+                ],
+            ),
+        ],
         tools = [
             tool(
                 path = "wrapped_clang",
@@ -267,12 +305,24 @@ def _impl(ctx):
         ],
     )
 
+    objc_link_flag_feature = feature(
+        name = "objc_link_flag",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = [ACTION_NAMES.objc_executable],
+                flag_groups = [flag_group(flags = ["-ObjC"])],
+                with_features = [with_feature_set(not_features = ["kernel_extension"])],
+            ),
+        ],
+    )
+
     objcpp_executable_action = action_config(
         action_name = _OBJCPP_EXECUTABLE,
         flag_sets = [
             flag_set(
                 flag_groups = [
-                    flag_group(flags = ["-stdlib=libc++", "-std=gnu++11"]),
+                    flag_group(flags = ["-stdlib=libc++", "-std=gnu++17"]),
                     flag_group(flags = [
                         "-arch",
                         arch,
@@ -338,7 +388,6 @@ def _impl(ctx):
         implies = [
             "contains_objc_source",
             "has_configured_linker_path",
-            "symbol_counts",
             "shared_flag",
             "linkstamps",
             "output_execpath_flags",
@@ -360,11 +409,25 @@ def _impl(ctx):
     cpp_link_static_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_static_library,
         implies = [
-            "runtime_root_flags",
-            "archiver_flags",
             "input_param_flags",
             "linker_param_file",
             "apple_env",
+        ],
+        flag_sets = [
+            flag_set(
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-D",
+                            "-no_warning_for_no_symbols",
+                            "-static",
+                            "-o",
+                            "%{output_execpath}",
+                        ],
+                        expand_if_available = "output_execpath",
+                    ),
+                ],
+            ),
         ],
         tools = [
             tool(
@@ -446,7 +509,7 @@ def _impl(ctx):
                             "-arch",
                             arch,
                             "-stdlib=libc++",
-                            "-std=gnu++11",
+                            "-std=gnu++17",
                             "-target",
                             target_system_name,
                         ],
@@ -549,8 +612,6 @@ def _impl(ctx):
                             "-objc_abi_version",
                             "-Xlinker",
                             "2",
-                            "-fobjc-link-runtime",
-                            "-ObjC",
                         ],
                     ),
                 ],
@@ -607,7 +668,6 @@ def _impl(ctx):
         action_name = ACTION_NAMES.cpp_link_executable,
         implies = [
             "contains_objc_source",
-            "symbol_counts",
             "linkstamps",
             "output_execpath_flags",
             "runtime_root_flags",
@@ -675,7 +735,6 @@ def _impl(ctx):
         implies = [
             "contains_objc_source",
             "has_configured_linker_path",
-            "symbol_counts",
             "shared_flag",
             "linkstamps",
             "output_execpath_flags",
@@ -788,45 +847,21 @@ def _impl(ctx):
             ],
         )
 
-    dynamic_linking_mode_feature = feature(name = "dynamic_linking_mode")
-
-    compile_all_modules_feature = feature(name = "compile_all_modules")
-
     runtime_root_flags_feature = feature(
         name = "runtime_root_flags",
         flag_sets = [
             flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.cpp_link_static_library],
+                actions = _CPP_DYNAMIC_LINK_ACTIONS,
                 flag_groups = [
                     flag_group(
                         flags = [
-                            "-Wl,-rpath,@loader_path/%{runtime_library_search_directories}",
+                            "-Xlinker",
+                            "-rpath",
+                            "-Xlinker",
+                            "@loader_path/%{runtime_library_search_directories}",
                         ],
                         iterate_over = "runtime_library_search_directories",
                         expand_if_available = "runtime_library_search_directories",
-                    ),
-                ],
-            ),
-            flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.cpp_link_static_library],
-                flag_groups = [
-                    flag_group(
-                        flags = ["%{runtime_root_flags}"],
-                        iterate_over = "runtime_root_flags",
-                        expand_if_available = "runtime_root_flags",
-                    ),
-                ],
-            ),
-            flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.cpp_link_static_library],
-                flag_groups = [
-                    flag_group(
-                        flags = ["%{runtime_root_entries}"],
-                        iterate_over = "runtime_root_entries",
-                        expand_if_available = "runtime_root_entries",
                     ),
                 ],
             ),
@@ -900,6 +935,7 @@ def _impl(ctx):
 
     compiler_input_flags_feature = feature(
         name = "compiler_input_flags",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -924,12 +960,38 @@ def _impl(ctx):
         ],
     )
 
+    external_include_paths_feature = feature(
+        name = "external_include_paths",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.linkstamp_compile,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                    ACTION_NAMES.clif_match,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = ["-isystem", "%{external_include_paths}"],
+                        iterate_over = "external_include_paths",
+                        expand_if_available = "external_include_paths",
+                    ),
+                ],
+            ),
+        ],
+    )
+
     strip_debug_symbols_feature = feature(
         name = "strip_debug_symbols",
         flag_sets = [
             flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(
                         flags = ["STRIP_DEBUG_SYMBOLS"],
@@ -946,7 +1008,6 @@ def _impl(ctx):
             flag_set(
                 actions = [
                     ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
                 ],
                 flag_groups = [flag_group(flags = ["-shared"])],
             ),
@@ -975,34 +1036,13 @@ def _impl(ctx):
     else:
         apply_simulator_compiler_flags_feature = feature(name = "apply_simulator_compiler_flags")
 
-    supports_pic_feature = feature(name = "supports_pic", enabled = True)
-
-    fastbuild_feature = feature(name = "fastbuild")
-
-    no_legacy_features_feature = feature(name = "no_legacy_features")
-
-    symbol_counts_feature = feature(
-        name = "symbol_counts",
-        flag_sets = [
-            flag_set(
-                actions = all_link_actions,
-                flag_groups = [
-                    flag_group(
-                        flags = ["-Wl,--print-symbol-counts=%{symbol_counts_output}"],
-                        expand_if_available = "symbol_counts_output",
-                    ),
-                ],
-            ),
-        ],
-    )
-
     user_link_flags_feature = feature(
         name = "user_link_flags",
         enabled = True,
         flag_sets = [
             flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(
                         flags = ["%{user_link_flags}"],
@@ -1065,7 +1105,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_module_compile,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
-                    ACTION_NAMES.clif_match,
                 ],
                 flag_groups = [
                     flag_group(
@@ -1099,7 +1138,6 @@ def _impl(ctx):
             flag_set(
                 actions = [
                     ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
                     ACTION_NAMES.cpp_link_executable,
                 ],
                 flag_groups = [flag_group(flags = ["--coverage"])],
@@ -1122,8 +1160,8 @@ def _impl(ctx):
             enabled = True,
             flag_sets = [
                 flag_set(
-                    actions = all_link_actions +
-                              [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
+                    actions = _DYNAMIC_LINK_ACTIONS +
+                              [_OBJCPP_EXECUTABLE],
                     flag_groups = [
                         flag_group(
                             flags = [
@@ -1133,6 +1171,17 @@ def _impl(ctx):
                             ] + _linker_search_flags,
                         ),
                     ],
+                ),
+                flag_set(
+                    actions = _DYNAMIC_LINK_ACTIONS +
+                              [_OBJCPP_EXECUTABLE],
+                    flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
+                ),
+                flag_set(
+                    actions = _DYNAMIC_LINK_ACTIONS +
+                              [_OBJCPP_EXECUTABLE],
+                    flag_groups = [flag_group(flags = ["-dead_strip"])],
+                    with_features = [with_feature_set(features = ["opt"])],
                 ),
                 flag_set(
                     actions = [
@@ -1158,8 +1207,8 @@ def _impl(ctx):
             enabled = True,
             flag_sets = [
                 flag_set(
-                    actions = all_link_actions +
-                              [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
+                    actions = _DYNAMIC_LINK_ACTIONS +
+                              [_OBJCPP_EXECUTABLE],
                     flag_groups = [
                         flag_group(
                             flags = [
@@ -1169,6 +1218,17 @@ def _impl(ctx):
                             ] + _linker_search_flags,
                         ),
                     ],
+                ),
+                flag_set(
+                    actions = _DYNAMIC_LINK_ACTIONS +
+                              [_OBJCPP_EXECUTABLE],
+                    flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
+                ),
+                flag_set(
+                    actions = _DYNAMIC_LINK_ACTIONS +
+                              [_OBJCPP_EXECUTABLE],
+                    flag_groups = [flag_group(flags = ["-dead_strip"])],
+                    with_features = [with_feature_set(features = ["opt"])],
                 ),
                 flag_set(
                     actions = [
@@ -1186,14 +1246,60 @@ def _impl(ctx):
             ],
         )
 
+    # We need to pass -object_path_lto in order to get debug symbols when building with LTO.
+    lto_object_path_feature = feature(
+        name = "lto_object_path",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-Xlinker",
+                            "-object_path_lto",
+                            "-Xlinker",
+                            "%{output_execpath}.lto.o",
+                        ],
+                        expand_if_available = "output_execpath",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    no_deduplicate_feature = feature(
+        name = "no_deduplicate",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-Xlinker",
+                            "-no_deduplicate",
+                        ],
+                    ),
+                ],
+                with_features = [
+                    with_feature_set(not_features = ["opt"]),
+                ],
+            ),
+        ],
+    )
+
     output_execpath_flags_feature = feature(
         name = "output_execpath_flags",
         flag_sets = [
             flag_set(
-                actions = all_link_actions,
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(
-                        flags = ["-o", "%{output_execpath}"],
+                        flags = ["-o", "%{output_execpath}", "LINKED_BINARY=%{output_execpath}"],
                         expand_if_available = "output_execpath",
                     ),
                 ],
@@ -1220,7 +1326,6 @@ def _impl(ctx):
                 actions = [
                     ACTION_NAMES.c_compile,
                     ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_module_codegen,
                     ACTION_NAMES.cpp_module_compile,
                     ACTION_NAMES.linkstamp_compile,
                     ACTION_NAMES.preprocess_assemble,
@@ -1279,7 +1384,6 @@ def _impl(ctx):
                     ACTION_NAMES.linkstamp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
@@ -1301,10 +1405,9 @@ def _impl(ctx):
         ],
     )
 
-    opt_feature = feature(name = "opt")
-
     pch_feature = feature(
         name = "pch",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -1313,12 +1416,18 @@ def _impl(ctx):
                     ACTION_NAMES.c_compile,
                     ACTION_NAMES.cpp_compile,
                 ],
-                flag_groups = [flag_group(flags = ["-include", "%{pch_file}"])],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-include",
+                            "%{pch_file}",
+                        ],
+                        expand_if_available = "pch_file",
+                    ),
+                ],
             ),
         ],
     )
-
-    coverage_feature = feature(name = "coverage")
 
     include_system_dirs_feature = feature(
         name = "include_system_dirs",
@@ -1335,7 +1444,7 @@ def _impl(ctx):
                     _OBJCPP_EXECUTABLE,
                     ACTION_NAMES.assemble,
                     ACTION_NAMES.preprocess_assemble,
-                ] + all_link_actions,
+                ],
                 flag_groups = [
                     flag_group(
                         flags = [
@@ -1509,27 +1618,6 @@ def _impl(ctx):
         ],
     )
 
-    per_object_debug_info_feature = feature(
-        name = "per_object_debug_info",
-        flag_sets = [
-            flag_set(
-                actions = [
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.assemble,
-                    ACTION_NAMES.preprocess_assemble,
-                ],
-                flag_groups = [
-                    flag_group(
-                        flags = ["-gsplit-dwarf"],
-                        expand_if_available = "per_object_debug_info_file",
-                    ),
-                ],
-            ),
-        ],
-    )
-
     lipo_feature = feature(
         name = "lipo",
         flag_sets = [
@@ -1597,6 +1685,7 @@ def _impl(ctx):
     if platform_name == "macos":
         apply_implicit_frameworks_feature = feature(
             name = "apply_implicit_frameworks",
+            enabled = True,
             flag_sets = [
                 flag_set(
                     actions = [
@@ -1611,6 +1700,7 @@ def _impl(ctx):
     else:
         apply_implicit_frameworks_feature = feature(
             name = "apply_implicit_frameworks",
+            enabled = True,
             flag_sets = [
                 flag_set(
                     actions = [
@@ -1625,31 +1715,6 @@ def _impl(ctx):
                 ),
             ],
         )
-
-    dbg_feature = feature(name = "dbg")
-
-    has_configured_linker_path_feature = feature(name = "has_configured_linker_path")
-
-    random_seed_feature = feature(
-        name = "random_seed",
-        enabled = True,
-        flag_sets = [
-            flag_set(
-                actions = [
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.cpp_module_compile,
-                ],
-                flag_groups = [
-                    flag_group(
-                        flags = ["-frandom-seed=%{output_file}"],
-                        expand_if_available = "output_file",
-                    ),
-                ],
-            ),
-        ],
-    )
 
     llvm_coverage_map_format_feature = feature(
         name = "llvm_coverage_map_format",
@@ -1670,14 +1735,72 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = [
-                    ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                    ACTION_NAMES.cpp_link_executable,
-                    ACTION_NAMES.objc_executable,
-                    _OBJCPP_EXECUTABLE,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [flag_group(flags = ["-fprofile-instr-generate"])],
+            ),
+        ],
+        requires = [feature_set(features = ["coverage"])],
+    )
+
+    coverage_prefix_map_feature = feature(
+        name = "coverage_prefix_map",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = ["-fcoverage-prefix-map=__BAZEL_EXECUTION_ROOT__=."],
+                    ),
+                ],
+            ),
+        ],
+        requires = [feature_set(features = ["coverage"])],
+    )
+
+    coverage_prefix_map_absolute_sources_non_hermetic_private_feature = feature(
+        name = "_coverage_prefix_map_absolute_sources_non_hermetic",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = ["-fcoverage-prefix-map=__BAZEL_EXECUTION_ROOT__=__BAZEL_EXECUTION_ROOT_CANONICAL__"],
+                    ),
+                ],
+            ),
+        ],
+        env_sets = [
+            env_set(
+                actions = [
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                env_entries = [
+                    env_entry(
+                        key = "COVERAGE_PREFIX_MAP_USE_ABSOLUTE_CWD_PATH",
+                        value = "1",
+                    ),
+                ],
             ),
         ],
         requires = [feature_set(features = ["coverage"])],
@@ -1751,11 +1874,8 @@ def _impl(ctx):
         enabled = True,
         flag_sets = [
             flag_set(
-                actions = all_link_actions +
-                          [
-                              ACTION_NAMES.objc_executable,
-                              _OBJCPP_EXECUTABLE,
-                          ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [flag_group(flags = ["-lc++"])],
                 with_features = [with_feature_set(not_features = ["kernel_extension"])],
             ),
@@ -1781,8 +1901,6 @@ def _impl(ctx):
             "c++-link-executable",
         ],
     )
-
-    module_maps_feature = feature(name = "module_maps", enabled = True)
 
     unfiltered_compile_flags_feature = feature(
         name = "unfiltered_compile_flags",
@@ -1819,13 +1937,11 @@ def _impl(ctx):
         name = "linker_param_file",
         flag_sets = [
             flag_set(
-                actions = all_link_actions + [
-                    ACTION_NAMES.cpp_link_static_library,
-                    _OBJC_ARCHIVE,
-                    ACTION_NAMES.objc_fully_link,
-                    ACTION_NAMES.objc_executable,
-                    _OBJCPP_EXECUTABLE,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS + _STATIC_LINK_ACTIONS +
+                          [
+                              _OBJC_ARCHIVE,
+                              _OBJCPP_EXECUTABLE,
+                          ],
                 flag_groups = [
                     flag_group(
                         flags = ["@%{linker_param_file}"],
@@ -1940,8 +2056,6 @@ def _impl(ctx):
     else:
         cpp_linker_flags_feature = feature(name = "cpp_linker_flags")
 
-    exclude_private_headers_in_module_maps_feature = feature(name = "exclude_private_headers_in_module_maps")
-
     debug_prefix_map_pwd_is_dot_feature = feature(
         name = "debug_prefix_map_pwd_is_dot",
         enabled = True,
@@ -1954,7 +2068,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
                     ACTION_NAMES.linkstamp_compile,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
@@ -1968,6 +2081,7 @@ def _impl(ctx):
 
     remap_xcode_path_feature = feature(
         name = "remap_xcode_path",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -1977,7 +2091,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
                     ACTION_NAMES.linkstamp_compile,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
@@ -1993,7 +2106,7 @@ def _impl(ctx):
         name = "linkstamps",
         flag_sets = [
             flag_set(
-                actions = all_link_actions,
+                actions = _CPP_DYNAMIC_LINK_ACTIONS,
                 flag_groups = [
                     flag_group(
                         flags = ["%{linkstamp_paths}"],
@@ -2017,7 +2130,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
                     ACTION_NAMES.linkstamp_compile,
-                    ACTION_NAMES.clif_match,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
@@ -2039,8 +2151,6 @@ def _impl(ctx):
         ],
     )
 
-    only_doth_headers_in_module_maps_feature = feature(name = "only_doth_headers_in_module_maps")
-
     default_compile_flags_feature = feature(
         name = "default_compile_flags",
         enabled = True,
@@ -2054,9 +2164,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.lto_backend,
-                    ACTION_NAMES.clif_match,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
@@ -2078,9 +2185,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.lto_backend,
-                    ACTION_NAMES.clif_match,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
@@ -2106,9 +2210,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.lto_backend,
-                    ACTION_NAMES.clif_match,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
@@ -2124,9 +2225,6 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.lto_backend,
-                    ACTION_NAMES.clif_match,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
@@ -2136,7 +2234,6 @@ def _impl(ctx):
                             "-g0",
                             "-O2",
                             "-DNDEBUG",
-                            "-DNS_BLOCK_ASSERTIONS=1",
                         ],
                     ),
                 ],
@@ -2151,26 +2248,33 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.lto_backend,
-                    ACTION_NAMES.clif_match,
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
                 flag_groups = [flag_group(flags = ["-g"])],
                 with_features = [with_feature_set(features = ["dbg"])],
             ),
+        ],
+    )
+
+    ns_block_assertions_feature = feature(
+        name = "ns_block_assertions",
+        enabled = True,
+        flag_sets = [
             flag_set(
                 actions = [
+                    ACTION_NAMES.assemble,
+                    ACTION_NAMES.preprocess_assemble,
                     ACTION_NAMES.linkstamp_compile,
+                    ACTION_NAMES.c_compile,
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.cpp_module_codegen,
-                    ACTION_NAMES.lto_backend,
-                    ACTION_NAMES.clif_match,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
                 ],
-                flag_groups = [flag_group(flags = ["-std=c++11"])],
+                flag_groups = [flag_group(flags = ["-DNS_BLOCK_ASSERTIONS=1"])],
+                with_features = [with_feature_set(features = ["opt"])],
             ),
         ],
     )
@@ -2179,26 +2283,21 @@ def _impl(ctx):
         name = "dead_strip",
         flag_sets = [
             flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
-                flag_groups = [
-                    flag_group(
-                        flags = ["-dead_strip"],
-                    ),
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
+                flag_groups = [flag_group(flags = ["-dead_strip"])],
             ),
         ],
-        requires = [feature_set(features = ["opt"])],
     )
 
     oso_prefix_feature = feature(
         name = "oso_prefix_is_pwd",
+        enabled = True,
         flag_sets = [
             flag_set(
-                actions = [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
-                flag_groups = [flag_group(flags = [
-                    "-Wl,-oso_prefix,__BAZEL_EXECUTION_ROOT__/",
-                ])],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
+                flag_groups = [flag_group(flags = ["-Wl,-oso_prefix,__BAZEL_EXECUTION_ROOT__/"])],
             ),
         ],
     )
@@ -2216,6 +2315,17 @@ def _impl(ctx):
                     _OBJCPP_EXECUTABLE,
                 ],
                 flag_groups = [flag_group(flags = ["-g"])],
+            ),
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS,
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "DSYM_HINT_DSYM_PATH=%{dsym_path}",
+                        ],
+                        expand_if_available = "dsym_path",
+                    ),
+                ],
             ),
             flag_set(
                 actions = [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
@@ -2265,6 +2375,7 @@ def _impl(ctx):
                 flag_groups = [
                     flag_group(
                         flags = [
+                            "-Werror=incompatible-sysroot",
                             "-Wshorten-64-to-32",
                             "-Wbool-conversion",
                             "-Wconstant-conversion",
@@ -2304,6 +2415,30 @@ def _impl(ctx):
                     flag_group(
                         flags = ["-MD", "-MF", "%{dependency_file}"],
                         expand_if_available = "dependency_file",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    serialized_diagnostics_file_feature = feature(
+        name = "serialized_diagnostics_file",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.assemble,
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = ["--serialize-diagnostics", "%{serialized_diagnostics_file}"],
+                        expand_if_available = "serialized_diagnostics_file",
                     ),
                 ],
             ),
@@ -2405,10 +2540,8 @@ def _impl(ctx):
         enabled = True,
         flag_sets = [
             flag_set(
-                actions = all_link_actions + [
-                    ACTION_NAMES.objc_executable,
-                    _OBJCPP_EXECUTABLE,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [flag_group(flags = ["-headerpad_max_install_names"])],
             ),
         ],
@@ -2418,10 +2551,8 @@ def _impl(ctx):
         name = "generate_linkmap",
         flag_sets = [
             flag_set(
-                actions = [
-                    ACTION_NAMES.objc_executable,
-                    _OBJCPP_EXECUTABLE,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(
                         flags = [
@@ -2430,6 +2561,17 @@ def _impl(ctx):
                             "-Xlinker",
                             "%{linkmap_exec_path}",
                         ],
+                        expand_if_available = "linkmap_exec_path",
+                    ),
+                    flag_group(
+                        flags = [
+                            "-Xlinker",
+                            "-map",
+                            "-Xlinker",
+                            "%{output_execpath}.map",
+                        ],
+                        expand_if_available = "output_execpath",
+                        expand_if_not_available = "linkmap_exec_path",
                     ),
                 ],
             ),
@@ -2438,17 +2580,19 @@ def _impl(ctx):
 
     set_install_name = feature(
         name = "set_install_name",
-        enabled = ctx.fragments.cpp.do_not_use_macos_set_install_name,
+        enabled = getattr(ctx.fragments.cpp, "do_not_use_macos_set_install_name", True),
         flag_sets = [
             flag_set(
                 actions = [
                     ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
                 ],
                 flag_groups = [
                     flag_group(
                         flags = [
-                            "-Wl,-install_name,@rpath/%{runtime_solib_name}",
+                            "-Xlinker",
+                            "-install_name",
+                            "-Xlinker",
+                            "@rpath/%{runtime_solib_name}",
                         ],
                         expand_if_available = "runtime_solib_name",
                     ),
@@ -2475,13 +2619,8 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = [
-                    ACTION_NAMES.cpp_link_executable,
-                    ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                    ACTION_NAMES.objc_executable,
-                    _OBJCPP_EXECUTABLE,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(flags = ["-fsanitize=address"]),
                 ],
@@ -2510,13 +2649,8 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = [
-                    ACTION_NAMES.cpp_link_executable,
-                    ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                    ACTION_NAMES.objc_executable,
-                    _OBJCPP_EXECUTABLE,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(flags = ["-fsanitize=thread"]),
                 ],
@@ -2545,13 +2679,8 @@ def _impl(ctx):
                 ],
             ),
             flag_set(
-                actions = [
-                    ACTION_NAMES.cpp_link_executable,
-                    ACTION_NAMES.cpp_link_dynamic_library,
-                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
-                    ACTION_NAMES.objc_executable,
-                    _OBJCPP_EXECUTABLE,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(flags = ["-fsanitize=undefined"]),
                 ],
@@ -2576,7 +2705,6 @@ def _impl(ctx):
                 flag_groups = [
                     flag_group(
                         flags = [
-                            "-O1",
                             "-gline-tables-only",
                             "-fno-omit-frame-pointer",
                             "-fno-sanitize-recover=all",
@@ -2592,13 +2720,16 @@ def _impl(ctx):
         ],
     )
 
-    # New features from upstream
-
     suppress_warnings_feature = feature(
         name = "suppress_warnings",
         flag_sets = [
             flag_set(
-                actions = all_compile_actions,
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
                 flag_groups = [flag_group(flags = ["-w"])],
             ),
         ],
@@ -2608,114 +2739,67 @@ def _impl(ctx):
         name = "treat_warnings_as_errors",
         flag_sets = [
             flag_set(
-                actions = all_compile_actions,
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
                 flag_groups = [flag_group(flags = ["-Werror"])],
             ),
             flag_set(
-                actions = all_link_actions,
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [flag_group(flags = ["-Wl,-fatal_warnings"])],
             ),
         ],
     )
 
+    # As of Xcode 15, linker warnings are emitted if duplicate `-l` options are
+    # present. Until such linkopts can be deduped by bazel itself, we disable
+    # these warnings.
     no_warn_duplicate_libraries_feature = feature(
         name = "no_warn_duplicate_libraries",
+        enabled = "no_warn_duplicate_libraries" in ctx.features,
         flag_sets = [
             flag_set(
-                actions = all_link_actions,
-                flag_groups = [flag_group(flags = ["-Wl,-no_warn_duplicate_libraries"])],
-            ),
-        ],
-    )
-
-    external_include_paths_feature = feature(
-        name = "external_include_paths",
-        flag_sets = [
-            flag_set(
-                actions = [
-                    ACTION_NAMES.preprocess_assemble,
-                    ACTION_NAMES.linkstamp_compile,
-                    ACTION_NAMES.c_compile,
-                    ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_header_parsing,
-                    ACTION_NAMES.cpp_module_compile,
-                    ACTION_NAMES.objc_compile,
-                    ACTION_NAMES.objcpp_compile,
-                    ACTION_NAMES.clif_match,
-                ],
+                actions = _DYNAMIC_LINK_ACTIONS +
+                          [_OBJCPP_EXECUTABLE],
                 flag_groups = [
                     flag_group(
-                        flags = ["-isystem", "%{external_include_paths}"],
-                        iterate_over = "external_include_paths",
-                        expand_if_available = "external_include_paths",
+                        flags = [
+                            "-Wl,-no_warn_duplicate_libraries",
+                        ],
                     ),
                 ],
             ),
         ],
     )
 
-    serialized_diagnostics_file_feature = feature(
-        name = "serialized_diagnostics_file",
-        flag_sets = [
-            flag_set(
-                actions = all_compile_actions,
-                flag_groups = [
-                    flag_group(
-                        flags = ["--serialize-diagnostics", "%{serialized_diagnostics_file}"],
-                        expand_if_available = "serialized_diagnostics_file",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-    # Marker features
-    parse_headers_feature = feature(name = "parse_headers")
-    no_dotd_file_feature = feature(name = "no_dotd_file")
-    archive_param_file_feature = feature(name = "archive_param_file")
-    compiler_param_file_feature = feature(name = "compiler_param_file")
-
-    lto_object_path_feature = feature(
-        name = "lto_object_path",
-        flag_sets = [
-            flag_set(
-                actions = all_link_actions,
-                flag_groups = [
-                    flag_group(
-                        flags = ["-object_path_lto", "%{lto_object_path}"],
-                        expand_if_available = "lto_object_path",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-    no_deduplicate_feature = feature(
-        name = "no_deduplicate",
-        flag_sets = [
-            flag_set(
-                actions = all_link_actions +
-                          [ACTION_NAMES.objc_executable, _OBJCPP_EXECUTABLE],
-                flag_groups = [flag_group(flags = [
-                    "-Xlinker",
-                    "-no_deduplicate",
-                ])],
-            ),
-        ],
-        requires = [feature_set(features = ["opt"])],
-    )
+    dynamic_linking_mode_feature = feature(name = "dynamic_linking_mode")
 
     features = [
-        fastbuild_feature,
-        no_legacy_features_feature,
-        opt_feature,
-        dbg_feature,
+        # Marker features
+        feature(name = "archive_param_file", enabled = True),
+        feature(name = "compiler_param_file"),
+        feature(name = "compile_all_modules"),
+        feature(name = "coverage"),
+        feature(name = "dbg"),
+        feature(name = "exclude_private_headers_in_module_maps"),
+        feature(name = "fastbuild"),
+        feature(name = "has_configured_linker_path"),
+        feature(name = "module_maps", enabled = True),
+        feature(name = "no_legacy_features"),
+        feature(name = "only_doth_headers_in_module_maps"),
+        feature(name = "opt"),
+        feature(name = "parse_headers"),
+        feature(name = "no_dotd_file"),
+        feature(name = "supports_pic", enabled = True),
+
+        # Features with more configuration
         link_libcpp_feature,
-        compile_all_modules_feature,
-        exclude_private_headers_in_module_maps_feature,
-        has_configured_linker_path_feature,
-        only_doth_headers_in_module_maps_feature,
         default_compile_flags_feature,
+        ns_block_assertions_feature,
         debug_prefix_map_pwd_is_dot_feature,
         remap_xcode_path_feature,
         generate_dsym_file_feature,
@@ -2724,7 +2808,6 @@ def _impl(ctx):
         contains_objc_source_feature,
         objc_actions_feature,
         strip_debug_symbols_feature,
-        symbol_counts_feature,
         shared_flag_feature,
         kernel_extension_feature,
         linkstamps_feature,
@@ -2732,9 +2815,9 @@ def _impl(ctx):
         archiver_flags_feature,
         runtime_root_flags_feature,
         input_param_flags_feature,
+        objc_link_flag_feature,
         force_pic_flags_feature,
         pch_feature,
-        module_maps_feature,
         use_objc_modules_feature,
         no_enable_modules_feature,
         apply_default_warnings_feature,
@@ -2742,18 +2825,19 @@ def _impl(ctx):
         include_paths_feature,
         sysroot_feature,
         dependency_file_feature,
+        serialized_diagnostics_file_feature,
         pic_feature,
-        per_object_debug_info_feature,
         preprocessor_defines_feature,
         framework_paths_feature,
-        random_seed_feature,
         fdo_instrument_feature,
         fdo_optimize_feature,
         autofdo_feature,
         lipo_feature,
-        coverage_feature,
+        lto_object_path_feature,
         llvm_coverage_map_format_feature,
         gcc_coverage_map_format_feature,
+        coverage_prefix_map_feature,
+        coverage_prefix_map_absolute_sources_non_hermetic_private_feature,
         apply_default_compiler_flags_feature,
         include_system_dirs_feature,
         headerpad_feature,
@@ -2763,6 +2847,7 @@ def _impl(ctx):
         relative_ast_path_feature,
         user_link_flags_feature,
         default_link_flags_feature,
+        no_deduplicate_feature,
         dead_strip_feature,
         cpp_linker_flags_feature,
         apply_implicit_frameworks_feature,
@@ -2783,18 +2868,14 @@ def _impl(ctx):
         treat_warnings_as_errors_feature,
         no_warn_duplicate_libraries_feature,
         external_include_paths_feature,
-        serialized_diagnostics_file_feature,
-        parse_headers_feature,
-        no_dotd_file_feature,
-        archive_param_file_feature,
-        compiler_param_file_feature,
-        lto_object_path_feature,
-        no_deduplicate_feature,
+        header_parsing_env_feature,
     ]
 
     if platform_name == "macos":
         features.append(dynamic_linking_mode_feature)
 
+    # macOS artifact name patterns differ from the defaults only for dynamic
+    # libraries.
     artifact_name_patterns = [
         artifact_name_pattern(
             category_name = "dynamic_library",
