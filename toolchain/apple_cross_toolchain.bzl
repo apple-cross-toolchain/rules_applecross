@@ -1,7 +1,5 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 
-_GITHUB_ASSET_HEADERS = {"Accept": "application/octet-stream"}
-
 def _read_netrc_token(rctx, host):
     """Read a password for the given host from ~/.netrc."""
     home = rctx.os.environ.get("HOME", "")
@@ -22,28 +20,41 @@ def _read_netrc_token(rctx, host):
             return parts[1]
     return None
 
-def _github_asset_download(rctx, urls, sha256, strip_prefix):
-    """Download and extract a GitHub release asset, handling private repos."""
-    api_urls = [u for u in urls if "api.github.com" in u]
-    if api_urls:
-        token = _read_netrc_token(rctx, "api.github.com")
-        auth = {}
-        headers = dict(_GITHUB_ASSET_HEADERS)
-        if token:
-            headers["Authorization"] = "token " + token
-        rctx.download_and_extract(
-            url = urls,
-            sha256 = sha256 or "",
-            stripPrefix = strip_prefix or "",
-            type = rctx.attr.apple_sdk_archive_type or "",
-            headers = headers,
-        )
-    else:
-        rctx.download_and_extract(
-            url = urls,
-            sha256 = sha256 or "",
-            stripPrefix = strip_prefix or "",
-        )
+def _sdk_download(rctx, urls, sha256, strip_prefix):
+    """Download and extract an SDK archive, with auth support for private hosts."""
+    kwargs = {
+        "url": urls,
+        "sha256": sha256 or "",
+        "stripPrefix": strip_prefix or "",
+    }
+    if rctx.attr.apple_sdk_archive_type:
+        kwargs["type"] = rctx.attr.apple_sdk_archive_type
+
+    # Build auth headers from ~/.netrc for any URL that needs them.
+    headers = {}
+    for u in urls:
+        if "api.github.com" in u:
+            # GitHub API release assets require this Accept header.
+            headers["Accept"] = "application/octet-stream"
+            token = _read_netrc_token(rctx, "api.github.com")
+            if token:
+                headers["Authorization"] = "token " + token
+            break
+
+    if not headers:
+        # Check ~/.netrc for a Bearer/token for the first URL's host.
+        for u in urls:
+            # Extract host from URL: "https://host/path" -> "host"
+            host = u.split("://")[-1].split("/")[0]
+            token = _read_netrc_token(rctx, host)
+            if token:
+                headers["Authorization"] = "Bearer " + token
+                break
+
+    if headers:
+        kwargs["headers"] = headers
+
+    rctx.download_and_extract(**kwargs)
 
 def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None):
     rctx.report_progress("Compiling {}".format(paths.basename(src_name)))
@@ -174,7 +185,7 @@ def _apple_cross_toolchain_impl(rctx):
             stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
         )
     elif rctx.attr.apple_sdk_urls:
-        _github_asset_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
+        _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
     # Resolve the @llvm_prebuilt repo (same URL+SHA as @llvm's own prebuilt;
     # Bazel's download cache deduplicates the network fetch).
