@@ -175,14 +175,19 @@ def _apple_cross_toolchain_impl(rctx):
     rctx.template("cc_wrapper.sh", cc_wrapper_tpl, substitutions)
     rctx.template("xcrunwrapper.sh", xcrunwrapper_tpl, substitutions)
 
-    # Extract Apple SDKs - either from local path or URL
+    # Extract Apple SDKs - either from local path/directory or URL
     if rctx.attr.apple_sdk_path:
-        # Local tarball
-        apple_sdk_tarball = rctx.workspace_root.get_child(rctx.attr.apple_sdk_path)
-        rctx.extract(
-            archive = apple_sdk_tarball,
-            stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
-        )
+        apple_sdk_local = rctx.workspace_root.get_child(rctx.attr.apple_sdk_path)
+        if rctx.execute(["test", "-d", str(apple_sdk_local)]).return_code == 0:
+            # Pre-extracted directory — hardlink copy (fast, no re-extraction,
+            # and tools like xcrun resolve paths correctly unlike symlinks).
+            rctx.execute(["bash", "-c", "cp -al '" + str(apple_sdk_local) + "/.' ."])
+        else:
+            # Tarball
+            rctx.extract(
+                archive = apple_sdk_local,
+                stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
+            )
     elif rctx.attr.apple_sdk_urls:
         _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
@@ -192,14 +197,19 @@ def _apple_cross_toolchain_impl(rctx):
     llvm_prebuilt_lib = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname.dirname) + "/lib"
     xcode_toolchain_dir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
 
-    # Extract Swift - either from local path or URL
+    # Extract Swift - either from local path/directory or URL
     if rctx.attr.swift_path:
-        swift_tarball = rctx.workspace_root.get_child(rctx.attr.swift_path)
-        rctx.extract(
-            archive = swift_tarball,
-            stripPrefix = rctx.attr.swift_strip_prefix or "",
-            output = "tmp_swift",
-        )
+        swift_local = rctx.workspace_root.get_child(rctx.attr.swift_path)
+        if rctx.execute(["test", "-d", str(swift_local)]).return_code == 0:
+            # Pre-extracted directory — symlink it
+            rctx.symlink(swift_local, "tmp_swift")
+        else:
+            # Tarball
+            rctx.extract(
+                archive = swift_local,
+                stripPrefix = rctx.attr.swift_strip_prefix or "",
+                output = "tmp_swift",
+            )
     elif rctx.attr.swift_urls:
         rctx.download_and_extract(
             url = rctx.attr.swift_urls,
@@ -632,7 +642,7 @@ _DEFAULT_SWIFT_STRIP_PREFIX = "swift-6.2.3-RELEASE-ubuntu24.04"
 apple_cross_toolchain = repository_rule(
     attrs = {
         "apple_sdk_path": attr.string(
-            doc = "Workspace-relative path to a local Apple SDK tarball.",
+            doc = "Workspace-relative path to a local Apple SDK tarball or pre-extracted directory.",
         ),
         "apple_sdk_urls": attr.string_list(),
         "apple_sdk_sha256": attr.string(
@@ -646,7 +656,7 @@ apple_cross_toolchain = repository_rule(
             mandatory = False,
         ),
         "swift_path": attr.string(
-            doc = "Workspace-relative path to a local Swift tarball.",
+            doc = "Workspace-relative path to a local Swift tarball or pre-extracted directory.",
         ),
         "swift_urls": attr.string_list(
             default = _DEFAULT_SWIFT_URLS,
