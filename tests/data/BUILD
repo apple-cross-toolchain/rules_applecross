@@ -17,6 +17,7 @@ cc_binary(
 objc_library(
     name = "dummy_lib",
     srcs = ["dummy.m"],
+    target_compatible_with = ["@platforms//os:macos"],
 )
 
 swift_library(
@@ -29,4 +30,5 @@ swift_library(
     name = "hello_foundation",
     srcs = ["hello_foundation.swift"],
     module_name = "HelloFoundation",
+    target_compatible_with = ["@platforms//os:macos"],
 )

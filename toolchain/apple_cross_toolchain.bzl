@@ -630,6 +630,11 @@ if __name__ == "__main__":
     rctx.delete("wrapped_clang.cc")
     rctx.symlink("wrapped_clang", "wrapped_clang_pp")
 
+    # Generate Swift version file for the Linux swift_toolchain rule.
+    swiftc = xcode_toolchain_bindir + "swiftc"
+    result = rctx.execute([swiftc, "--version"])
+    rctx.file("swift_version", result.stdout if result.return_code == 0 else "")
+
     # Setup Swift toolchain
     rctx.template("swift_toolchain.bzl", swift_toolchain_tpl, substitutions)
     rctx.template("repositories.bzl", repositories_tpl, substitutions)

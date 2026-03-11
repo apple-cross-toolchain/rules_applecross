@@ -4,6 +4,7 @@ load("@rules_cc//cc:defs.bzl", "cc_toolchain", "cc_toolchain_suite", "cc_library
 load("@build_bazel_apple_support//configs:platforms.bzl", "APPLE_PLATFORMS_CONSTRAINTS")
 load(":cc_toolchain_config.bzl", "cc_toolchain_config")
 load(":swift_toolchain.bzl", "swift_toolchain")
+load("@build_bazel_rules_swift//swift/toolchains:swift_toolchain.bzl", linux_swift_toolchain = "swift_toolchain")
 
 exports_files([
     "wrapped_clang",
@@ -185,3 +186,27 @@ filegroup(
     )
     for arch in _APPLE_ARCHS
 ]
+
+# Linux Swift toolchain (for exec/host Swift compilation)
+
+linux_swift_toolchain(
+    name = "swift-compiler-linux_x86_64",
+    arch = "x86_64",
+    os = "linux",
+    root = "%{toolchain_path_prefix}Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr",
+    version_file = ":swift_version",
+)
+
+toolchain(
+    name = "swift-toolchain-linux_x86_64",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    toolchain = ":swift-compiler-linux_x86_64",
+    toolchain_type = "@build_bazel_rules_swift//toolchains:toolchain_type",
+)
