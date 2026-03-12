@@ -99,4 +99,4 @@ find "$PROJECT_ROOT/Xcode.app" -type l -exec sh -c 'test "$(readlink "$1")" = ".
 
 XCODE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_ROOT/Xcode.app/Contents/version.plist")"
 
-tar -C "$PROJECT_ROOT" -Jcf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.xz" Xcode.app
+tar -C "$PROJECT_ROOT" --zstd -cf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.zst" Xcode.app
