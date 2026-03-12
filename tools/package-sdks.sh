@@ -26,6 +26,9 @@ SDK_EXCLUDES=(
   --exclude "*.swiftdoc"
   # Static archives — the SDK provides .tbd text stubs for linking
   --exclude "*.a"
+  # Mach-O dynamic libraries — only .tbd text stubs are needed for linking
+  # on Linux; the real binaries are large and architecture-specific
+  --exclude "*.dylib"
   # Scripting frameworks never used by the toolchain
   --exclude "Ruby.framework"
   --exclude "Perl.framework"
@@ -47,11 +50,11 @@ for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS Appl
   rsync -a --relative "${SDK_EXCLUDES[@]}" "./Platforms/$sdk.platform/Developer/SDKs/" "$NEW_DEVELOPER_DIR"
 
   if [[ -d "Platforms/$sdk.platform/usr/lib" ]]; then
-    rsync -a --relative --exclude "*.a" "./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
   if [[ -d "Platforms/$sdk.platform/Developer/usr/lib" ]]; then
-    rsync -a --relative --exclude "*.a" "./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
   if [[ -d "Platforms/$sdk.platform/Developer/Library/Frameworks" ]]; then
@@ -73,17 +76,22 @@ if [[ -d "Toolchains/XcodeDefault.xctoolchain/usr/lib/arc" ]]; then
   rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/" "$NEW_DEVELOPER_DIR"
 fi
 rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/" "$NEW_DEVELOPER_DIR"
-# Exclude .a from Swift runtime dirs — the cross-compilation toolchain uses its
-# own Swift and these back-deployment compatibility archives (libswiftCompatibility*.a)
-# come from the separate Swift toolchain instead.  Keep .tbd stubs and .swiftmodule/
-# .swiftinterface files which are still needed.
-rsync -a --relative --exclude "*.a" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
+# Exclude .a and .dylib from Swift runtime dirs — the cross-compilation
+# toolchain uses its own Swift runtime; only .tbd stubs, .swiftmodule/
+# and .swiftinterface files are needed for compilation and linking.
+rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
 if [[ -d "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0" ]]; then
-  rsync -a --relative --exclude "*.a" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
+  rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
 fi
 
 # Create a placeholder bin directory
 mkdir -p "$NEW_DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+
+# Remove Mach-O binaries from framework bundles (e.g. XCTest.framework/XCTest).
+# These extensionless fat binaries are only needed at runtime, not for cross-
+# compilation linking (which uses .tbd text stubs).
+find "$PROJECT_ROOT/Xcode.app" -path "*.framework/*" -type f ! -name "*.*" \
+  -exec sh -c 'file "$1" | grep -q "Mach-O" && rm "$1"' _ {} \;
 
 # Remove self-referencing symlinks (e.g. Ruby.framework/Headers/ruby/ruby -> .)
 # that cause infinite loops when Bazel globs the SDK tree.
