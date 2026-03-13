@@ -48,7 +48,7 @@ apple_cross_toolchain = use_extension(
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     apple_sdk_urls = ["SDKS_URL"],
-    apple_sdk_sha256 = "2716a118d0b23e3b789dc97e72ba6a5bc2a2a0d9cbeea946d0410fcf9364d6ab",
+    apple_sdk_sha256 = "afe06f6880327a32393fe84c0d267b50e655636c58c4047bfe584cc7577004b2",
     apple_sdk_archive_type = "tar.zst",
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")
