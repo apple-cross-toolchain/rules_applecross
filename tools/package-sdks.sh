@@ -87,11 +87,43 @@ fi
 # Create a placeholder bin directory
 mkdir -p "$NEW_DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin"
 
-# Remove Mach-O binaries from framework bundles (e.g. XCTest.framework/XCTest).
-# These extensionless fat binaries are only needed at runtime, not for cross-
-# compilation linking (which uses .tbd text stubs).
+# Replace Mach-O binaries with TBD text stubs.
+# Framework bundles contain fat Mach-O binaries (e.g. XCTest.framework/XCTest)
+# that are only needed at runtime.  For cross-compilation linking we only need
+# .tbd stubs.  Use `tapi stubify` to generate them, then remove the originals.
 find "$PROJECT_ROOT/Xcode.app" -path "*.framework/*" -type f ! -name "*.*" \
-  -exec sh -c 'file "$1" | grep -q "Mach-O" && rm "$1"' _ {} \;
+  -exec sh -c '
+    if file "$1" | grep -q "Mach-O"; then
+      tbd="${1}.tbd"
+      if [ ! -f "$tbd" ]; then
+        xcrun tapi stubify "$1" -o "$tbd" 2>/dev/null || true
+      fi
+      rm "$1"
+    fi
+  ' _ {} \;
+
+# Generate TBD stubs for .dylib files that were excluded by rsync.
+# Re-scan the source and stubify any dylib whose .tbd doesn't already exist.
+for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS AppleTVSimulator XROS XRSimulator; do
+  for dir in \
+    "Platforms/$sdk.platform/usr/lib" \
+    "Platforms/$sdk.platform/Developer/usr/lib" \
+    "Toolchains/XcodeDefault.xctoolchain/usr/lib/swift" \
+    "Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0"
+  do
+    src_dir="$DEVELOPER_DIR/$dir"
+    dst_dir="$NEW_DEVELOPER_DIR/$dir"
+    [[ -d "$src_dir" ]] || continue
+    [[ -d "$dst_dir" ]] || continue
+    find "$src_dir" -name "*.dylib" -type f | while read -r dylib; do
+      rel="${dylib#"$src_dir/"}"
+      tbd_path="$dst_dir/${rel%.dylib}.tbd"
+      [[ -f "$tbd_path" ]] && continue
+      mkdir -p "$(dirname "$tbd_path")"
+      xcrun tapi stubify "$dylib" -o "$tbd_path" 2>/dev/null || true
+    done
+  done
+done
 
 # Remove self-referencing symlinks (e.g. Ruby.framework/Headers/ruby/ruby -> .)
 # that cause infinite loops when Bazel globs the SDK tree.
