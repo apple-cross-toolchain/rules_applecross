@@ -129,7 +129,7 @@ done
 # tapi stubify preserves re-export chains (e.g. XCTest → XCTestCore) but ld64.lld
 # cannot resolve @rpath references to PrivateFrameworks.  For cross-compilation
 # we only need the stub to exist; the re-export metadata is not required.
-find "$PROJECT_ROOT/Xcode.app" -path "*/Developer/Library/*/Frameworks/*.framework/*.tbd" -type f \
+find "$PROJECT_ROOT/Xcode.app" \( -path "*/Developer/Library/Frameworks/*.framework/*" -o -path "*/Developer/Library/PrivateFrameworks/*.framework/*" \) -name "*.tbd" -type f \
   -exec python3 -c '
 import json, sys
 for path in sys.argv[1:]:
