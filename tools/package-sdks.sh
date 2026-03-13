@@ -125,6 +125,32 @@ for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS Appl
   done
 done
 
+# Strip reexported_libraries from Developer framework TBDs.
+# tapi stubify preserves re-export chains (e.g. XCTest → XCTestCore) but ld64.lld
+# cannot resolve @rpath references to PrivateFrameworks.  For cross-compilation
+# we only need the stub to exist; the re-export metadata is not required.
+find "$PROJECT_ROOT/Xcode.app" -path "*/Developer/Library/*/Frameworks/*.framework/*.tbd" -type f \
+  -exec python3 -c '
+import json, sys
+for path in sys.argv[1:]:
+    try:
+        with open(path) as f:
+            tbd = json.load(f)
+    except (json.JSONDecodeError, ValueError):
+        continue
+    changed = False
+    for key in ("main_library", "libraries"):
+        obj = tbd.get(key)
+        items = [obj] if isinstance(obj, dict) else (obj if isinstance(obj, list) else [])
+        for item in items:
+            if "reexported_libraries" in item:
+                del item["reexported_libraries"]
+                changed = True
+    if changed:
+        with open(path, "w") as f:
+            json.dump(tbd, f)
+' {} +
+
 # Remove self-referencing symlinks (e.g. Ruby.framework/Headers/ruby/ruby -> .)
 # that cause infinite loops when Bazel globs the SDK tree.
 find "$PROJECT_ROOT/Xcode.app" -type l -exec sh -c 'test "$(readlink "$1")" = "." && rm "$1"' _ {} \;
