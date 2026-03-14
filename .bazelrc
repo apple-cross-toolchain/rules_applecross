@@ -11,7 +11,6 @@ build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:
 
 build:remote --bes_backend=grpcs://cloud.buildbuddy.io
 build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-build:remote --host_platform=//platforms:docker_image_platform
 build:remote --jobs=100
 build:remote --remote_download_toplevel
 build:remote --remote_executor=grpcs://cloud.buildbuddy.io
