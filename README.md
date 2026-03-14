@@ -80,7 +80,6 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
     ```
     build:remote --bes_backend=grpcs://cloud.buildbuddy.io
     build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-    build:remote --host_platform=//platforms:docker_image_platform
     build:remote --jobs=100
     build:remote --remote_download_toplevel
     build:remote --remote_executor=grpcs://cloud.buildbuddy.io
