@@ -18,8 +18,6 @@ Adapted for rules_swift 3.x.
 """
 
 load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
-load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
-load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "SwiftToolchainInfo",
@@ -57,10 +55,8 @@ load(
     "@build_bazel_rules_swift//swift/toolchains/config:tool_config.bzl",
     "ToolConfigInfo",
 )
-
-# Path to the toolchain root, substituted by the template engine.
-_TOOLCHAIN_ROOT = "%{toolchain_path_prefix}Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr"
-_DEVELOPER_DIR = "%{toolchain_path_prefix}Xcode.app/Contents/Developer"
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 
 # Swift action names (matching rules_swift constants).
 _SWIFT_ACTION_COMPILE = "SwiftCompile"
@@ -111,9 +107,11 @@ _PLATFORM_INFO = {
 }
 
 _SIMULATOR_CPUS = [
-    "ios_i386", "ios_x86_64",
+    "ios_i386",
+    "ios_x86_64",
     "tvos_x86_64",
-    "watchos_i386", "watchos_x86_64",
+    "watchos_i386",
+    "watchos_x86_64",
     "visionos_x86_64",
 ]
 
@@ -126,6 +124,7 @@ _PLATFORM_TYPE_MAP = {
 
 def _make_resource_directory_configurator(developer_dir):
     """Configures the -resource-dir flag for Swift compilation."""
+
     def _resource_directory_configurator(_prerequisites, args):
         args.add(
             "-resource-dir",
@@ -136,12 +135,13 @@ def _make_resource_directory_configurator(developer_dir):
 
     return _resource_directory_configurator
 
-def _make_tool_configs(additional_tools):
+def _make_tool_configs(additional_tools, toolchain_root):
     """Creates tool configurations for Swift actions."""
+
     def _driver_config(mode):
         return {
             "mode": mode,
-            "toolchain_root": _TOOLCHAIN_ROOT,
+            "toolchain_root": toolchain_root,
             "tool_executable_suffix": "",
         }
 
@@ -225,6 +225,9 @@ def _test_linking_context(sdk_platform, developer_dir, toolchain_label):
     )
 
 def _swift_toolchain_impl(ctx):
+    developer_dir = ctx.attr.toolchain_path_prefix + "Xcode.app/Contents/Developer"
+    toolchain_root = developer_dir + "/Toolchains/XcodeDefault.xctoolchain/usr"
+
     cc_toolchain = find_cpp_toolchain(ctx)
     cpu = ctx.attr.cpu
 
@@ -262,7 +265,7 @@ def _swift_toolchain_impl(ctx):
     xcode_version_str = str(xcode_config.xcode_version()) if xcode_config.xcode_version() else ""
     xcode_parts = xcode_version_str.split(".")
     sdk_version = ".".join(xcode_parts[:2]) if len(xcode_parts) >= 2 else xcode_version_str
-    sdk_dir = _DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + sdk_version + ".sdk"
+    sdk_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + sdk_version + ".sdk"
 
     execution_requirements = xcode_config.execution_info()
 
@@ -287,7 +290,7 @@ def _swift_toolchain_impl(ctx):
     ]
 
     # Platform developer paths (needed for XCTest and other developer frameworks)
-    platform_developer_dir = _DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer"
+    platform_developer_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer"
     platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
     platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
 
@@ -325,14 +328,14 @@ def _swift_toolchain_impl(ctx):
                 _SWIFT_ACTION_SYNTHESIZE_INTERFACE,
             ],
             configurators = [
-                _make_resource_directory_configurator(_DEVELOPER_DIR),
+                _make_resource_directory_configurator(developer_dir),
             ],
         ),
         # Resource directory for module interface compilation (always needed)
         ActionConfigInfo(
             actions = [_SWIFT_ACTION_COMPILE_MODULE_INTERFACE],
             configurators = [
-                _make_resource_directory_configurator(_DEVELOPER_DIR),
+                _make_resource_directory_configurator(developer_dir),
             ],
         ),
         # Debug prefix map for reproducible debug info
@@ -378,8 +381,8 @@ def _swift_toolchain_impl(ctx):
     ])
 
     # Collect toolchain files as additional tools for sandbox access.
-    additional_tools = ctx.attr._toolchain_files.files.to_list()
-    tool_configs = _make_tool_configs(additional_tools)
+    additional_tools = ctx.attr.toolchain_files.files.to_list()
+    tool_configs = _make_tool_configs(additional_tools, toolchain_root)
 
     # Build Swift linker opts provider
     swift_platform_name = info.swift_platform_name
@@ -387,18 +390,18 @@ def _swift_toolchain_impl(ctx):
         swift_platform_name = swift_platform_name.replace("os", "simulator") if swift_platform_name.endswith("os") else swift_platform_name + "simulator"
 
     swift_linkopts = _swift_linkopts_cc_info(
-        toolchain_root = _TOOLCHAIN_ROOT,
+        toolchain_root = toolchain_root,
         swift_platform_name = swift_platform_name,
         sdk_platform = sdk_platform,
         sdk_dir = sdk_dir,
-        developer_dir = _DEVELOPER_DIR,
+        developer_dir = developer_dir,
         toolchain_label = ctx.label,
     )
 
     # Build test linking context
     test_linking_ctx = _test_linking_context(
         sdk_platform = sdk_platform,
-        developer_dir = _DEVELOPER_DIR,
+        developer_dir = developer_dir,
         toolchain_label = ctx.label,
     )
 
@@ -432,7 +435,7 @@ def _swift_toolchain_impl(ctx):
         module_aliases = {},
         package_configurations = [],
         requested_features = requested_features,
-        root_dir = _TOOLCHAIN_ROOT,
+        root_dir = toolchain_root,
         swift_worker = ctx.attr._worker[DefaultInfo].files_to_run,
         test_configuration = struct(
             binary_name = "{name}",
@@ -460,8 +463,13 @@ swift_toolchain = rule(
             mandatory = True,
             doc = "The target CPU (e.g. ios_arm64, darwin_arm64).",
         ),
-        "_toolchain_files": attr.label(
-            default = Label(":toolchain_files"),
+        "toolchain_path_prefix": attr.string(
+            mandatory = True,
+            doc = "Path prefix for the cross-compilation toolchain (e.g. 'external/apple_cross_toolchain/').",
+        ),
+        "toolchain_files": attr.label(
+            mandatory = True,
+            doc = "Filegroup of SDK/toolchain files needed for sandbox access.",
         ),
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),

@@ -1,0 +1,274 @@
+"""Config settings for Apple platform selection in rule-based toolchains."""
+
+package(default_visibility = ["//visibility:public"])
+
+# Per-OS config settings (for OS-level flag variation)
+
+config_setting(
+    name = "is_macos",
+    constraint_values = ["@platforms//os:macos"],
+)
+
+config_setting(
+    name = "is_ios",
+    constraint_values = ["@platforms//os:ios"],
+)
+
+config_setting(
+    name = "is_tvos",
+    constraint_values = ["@platforms//os:tvos"],
+)
+
+config_setting(
+    name = "is_watchos",
+    constraint_values = ["@platforms//os:watchos"],
+)
+
+config_setting(
+    name = "is_visionos",
+    constraint_values = ["@platforms//os:visionos"],
+)
+
+# Device vs simulator
+
+config_setting(
+    name = "is_simulator",
+    constraint_values = ["@build_bazel_apple_support//constraints:simulator"],
+)
+
+config_setting(
+    name = "is_device",
+    constraint_values = ["@build_bazel_apple_support//constraints:device"],
+)
+
+# Per-SDK-platform config settings (for SDK path selection)
+# Each matches a specific SDK directory (combining OS + device/simulator).
+
+config_setting(
+    name = "sdk_iphoneos",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "sdk_iphonesimulator",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+config_setting(
+    name = "sdk_macosx",
+    constraint_values = ["@platforms//os:macos"],
+)
+
+config_setting(
+    name = "sdk_appletvos",
+    constraint_values = [
+        "@platforms//os:tvos",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "sdk_appletvsimulator",
+    constraint_values = [
+        "@platforms//os:tvos",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+config_setting(
+    name = "sdk_xros",
+    constraint_values = [
+        "@platforms//os:visionos",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "sdk_xrsimulator",
+    constraint_values = [
+        "@platforms//os:visionos",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+config_setting(
+    name = "sdk_watchos",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "sdk_watchsimulator",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+# Per-arch config settings (for target triple selection).
+# Each uniquely identifies one entry in APPLE_PLATFORMS_CONSTRAINTS.
+
+# macOS
+config_setting(
+    name = "darwin_arm64",
+    constraint_values = [
+        "@platforms//os:macos",
+        "@platforms//cpu:arm64",
+    ],
+)
+
+config_setting(
+    name = "darwin_arm64e",
+    constraint_values = [
+        "@platforms//os:macos",
+        "@platforms//cpu:arm64e",
+    ],
+)
+
+config_setting(
+    name = "darwin_x86_64",
+    constraint_values = [
+        "@platforms//os:macos",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+# iOS
+config_setting(
+    name = "ios_arm64",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "ios_arm64e",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@platforms//cpu:arm64e",
+    ],
+)
+
+config_setting(
+    name = "ios_sim_arm64",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+config_setting(
+    name = "ios_x86_64",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+# tvOS
+config_setting(
+    name = "tvos_arm64",
+    constraint_values = [
+        "@platforms//os:tvos",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "tvos_sim_arm64",
+    constraint_values = [
+        "@platforms//os:tvos",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+config_setting(
+    name = "tvos_x86_64",
+    constraint_values = [
+        "@platforms//os:tvos",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+# visionOS
+config_setting(
+    name = "visionos_arm64",
+    constraint_values = [
+        "@platforms//os:visionos",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "visionos_sim_arm64",
+    constraint_values = [
+        "@platforms//os:visionos",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+# watchOS
+config_setting(
+    name = "watchos_arm64",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+config_setting(
+    name = "watchos_device_arm64",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "watchos_device_arm64e",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@platforms//cpu:arm64e",
+    ],
+)
+
+config_setting(
+    name = "watchos_arm64_32",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@platforms//cpu:arm64_32",
+    ],
+)
+
+config_setting(
+    name = "watchos_armv7k",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@platforms//cpu:armv7k",
+    ],
+)
+
+config_setting(
+    name = "watchos_x86_64",
+    constraint_values = [
+        "@platforms//os:watchos",
+        "@platforms//cpu:x86_64",
+    ],
+)

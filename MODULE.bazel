@@ -1,41 +1,64 @@
-module(name = "rules_applecross", version = "0.0.3")
+module(
+    name = "rules_applecross",
+    version = "0.0.3",
+)
 
 bazel_dep(name = "bazel_features", version = "1.43.0")
 bazel_dep(name = "apple_support", version = "2.3.0", repo_name = "build_bazel_apple_support")
 bazel_dep(name = "rules_apple", version = "4.5.0", repo_name = "build_bazel_rules_apple")
 git_override(
     module_name = "rules_apple",
-    remote = "https://github.com/bazelbuild/rules_apple.git",
     commit = "e0eab8952919d51b5c2e19c9ee8a714256a0b735",
+    patch_strip = 1,
     patches = [
         "//patches:rules_apple_no_exec_platform_constraint.patch",
+        "//patches:rules_apple_linkstamps_compat.patch",
+        "//patches:rules_apple_bundletool_path.patch",
     ],
-    patch_strip = 1,
+    remote = "https://github.com/bazelbuild/rules_apple.git",
 )
+
 bazel_dep(name = "rules_swift", version = "3.5.0", repo_name = "build_bazel_rules_swift")
 single_version_override(
     module_name = "rules_swift",
-    version = "3.5.0",
+    patch_strip = 1,
     patches = [
         "//patches:rules_swift_empty_target_system_name.patch",
     ],
-    patch_strip = 1,
+    version = "3.5.0",
 )
+
 bazel_dep(name = "rules_cc", version = "0.2.17")
+single_version_override(
+    module_name = "rules_cc",
+    patch_strip = 1,
+    patches = [
+        "//patches:rules_cc_apple_force_load.patch",
+    ],
+    version = "0.2.17",
+)
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "llvm", version = "0.6.1")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "xctestrunner", version = "0.0.1")
 git_override(
     module_name = "xctestrunner",
-    remote = "https://github.com/apple-cross-toolchain/xctestrunner-bash.git",
     commit = "9548d93f29a2a93315d7a0458622682c0f76e6fe",
+    remote = "https://github.com/apple-cross-toolchain/xctestrunner-bash.git",
 )
 
 non_module_deps = use_extension("@build_bazel_rules_apple//apple:extensions.bzl", "non_module_deps", dev_dependency = True)
-override_repo(non_module_deps, xctestrunner = "xctestrunner")
 
-register_toolchains("//testing:ios_test_toolchain", dev_dependency = True)
+override_repo(
+    non_module_deps,
+    xctestrunner = "xctestrunner",
+)
+
+register_toolchains(
+    "//testing:ios_test_toolchain",
+    dev_dependency = True,
+)
+
 register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64")
 
 llvm_prebuilt_ext = use_extension("//toolchain:llvm_prebuilt.bzl", "llvm_prebuilt")

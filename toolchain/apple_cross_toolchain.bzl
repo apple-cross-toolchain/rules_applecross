@@ -144,13 +144,9 @@ def _apple_cross_toolchain_impl(rctx):
     # Resolve label paths
     libtool_cc = rctx.path(Label("@rules_applecross//toolchain:libtool.cc"))
     build_tpl = rctx.path(Label("@rules_applecross//toolchain:BUILD.template.bzl"))
-    cc_toolchain_config_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_toolchain_config.template.bzl"))
     cc_wrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_wrapper.template.sh"))
-    swift_toolchain_tpl = rctx.path(Label("@rules_applecross//toolchain:swift_toolchain.template.bzl"))
-    repositories_tpl = rctx.path(Label("@rules_applecross//toolchain:repositories.template.bzl"))
-    swift_autoconfig_tpl = rctx.path(Label("@rules_applecross//toolchain:swift_autoconfiguration.template.bzl"))
-    wrapped_clang_tpl = rctx.path(Label("@rules_applecross//toolchain:wrapped_clang.template.cc"))
-    xcrunwrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:xcrunwrapper.template.sh"))
+    wrapped_clang_src = rctx.path(Label("@rules_applecross//toolchain:wrapped_clang.cc"))
+    xcrunwrapper_src = rctx.path(Label("@rules_applecross//toolchain:xcrunwrapper.sh"))
 
     repo_path = str(rctx.path(""))
     relative_path_prefix = "external/{}/".format(rctx.name)
@@ -164,16 +160,14 @@ def _apple_cross_toolchain_impl(rctx):
 
     substitutions = {
         "%{cc}": relative_path_prefix + "wrapped_clang",
-        "%{repo_name}": rctx.name,
-        "%{repo_path}": repo_path,
         "%{toolchain_path_prefix}": toolchain_path_prefix,
         "%{tools_path_prefix}": tools_path_prefix,
     }
 
-    # Setup C++ toolchain helpers (BUILD and cc_toolchain_config are deferred
-    # until after clang version detection so we can populate include dirs).
+    # Setup C++ toolchain helpers (BUILD is deferred until after clang version
+    # detection so we can populate include dirs).
     rctx.template("cc_wrapper.sh", cc_wrapper_tpl, substitutions)
-    rctx.template("xcrunwrapper.sh", xcrunwrapper_tpl, substitutions)
+    rctx.template("xcrunwrapper.sh", xcrunwrapper_src, {})
 
     # Extract Apple SDKs - either from local path/directory or URL
     if rctx.attr.apple_sdk_path:
@@ -222,14 +216,17 @@ def _apple_cross_toolchain_impl(rctx):
         # Copy all swift-related binaries (including swift-driver,
         # swift-frontend, etc. that symlinks like swiftc point to)
         rctx.execute([
-            "bash", "-c",
+            "bash",
+            "-c",
             "cp -a tmp_swift/usr/bin/swift* " + xcode_toolchain_bindir,
         ])
+
         # Also copy Swift runtime/stdlib libraries if present
         result = rctx.execute(["test", "-d", "tmp_swift/usr/lib/swift"])
         if result.return_code == 0:
             rctx.execute([
-                "cp", "-a",
+                "cp",
+                "-a",
                 "tmp_swift/usr/lib/swift",
                 xcode_toolchain_bindir + "../lib/",
             ])
@@ -251,16 +248,19 @@ def _apple_cross_toolchain_impl(rctx):
     # Copy LLVM binaries from @llvm's prebuilt repo AFTER ported-tools
     # extraction so they take precedence.
     result = rctx.execute([
-        "bash", "-c",
+        "bash",
+        "-c",
         "cp -a " + llvm_prebuilt_bin + "/* " + xcode_toolchain_bindir,
     ])
     if result.return_code != 0:
         fail("Failed to copy LLVM binaries: " + result.stderr)
+
     # Also copy clang resource headers (lib/clang/<ver>/include/) if present
     result = rctx.execute(["test", "-d", llvm_prebuilt_lib])
     if result.return_code == 0:
         rctx.execute([
-            "bash", "-c",
+            "bash",
+            "-c",
             "cp -a " + llvm_prebuilt_lib + "/* " + xcode_toolchain_dir + "lib/",
         ])
 
@@ -288,14 +288,17 @@ def _apple_cross_toolchain_impl(rctx):
     clang_lib_dir = xcode_toolchain_dir + "lib/clang/"
     llvm_ver = ""
     result = rctx.execute([
-        "bash", "-c",
+        "bash",
+        "-c",
         "ls -1 " + clang_lib_dir + " 2>/dev/null | head -1",
     ])
     sdk_clang_ver = result.stdout.strip()
     if sdk_clang_ver:
         result = rctx.execute([
-            xcode_toolchain_bindir + "clang", "--version",
+            xcode_toolchain_bindir + "clang",
+            "--version",
         ])
+
         # Extract major version from "clang version X.Y.Z"
         for line in result.stdout.split("\n"):
             if "clang version" in line:
@@ -308,7 +311,10 @@ def _apple_cross_toolchain_impl(rctx):
                         # LLVM version dir doesn't exist at all — symlink it
                         # to the SDK version.
                         rctx.execute([
-                            "ln", "-sfn", sdk_clang_ver, llvm_clang_dir,
+                            "ln",
+                            "-sfn",
+                            sdk_clang_ver,
+                            llvm_clang_dir,
                         ])
                     else:
                         # LLVM version dir exists (from prebuilt) with headers
@@ -319,7 +325,8 @@ def _apple_cross_toolchain_impl(rctx):
                             result = rctx.execute(["test", "-e", llvm_clang_dir + "/lib"])
                             if result.return_code != 0:
                                 rctx.execute([
-                                    "ln", "-sfn",
+                                    "ln",
+                                    "-sfn",
                                     "../" + sdk_clang_ver + "/lib",
                                     llvm_clang_dir + "/lib",
                                 ])
@@ -329,8 +336,54 @@ def _apple_cross_toolchain_impl(rctx):
     # that Bazel's include scanner matches resolved absolute include paths from
     # the compiler (clang resource dir, SDK headers, framework headers, etc.).
     substitutions["%{cxx_builtin_include_directories}"] = repo_path
+
+    # Detect SDK directory paths for the rule-based toolchain.
+    # Computes full sdk_path, sdk_fw (framework dir), and plat_fw (platform
+    # developer framework dir) for each Apple SDK platform.
+    _developer_dir_path = "Xcode.app/Contents/Developer"
+    _sdk_names = [
+        "iPhoneOS",
+        "iPhoneSimulator",
+        "MacOSX",
+        "AppleTVOS",
+        "AppleTVSimulator",
+        "XROS",
+        "XRSimulator",
+        "WatchOS",
+        "WatchSimulator",
+    ]
+    for _sdk_name in _sdk_names:
+        _sdk_glob = _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/SDKs/" + _sdk_name + "*.sdk"
+        result = rctx.execute(["bash", "-c", "ls -d " + _sdk_glob + " 2>/dev/null | head -1"])
+        if result.return_code == 0 and result.stdout.strip():
+            _sdk_rel = result.stdout.strip()
+        else:
+            _sdk_rel = _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/SDKs/" + _sdk_name + ".sdk"
+
+        _lower = _sdk_name.lower()
+        substitutions["%{sdk_path_" + _lower + "}"] = toolchain_path_prefix + _sdk_rel
+        substitutions["%{sdk_fw_" + _lower + "}"] = toolchain_path_prefix + _sdk_rel + "/System/Library/Frameworks"
+        substitutions["%{plat_fw_" + _lower + "}"] = toolchain_path_prefix + _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/Library/Frameworks"
+        substitutions["%{plat_lib_" + _lower + "}"] = toolchain_path_prefix + _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/usr/lib"
+
+    # Detect Xcode version and SDK version for environment variables.
+    _xcode_version_plist = "Xcode.app/Contents/version.plist"
+    result = rctx.execute([
+        "bash",
+        "-c",
+        xcode_toolchain_bindir + "PlistBuddy -c 'Print CFBundleShortVersionString' " + _xcode_version_plist + " 2>/dev/null || echo '16.0'",
+    ])
+    substitutions["%{xcode_version}"] = result.stdout.strip() if result.return_code == 0 else "16.0"
+
+    # Use the first found SDK version as a representative override.
+    result = rctx.execute([
+        "bash",
+        "-c",
+        "ls -d " + _developer_dir_path + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk 2>/dev/null | head -1 | grep -oP '(?<=iPhoneOS)[0-9.]+(?=\\.sdk)' || echo ''",
+    ])
+    substitutions["%{sdk_version_override}"] = result.stdout.strip() if result.return_code == 0 and result.stdout.strip() else ""
+
     rctx.template("BUILD", build_tpl, substitutions)
-    rctx.template("cc_toolchain_config.bzl", cc_toolchain_config_tpl, substitutions)
 
     # Create Apple-compatible symlinks for LLVM tools so that
     # toolchain configs and xcrunwrapper can invoke them by their
@@ -473,33 +526,30 @@ if __name__ == "__main__":
             executable = True,
         )
 
-    # Create codesign stub for Linux (ad-hoc signing no-op).
+    # Create codesign/codesign_allocate stubs for Linux cross-compilation.
+    # Always overwrite — the SDK may ship real binaries (e.g. codesign_allocate
+    # from LLVM) that fail on Linux with "unable to find any toolchains".
     _codesign_path = xcode_toolchain_bindir + "codesign"
-    result = rctx.execute(["test", "-e", _codesign_path])
-    if result.return_code != 0:
-        rctx.file(
-            _codesign_path,
-            content = """\
+    rctx.file(
+        _codesign_path,
+        content = """\
 #!/bin/bash
 # Stub: codesign is not available on Linux. No-op for cross-compilation.
 exit 0
 """,
-            executable = True,
-        )
+        executable = True,
+    )
 
-    # Create codesign_allocate stub for Linux.
     _codesign_allocate_path = xcode_toolchain_bindir + "codesign_allocate"
-    result = rctx.execute(["test", "-e", _codesign_allocate_path])
-    if result.return_code != 0:
-        rctx.file(
-            _codesign_allocate_path,
-            content = """\
+    rctx.file(
+        _codesign_allocate_path,
+        content = """\
 #!/bin/bash
 # Stub: codesign_allocate is not available on Linux. No-op for cross-compilation.
 exit 0
 """,
-            executable = True,
-        )
+        executable = True,
+    )
 
     # Create security stub for Linux (handles mobileprovision parsing).
     _security_path = xcode_toolchain_bindir + "security"
@@ -595,7 +645,8 @@ if __name__ == "__main__":
         _sdk_name = _sdk_info[1]
         _sdk_fw_dir = developer_dir + "/Platforms/" + _sdk_platform_name + ".platform/Developer/SDKs/" + _sdk_name + ".sdk/System/Library/Frameworks"
         result = rctx.execute([
-            "bash", "-c",
+            "bash",
+            "-c",
             "find '" + _sdk_fw_dir + "' -type d -name '*.swiftmodule' 2>/dev/null",
         ])
         if result.return_code == 0:
@@ -608,7 +659,8 @@ if __name__ == "__main__":
                 r2 = rctx.execute(["test", "-e", _arm64])
                 if r1.return_code == 0 and r2.return_code != 0:
                     rctx.execute([
-                        "bash", "-c",
+                        "bash",
+                        "-c",
                         "sed 's/arm64e-apple-ios/arm64-apple-ios/g' '" + _arm64e + "' > '" + _arm64 + "'",
                     ])
 
@@ -620,7 +672,7 @@ if __name__ == "__main__":
         std = "c++17",
     )
 
-    rctx.template("wrapped_clang.cc", wrapped_clang_tpl, substitutions)
+    rctx.template("wrapped_clang.cc", wrapped_clang_src, {})
     _compile_cc_file(
         rctx,
         str(rctx.path("wrapped_clang.cc")),
@@ -634,11 +686,6 @@ if __name__ == "__main__":
     swiftc = xcode_toolchain_bindir + "swiftc"
     result = rctx.execute([swiftc, "--version"])
     rctx.file("swift_version", result.stdout if result.return_code == 0 else "")
-
-    # Setup Swift toolchain
-    rctx.template("swift_toolchain.bzl", swift_toolchain_tpl, substitutions)
-    rctx.template("repositories.bzl", repositories_tpl, substitutions)
-    rctx.template("swift_autoconfiguration.bzl", swift_autoconfig_tpl, substitutions)
 
 _DEFAULT_SWIFT_URLS = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"]
 _DEFAULT_SWIFT_SHA256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5"

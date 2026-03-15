@@ -1,0 +1,23 @@
+diff --git a/apple/internal/compilation_support.bzl b/apple/internal/compilation_support.bzl
+index 8aed565e..03b5ca0d 100644
+--- a/apple/internal/compilation_support.bzl
++++ b/apple/internal/compilation_support.bzl
+@@ -440,9 +440,17 @@ def _create_deduped_linkopts_linking_context(owner, cc_linking_context, seen_fla
+             ))
+ 
+     # Why does linker_input not expose linkstamp?  This needs to be fixed.
++    if getattr(cc_linking_context, "linkstamps", False):
++        _linkstamps = cc_linking_context.linkstamps()
++    else:
++        _linkstamps = depset([
++            linkstamp
++            for linker_input in cc_linking_context.linker_inputs.to_list()
++            for linkstamp in linker_input.linkstamps
++        ])
+     linker_inputs.append(cc_common.create_linker_input(
+         owner = owner,
+-        linkstamps = cc_linking_context.linkstamps(),
++        linkstamps = _linkstamps,
+     ))
+ 
+     return (
