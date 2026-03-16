@@ -375,13 +375,17 @@ def _apple_cross_toolchain_impl(rctx):
     ])
     substitutions["%{xcode_version}"] = result.stdout.strip() if result.return_code == 0 else "16.0"
 
-    # Use the first found SDK version as a representative override.
+    # Detect SDK version from SDKSettings.json (more reliable than directory name).
+    _sdk_settings = _developer_dir_path + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json"
     result = rctx.execute([
-        "bash",
-        "-c",
-        "ls -d " + _developer_dir_path + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS*.sdk 2>/dev/null | head -1 | grep -oP '(?<=iPhoneOS)[0-9.]+(?=\\.sdk)' || echo ''",
+        "python3", "-c",
+        "import json,sys; print(json.load(open(sys.argv[1]))['Version'])",
+        _sdk_settings,
     ])
-    substitutions["%{sdk_version_override}"] = result.stdout.strip() if result.return_code == 0 and result.stdout.strip() else ""
+    _sdk_version = result.stdout.strip()
+    if not _sdk_version:
+        fail("Failed to detect SDK version from {}: {}".format(_sdk_settings, result.stderr.strip()))
+    substitutions["%{sdk_version_override}"] = _sdk_version
 
     rctx.template("BUILD", build_tpl, substitutions)
 
