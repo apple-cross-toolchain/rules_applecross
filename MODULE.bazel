@@ -20,13 +20,10 @@ git_override(
 )
 
 bazel_dep(name = "rules_swift", version = "3.5.0", repo_name = "build_bazel_rules_swift")
-single_version_override(
+git_override(
     module_name = "rules_swift",
-    patch_strip = 1,
-    patches = [
-        "//patches:rules_swift_empty_target_system_name.patch",
-    ],
-    version = "3.5.0",
+    commit = "feada87453a152b26baaca89c41653f33890937e",
+    remote = "https://github.com/bazelbuild/rules_swift.git",
 )
 
 bazel_dep(name = "rules_cc", version = "0.2.17")
