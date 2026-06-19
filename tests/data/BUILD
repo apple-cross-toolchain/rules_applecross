@@ -1,7 +1,9 @@
+load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application")
+load("@build_bazel_rules_apple//apple:versioning.bzl", "apple_bundle_version")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
 
 cc_library(
     name = "hello_c",
@@ -31,4 +33,37 @@ swift_library(
     srcs = ["hello_foundation.swift"],
     module_name = "HelloFoundation",
     target_compatible_with = ["@platforms//os:macos"],
+)
+
+swift_library(
+    name = "hello_uikit_swift",
+    srcs = ["HelloUIKit.swift"],
+    module_name = "HelloUIKit",
+)
+
+swift_library(
+    name = "hello_ios_app_lib",
+    srcs = ["main.swift"],
+    data = ["Greeting.txt"],
+    linkopts = ["-Wl,-framework,UIKit"],
+    module_name = "HelloIOSApp",
+)
+
+apple_bundle_version(
+    name = "hello_ios_app_version",
+    build_version = "1",
+)
+
+ios_application(
+    name = "hello_ios_app",
+    bundle_id = "com.example.HelloIOSApp",
+    families = ["iphone"],
+    features = [
+        "apple.skip_codesign_simulator_bundles",
+        "disable_legacy_signing",
+    ],
+    infoplists = ["HelloIOSAppInfo.plist"],
+    minimum_os_version = "16.0",
+    version = ":hello_ios_app_version",
+    deps = [":hello_ios_app_lib"],
 )
