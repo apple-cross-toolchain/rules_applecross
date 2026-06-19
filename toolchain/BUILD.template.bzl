@@ -224,57 +224,74 @@ filegroup(
 
 filegroup(
     name = "toolchain_files",
-    srcs = glob(
-        include = [
-            "Xcode.app/Contents/Developer/Toolchains/usr/bin/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Info.plist",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/usr/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/Library/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/usr/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/usr/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/*.so*",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/**",
-        ],
-        allow_empty = True,
-        exclude = [
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/Frameworks/Ruby.framework/**",
-        ],
-    ),
+    srcs = [
+        "Xcode.app/Contents/Developer/Platforms/AppleTVOS.platform",
+        "Xcode.app/Contents/Developer/Platforms/AppleTVSimulator.platform",
+        "Xcode.app/Contents/Developer/Platforms/MacOSX.platform",
+        "Xcode.app/Contents/Developer/Platforms/WatchOS.platform",
+        "Xcode.app/Contents/Developer/Platforms/WatchSimulator.platform",
+        "Xcode.app/Contents/Developer/Platforms/XROS.platform",
+        "Xcode.app/Contents/Developer/Platforms/XRSimulator.platform",
+        "Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform",
+        "Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform",
+        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
+        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include",
+        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
+    ],
 )
+
+_SWIFT_COMMON_TOOLCHAIN_INPUTS = [
+    "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
+    "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include",
+    "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
+]
+
+_SWIFT_PLATFORM_INPUTS = {
+    "AppleTVOS": ["Xcode.app/Contents/Developer/Platforms/AppleTVOS.platform"],
+    "AppleTVSimulator": ["Xcode.app/Contents/Developer/Platforms/AppleTVSimulator.platform"],
+    "MacOSX": ["Xcode.app/Contents/Developer/Platforms/MacOSX.platform"],
+    "WatchOS": ["Xcode.app/Contents/Developer/Platforms/WatchOS.platform"],
+    "WatchSimulator": ["Xcode.app/Contents/Developer/Platforms/WatchSimulator.platform"],
+    "XROS": ["Xcode.app/Contents/Developer/Platforms/XROS.platform"],
+    "XRSimulator": ["Xcode.app/Contents/Developer/Platforms/XRSimulator.platform"],
+    "iPhoneOS": ["Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform"],
+    "iPhoneSimulator": ["Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform"],
+}
+
+[
+    filegroup(
+        name = "swift_toolchain_files_" + platform,
+        srcs = platform_inputs + _SWIFT_COMMON_TOOLCHAIN_INPUTS,
+    )
+    for platform, platform_inputs in _SWIFT_PLATFORM_INPUTS.items()
+]
+
+_SWIFT_TOOLCHAIN_FILES_BY_ARCH = {
+    "darwin_arm64": ":swift_toolchain_files_MacOSX",
+    "darwin_arm64e": ":swift_toolchain_files_MacOSX",
+    "darwin_x86_64": ":swift_toolchain_files_MacOSX",
+    "ios_arm64": ":swift_toolchain_files_iPhoneOS",
+    "ios_arm64e": ":swift_toolchain_files_iPhoneOS",
+    "ios_sim_arm64": ":swift_toolchain_files_iPhoneSimulator",
+    "ios_x86_64": ":swift_toolchain_files_iPhoneSimulator",
+    "tvos_arm64": ":swift_toolchain_files_AppleTVOS",
+    "tvos_sim_arm64": ":swift_toolchain_files_AppleTVSimulator",
+    "tvos_x86_64": ":swift_toolchain_files_AppleTVSimulator",
+    "visionos_arm64": ":swift_toolchain_files_XROS",
+    "visionos_sim_arm64": ":swift_toolchain_files_XRSimulator",
+    "watchos_arm64": ":swift_toolchain_files_WatchOS",
+    "watchos_arm64_32": ":swift_toolchain_files_WatchOS",
+    "watchos_device_arm64": ":swift_toolchain_files_WatchOS",
+    "watchos_device_arm64e": ":swift_toolchain_files_WatchOS",
+    "watchos_x86_64": ":swift_toolchain_files_WatchSimulator",
+}
 
 filegroup(
     name = "swift_toolchain_files",
-    srcs = glob(
-        include = [
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Info.plist",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/usr/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/Library/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/usr/**",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/usr/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/**",
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/**",
-        ],
-        allow_empty = True,
-        exclude = [
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/Frameworks/Ruby.framework/**",
-        ],
-    ),
+    srcs = _SWIFT_COMMON_TOOLCHAIN_INPUTS + [
+        "Xcode.app/Contents/Developer/Platforms",
+    ],
 )
 
 cc_args(
@@ -394,7 +411,7 @@ cc_toolchain_suite(
         name = "swift-compiler-" + arch,
         cpu = arch,
         swift_tools = "%{swift_tools}",
-        toolchain_files = ":swift_toolchain_files",
+        toolchain_files = _SWIFT_TOOLCHAIN_FILES_BY_ARCH[arch],
         toolchain_path_prefix = "%{toolchain_path_prefix}",
     )
     for arch in _APPLE_ARCHS
