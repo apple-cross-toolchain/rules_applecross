@@ -28,8 +28,8 @@ git_override(
 
 bazel_dep(name = "rules_cc", version = "0.2.19")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
-bazel_dep(name = "llvm", version = "0.6.1")
-bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "llvm", version = "0.8.9")
+bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "xctestrunner", version = "0.0.1")
 git_override(
     module_name = "xctestrunner",
@@ -51,8 +51,21 @@ register_toolchains(
 
 register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64")
 
-llvm_prebuilt_ext = use_extension("//toolchain:llvm_prebuilt.bzl", "llvm_prebuilt")
-use_repo(llvm_prebuilt_ext, "llvm_prebuilt")
+LLVM_PREBUILT_VERSION = "22.1.7"
+
+llvm_toolchain_minimal = use_extension("@llvm//extensions:llvm_toolchain_minimal.bzl", "llvm_toolchain_minimal")
+llvm_toolchain_minimal.release(
+    llvm_version = LLVM_PREBUILT_VERSION,
+)
+use_repo(
+    llvm_toolchain_minimal,
+    "llvm-toolchain-minimal-%s-darwin-amd64" % LLVM_PREBUILT_VERSION,
+    "llvm-toolchain-minimal-%s-darwin-arm64" % LLVM_PREBUILT_VERSION,
+    "llvm-toolchain-minimal-%s-linux-arm64" % LLVM_PREBUILT_VERSION,
+    "llvm-toolchain-minimal-%s-windows-amd64" % LLVM_PREBUILT_VERSION,
+    "llvm-toolchain-minimal-%s-windows-arm64" % LLVM_PREBUILT_VERSION,
+    llvm_prebuilt = "llvm-toolchain-minimal-%s-linux-amd64" % LLVM_PREBUILT_VERSION,
+)
 
 apple_cross_toolchain = use_extension(
     "//toolchain:extensions.bzl",

@@ -185,8 +185,8 @@ def _apple_cross_toolchain_impl(rctx):
     elif rctx.attr.apple_sdk_urls:
         _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
-    # Resolve the @llvm_prebuilt repo (same URL+SHA as @llvm's own prebuilt;
-    # Bazel's download cache deduplicates the network fetch).
+    # Resolve the @llvm_prebuilt alias imported from @llvm's minimal prebuilt
+    # toolchain extension.
     llvm_prebuilt_bin = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname)
     llvm_prebuilt_lib = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname.dirname) + "/lib"
     xcode_toolchain_dir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
