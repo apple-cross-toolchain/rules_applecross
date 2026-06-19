@@ -3,8 +3,20 @@ module(
     version = "0.0.3",
 )
 
-bazel_dep(name = "bazel_features", version = "1.43.0")
-bazel_dep(name = "apple_support", version = "2.3.0", repo_name = "build_bazel_apple_support")
+bazel_dep(name = "bazel_features", version = "1.47.0")
+bazel_dep(name = "apple_support", version = "2.3.0")
+git_override(
+    module_name = "apple_support",
+    commit = "8f8c3683cad479dfb169ec5ae9d7bf062eb20fd3",
+    patch_strip = 1,
+    patches = ["//patches:apple_support_rule_based_visibility.patch"],
+    remote = "https://github.com/bazelbuild/apple_support.git",
+)
+
+apple_support_toolchain_env = use_repo_rule("@apple_support//toolchain:toolchain_env.bzl", "toolchain_env")
+
+apple_support_toolchain_env(name = "apple_support_toolchain_env")
+
 bazel_dep(name = "rules_apple", version = "4.5.0", repo_name = "build_bazel_rules_apple")
 git_override(
     module_name = "rules_apple",

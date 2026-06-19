@@ -33,12 +33,12 @@ config_setting(
 
 config_setting(
     name = "is_simulator",
-    constraint_values = ["@build_bazel_apple_support//constraints:simulator"],
+    constraint_values = ["@apple_support//constraints:simulator"],
 )
 
 config_setting(
     name = "is_device",
-    constraint_values = ["@build_bazel_apple_support//constraints:device"],
+    constraint_values = ["@apple_support//constraints:device"],
 )
 
 # Per-SDK-platform config settings (for SDK path selection)
@@ -48,7 +48,7 @@ config_setting(
     name = "sdk_iphoneos",
     constraint_values = [
         "@platforms//os:ios",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 
@@ -56,7 +56,7 @@ config_setting(
     name = "sdk_iphonesimulator",
     constraint_values = [
         "@platforms//os:ios",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -69,7 +69,7 @@ config_setting(
     name = "sdk_appletvos",
     constraint_values = [
         "@platforms//os:tvos",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 
@@ -77,7 +77,7 @@ config_setting(
     name = "sdk_appletvsimulator",
     constraint_values = [
         "@platforms//os:tvos",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -85,7 +85,7 @@ config_setting(
     name = "sdk_xros",
     constraint_values = [
         "@platforms//os:visionos",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 
@@ -93,7 +93,7 @@ config_setting(
     name = "sdk_xrsimulator",
     constraint_values = [
         "@platforms//os:visionos",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -101,7 +101,7 @@ config_setting(
     name = "sdk_watchos",
     constraint_values = [
         "@platforms//os:watchos",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 
@@ -109,7 +109,7 @@ config_setting(
     name = "sdk_watchsimulator",
     constraint_values = [
         "@platforms//os:watchos",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -147,7 +147,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:ios",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 
@@ -164,7 +164,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:ios",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -182,7 +182,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:tvos",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 
@@ -191,7 +191,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:tvos",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -209,7 +209,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:visionos",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 
@@ -218,7 +218,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:visionos",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -228,7 +228,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:watchos",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:simulator",
+        "@apple_support//constraints:simulator",
     ],
 )
 
@@ -237,7 +237,7 @@ config_setting(
     constraint_values = [
         "@platforms//os:watchos",
         "@platforms//cpu:arm64",
-        "@build_bazel_apple_support//constraints:device",
+        "@apple_support//constraints:device",
     ],
 )
 

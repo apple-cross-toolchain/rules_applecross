@@ -1,0 +1,87 @@
+diff --git a/toolchain/BUILD b/toolchain/BUILD
+index 9ac0189..f08864e 100644
+--- a/toolchain/BUILD
++++ b/toolchain/BUILD
+@@ -15,6 +15,8 @@ load("@rules_cc//cc/toolchains:toolchain.bzl", "cc_toolchain")
+ load(":dynamic_toolchain_info.bzl", "dynamic_toolchain_info", "xcode_execution_info")
+ load(":features.bzl", "enableable_feature", "negatable_feature")
+ 
++package(default_visibility = ["//visibility:public"])
++
+ MARKER_FEATURES = [
+     "archive_param_file",
+     "compile_all_modules",
+@@ -263,7 +265,7 @@ cc_args(
+ 
+ dynamic_toolchain_info(
+     name = "dynamic_toolchain_info",
+-    visibility = ["//toolchain:__subpackages__"],
++    visibility = ["//visibility:public"],
+ )
+ 
+ xcode_execution_info(
+diff --git a/toolchain/coverage/BUILD b/toolchain/coverage/BUILD
+index 47a4c46..d4907aa 100644
+--- a/toolchain/coverage/BUILD
++++ b/toolchain/coverage/BUILD
+@@ -2,7 +2,7 @@ load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
+ load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
+ load("//toolchain:features.bzl", "enableable_feature", "negatable_feature")
+ 
+-package(default_visibility = ["//toolchain:__pkg__"])
++package(default_visibility = ["//visibility:public"])
+ 
+ _COVERAGE_COMPILE_ACTIONS = [
+     # TODO: Should all compile actions be here?
+diff --git a/toolchain/objc/BUILD b/toolchain/objc/BUILD
+index e510c99..f9c49d3 100644
+--- a/toolchain/objc/BUILD
++++ b/toolchain/objc/BUILD
+@@ -1,7 +1,7 @@
+ load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
+ load("//toolchain:features.bzl", "negatable_feature")
+ 
+-package(default_visibility = ["//toolchain:__pkg__"])
++package(default_visibility = ["//visibility:public"])
+ 
+ negatable_feature(
+     name = "__apple_default_warnings",
+diff --git a/toolchain/pgo/BUILD b/toolchain/pgo/BUILD
+index 0d1e388..71f43f6 100644
+--- a/toolchain/pgo/BUILD
++++ b/toolchain/pgo/BUILD
+@@ -1,7 +1,7 @@
+ load("@rules_cc//cc/toolchains:mutually_exclusive_category.bzl", "cc_mutually_exclusive_category")
+ load("//toolchain:features.bzl", "enableable_feature")
+ 
+-package(default_visibility = ["//:__subpackages__"])
++package(default_visibility = ["//visibility:public"])
+ 
+ cc_mutually_exclusive_category(
+     name = "profile",
+diff --git a/toolchain/sanitizers/BUILD b/toolchain/sanitizers/BUILD
+index aef60a7..a4cd49f 100644
+--- a/toolchain/sanitizers/BUILD
++++ b/toolchain/sanitizers/BUILD
+@@ -3,7 +3,7 @@ load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
+ load("@rules_cc//cc/toolchains:feature_constraint.bzl", "cc_feature_constraint")
+ load("//toolchain:features.bzl", "enableable_feature")
+ 
+-package(default_visibility = ["//toolchain:__pkg__"])
++package(default_visibility = ["//visibility:public"])
+ 
+ _LIMITED_COMPILE_ACTIONS = [
+     "@rules_cc//cc/toolchains/actions:c_compile",
+diff --git a/toolchain/toolchain_env.bzl b/toolchain/toolchain_env.bzl
+index 76dbb0b..00fdca0 100644
+--- a/toolchain/toolchain_env.bzl
++++ b/toolchain/toolchain_env.bzl
+@@ -143,7 +143,7 @@ load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
+ load("@rules_cc//cc/toolchains:feature_set.bzl", "cc_feature_set")
+ load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
+ 
+-package(default_visibility = ["@apple_support//:__subpackages__"])
++package(default_visibility = ["//visibility:public"])
+ 
+ cc_feature(
+     name = "copts_from_env",

@@ -1,5 +1,5 @@
-load("@build_bazel_apple_support//xcode:xcode_config.bzl", "xcode_config")
-load("@build_bazel_apple_support//xcode:xcode_version.bzl", "xcode_version")
+load("@apple_support//xcode:xcode_config.bzl", "xcode_config")
+load("@apple_support//xcode:xcode_version.bzl", "xcode_version")
 
 package(default_visibility = ["//visibility:public"])
 

@@ -89,6 +89,9 @@ def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None, std = "c
 
 def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_dir):
     """Create Swift compatibility stub archives expected by Apple linkers."""
+    if not rctx.os.name.startswith("linux"):
+        return
+
     clang = toolchain_bindir + "clang"
     llvm_ar = toolchain_bindir + "llvm-ar"
     if rctx.execute(["test", "-x", clang]).return_code != 0:
@@ -140,6 +143,31 @@ def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_
             rctx.delete(src)
             rctx.delete(obj)
 
+def _remove_appledouble_files(rctx):
+    result = rctx.execute([
+        "bash",
+        "-c",
+        "find Xcode.app -type f -name '._*' -delete && find Xcode.app -type d -name __MACOSX -prune -exec rm -rf {} +",
+    ])
+    if result.return_code != 0:
+        fail("Failed to remove AppleDouble files from the extracted SDK: " + (result.stderr or result.stdout))
+
+def _normalize_sdk_modulemaps(rctx):
+    result = rctx.execute([
+        "bash",
+        "-c",
+        """\
+find Xcode.app -path '*/usr/include/libxml2/module.modulemap' -print0 | while IFS= read -r -d '' modulemap; do
+  include_dir="${modulemap%/libxml2/module.modulemap}"
+  if [ -e "${include_dir}/libxml/module.modulemap" ]; then
+    rm -f "$modulemap"
+  fi
+done
+""",
+    ])
+    if result.return_code != 0:
+        fail("Failed to normalize SDK module maps: " + (result.stderr or result.stdout))
+
 def _apple_cross_toolchain_impl(rctx):
     # Resolve label paths
     libtool_cc = rctx.path(Label("@rules_applecross//toolchain:libtool.cc"))
@@ -184,6 +212,9 @@ def _apple_cross_toolchain_impl(rctx):
             )
     elif rctx.attr.apple_sdk_urls:
         _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
+
+    _remove_appledouble_files(rctx)
+    _normalize_sdk_modulemaps(rctx)
 
     # Resolve the @llvm_prebuilt alias imported from @llvm's minimal prebuilt
     # toolchain extension.
@@ -607,37 +638,38 @@ if __name__ == "__main__":
             executable = True,
         )
 
-    # Create stub Swift compatibility libraries with FORCE_LOAD symbols.
-    _swift_compat_symbols = {
-        "libswiftCompatibility51.a": "_swift_FORCE_LOAD_$_swiftCompatibility51",
-        "libswiftCompatibility56.a": "_swift_FORCE_LOAD_$_swiftCompatibility56",
-        "libswiftCompatibilityConcurrency.a": "_swift_FORCE_LOAD_$_swiftCompatibilityConcurrency",
-        "libswiftCompatibilityDynamicReplacements.a": "_swift_FORCE_LOAD_$_swiftCompatibilityDynamicReplacements",
-        "libswiftCompatibilityPacks.a": "_swift_FORCE_LOAD_$_swiftCompatibilityPacks",
-    }
-    _clang = xcode_toolchain_bindir + "clang"
-    _ar = xcode_toolchain_bindir + "ar"
-    _xcode_toolchain_libdir = xcode_toolchain_bindir + "../lib/swift/"
-    for _platform_info in [("iphoneos", "arm64-apple-ios13.0"), ("iphonesimulator", "arm64-apple-ios13.0-simulator"), ("macosx", "arm64-apple-macos11.0")]:
-        _platform_name = _platform_info[0]
-        _target_triple = _platform_info[1]
-        _swift_platform_lib = _xcode_toolchain_libdir + _platform_name
-        result = rctx.execute(["test", "-d", _swift_platform_lib])
-        if result.return_code == 0:
-            _sdk_platform = "iPhoneOS" if _platform_name == "iphoneos" else ("iPhoneSimulator" if _platform_name == "iphonesimulator" else "MacOSX")
-            _sdk_path = developer_dir + "/Platforms/" + _sdk_platform + ".platform/Developer/SDKs/" + _sdk_platform + ".sdk"
-            for _compat_lib, _symbol in _swift_compat_symbols.items():
-                _lib_path = _swift_platform_lib + "/" + _compat_lib
-                result = rctx.execute(["test", "-e", _lib_path])
-                if result.return_code != 0:
-                    _c_symbol = _symbol.lstrip("_")
-                    _stub_c = _swift_platform_lib + "/_compat_stub.c"
-                    _stub_o = _swift_platform_lib + "/_compat_stub.o"
-                    rctx.file(_stub_c, content = "void " + _c_symbol + "(void) {}\n")
-                    rctx.execute([_clang, "-target", _target_triple, "-isysroot", _sdk_path, "-c", _stub_c, "-o", _stub_o])
-                    rctx.execute([_ar, "rcs", _lib_path, _stub_o])
-                    rctx.delete(_stub_c)
-                    rctx.delete(_stub_o)
+    if rctx.os.name.startswith("linux"):
+        # Create stub Swift compatibility libraries with FORCE_LOAD symbols.
+        _swift_compat_symbols = {
+            "libswiftCompatibility51.a": "_swift_FORCE_LOAD_$_swiftCompatibility51",
+            "libswiftCompatibility56.a": "_swift_FORCE_LOAD_$_swiftCompatibility56",
+            "libswiftCompatibilityConcurrency.a": "_swift_FORCE_LOAD_$_swiftCompatibilityConcurrency",
+            "libswiftCompatibilityDynamicReplacements.a": "_swift_FORCE_LOAD_$_swiftCompatibilityDynamicReplacements",
+            "libswiftCompatibilityPacks.a": "_swift_FORCE_LOAD_$_swiftCompatibilityPacks",
+        }
+        _clang = xcode_toolchain_bindir + "clang"
+        _ar = xcode_toolchain_bindir + "ar"
+        _xcode_toolchain_libdir = xcode_toolchain_bindir + "../lib/swift/"
+        for _platform_info in [("iphoneos", "arm64-apple-ios13.0"), ("iphonesimulator", "arm64-apple-ios13.0-simulator"), ("macosx", "arm64-apple-macos11.0")]:
+            _platform_name = _platform_info[0]
+            _target_triple = _platform_info[1]
+            _swift_platform_lib = _xcode_toolchain_libdir + _platform_name
+            result = rctx.execute(["test", "-d", _swift_platform_lib])
+            if result.return_code == 0:
+                _sdk_platform = "iPhoneOS" if _platform_name == "iphoneos" else ("iPhoneSimulator" if _platform_name == "iphonesimulator" else "MacOSX")
+                _sdk_path = developer_dir + "/Platforms/" + _sdk_platform + ".platform/Developer/SDKs/" + _sdk_platform + ".sdk"
+                for _compat_lib, _symbol in _swift_compat_symbols.items():
+                    _lib_path = _swift_platform_lib + "/" + _compat_lib
+                    result = rctx.execute(["test", "-e", _lib_path])
+                    if result.return_code != 0:
+                        _c_symbol = _symbol.lstrip("_")
+                        _stub_c = _swift_platform_lib + "/_compat_stub.c"
+                        _stub_o = _swift_platform_lib + "/_compat_stub.o"
+                        rctx.file(_stub_c, content = "void " + _c_symbol + "(void) {}\n")
+                        rctx.execute([_clang, "-target", _target_triple, "-isysroot", _sdk_path, "-c", _stub_c, "-o", _stub_o])
+                        rctx.execute([_ar, "rcs", _lib_path, _stub_o])
+                        rctx.delete(_stub_c)
+                        rctx.delete(_stub_o)
 
     # Create arm64 swiftinterface files for arm64e-only frameworks.
     # Some SDK frameworks (especially cross-import overlays like
@@ -687,9 +719,7 @@ if __name__ == "__main__":
     rctx.symlink("wrapped_clang", "wrapped_clang_pp")
 
     # Generate Swift version file for the Linux swift_toolchain rule.
-    swiftc = xcode_toolchain_bindir + "swiftc"
-    result = rctx.execute([swiftc, "--version"])
-    rctx.file("swift_version", result.stdout if result.return_code == 0 else "")
+    rctx.file("swift_version", "")
 
 _DEFAULT_SWIFT_URLS = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"]
 _DEFAULT_SWIFT_SHA256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5"
