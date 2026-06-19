@@ -1,8 +1,9 @@
 load("@apple_support//configs:platforms.bzl", "APPLE_PLATFORMS_CONSTRAINTS")
 load("@bazel_features//:features.bzl", "bazel_features")
 load("@build_bazel_rules_swift//swift/toolchains:swift_toolchain.bzl", linux_swift_toolchain = "swift_toolchain")
+load("@rules_applecross//toolchain:exec_tool.bzl", "exec_tool")
 load("@rules_applecross//toolchain:swift_toolchain.bzl", "swift_toolchain")
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_toolchain_suite")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_toolchain_suite")
 load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
 load("@rules_cc//cc/toolchains:tool.bzl", "cc_tool")
 load("@rules_cc//cc/toolchains:tool_map.bzl", "cc_tool_map")
@@ -13,12 +14,42 @@ package(default_visibility = ["//visibility:public"])
 _APPLE_ARCHS = APPLE_PLATFORMS_CONSTRAINTS.keys()
 
 exports_files([
-    "wrapped_clang",
-    "wrapped_clang_pp",
     "cc_wrapper.sh",
-    "libtool",
     "xcrunwrapper.sh",
 ])
+
+cc_binary(
+    name = "_libtool",
+    srcs = ["libtool.cc"],
+    copts = [
+        "-std=c++17",
+        "-O3",
+    ],
+)
+
+exec_tool(
+    name = "libtool",
+    binary = ":_libtool",
+)
+
+cc_binary(
+    name = "_wrapped_clang",
+    srcs = ["wrapped_clang.cc"],
+    copts = [
+        "-std=c++11",
+        "-O3",
+    ],
+)
+
+exec_tool(
+    name = "wrapped_clang",
+    binary = ":_wrapped_clang",
+)
+
+exec_tool(
+    name = "wrapped_clang_pp",
+    binary = ":_wrapped_clang",
+)
 
 CC_TOOLCHAINS = [
     (cpu + "|clang", ":cc-compiler-" + cpu)

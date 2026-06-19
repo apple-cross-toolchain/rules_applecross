@@ -1,5 +1,3 @@
-load("@bazel_skylib//lib:paths.bzl", "paths")
-
 def _read_netrc_token(rctx, host):
     """Read a password for the given host from ~/.netrc."""
     home = rctx.os.environ.get("HOME", "")
@@ -55,37 +53,6 @@ def _sdk_download(rctx, urls, sha256, strip_prefix):
         kwargs["headers"] = headers
 
     rctx.download_and_extract(**kwargs)
-
-def _compile_cc_file(rctx, src_name, out_name, toolchain_bindir = None, std = "c++11"):
-    rctx.report_progress("Compiling {}".format(paths.basename(src_name)))
-    if not toolchain_bindir:
-        fail("toolchain_bindir is required to compile " + out_name + " hermetically")
-
-    cc = toolchain_bindir + "clang"
-    result = rctx.execute(["test", "-x", cc])
-    if result.return_code != 0:
-        fail("Expected hermetic host clang at " + cc + " while compiling " + out_name)
-
-    link_flags = ["-fuse-ld=lld", "-lstdc++"]
-    result = rctx.execute([
-        cc,
-        "-std=" + std,
-        "-O3",
-        "-o",
-        out_name,
-        src_name,
-    ] + link_flags, 30)
-    if (result.return_code != 0):
-        error_msg = (
-            "return code {code}, stderr: {err}, stdout: {out}"
-        ).format(
-            code = result.return_code,
-            err = result.stderr,
-            out = result.stdout,
-        )
-        fail(out_name + " failed to generate. Please file an issue at " +
-             "https://github.com/apple-cross-toolchain/rules_applecross/issues with the following:\n" +
-             error_msg)
 
 def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_dir):
     """Create Swift compatibility stub archives expected by Apple linkers."""
@@ -196,6 +163,8 @@ def _apple_cross_toolchain_impl(rctx):
     # detection so we can populate include dirs).
     rctx.template("cc_wrapper.sh", cc_wrapper_tpl, substitutions)
     rctx.template("xcrunwrapper.sh", xcrunwrapper_src, {})
+    rctx.symlink(libtool_cc, "libtool.cc")
+    rctx.symlink(wrapped_clang_src, "wrapped_clang.cc")
 
     # Extract Apple SDKs - either from local path/directory or URL
     if rctx.attr.apple_sdk_path:
@@ -699,24 +668,6 @@ if __name__ == "__main__":
                         "-c",
                         "sed 's/arm64e-apple-ios/arm64-apple-ios/g' '" + _arm64e + "' > '" + _arm64 + "'",
                     ])
-
-    _compile_cc_file(
-        rctx,
-        str(libtool_cc),
-        "libtool",
-        toolchain_bindir = xcode_toolchain_bindir,
-        std = "c++17",
-    )
-
-    rctx.template("wrapped_clang.cc", wrapped_clang_src, {})
-    _compile_cc_file(
-        rctx,
-        str(rctx.path("wrapped_clang.cc")),
-        "wrapped_clang",
-        toolchain_bindir = xcode_toolchain_bindir,
-    )
-    rctx.delete("wrapped_clang.cc")
-    rctx.symlink("wrapped_clang", "wrapped_clang_pp")
 
     # Generate Swift version file for the Linux swift_toolchain rule.
     rctx.file("swift_version", "")
