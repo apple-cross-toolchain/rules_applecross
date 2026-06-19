@@ -39,6 +39,7 @@ git_override(
 )
 
 bazel_dep(name = "rules_cc", version = "0.2.19")
+bazel_dep(name = "rules_python", version = "1.7.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "llvm", version = "0.8.9")
 bazel_dep(name = "platforms", version = "1.1.0")
@@ -85,9 +86,11 @@ apple_cross_toolchain = use_extension(
 )
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
-    apple_sdk_urls = ["SDKS_URL"],
-    apple_sdk_sha256 = "cbd51f205b43a20f67198c86848967f394783f1063c0bbd736e88cc1ff1f0ebe",
-    apple_sdk_archive_type = "tar.zst",
+    apple_sdk_archive_type = "tar.xz",
+    apple_sdk_path = "apple-sdks-xcode-26.1.1.tar.xz",
+    swift_sha256 = "4022cb64faf7e2681c19f9b62a22fb7d9055db6194d9e4a4bef9107b6ce10946",
+    swift_strip_prefix = "swift-6.2.1-RELEASE-ubuntu24.04",
+    swift_urls = ["https://download.swift.org/swift-6.2.1-release/ubuntu2404/swift-6.2.1-RELEASE/swift-6.2.1-RELEASE-ubuntu24.04.tar.gz"],
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")
 

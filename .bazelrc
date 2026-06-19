@@ -12,10 +12,14 @@ build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:
 
 build:remote --bes_backend=grpcs://cloud.buildbuddy.io
 build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+build:remote --extra_execution_platforms=//platforms:linux_x86_64
+build:remote --host_features=fully_static_link
 build:remote --jobs=100
+build:remote --@rules_python//python/config_settings:bootstrap_impl=script
+build:remote --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
 build:remote --remote_download_toplevel
 build:remote --remote_executor=grpcs://cloud.buildbuddy.io
 build:remote --remote_timeout=3600
 build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
-build:remote --tls_client_certificate=buildbuddy-cert.pem
-build:remote --tls_client_key=buildbuddy-key.pem
+# build:remote --tls_client_certificate=buildbuddy-cert.pem
+# build:remote --tls_client_key=buildbuddy-key.pem

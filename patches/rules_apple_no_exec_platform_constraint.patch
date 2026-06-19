@@ -38,6 +38,20 @@ index 40f3d1f..1c0e447 100644
          inputs = [entitlements],
          mnemonic = "ProcessDEREntitlements",
          outputs = [der_entitlements],
+diff --git a/apple/internal/ios_rules.bzl b/apple/internal/ios_rules.bzl
+--- a/apple/internal/ios_rules.bzl
++++ b/apple/internal/ios_rules.bzl
+@@ -437,8 +437,8 @@ def _ios_application_impl(ctx):
+             package_messages_support = True,
+         ),
+     )
+-
+-    if platform_prerequisites.platform.is_device:
++
++    if platform_prerequisites.platform.is_device and provisioning_profile:
+         processor_partials.append(
+             partials.provisioning_profile_partial(
+                 actions = actions,
 diff --git a/apple/internal/partials/apple_symbols_file.bzl b/apple/internal/partials/apple_symbols_file.bzl
 index 1a5cfb3..b9e3e7f 100644
 --- a/apple/internal/partials/apple_symbols_file.bzl
@@ -120,13 +134,22 @@ diff --git a/tools/environment_plist/environment_plist.sh b/tools/environment_pl
 index 1dca56d..f52ec5b 100755
 --- a/tools/environment_plist/environment_plist.sh
 +++ b/tools/environment_plist/environment_plist.sh
-@@ -26,6 +26,16 @@
+@@ -26,6 +26,25 @@
  
  set -eu
  
 +# Resolve DEVELOPER_DIR via xcode-select if not already set.
 +if [[ -z "${DEVELOPER_DIR:-}" ]]; then
 +  DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
++fi
++# Tool data appears under the sh_binary runfiles tree, not necessarily at the
++# execroot-relative external path used by toolchain actions.
++if [[ -n "${DEVELOPER_DIR:-}" && ! -d "${DEVELOPER_DIR}" ]]; then
++  runfiles_dir="${RUNFILES_DIR:-${0}.runfiles}"
++  runfiles_developer_dir="${runfiles_dir}/${DEVELOPER_DIR#external/}"
++  if [[ -d "${runfiles_developer_dir}" ]]; then
++    DEVELOPER_DIR="${runfiles_developer_dir}"
++  fi
 +fi
 +# When DEVELOPER_DIR is set, prepend the toolchain bin directory to PATH
 +# so that xcrun, PlistBuddy, plutil, sw_vers, etc. are found there.
@@ -195,6 +218,18 @@ index 1dca56d..f52ec5b 100755
      -c "Add :DTPlatformBuild string ${platform_build:-""}" \
      -c "Add :DTSDKBuild string ${sdk_build:-""}" \
      -c "Add :DTPlatformVersion string ${platform_version:-""}" \
+diff --git a/tools/environment_plist/BUILD b/tools/environment_plist/BUILD
+--- a/tools/environment_plist/BUILD
++++ b/tools/environment_plist/BUILD
+@@ -6,5 +6,8 @@ licenses(["notice"])
+ sh_binary(
+     name = "environment_plist",
++    data = [
++        "@@+apple_cross_toolchain+apple_cross_toolchain//:toolchain_files",
++    ],
+     srcs = ["environment_plist.sh"],
+     visibility = [
+         "//apple/internal:__pkg__",
 diff --git a/tools/plisttool/plisttool.py b/tools/plisttool/plisttool.py
 --- a/tools/plisttool/plisttool.py
 +++ b/tools/plisttool/plisttool.py
