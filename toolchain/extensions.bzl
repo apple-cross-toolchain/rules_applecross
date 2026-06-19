@@ -16,18 +16,8 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "apple_sdk_sha256": config.apple_sdk_sha256,
                 "apple_sdk_strip_prefix": config.apple_sdk_strip_prefix,
                 "apple_sdk_archive_type": config.apple_sdk_archive_type,
+                "swift_tools": config.swift_tools,
             }
-
-            # Only pass swift_* when explicitly set, so the
-            # repository rule's built-in defaults are used otherwise.
-            if config.swift_path:
-                kwargs["swift_path"] = config.swift_path
-            if config.swift_urls:
-                kwargs["swift_urls"] = config.swift_urls
-            if config.swift_sha256:
-                kwargs["swift_sha256"] = config.swift_sha256
-            if config.swift_strip_prefix:
-                kwargs["swift_strip_prefix"] = config.swift_strip_prefix
 
             _apple_cross_toolchain_rule(**kwargs)
 
@@ -39,10 +29,7 @@ _configure_tag = tag_class(
         "apple_sdk_sha256": attr.string(),
         "apple_sdk_strip_prefix": attr.string(),
         "apple_sdk_archive_type": attr.string(),
-        "swift_path": attr.string(),
-        "swift_urls": attr.string_list(),
-        "swift_sha256": attr.string(),
-        "swift_strip_prefix": attr.string(),
+        "swift_tools": attr.string(mandatory = True),
     },
 )
 

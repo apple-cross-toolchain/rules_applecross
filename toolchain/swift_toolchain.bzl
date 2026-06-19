@@ -19,6 +19,10 @@ Adapted for rules_swift 3.x.
 
 load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
+    "@build_bazel_rules_swift//swift:providers.bzl",
+    "SwiftToolsInfo",
+)
+load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "SwiftToolchainInfo",
 )
@@ -135,28 +139,20 @@ def _make_resource_directory_configurator(developer_dir):
 
     return _resource_directory_configurator
 
-def _make_tool_configs(additional_tools, toolchain_root):
+def _make_tool_configs(additional_tools, swift_tools):
     """Creates tool configurations for Swift actions."""
 
-    def _driver_config(mode):
-        return {
-            "mode": mode,
-            "toolchain_root": toolchain_root,
-            "tool_executable_suffix": "",
-        }
-
-    # Persistent worker mode for main compile actions (matches upstream).
+    # Use rules_swift's hermetic Swift distribution as explicit action tools,
+    # while keeping Apple SDK/resource configuration in this rule.
     persistent_tool_config = ToolConfigInfo(
         additional_tools = additional_tools,
-        driver_config = _driver_config("swiftc"),
+        executable = swift_tools.swift_driver,
         use_param_file = True,
         worker_mode = "persistent",
     )
-
-    # Wrap mode for non-compile actions.
     wrap_tool_config = ToolConfigInfo(
         additional_tools = additional_tools,
-        driver_config = _driver_config("swiftc"),
+        executable = swift_tools.swift_driver,
         use_param_file = True,
         worker_mode = "wrap",
     )
@@ -169,13 +165,13 @@ def _make_tool_configs(additional_tools, toolchain_root):
         _SWIFT_ACTION_COMPILE_MODULE_INTERFACE: wrap_tool_config,
         _SWIFT_ACTION_SYMBOL_GRAPH_EXTRACT: ToolConfigInfo(
             additional_tools = additional_tools,
-            driver_config = _driver_config("swift-symbolgraph-extract"),
+            executable = swift_tools.swift_symbolgraph_extract,
             use_param_file = True,
             worker_mode = "wrap",
         ),
     }
 
-def _swift_linkopts_cc_info(toolchain_root, swift_platform_name, sdk_platform, sdk_dir, developer_dir, toolchain_label):
+def _swift_linkopts_cc_info(swift_platform_name, sdk_platform, developer_dir, toolchain_label):
     """Returns a CcInfo with linker flags for Swift standard library linking."""
     swift_lib_dir = developer_dir + "/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" + swift_platform_name
     platform_developer_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer"
@@ -381,8 +377,9 @@ def _swift_toolchain_impl(ctx):
     ])
 
     # Collect toolchain files as additional tools for sandbox access.
-    additional_tools = ctx.attr.toolchain_files.files.to_list()
-    tool_configs = _make_tool_configs(additional_tools, toolchain_root)
+    swift_tools = ctx.attr.swift_tools[SwiftToolsInfo]
+    additional_tools = ctx.attr.toolchain_files.files.to_list() + list(swift_tools.additional_inputs)
+    tool_configs = _make_tool_configs(additional_tools, swift_tools)
 
     # Build Swift linker opts provider
     swift_platform_name = info.swift_platform_name
@@ -390,10 +387,8 @@ def _swift_toolchain_impl(ctx):
         swift_platform_name = swift_platform_name.replace("os", "simulator") if swift_platform_name.endswith("os") else swift_platform_name + "simulator"
 
     swift_linkopts = _swift_linkopts_cc_info(
-        toolchain_root = toolchain_root,
         swift_platform_name = swift_platform_name,
         sdk_platform = sdk_platform,
-        sdk_dir = sdk_dir,
         developer_dir = developer_dir,
         toolchain_label = ctx.label,
     )
@@ -436,7 +431,16 @@ def _swift_toolchain_impl(ctx):
         package_configurations = [],
         requested_features = requested_features,
         root_dir = toolchain_root,
+        runtime = depset(),
         swift_worker = ctx.attr._worker[DefaultInfo].files_to_run,
+        system_modules = struct(
+            cc_infos = [],
+            swift_infos = [],
+        ),
+        implicit_system_modules = struct(
+            cc_infos = [],
+            swift_infos = [],
+        ),
         test_configuration = struct(
             binary_name = "{name}",
             env = {},
@@ -470,6 +474,11 @@ swift_toolchain = rule(
         "toolchain_files": attr.label(
             mandatory = True,
             doc = "Filegroup of SDK/toolchain files needed for sandbox access.",
+        ),
+        "swift_tools": attr.label(
+            mandatory = True,
+            providers = [SwiftToolsInfo],
+            doc = "rules_swift SwiftToolsInfo target providing Linux-host Swift executables.",
         ),
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),

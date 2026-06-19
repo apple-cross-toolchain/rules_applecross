@@ -155,6 +155,7 @@ def _apple_cross_toolchain_impl(rctx):
 
     substitutions = {
         "%{cc}": relative_path_prefix + "wrapped_clang",
+        "%{swift_tools}": rctx.attr.swift_tools,
         "%{toolchain_path_prefix}": toolchain_path_prefix,
         "%{tools_path_prefix}": tools_path_prefix,
     }
@@ -190,54 +191,6 @@ def _apple_cross_toolchain_impl(rctx):
     llvm_prebuilt_bin = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname)
     llvm_prebuilt_lib = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname.dirname) + "/lib"
     xcode_toolchain_dir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
-
-    # Extract Swift - either from local path/directory or URL
-    if rctx.attr.swift_path:
-        swift_local = rctx.workspace_root.get_child(rctx.attr.swift_path)
-        if rctx.execute(["test", "-d", str(swift_local)]).return_code == 0:
-            # Pre-extracted directory — symlink it
-            rctx.symlink(swift_local, "tmp_swift")
-        else:
-            # Tarball
-            rctx.extract(
-                archive = swift_local,
-                stripPrefix = rctx.attr.swift_strip_prefix or "",
-                output = "tmp_swift",
-            )
-    elif rctx.attr.swift_urls:
-        rctx.download_and_extract(
-            url = rctx.attr.swift_urls,
-            sha256 = rctx.attr.swift_sha256,
-            stripPrefix = rctx.attr.swift_strip_prefix,
-            output = "tmp_swift",
-        )
-
-    if rctx.attr.swift_path or rctx.attr.swift_urls:
-        # Copy all swift-related binaries (including swift-driver,
-        # swift-frontend, etc. that symlinks like swiftc point to)
-        rctx.execute([
-            "bash",
-            "-c",
-            "cp -a tmp_swift/usr/bin/swift* " + xcode_toolchain_bindir,
-        ])
-
-        # Also copy Swift runtime/stdlib libraries if present
-        result = rctx.execute(["test", "-d", "tmp_swift/usr/lib/swift"])
-        if result.return_code == 0:
-            rctx.execute([
-                "cp",
-                "-a",
-                "tmp_swift/usr/lib/swift",
-                xcode_toolchain_bindir + "../lib/",
-            ])
-        rctx.delete("tmp_swift")
-
-        # Remove Linux-specific overlay modules that conflict with Apple SDK
-        # modules. When cross-compiling for Apple platforms, the SDK provides
-        # these modules (dispatch, CoreFoundation, Block, os).
-        swift_lib = xcode_toolchain_bindir + "../lib/swift"
-        for overlay in ["dispatch", "CoreFoundation", "Block", "os"]:
-            rctx.delete(swift_lib + "/" + overlay)
 
     rctx.download_and_extract(
         url = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.22/ported-tools-linux-x86_64.tar.xz"],
@@ -378,7 +331,8 @@ def _apple_cross_toolchain_impl(rctx):
     # Detect SDK version from SDKSettings.json (more reliable than directory name).
     _sdk_settings = _developer_dir_path + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json"
     result = rctx.execute([
-        "python3", "-c",
+        "python3",
+        "-c",
         "import json,sys; print(json.load(open(sys.argv[1]))['Version'])",
         _sdk_settings,
     ])
@@ -669,13 +623,6 @@ if __name__ == "__main__":
                         "sed 's/arm64e-apple-ios/arm64-apple-ios/g' '" + _arm64e + "' > '" + _arm64 + "'",
                     ])
 
-    # Generate Swift version file for the Linux swift_toolchain rule.
-    rctx.file("swift_version", "")
-
-_DEFAULT_SWIFT_URLS = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.20/swift-6.2.3-RELEASE-ubuntu24.04-stripped.tar.xz"]
-_DEFAULT_SWIFT_SHA256 = "b84d5a7ced3ce25a8b1f94be448f1927e159712e7e2c95b7047afeb0f5c266f5"
-_DEFAULT_SWIFT_STRIP_PREFIX = "swift-6.2.3-RELEASE-ubuntu24.04"
-
 apple_cross_toolchain = repository_rule(
     attrs = {
         "apple_sdk_path": attr.string(
@@ -692,17 +639,9 @@ apple_cross_toolchain = repository_rule(
             doc = "Archive type (e.g. 'tar.xz') when it can't be inferred from the URL.",
             mandatory = False,
         ),
-        "swift_path": attr.string(
-            doc = "Workspace-relative path to a local Swift tarball or pre-extracted directory.",
-        ),
-        "swift_urls": attr.string_list(
-            default = _DEFAULT_SWIFT_URLS,
-        ),
-        "swift_sha256": attr.string(
-            default = _DEFAULT_SWIFT_SHA256,
-        ),
-        "swift_strip_prefix": attr.string(
-            default = _DEFAULT_SWIFT_STRIP_PREFIX,
+        "swift_tools": attr.string(
+            doc = "Label of a rules_swift swift_tools target used as the Linux-host Swift compiler payload.",
+            mandatory = True,
         ),
     },
     environ = ["HOME", "PATH"],

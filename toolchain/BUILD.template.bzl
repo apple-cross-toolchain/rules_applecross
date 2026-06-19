@@ -1,6 +1,5 @@
 load("@apple_support//configs:platforms.bzl", "APPLE_PLATFORMS_CONSTRAINTS")
 load("@bazel_features//:features.bzl", "bazel_features")
-load("@build_bazel_rules_swift//swift/toolchains:swift_toolchain.bzl", linux_swift_toolchain = "swift_toolchain")
 load("@rules_applecross//toolchain:exec_tool.bzl", "exec_tool")
 load("@rules_applecross//toolchain:swift_toolchain.bzl", "swift_toolchain")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_toolchain_suite")
@@ -252,6 +251,32 @@ filegroup(
     ),
 )
 
+filegroup(
+    name = "swift_toolchain_files",
+    srcs = glob(
+        include = [
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Info.plist",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/usr/**",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/**",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/Library/**",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/usr/**",
+            "Xcode.app/Contents/Developer/Platforms/*.platform/usr/**",
+            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
+            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include/**",
+            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/**",
+            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/**",
+            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/**",
+            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/**",
+        ],
+        allow_empty = True,
+        exclude = [
+            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/Frameworks/Ruby.framework/**",
+        ],
+    ),
+)
+
 cc_args(
     name = "applecross_env",
     actions = ["@rules_cc//cc/toolchains/actions:all_actions"],
@@ -368,7 +393,8 @@ cc_toolchain_suite(
     swift_toolchain(
         name = "swift-compiler-" + arch,
         cpu = arch,
-        toolchain_files = ":toolchain_files",
+        swift_tools = "%{swift_tools}",
+        toolchain_files = ":swift_toolchain_files",
         toolchain_path_prefix = "%{toolchain_path_prefix}",
     )
     for arch in _APPLE_ARCHS
@@ -387,25 +413,3 @@ cc_toolchain_suite(
     )
     for arch in _APPLE_ARCHS
 ]
-
-linux_swift_toolchain(
-    name = "swift-compiler-linux_x86_64",
-    arch = "x86_64",
-    os = "linux",
-    root = "%{toolchain_path_prefix}Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr",
-    version_file = ":swift_version",
-)
-
-toolchain(
-    name = "swift-toolchain-linux_x86_64",
-    exec_compatible_with = [
-        "@platforms//os:linux",
-        "@platforms//cpu:x86_64",
-    ],
-    target_compatible_with = [
-        "@platforms//os:linux",
-        "@platforms//cpu:x86_64",
-    ],
-    toolchain = ":swift-compiler-linux_x86_64",
-    toolchain_type = "@build_bazel_rules_swift//toolchains:toolchain_type",
-)
