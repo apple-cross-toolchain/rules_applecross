@@ -398,10 +398,9 @@ def _apple_cross_toolchain_impl(rctx):
 
     rctx.template("BUILD", build_tpl, substitutions)
 
-    # Create Apple-compatible symlinks for LLVM tools so that
-    # toolchain configs and xcrunwrapper can invoke them by their
-    # traditional Apple names. Done AFTER all extractions so that
-    # symlinks don't interfere with tarball extraction.
+    # Create Apple-compatible symlinks for LLVM tools so that actions can
+    # invoke them by their traditional Apple names. Done AFTER all extractions
+    # so that symlinks don't interfere with tarball extraction.
     _llvm_symlinks = {
         # NOTE: "libtool" is intentionally omitted — the llvm multicall binary
         # doesn't recognize "libtool" as a subcommand (only "libtool-darwin").
