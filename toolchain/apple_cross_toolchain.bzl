@@ -179,6 +179,7 @@ def _apple_cross_toolchain_impl(rctx):
             rctx.extract(
                 archive = apple_sdk_local,
                 stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
+                type = rctx.attr.apple_sdk_archive_type or "",
             )
     elif rctx.attr.apple_sdk_urls:
         _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
@@ -636,7 +637,7 @@ apple_cross_toolchain = repository_rule(
             mandatory = False,
         ),
         "apple_sdk_archive_type": attr.string(
-            doc = "Archive type (e.g. 'tar.xz') when it can't be inferred from the URL.",
+            doc = "Archive type (e.g. 'tar.zst') when it can't be inferred from the archive name.",
             mandatory = False,
         ),
         "swift_tools": attr.string(
