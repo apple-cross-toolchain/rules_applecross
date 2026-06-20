@@ -155,6 +155,12 @@ for path in sys.argv[1:]:
 # that cause infinite loops when Bazel globs the SDK tree.
 find "$PROJECT_ROOT/Xcode.app" -type l -exec sh -c 'test "$(readlink "$1")" = "." && rm "$1"' _ {} \;
 
+if find "$PROJECT_ROOT/Xcode.app" \( -name "._*" -o -name "__MACOSX" \) -print -quit | grep -q .; then
+  echo "error: AppleDouble files remain in packaged Xcode tree" >&2
+  find "$PROJECT_ROOT/Xcode.app" \( -name "._*" -o -name "__MACOSX" \) -print >&2
+  exit 1
+fi
+
 XCODE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_ROOT/Xcode.app/Contents/version.plist")"
 
-tar -C "$PROJECT_ROOT" --zstd -cf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.zst" Xcode.app
+COPYFILE_DISABLE=1 tar -C "$PROJECT_ROOT" --zstd -cf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.zst" Xcode.app

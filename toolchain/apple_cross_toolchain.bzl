@@ -110,14 +110,78 @@ def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_
             rctx.delete(src)
             rctx.delete(obj)
 
-def _remove_appledouble_files(rctx):
-    result = rctx.execute([
-        "bash",
-        "-c",
-        "find Xcode.app -type f -name '._*' -delete && find Xcode.app -type d -name __MACOSX -prune -exec rm -rf {} +",
-    ])
+def _restore_tbd_symlinks(rctx):
+    python = rctx.which("python3")
+    if python:
+        result = rctx.execute([
+            str(python),
+            "-c",
+            """\
+import os
+
+root = "Xcode.app"
+
+def is_framework_path(path):
+    return any(part.endswith(".framework") for part in path.split(os.sep))
+
+for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+    kept_dirs = []
+    for name in dirnames:
+        path = os.path.join(dirpath, name)
+        if os.path.islink(path):
+            if not os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+        else:
+            kept_dirs.append(name)
+    dirnames[:] = kept_dirs
+
+    in_framework = is_framework_path(dirpath)
+    for name in filenames:
+        path = os.path.join(dirpath, name)
+        if os.path.islink(path):
+            if not os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+            continue
+
+        if in_framework and name.endswith(".tbd"):
+            link = os.path.join(dirpath, name[:-4])
+            if not os.path.exists(link):
+                try:
+                    os.unlink(link)
+                except FileNotFoundError:
+                    pass
+                os.symlink(name, link)
+""",
+        ])
+    else:
+        result = rctx.execute([
+            "bash",
+            "-c",
+            """\
+find Xcode.app -path "*.framework/*" -name "*.tbd" -type f -exec sh -c '
+  for tbd; do
+    link="${tbd%.tbd}"
+    if [ ! -e "$link" ]; then
+      rm -f "$link"
+      ln -s "$(basename "$tbd")" "$link"
+    fi
+  done
+' _ {} +
+find Xcode.app -type l -exec sh -c '
+  for link; do
+    [ -e "$link" ] || rm -f "$link"
+  done
+' _ {} +
+""",
+        ])
     if result.return_code != 0:
-        fail("Failed to remove AppleDouble files from the extracted SDK: " + (result.stderr or result.stdout))
+        fail("Failed to restore SDK TBD symlinks: " + (result.stderr or result.stdout))
 
 def _normalize_sdk_modulemaps(rctx):
     result = rctx.execute([
@@ -184,7 +248,7 @@ def _apple_cross_toolchain_impl(rctx):
     elif rctx.attr.apple_sdk_urls:
         _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
-    _remove_appledouble_files(rctx)
+    _restore_tbd_symlinks(rctx)
     _normalize_sdk_modulemaps(rctx)
 
     # Resolve the @llvm_prebuilt alias imported from @llvm's minimal prebuilt
