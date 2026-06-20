@@ -99,6 +99,9 @@ find "$PROJECT_ROOT/Xcode.app" -path "*.framework/*" -type f ! -name "*.*" \
         xcrun tapi stubify "$1" -o "$tbd" 2>/dev/null || true
       fi
       rm "$1"
+      if [ -f "$tbd" ]; then
+        ln -s "$(basename "$tbd")" "$1"
+      fi
     fi
   ' _ {} \;
 
@@ -154,6 +157,12 @@ for path in sys.argv[1:]:
 # Remove self-referencing symlinks (e.g. Ruby.framework/Headers/ruby/ruby -> .)
 # that cause infinite loops when Bazel globs the SDK tree.
 find "$PROJECT_ROOT/Xcode.app" -type l -exec sh -c 'test "$(readlink "$1")" = "." && rm "$1"' _ {} \;
+
+if find "$PROJECT_ROOT/Xcode.app" -type l ! -exec test -e {} \; -print -quit | grep -q .; then
+  echo "error: broken symlinks remain in packaged Xcode tree" >&2
+  find "$PROJECT_ROOT/Xcode.app" -type l ! -exec test -e {} \; -print >&2
+  exit 1
+fi
 
 if find "$PROJECT_ROOT/Xcode.app" \( -name "._*" -o -name "__MACOSX" \) -print -quit | grep -q .; then
   echo "error: AppleDouble files remain in packaged Xcode tree" >&2
