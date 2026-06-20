@@ -12,11 +12,6 @@ package(default_visibility = ["//visibility:public"])
 
 _APPLE_ARCHS = APPLE_PLATFORMS_CONSTRAINTS.keys()
 
-exports_files([
-    "cc_wrapper.sh",
-    "xcrunwrapper.sh",
-])
-
 cc_binary(
     name = "_libtool",
     srcs = ["libtool.cc"],
@@ -318,10 +313,7 @@ cc_tool(
 cc_tool(
     name = "libtool_tool",
     src = ":libtool",
-    data = [
-        ":toolchain_files",
-        ":xcrunwrapper.sh",
-    ],
+    data = [":toolchain_files"],
 )
 
 cc_tool(

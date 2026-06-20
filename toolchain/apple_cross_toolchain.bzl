@@ -203,31 +203,21 @@ def _apple_cross_toolchain_impl(rctx):
     # Resolve label paths
     libtool_cc = rctx.path(Label("@rules_applecross//toolchain:libtool.cc"))
     build_tpl = rctx.path(Label("@rules_applecross//toolchain:BUILD.template.bzl"))
-    cc_wrapper_tpl = rctx.path(Label("@rules_applecross//toolchain:cc_wrapper.template.sh"))
     wrapped_clang_src = rctx.path(Label("@rules_applecross//toolchain:wrapped_clang.cc"))
-    xcrunwrapper_src = rctx.path(Label("@rules_applecross//toolchain:xcrunwrapper.sh"))
 
     repo_path = str(rctx.path(""))
     relative_path_prefix = "external/{}/".format(rctx.name)
     toolchain_path_prefix = relative_path_prefix
-    developer_dir = ""
-    tools_path_prefix = ""
+    developer_dir = "Xcode.app/Contents/Developer"
     xcode_toolchain_bindir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/"
-    if rctx.attr.apple_sdk_urls or rctx.attr.apple_sdk_path:
-        developer_dir = "Xcode.app/Contents/Developer"
-        tools_path_prefix = toolchain_path_prefix + xcode_toolchain_bindir
 
     substitutions = {
-        "%{cc}": relative_path_prefix + "wrapped_clang",
         "%{swift_tools}": rctx.attr.swift_tools,
         "%{toolchain_path_prefix}": toolchain_path_prefix,
-        "%{tools_path_prefix}": tools_path_prefix,
     }
 
     # Setup C++ toolchain helpers (BUILD is deferred until after clang version
     # detection so we can populate include dirs).
-    rctx.template("cc_wrapper.sh", cc_wrapper_tpl, substitutions)
-    rctx.template("xcrunwrapper.sh", xcrunwrapper_src, {})
     rctx.symlink(libtool_cc, "libtool.cc")
     rctx.symlink(wrapped_clang_src, "wrapped_clang.cc")
 
