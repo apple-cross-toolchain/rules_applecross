@@ -54,6 +54,18 @@ def _sdk_download(rctx, urls, sha256, strip_prefix):
 
     rctx.download_and_extract(**kwargs)
 
+def _toolchain_path(rctx, path):
+    return rctx.path(Label("@rules_applecross//toolchain:" + path))
+
+def _python3(rctx):
+    python = rctx.which("python3")
+    if not python:
+        fail("python3 is required to prepare the Apple cross toolchain repository")
+    return str(python)
+
+def _install_executable(rctx, source, destination):
+    rctx.template(destination, _toolchain_path(rctx, source), {}, executable = True)
+
 def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_dir):
     """Create Swift compatibility stub archives expected by Apple linkers."""
     if not rctx.os.name.startswith("linux"):
@@ -111,93 +123,40 @@ def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_
             rctx.delete(obj)
 
 def _restore_tbd_symlinks(rctx):
-    python = rctx.which("python3")
-    if python:
-        result = rctx.execute([
-            str(python),
-            "-c",
-            """\
-import os
-
-root = "Xcode.app"
-
-def is_framework_path(path):
-    return any(part.endswith(".framework") for part in path.split(os.sep))
-
-for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
-    kept_dirs = []
-    for name in dirnames:
-        path = os.path.join(dirpath, name)
-        if os.path.islink(path):
-            if not os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except FileNotFoundError:
-                    pass
-        else:
-            kept_dirs.append(name)
-    dirnames[:] = kept_dirs
-
-    in_framework = is_framework_path(dirpath)
-    for name in filenames:
-        path = os.path.join(dirpath, name)
-        if os.path.islink(path):
-            if not os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except FileNotFoundError:
-                    pass
-            continue
-
-        if in_framework and name.endswith(".tbd"):
-            link = os.path.join(dirpath, name[:-4])
-            if not os.path.exists(link):
-                try:
-                    os.unlink(link)
-                except FileNotFoundError:
-                    pass
-                os.symlink(name, link)
-""",
-        ])
-    else:
-        result = rctx.execute([
-            "bash",
-            "-c",
-            """\
-find Xcode.app -path "*.framework/*" -name "*.tbd" -type f -exec sh -c '
-  for tbd; do
-    link="${tbd%.tbd}"
-    if [ ! -e "$link" ]; then
-      rm -f "$link"
-      ln -s "$(basename "$tbd")" "$link"
-    fi
-  done
-' _ {} +
-find Xcode.app -type l -exec sh -c '
-  for link; do
-    [ -e "$link" ] || rm -f "$link"
-  done
-' _ {} +
-""",
-        ])
+    result = rctx.execute([
+        _python3(rctx),
+        str(_toolchain_path(rctx, "repo_tools/restore_tbd_symlinks.py")),
+        "Xcode.app",
+    ])
     if result.return_code != 0:
         fail("Failed to restore SDK TBD symlinks: " + (result.stderr or result.stdout))
 
 def _normalize_sdk_modulemaps(rctx):
     result = rctx.execute([
-        "bash",
-        "-c",
-        """\
-find Xcode.app -path '*/usr/include/libxml2/module.modulemap' -print0 | while IFS= read -r -d '' modulemap; do
-  include_dir="${modulemap%/libxml2/module.modulemap}"
-  if [ -e "${include_dir}/libxml/module.modulemap" ]; then
-    rm -f "$modulemap"
-  fi
-done
-""",
+        _python3(rctx),
+        str(_toolchain_path(rctx, "repo_tools/normalize_sdk_modulemaps.py")),
+        "Xcode.app",
     ])
     if result.return_code != 0:
         fail("Failed to normalize SDK module maps: " + (result.stderr or result.stdout))
+
+def _ensure_clang_resource_libs(rctx, clang_lib_dir, toolchain_bindir):
+    result = rctx.execute([
+        _python3(rctx),
+        str(_toolchain_path(rctx, "repo_tools/ensure_clang_resource_libs.py")),
+        clang_lib_dir,
+        toolchain_bindir,
+    ])
+    if result.return_code != 0:
+        fail("Failed to prepare clang resource libraries: " + (result.stderr or result.stdout))
+
+def _patch_swiftinterfaces(rctx, framework_dirs):
+    result = rctx.execute([
+        _python3(rctx),
+        str(_toolchain_path(rctx, "repo_tools/patch_swiftinterfaces.py")),
+    ] + framework_dirs)
+    if result.return_code != 0:
+        fail("Failed to patch SDK Swift interfaces: " + (result.stderr or result.stdout))
 
 def _apple_cross_toolchain_impl(rctx):
     # Resolve label paths
@@ -290,55 +249,7 @@ def _apple_cross_toolchain_impl(rctx):
             rctx.execute(["ln", "-sfn", "../host", swift_lib_dir + "/host"])
 
     # Ensure the clang resource directory matches the actual clang version.
-    # The Xcode SDK ships clang resource headers and compiler-rt builtins
-    # under lib/clang/<sdk_ver>/ but our LLVM binary expects
-    # lib/clang/<llvm_ver>/. Bridge the version gap so clang finds both.
-    clang_lib_dir = xcode_toolchain_dir + "lib/clang/"
-    llvm_ver = ""
-    result = rctx.execute([
-        "bash",
-        "-c",
-        "ls -1 " + clang_lib_dir + " 2>/dev/null | head -1",
-    ])
-    sdk_clang_ver = result.stdout.strip()
-    if sdk_clang_ver:
-        result = rctx.execute([
-            xcode_toolchain_bindir + "clang",
-            "--version",
-        ])
-
-        # Extract major version from "clang version X.Y.Z"
-        for line in result.stdout.split("\n"):
-            if "clang version" in line:
-                llvm_ver = line.split("clang version")[1].strip().split(".")[0]
-                if llvm_ver != sdk_clang_ver:
-                    llvm_clang_dir = clang_lib_dir + llvm_ver
-                    sdk_clang_dir = clang_lib_dir + sdk_clang_ver
-                    result = rctx.execute(["test", "-d", llvm_clang_dir])
-                    if result.return_code != 0:
-                        # LLVM version dir doesn't exist at all — symlink it
-                        # to the SDK version.
-                        rctx.execute([
-                            "ln",
-                            "-sfn",
-                            sdk_clang_ver,
-                            llvm_clang_dir,
-                        ])
-                    else:
-                        # LLVM version dir exists (from prebuilt) with headers
-                        # but the SDK's compiler-rt builtins (lib/darwin/) are
-                        # under the SDK version. Symlink missing subdirs.
-                        result = rctx.execute(["test", "-d", sdk_clang_dir + "/lib"])
-                        if result.return_code == 0:
-                            result = rctx.execute(["test", "-e", llvm_clang_dir + "/lib"])
-                            if result.return_code != 0:
-                                rctx.execute([
-                                    "ln",
-                                    "-sfn",
-                                    "../" + sdk_clang_ver + "/lib",
-                                    llvm_clang_dir + "/lib",
-                                ])
-                break
+    _ensure_clang_resource_libs(rctx, xcode_toolchain_dir + "lib/clang/", xcode_toolchain_bindir)
 
     # Populate cxx_builtin_include_directories with the absolute repo path so
     # that Bazel's include scanner matches resolved absolute include paths from
@@ -386,9 +297,8 @@ def _apple_cross_toolchain_impl(rctx):
     # Detect SDK version from SDKSettings.json (more reliable than directory name).
     _sdk_settings = _developer_dir_path + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json"
     result = rctx.execute([
-        "python3",
-        "-c",
-        "import json,sys; print(json.load(open(sys.argv[1]))['Version'])",
+        _python3(rctx),
+        str(_toolchain_path(rctx, "repo_tools/read_sdk_settings_version.py")),
         _sdk_settings,
     ])
     _sdk_version = result.stdout.strip()
@@ -431,189 +341,34 @@ def _apple_cross_toolchain_impl(rctx):
         _tool_path = xcode_toolchain_bindir + _tool_name
         result = rctx.execute(["test", "-e", _tool_path])
         if result.return_code != 0:
-            rctx.file(
-                _tool_path,
-                content = """\
-#!/bin/bash
-# Stub: {tool} is not available on Linux. Creates empty output.
-OUTPUT=""
-for arg in "$@"; do
-  if [[ "$prev" == "-o" ]]; then OUTPUT="$arg"; fi
-  prev="$arg"
-done
-if [[ -n "$OUTPUT" ]]; then touch "$OUTPUT"; fi
-""".format(tool = _tool_name),
-                executable = True,
-            )
+            _install_executable(rctx, "stubs/empty_output_tool.sh", _tool_path)
 
     # Create intentbuilderc stub for Linux.
     _intentbuilderc_path = xcode_toolchain_bindir + "intentbuilderc"
     result = rctx.execute(["test", "-e", _intentbuilderc_path])
     if result.return_code != 0:
-        rctx.file(
-            _intentbuilderc_path,
-            content = """\
-#!/bin/bash
-# Stub: intentbuilderc is not available on Linux.
-OUTPUT_DIR=""
-LANGUAGE=""
-for arg in "$@"; do
-  if [[ "$prev" == "-output" ]]; then OUTPUT_DIR="$arg"; fi
-  if [[ "$prev" == "-language" ]]; then LANGUAGE="$arg"; fi
-  prev="$arg"
-done
-if [[ -n "$OUTPUT_DIR" ]]; then
-  mkdir -p "$OUTPUT_DIR"
-  if [[ "$LANGUAGE" == "Swift" ]]; then
-    touch "$OUTPUT_DIR/Intents.swift"
-  fi
-fi
-""",
-            executable = True,
-        )
+        _install_executable(rctx, "stubs/intentbuilderc.sh", _intentbuilderc_path)
 
     # Create xcstringtool stub for Linux (compiles .xcstrings to .strings).
     _xcstringtool_path = xcode_toolchain_bindir + "xcstringtool"
     result = rctx.execute(["test", "-e", _xcstringtool_path])
     if result.return_code != 0:
-        rctx.file(
-            _xcstringtool_path,
-            content = """\
-#!/usr/bin/env python3
-\"\"\"Minimal xcstringtool stub for cross-compilation on Linux.
-Handles 'compile' subcommand to convert .xcstrings JSON to .strings files.\"\"\"
-import json, os, plistlib, sys
-
-def compile_xcstrings(args):
-    output_dir = None
-    input_file = None
-    i = 0
-    while i < len(args):
-        if args[i] == "--output-directory" and i + 1 < len(args):
-            output_dir = args[i + 1]
-            i += 2
-        else:
-            input_file = args[i]
-            i += 1
-    if not output_dir or not input_file:
-        print("Usage: xcstringtool compile --output-directory <dir> <input>", file=sys.stderr)
-        return 1
-    with open(input_file, "r") as f:
-        data = json.load(f)
-    source_lang = data.get("sourceLanguage", "en")
-    strings = data.get("strings", {})
-    # Collect all languages
-    langs = set()
-    for key, info in strings.items():
-        for lang in info.get("localizations", {}):
-            langs.add(lang)
-    if not langs:
-        langs.add(source_lang)
-    base_name = os.path.splitext(os.path.basename(input_file))[0]
-    for lang in langs:
-        lproj = os.path.join(output_dir, lang + ".lproj")
-        os.makedirs(lproj, exist_ok=True)
-        entries = {}
-        for key, info in strings.items():
-            loc = info.get("localizations", {}).get(lang, {})
-            su = loc.get("stringUnit", {})
-            value = su.get("value", key)
-            entries[key] = value
-        out_path = os.path.join(lproj, base_name + ".strings")
-        with open(out_path, "wb") as f:
-            plistlib.dump(entries, f, fmt=plistlib.FMT_BINARY)
-    return 0
-
-def main():
-    if len(sys.argv) < 2:
-        sys.exit(1)
-    if sys.argv[1] == "compile":
-        sys.exit(compile_xcstrings(sys.argv[2:]))
-    print("Unknown subcommand: " + sys.argv[1], file=sys.stderr)
-    sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-""",
-            executable = True,
-        )
+        _install_executable(rctx, "stubs/xcstringtool.py", _xcstringtool_path)
 
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
     # Always overwrite — the SDK may ship real binaries (e.g. codesign_allocate
     # from LLVM) that fail on Linux with "unable to find any toolchains".
     _codesign_path = xcode_toolchain_bindir + "codesign"
-    rctx.file(
-        _codesign_path,
-        content = """\
-#!/bin/bash
-# Stub: codesign is not available on Linux. No-op for cross-compilation.
-exit 0
-""",
-        executable = True,
-    )
+    _install_executable(rctx, "stubs/noop_tool.sh", _codesign_path)
 
     _codesign_allocate_path = xcode_toolchain_bindir + "codesign_allocate"
-    rctx.file(
-        _codesign_allocate_path,
-        content = """\
-#!/bin/bash
-# Stub: codesign_allocate is not available on Linux. No-op for cross-compilation.
-exit 0
-""",
-        executable = True,
-    )
+    _install_executable(rctx, "stubs/noop_tool.sh", _codesign_allocate_path)
 
     # Create security stub for Linux (handles mobileprovision parsing).
     _security_path = xcode_toolchain_bindir + "security"
     result = rctx.execute(["test", "-e", _security_path])
     if result.return_code != 0:
-        rctx.file(
-            _security_path,
-            content = """\
-#!/usr/bin/env python3
-\"\"\"Minimal security stub for cross-compilation on Linux.
-Handles the subset of macOS 'security' commands used by rules_apple codesigningtool.\"\"\"
-import subprocess, sys, os
-
-def main():
-    args = sys.argv[1:]
-    if not args:
-        sys.exit(0)
-    # security cms -D -i <file>: extract plist from PKCS#7 signed mobileprovision
-    if args[0] == "cms" and "-D" in args and "-i" in args:
-        idx = args.index("-i")
-        if idx + 1 < len(args):
-            mp_file = args[idx + 1]
-            # Try openssl to extract the signed content
-            try:
-                result = subprocess.run(
-                    ["openssl", "smime", "-inform", "DER", "-verify", "-noverify", "-in", mp_file],
-                    capture_output=True
-                )
-                if result.returncode == 0 and result.stdout:
-                    sys.stdout.buffer.write(result.stdout)
-                    sys.exit(0)
-            except FileNotFoundError:
-                pass
-            # Fallback: return a minimal empty plist
-            print('<?xml version="1.0" encoding="UTF-8"?>')
-            print('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">')
-            print('<plist version="1.0"><dict>')
-            print('<key>DeveloperCertificates</key><array></array>')
-            print('</dict></plist>')
-            sys.exit(0)
-    # security find-identity -p codesigning: return a fake identity
-    if args[0] == "find-identity":
-        print("  1) AABBCCDDAABBCCDDAABBCCDDAABBCCDDAABBCCDD \\"Apple Development: Cross Compilation\\"")
-        print("     1 valid identities found")
-        sys.exit(0)
-    sys.exit(0)
-
-if __name__ == "__main__":
-    main()
-""",
-            executable = True,
-        )
+        _install_executable(rctx, "stubs/security.py", _security_path)
 
     if rctx.os.name.startswith("linux"):
         # Create stub Swift compatibility libraries with FORCE_LOAD symbols.
@@ -649,33 +404,10 @@ if __name__ == "__main__":
                         rctx.delete(_stub_o)
 
     # Create arm64 swiftinterface files for arm64e-only frameworks.
-    # Some SDK frameworks (especially cross-import overlays like
-    # _Translation_SwiftUI) ship only arm64e swiftinterfaces. The Swift
-    # compiler won't load these when targeting arm64, causing "has no
-    # member" errors. Create arm64 copies with the target triple replaced.
-    for _sdk_info in [("iPhoneOS", "iPhoneOS"), ("iPhoneSimulator", "iPhoneSimulator")]:
-        _sdk_platform_name = _sdk_info[0]
-        _sdk_name = _sdk_info[1]
-        _sdk_fw_dir = developer_dir + "/Platforms/" + _sdk_platform_name + ".platform/Developer/SDKs/" + _sdk_name + ".sdk/System/Library/Frameworks"
-        result = rctx.execute([
-            "bash",
-            "-c",
-            "find '" + _sdk_fw_dir + "' -type d -name '*.swiftmodule' 2>/dev/null",
-        ])
-        if result.return_code == 0:
-            for _swiftmod_dir in result.stdout.strip().split("\n"):
-                if not _swiftmod_dir:
-                    continue
-                _arm64e = _swiftmod_dir + "/arm64e-apple-ios.swiftinterface"
-                _arm64 = _swiftmod_dir + "/arm64-apple-ios.swiftinterface"
-                r1 = rctx.execute(["test", "-e", _arm64e])
-                r2 = rctx.execute(["test", "-e", _arm64])
-                if r1.return_code == 0 and r2.return_code != 0:
-                    rctx.execute([
-                        "bash",
-                        "-c",
-                        "sed 's/arm64e-apple-ios/arm64-apple-ios/g' '" + _arm64e + "' > '" + _arm64 + "'",
-                    ])
+    _patch_swiftinterfaces(rctx, [
+        developer_dir + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks",
+        developer_dir + "/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk/System/Library/Frameworks",
+    ])
 
 apple_cross_toolchain = repository_rule(
     attrs = {
