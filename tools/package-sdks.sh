@@ -2,6 +2,11 @@
 
 set -euxo pipefail
 
+# Keep macOS resource-fork and extended-attribute metadata out of copied files
+# and the final archive. Non-Apple tar readers expose that metadata as `._*`
+# entries, doubling the apparent archive entry count.
+export COPYFILE_DISABLE=1
+
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
   DEVELOPER_DIR="$(xcode-select -p)"
 fi
@@ -172,4 +177,12 @@ fi
 
 XCODE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_ROOT/Xcode.app/Contents/version.plist")"
 
-COPYFILE_DISABLE=1 tar -C "$PROJECT_ROOT" --zstd -cf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.zst" Xcode.app
+tar \
+  --no-mac-metadata \
+  --no-xattrs \
+  --no-fflags \
+  --no-acls \
+  -C "$PROJECT_ROOT" \
+  --zstd \
+  -cf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.zst" \
+  Xcode.app
