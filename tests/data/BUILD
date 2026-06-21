@@ -8,12 +8,46 @@ load("@rules_cc//cc:objc_library.bzl", "objc_library")
 cc_library(
     name = "hello_c",
     srcs = ["hello.c"],
+    hdrs = ["hello.h"],
+)
+
+cc_library(
+    name = "hello_cc",
+    srcs = ["hello.cc"],
+    hdrs = ["hello_cc.h"],
+    deps = [":hello_c"],
 )
 
 cc_binary(
     name = "hello_bin",
     srcs = ["main.c"],
     deps = [":hello_c"],
+)
+
+cc_binary(
+    name = "hello_cc_bin",
+    srcs = ["main.cc"],
+    deps = [":hello_cc"],
+)
+
+cc_binary(
+    name = "bcr_cc_deps_bin",
+    srcs = ["bcr_deps.cc"],
+    deps = [
+        "@fmt",
+        "@zlib",
+    ],
+)
+
+cc_binary(
+    name = "bcr_complex_cc_deps_bin",
+    srcs = ["bcr_complex_deps.cc"],
+    deps = [
+        "@fmt",
+        "@libpng",
+        "@sqlite3",
+        "@zlib",
+    ],
 )
 
 objc_library(

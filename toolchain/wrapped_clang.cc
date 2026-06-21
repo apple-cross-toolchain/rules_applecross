@@ -189,7 +189,6 @@ std::string GetMandatoryEnvVar(const std::string &var_name) {
   return env_value;
 }
 
-#if !__APPLE__
 // Returns the requested environment variable in the current process's
 // environment, or an empty string if this variable is unset.
 static std::string GetEnvVar(const std::string &var_name) {
@@ -199,7 +198,6 @@ static std::string GetEnvVar(const std::string &var_name) {
   }
   return env_value;
 }
-#endif
 
 // Returns true if `str` starts with the specified `prefix`.
 bool StartsWith(const std::string &str, const std::string &prefix) {
@@ -416,7 +414,7 @@ int main(int argc, char *argv[]) {
   std::string sdk_root = GetMandatoryEnvVar("SDKROOT");
 #else
   // On non-Apple platforms, get DEVELOPER_DIR from the environment (set by
-  // the CC toolchain config's apple_env feature) and compute SDKROOT.
+  // the CC toolchain config's apple_env feature).
   std::string developer_dir = GetEnvVar("DEVELOPER_DIR");
   if (developer_dir == "") {
     // Fallback: compute from our own binary location.
@@ -438,6 +436,9 @@ int main(int argc, char *argv[]) {
 
   std::string sdk_root = GetEnvVar("SDKROOT");
   if (sdk_root == "") {
+    sdk_root = GetEnvVar("APPLECROSS_SYSROOT");
+  }
+  if (sdk_root == "") {
     std::string sdk_platform = GetMandatoryEnvVar("APPLE_SDK_PLATFORM");
     std::string sdk_version = GetMandatoryEnvVar("APPLE_SDK_VERSION_OVERRIDE");
     sdk_root = developer_dir + "/Platforms/" + sdk_platform +
@@ -451,13 +452,11 @@ int main(int argc, char *argv[]) {
 #if __APPLE__
   std::vector<std::string> invocation_args = {"/usr/bin/xcrun", tool_name};
 #else
-  // On Linux, use the ported xcrun from the toolchain. Setting SDKROOT lets
-  // xcrun propagate it to clang so that both compile and link actions see the
-  // sysroot, matching the macOS behavior.
-  std::string xcrun_path = developer_dir +
-      "/Toolchains/XcodeDefault.xctoolchain/usr/bin/xcrun";
+  std::string toolchain_bin = developer_dir +
+      "/Toolchains/XcodeDefault.xctoolchain/usr/bin";
+  std::string tool_path = toolchain_bin + "/" + tool_name;
   setenv("SDKROOT", sdk_root.c_str(), 1);
-  std::vector<std::string> invocation_args = {xcrun_path, tool_name};
+  std::vector<std::string> invocation_args = {tool_path};
 #endif
   std::vector<std::string> processed_args = {};
 
@@ -507,18 +506,26 @@ int main(int argc, char *argv[]) {
 #if __APPLE__
   std::string dsym_xcrun = "/usr/bin/xcrun";
 #else
-  std::string dsym_xcrun = developer_dir +
-      "/Toolchains/XcodeDefault.xctoolchain/usr/bin/xcrun";
+  std::string dsymutil_path = toolchain_bin + "/dsymutil";
+  std::string strip_path = toolchain_bin + "/strip";
 #endif
 
   // Generate dSYM if dsym_path is set.
   if (!dsym_path.empty()) {
+#if __APPLE__
     std::vector<std::string> dsymutil_args = {dsym_xcrun,
                                               "dsymutil",
                                               linked_binary,
                                               "-o",
                                               dsym_path,
                                               "--no-swiftmodule-timestamp"};
+#else
+    std::vector<std::string> dsymutil_args = {dsymutil_path,
+                                              linked_binary,
+                                              "-o",
+                                              dsym_path,
+                                              "--no-swiftmodule-timestamp"};
+#endif
     // If dsym_path ends with .dSYM, generate a bundle; otherwise use --flat.
     if (dsym_path.size() < 5 ||
         dsym_path.compare(dsym_path.size() - 5, 5, ".dSYM") != 0) {
@@ -531,8 +538,12 @@ int main(int argc, char *argv[]) {
 
   // Strip debug symbols if requested.
   if (strip_debug_symbols) {
+#if __APPLE__
     std::vector<std::string> strip_args = {dsym_xcrun, "strip", "-S",
                                            linked_binary};
+#else
+    std::vector<std::string> strip_args = {strip_path, "-S", linked_binary};
+#endif
     if (!RunSubProcess(strip_args)) {
       return 2;
     }

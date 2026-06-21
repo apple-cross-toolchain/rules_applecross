@@ -1,5 +1,6 @@
 load("@apple_support//configs:platforms.bzl", "APPLE_PLATFORMS_CONSTRAINTS")
 load("@bazel_features//:features.bzl", "bazel_features")
+load("@rules_applecross//toolchain:builtin_include_directory.bzl", "builtin_include_directory")
 load("@rules_applecross//toolchain:exec_tool.bzl", "exec_tool")
 load("@rules_applecross//toolchain:swift_toolchain.bzl", "swift_toolchain")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_toolchain_suite")
@@ -120,7 +121,6 @@ APPLE_SUPPORT_ENABLED_FEATURES = APPLE_SUPPORT_ENABLED_MARKERS + [
     "@apple_support//toolchain/coverage:coverage_prefix_map",
     "@apple_support//toolchain/coverage:_coverage_prefix_map_absolute_sources_non_hermetic_wrapper",
     "@apple_support//toolchain/objc:__apple_default_compiler_flags",
-    "@apple_support//toolchain:sysroot_feature",
     "@apple_support//toolchain:headerpad",
     "@rules_cc//cc/toolchains/args/objc_arc_flags:feature",
     "@apple_support//toolchain:user_link_flags",
@@ -197,21 +197,26 @@ filegroup(
     srcs = [],
 )
 
+_XCODE_DEVELOPER_DIR = "Xcode.app/Contents/Developer"
+_XCODE_TOOLCHAIN_DIR = _XCODE_DEVELOPER_DIR + "/Toolchains/XcodeDefault.xctoolchain"
+_XCODE_TOOLCHAIN_BIN = _XCODE_TOOLCHAIN_DIR + "/usr/bin"
+_XCODE_TOOLCHAIN_LIB = _XCODE_TOOLCHAIN_DIR + "/usr/lib"
+
 filegroup(
     name = "ported_tools",
-    srcs = glob(["Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/*"]),
+    srcs = glob([_XCODE_TOOLCHAIN_BIN + "/*"]),
 )
 
 filegroup(
     name = "sdk_tool_files",
     srcs = glob(
         include = [
-            "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/*",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Info.plist",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
-            "Xcode.app/Contents/Developer/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/CoreServices/SystemVersion.plist",
-            "Xcode.app/Contents/Developer/version.plist",
+            _XCODE_TOOLCHAIN_BIN + "/*",
+            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Info.plist",
+            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
+            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
+            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/CoreServices/SystemVersion.plist",
+            _XCODE_DEVELOPER_DIR + "/version.plist",
         ],
         allow_empty = True,
     ),
@@ -219,20 +224,59 @@ filegroup(
 
 filegroup(
     name = "toolchain_files",
+    srcs = [":sdk_tool_files"],
+)
+
+filegroup(
+    name = "clang_resource_files",
     srcs = [
-        "Xcode.app/Contents/Developer/Platforms/AppleTVOS.platform",
-        "Xcode.app/Contents/Developer/Platforms/AppleTVSimulator.platform",
-        "Xcode.app/Contents/Developer/Platforms/MacOSX.platform",
-        "Xcode.app/Contents/Developer/Platforms/WatchOS.platform",
-        "Xcode.app/Contents/Developer/Platforms/WatchSimulator.platform",
-        "Xcode.app/Contents/Developer/Platforms/XROS.platform",
-        "Xcode.app/Contents/Developer/Platforms/XRSimulator.platform",
-        "Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform",
-        "Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform",
-        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
-        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
-        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include",
-        "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
+        _XCODE_TOOLCHAIN_LIB + "/clang",
+    ],
+)
+
+builtin_include_directory(
+    name = "clang_resource_include_directory",
+    path = _XCODE_TOOLCHAIN_LIB + "/clang",
+)
+
+filegroup(
+    name = "clang_tool_files",
+    srcs = [
+        _XCODE_TOOLCHAIN_BIN + "/clang",
+        _XCODE_TOOLCHAIN_BIN + "/llvm",
+        ":clang_resource_files",
+    ],
+)
+
+filegroup(
+    name = "clangpp_tool_files",
+    srcs = [
+        _XCODE_TOOLCHAIN_BIN + "/clang++",
+        _XCODE_TOOLCHAIN_BIN + "/llvm",
+        ":clang_resource_files",
+    ],
+)
+
+filegroup(
+    name = "link_tool_files",
+    srcs = [
+        ":clang_tool_files",
+        _XCODE_TOOLCHAIN_BIN + "/dsymutil",
+        _XCODE_TOOLCHAIN_BIN + "/ld",
+        _XCODE_TOOLCHAIN_BIN + "/ld64.lld",
+        _XCODE_TOOLCHAIN_BIN + "/lld",
+        _XCODE_TOOLCHAIN_BIN + "/llvm-strip",
+        _XCODE_TOOLCHAIN_BIN + "/strip",
+        _XCODE_TOOLCHAIN_LIB + "/libtapi.so",
+        _XCODE_TOOLCHAIN_LIB + "/libtapi.so.8svn",
+    ],
+)
+
+filegroup(
+    name = "libtool_files",
+    srcs = [
+        _XCODE_TOOLCHAIN_BIN + "/llvm",
+        _XCODE_TOOLCHAIN_BIN + "/llvm-libtool-darwin",
     ],
 )
 
@@ -243,15 +287,15 @@ _SWIFT_COMMON_TOOLCHAIN_INPUTS = [
 ]
 
 _SWIFT_PLATFORM_INPUTS = {
-    "AppleTVOS": ["Xcode.app/Contents/Developer/Platforms/AppleTVOS.platform"],
-    "AppleTVSimulator": ["Xcode.app/Contents/Developer/Platforms/AppleTVSimulator.platform"],
-    "MacOSX": ["Xcode.app/Contents/Developer/Platforms/MacOSX.platform"],
-    "WatchOS": ["Xcode.app/Contents/Developer/Platforms/WatchOS.platform"],
-    "WatchSimulator": ["Xcode.app/Contents/Developer/Platforms/WatchSimulator.platform"],
-    "XROS": ["Xcode.app/Contents/Developer/Platforms/XROS.platform"],
-    "XRSimulator": ["Xcode.app/Contents/Developer/Platforms/XRSimulator.platform"],
-    "iPhoneOS": ["Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform"],
-    "iPhoneSimulator": ["Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform"],
+    "AppleTVOS": [_XCODE_DEVELOPER_DIR + "/Platforms/AppleTVOS.platform"],
+    "AppleTVSimulator": [_XCODE_DEVELOPER_DIR + "/Platforms/AppleTVSimulator.platform"],
+    "MacOSX": [_XCODE_DEVELOPER_DIR + "/Platforms/MacOSX.platform"],
+    "WatchOS": [_XCODE_DEVELOPER_DIR + "/Platforms/WatchOS.platform"],
+    "WatchSimulator": [_XCODE_DEVELOPER_DIR + "/Platforms/WatchSimulator.platform"],
+    "XROS": [_XCODE_DEVELOPER_DIR + "/Platforms/XROS.platform"],
+    "XRSimulator": [_XCODE_DEVELOPER_DIR + "/Platforms/XRSimulator.platform"],
+    "iPhoneOS": [_XCODE_DEVELOPER_DIR + "/Platforms/iPhoneOS.platform"],
+    "iPhoneSimulator": [_XCODE_DEVELOPER_DIR + "/Platforms/iPhoneSimulator.platform"],
 }
 
 [
@@ -285,9 +329,144 @@ _SWIFT_TOOLCHAIN_FILES_BY_ARCH = {
 filegroup(
     name = "swift_toolchain_files",
     srcs = _SWIFT_COMMON_TOOLCHAIN_INPUTS + [
-        "Xcode.app/Contents/Developer/Platforms",
+        _XCODE_DEVELOPER_DIR + "/Platforms",
     ],
 )
+
+_APPLE_SDK_PLATFORMS_BY_ARCH = {
+    "darwin_arm64": "MacOSX",
+    "darwin_arm64e": "MacOSX",
+    "darwin_x86_64": "MacOSX",
+    "ios_arm64": "iPhoneOS",
+    "ios_arm64e": "iPhoneOS",
+    "ios_sim_arm64": "iPhoneSimulator",
+    "ios_x86_64": "iPhoneSimulator",
+    "tvos_arm64": "AppleTVOS",
+    "tvos_sim_arm64": "AppleTVSimulator",
+    "tvos_x86_64": "AppleTVSimulator",
+    "visionos_arm64": "XROS",
+    "visionos_sim_arm64": "XRSimulator",
+    "watchos_arm64": "WatchSimulator",
+    "watchos_arm64_32": "WatchOS",
+    "watchos_device_arm64": "WatchOS",
+    "watchos_device_arm64e": "WatchOS",
+    "watchos_x86_64": "WatchSimulator",
+}
+
+_APPLE_SDK_PLATFORMS = {
+    sdk_platform: None
+    for sdk_platform in _APPLE_SDK_PLATFORMS_BY_ARCH.values()
+}.keys()
+
+[
+    filegroup(
+        name = "sdk_" + sdk_platform.lower(),
+        srcs = [
+            _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + ".sdk",
+        ],
+    )
+    for sdk_platform in _APPLE_SDK_PLATFORMS
+]
+
+[
+    filegroup(
+        name = "platform_frameworks_" + sdk_platform.lower(),
+        srcs = [
+            _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/Library/Frameworks",
+        ],
+    )
+    for sdk_platform in _APPLE_SDK_PLATFORMS
+]
+
+[
+    filegroup(
+        name = "platform_libs_" + sdk_platform.lower(),
+        srcs = [
+            _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/usr/lib",
+        ],
+    )
+    for sdk_platform in _APPLE_SDK_PLATFORMS
+]
+
+[
+    builtin_include_directory(
+        name = "sdk_usr_include_directory_" + sdk_platform.lower(),
+        path = _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + ".sdk/usr/include",
+    )
+    for sdk_platform in _APPLE_SDK_PLATFORMS
+]
+
+[
+    builtin_include_directory(
+        name = "sdk_frameworks_directory_" + sdk_platform.lower(),
+        path = _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + ".sdk/System/Library/Frameworks",
+    )
+    for sdk_platform in _APPLE_SDK_PLATFORMS
+]
+
+[
+    builtin_include_directory(
+        name = "platform_frameworks_directory_" + sdk_platform.lower(),
+        path = _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/Library/Frameworks",
+    )
+    for sdk_platform in _APPLE_SDK_PLATFORMS
+]
+
+[
+    cc_args(
+        name = "applecross_sysroot_" + arch,
+        actions = [
+            "@rules_cc//cc/toolchains/actions:compile_actions",
+            "@rules_cc//cc/toolchains/actions:link_actions",
+            "@rules_cc//cc/toolchains/actions:objc_executable",
+        ],
+        args = [
+            "-isysroot",
+            "{sysroot}",
+            "-F{sysroot}/System/Library/Frameworks",
+            "-F{platform_frameworks}",
+        ],
+        allowlist_include_directories = [
+            ":clang_resource_include_directory",
+            ":sdk_usr_include_directory_" + sdk_platform.lower(),
+            ":sdk_frameworks_directory_" + sdk_platform.lower(),
+            ":platform_frameworks_directory_" + sdk_platform.lower(),
+        ],
+        data = [
+            ":sdk_" + sdk_platform.lower(),
+            ":platform_frameworks_" + sdk_platform.lower(),
+        ],
+        env = {
+            "APPLECROSS_SYSROOT": "{sysroot}",
+            "SDKROOT": "{sysroot}",
+        },
+        format = {
+            "platform_frameworks": ":platform_frameworks_" + sdk_platform.lower(),
+            "sysroot": ":sdk_" + sdk_platform.lower(),
+        },
+    )
+    for arch, sdk_platform in _APPLE_SDK_PLATFORMS_BY_ARCH.items()
+]
+
+[
+    cc_args(
+        name = "applecross_platform_link_paths_" + arch,
+        actions = [
+            "@rules_cc//cc/toolchains/actions:link_actions",
+            "@rules_cc//cc/toolchains/actions:objc_executable",
+        ],
+        args = [
+            "-L{platform_libs}",
+        ],
+        data = [
+            ":platform_libs_" + sdk_platform.lower(),
+        ],
+        format = {
+            "platform_libs": ":platform_libs_" + sdk_platform.lower(),
+        },
+    )
+    for arch, sdk_platform in _APPLE_SDK_PLATFORMS_BY_ARCH.items()
+]
 
 cc_args(
     name = "applecross_env",
@@ -301,37 +480,49 @@ cc_args(
 cc_tool(
     name = "clang_tool",
     src = ":wrapped_clang",
-    data = [":toolchain_files"],
+    data = [":clang_tool_files"],
 )
 
 cc_tool(
     name = "clangpp_tool",
     src = ":wrapped_clang_pp",
-    data = [":toolchain_files"],
+    data = [":clangpp_tool_files"],
+)
+
+cc_tool(
+    name = "clang_link_tool",
+    src = ":wrapped_clang",
+    data = [":link_tool_files"],
 )
 
 cc_tool(
     name = "libtool_tool",
     src = ":libtool",
-    data = [":toolchain_files"],
+    data = [":libtool_files"],
 )
 
 cc_tool(
     name = "strip_tool",
     src = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-strip",
-    data = [":toolchain_files"],
+    data = [
+        _XCODE_TOOLCHAIN_BIN + "/llvm",
+    ],
 )
 
 cc_tool(
     name = "llvm_profdata_tool",
     src = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-profdata",
-    data = [":toolchain_files"],
+    data = [
+        _XCODE_TOOLCHAIN_BIN + "/llvm",
+    ],
 )
 
 cc_tool(
     name = "llvm_cov_tool",
     src = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-cov",
-    data = [":toolchain_files"],
+    data = [
+        _XCODE_TOOLCHAIN_BIN + "/llvm",
+    ],
 )
 
 cc_tool_map(
@@ -342,14 +533,14 @@ cc_tool_map(
         "@rules_cc//cc/toolchains/actions:c_compile_actions": ":clang_tool",
         "@rules_cc//cc/toolchains/actions:cpp_compile": ":clangpp_tool",
         "@rules_cc//cc/toolchains/actions:cpp_header_parsing": ":clangpp_tool",
-        "@rules_cc//cc/toolchains/actions:cpp_link_dynamic_library": ":clang_tool",
-        "@rules_cc//cc/toolchains/actions:cpp_link_executable": ":clang_tool",
+        "@rules_cc//cc/toolchains/actions:cpp_link_dynamic_library": ":clang_link_tool",
+        "@rules_cc//cc/toolchains/actions:cpp_link_executable": ":clang_link_tool",
         "@rules_cc//cc/toolchains/actions:cpp_module_compile": ":clangpp_tool",
         "@rules_cc//cc/toolchains/actions:linkstamp_compile": ":clang_tool",
         "@rules_cc//cc/toolchains/actions:llvm_cov": ":llvm_cov_tool",
         "@rules_cc//cc/toolchains/actions:llvm_profdata": ":llvm_profdata_tool",
         "@rules_cc//cc/toolchains/actions:objc_compile": ":clang_tool",
-        "@rules_cc//cc/toolchains/actions:objc_executable": ":clang_tool",
+        "@rules_cc//cc/toolchains/actions:objc_executable": ":clang_link_tool",
         "@rules_cc//cc/toolchains/actions:objcpp_compile": ":clangpp_tool",
         "@rules_cc//cc/toolchains/actions:strip": ":strip_tool",
     },
@@ -361,6 +552,8 @@ cc_tool_map(
         args = [
             "@apple_support_toolchain_env//:include_directories_from_xcode",
             ":applecross_env",
+            ":applecross_sysroot_" + arch,
+            ":applecross_platform_link_paths_" + arch,
             "@apple_support//toolchain:xcode_env",
         ],
         artifact_name_patterns = ["@apple_support//toolchain:dylib_pattern"],
