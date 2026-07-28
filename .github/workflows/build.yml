@@ -10,8 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Fetch Apple SDKs
@@ -19,19 +19,27 @@ jobs:
           SDKS_URL: ${{ secrets.SDKS_URL }}
           SDKS_TOKEN: ${{ secrets.SDKS_PASSWORD }}
         run: tools/fetch-sdks.sh
-      - uses: google-github-actions/auth@v2
+      - name: Start Bazel cache adapter
+        id: bazel-cache
+        uses: thii/bazel-gha-remote-cache@6fe91116ddbdc1ed9fa879febe488875cbff7872 # v0.0.3
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          storage-mode: pack
+          github-token: ${{ github.token }}
+          mode: >-
+            ${{ github.event_name == 'push' &&
+                github.ref == format(
+                  'refs/heads/{0}',
+                  github.event.repository.default_branch
+                ) &&
+                'read-write' || 'read-only' }}
       - run: >-
-          bazel build
+          bazel
+          --bazelrc="${{ steps.bazel-cache.outputs.bazelrc }}"
+          build
           --ios_multi_cpus=sim_arm64
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
-          --remote_cache=${{ secrets.BAZEL_REMOTE_CACHE }}
-          --google_default_credentials
-          --remote_upload_local_results=true
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
       - uses: actions/upload-artifact@v4
