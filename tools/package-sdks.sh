@@ -184,5 +184,9 @@ tar \
   --no-acls \
   -C "$PROJECT_ROOT" \
   --zstd \
-  -cf "$PROJECT_ROOT/apple-sdks-xcode-$XCODE_VERSION.tar.zst" \
+  -cf "$PROJECT_ROOT/apple-sdks.tar.zst" \
   Xcode.app
+
+# The local filename is version-neutral so MODULE.bazel's apple_sdk_path never
+# needs to change; use the version when naming a release asset.
+echo "Packaged Xcode $XCODE_VERSION SDKs into apple-sdks.tar.zst"

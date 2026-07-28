@@ -100,7 +100,7 @@ apple_cross_toolchain = use_extension(
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     apple_sdk_archive_type = "tar.zst",
-    apple_sdk_path = "apple-sdks-xcode-26.1.1.tar.zst",
+    apple_sdk_path = "apple-sdks.tar.zst",
     swift_tools = "@applecross_swift_ubuntu24.04//:tools",
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")

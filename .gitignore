@@ -1,5 +1,5 @@
 /bazel-*
 /*.pem
 /MODULE.bazel.lock
-/apple-sdks-*.tar.*
+/apple-sdks*.tar.*
 /Xcode.app

@@ -85,8 +85,8 @@ Configured by the module extension:
 ```starlark
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
-    apple_sdk_path = "apple-sdks-xcode-26.1.1.tar.xz",
-    apple_sdk_archive_type = "tar.xz",
+    apple_sdk_path = "apple-sdks.tar.zst",
+    apple_sdk_archive_type = "tar.zst",
 )
 ```
 
