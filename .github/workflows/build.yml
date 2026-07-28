@@ -13,7 +13,7 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fetch Apple SDKs
         env:
           SDKS_URL: ${{ secrets.SDKS_URL }}
@@ -42,12 +42,12 @@ jobs:
           //examples/...
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Tests
           path: Tests.tar.xz
           retention-days: 1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: UITests
           path: UITests.tar.xz
@@ -56,7 +56,7 @@ jobs:
     needs: build
     runs-on: macOS-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Tests
       - run: |
@@ -68,7 +68,7 @@ jobs:
             TEST_UNDECLARED_OUTPUTS_DIR="$tmpdir/outputs" \
             XML_OUTPUT_FILE="$tmpdir/tests.xml" \
             examples/ios/HelloWorldSwiftUI/Tests
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: UITests
       - run: |
@@ -83,7 +83,7 @@ jobs:
   # remote_build:
   #   runs-on: ubuntu-latest
   #   steps:
-  #     - uses: actions/checkout@v2
+  #     - uses: actions/checkout@v7
   #     - run: |
   #         echo "${{ secrets.BUILDBUDDY_ORG_CERT }}" > buildbuddy-cert.pem
   #         echo "${{ secrets.BUILDBUDDY_ORG_KEY }}" > buildbuddy-key.pem
