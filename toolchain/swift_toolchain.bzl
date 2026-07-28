@@ -139,19 +139,24 @@ def _make_resource_directory_configurator(developer_dir):
 
     return _resource_directory_configurator
 
-def _make_tool_configs(additional_tools, swift_tools):
+def _make_tool_configs(additional_tools, swift_tools, toolchain_path):
     """Creates tool configurations for Swift actions."""
 
     # Use rules_swift's hermetic Swift distribution as explicit action tools,
     # while keeping Apple SDK/resource configuration in this rule.
+    # The worker substitutes __BAZEL_SWIFT_TOOLCHAIN_PATH__ in compiler flags.
+    # Supplying it explicitly prevents the absolute /usr/bin/xcrun fallback.
+    env = {"TOOLCHAIN_PATH": toolchain_path}
     persistent_tool_config = ToolConfigInfo(
         additional_tools = additional_tools,
+        env = env,
         executable = swift_tools.swift_driver,
         use_param_file = True,
         worker_mode = "persistent",
     )
     wrap_tool_config = ToolConfigInfo(
         additional_tools = additional_tools,
+        env = env,
         executable = swift_tools.swift_driver,
         use_param_file = True,
         worker_mode = "wrap",
@@ -165,6 +170,7 @@ def _make_tool_configs(additional_tools, swift_tools):
         _SWIFT_ACTION_COMPILE_MODULE_INTERFACE: wrap_tool_config,
         _SWIFT_ACTION_SYMBOL_GRAPH_EXTRACT: ToolConfigInfo(
             additional_tools = additional_tools,
+            env = env,
             executable = swift_tools.swift_symbolgraph_extract,
             use_param_file = True,
             worker_mode = "wrap",
@@ -222,7 +228,8 @@ def _test_linking_context(sdk_platform, developer_dir, toolchain_label):
 
 def _swift_toolchain_impl(ctx):
     developer_dir = ctx.attr.toolchain_path_prefix + "Xcode.app/Contents/Developer"
-    toolchain_root = developer_dir + "/Toolchains/XcodeDefault.xctoolchain/usr"
+    toolchain_path = developer_dir + "/Toolchains/XcodeDefault.xctoolchain"
+    toolchain_root = toolchain_path + "/usr"
 
     cc_toolchain = find_cpp_toolchain(ctx)
     cpu = ctx.attr.cpu
@@ -379,7 +386,7 @@ def _swift_toolchain_impl(ctx):
     # Collect toolchain files as additional tools for sandbox access.
     swift_tools = ctx.attr.swift_tools[SwiftToolsInfo]
     additional_tools = ctx.attr.toolchain_files.files.to_list() + list(swift_tools.additional_inputs)
-    tool_configs = _make_tool_configs(additional_tools, swift_tools)
+    tool_configs = _make_tool_configs(additional_tools, swift_tools, toolchain_path)
 
     # Build Swift linker opts provider
     swift_platform_name = info.swift_platform_name
