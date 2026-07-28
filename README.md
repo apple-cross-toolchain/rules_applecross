@@ -94,3 +94,17 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
     ```
     bazel build --config=remote @rules_applecross//examples/ios/HelloWorldSwiftUI:HelloWorld
     ```
+
+## Developing rules_applecross
+
+This repository's own `MODULE.bazel` reads the SDK archive from the workspace
+root via `apple_sdk_path`, so building the examples here needs that archive in
+place first. On macOS, `tools/package-sdks.sh` writes it there. Otherwise,
+download a packaged one:
+
+```
+SDKS_URL=<url> tools/fetch-sdks.sh
+```
+
+Add `SDKS_TOKEN=<token>` when the host needs credentials. CI runs the same
+script, so neither path requires editing a checked-in file to build.

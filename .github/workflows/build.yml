@@ -14,15 +14,11 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare env
-        run: |
-          cat > ~/.netrc <<EOF
-          machine api.github.com
-          login ${{ secrets.SDKS_USER }}
-          password ${{ secrets.SDKS_PASSWORD }}
-          EOF
-          chmod 600 ~/.netrc
-          sed -i 's|SDKS_URL|${{ secrets.SDKS_URL }}|g' MODULE.bazel
+      - name: Fetch Apple SDKs
+        env:
+          SDKS_URL: ${{ secrets.SDKS_URL }}
+          SDKS_TOKEN: ${{ secrets.SDKS_PASSWORD }}
+        run: tools/fetch-sdks.sh
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
