@@ -106,5 +106,9 @@ download a packaged one:
 SDKS_URL=<url> tools/fetch-sdks.sh
 ```
 
-Add `SDKS_TOKEN=<token>` when the host needs credentials. CI runs the same
-script, so neither path requires editing a checked-in file to build.
+Add `SDKS_TOKEN=<token>` when the host needs credentials. For a GitHub
+release on a private repository, `SDKS_URL` can be the ordinary release
+download URL (`.../releases/download/<tag>/<name>` or
+`.../releases/latest/download/<name>`); the script resolves it through the
+GitHub API, which is the only endpoint that honors token auth there. CI runs
+the same script, so neither path requires editing a checked-in file to build.

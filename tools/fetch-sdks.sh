@@ -48,6 +48,57 @@ CURL_ARGS=(
   --retry 3
   --retry-connrefused
 )
+
+# GitHub's web release URLs ignore Authorization headers on private repos and
+# return 404 even for a valid token. When we have a token, resolve such a URL
+# through the release API to the asset's api.github.com URL, which does honor
+# token auth. Without a token the direct URL is left alone (works for public
+# repos). Handles both the per-tag and the always-latest forms:
+#   github.com/OWNER/REPO/releases/download/TAG/NAME
+#   github.com/OWNER/REPO/releases/latest/download/NAME
+RELEASE_URL=""
+ASSET_NAME=""
+if [[ -n "$TOKEN" ]]; then
+  if [[ "$SDKS_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/]+)$ ]]; then
+    RELEASE_URL="https://api.github.com/repos/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/releases/tags/${BASH_REMATCH[3]}"
+    ASSET_NAME="${BASH_REMATCH[4]}"
+  elif [[ "$SDKS_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/releases/latest/download/([^/]+)$ ]]; then
+    RELEASE_URL="https://api.github.com/repos/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/releases/latest"
+    ASSET_NAME="${BASH_REMATCH[3]}"
+  fi
+fi
+if [[ -n "$RELEASE_URL" ]]; then
+  RELEASE_JSON="$(mktemp)"
+  trap 'rm -f "$RELEASE_JSON"' EXIT
+  # --fail-with-body keeps GitHub's error JSON so auth failures are
+  # diagnosable from the log; --location follows the 301 GitHub answers for
+  # renamed repositories (same-host, so curl keeps the Authorization header).
+  if ! curl --fail-with-body --location --silent --show-error \
+    --retry 3 --retry-connrefused \
+    --header "Authorization: Bearer $TOKEN" \
+    --output "$RELEASE_JSON" \
+    "$RELEASE_URL"; then
+    echo "error: failed to resolve $RELEASE_URL; check that SDKS_TOKEN grants read access to the repository. GitHub said:" >&2
+    cat "$RELEASE_JSON" >&2
+    echo >&2
+    exit 1
+  fi
+  SDKS_URL="$(python3 -c '
+import json, sys
+name = sys.argv[1]
+release = json.load(sys.stdin)
+for asset in release.get("assets", []):
+    if asset["name"] == name:
+        print(asset["url"])
+        break
+else:
+    sys.exit("error: release %s has no asset named %s"
+             % (release.get("tag_name"), name))
+' "$ASSET_NAME" < "$RELEASE_JSON")"
+  rm -f "$RELEASE_JSON"
+  trap - EXIT
+fi
+
 if [[ "$SDKS_URL" == *"api.github.com"* ]]; then
   # GitHub serves release asset metadata as JSON without this.
   CURL_ARGS+=(--header "Accept: application/octet-stream")
