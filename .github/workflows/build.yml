@@ -37,11 +37,32 @@ jobs:
           --bazelrc="${{ steps.bazel-cache.outputs.bazelrc }}"
           build
           --ios_multi_cpus=sim_arm64
+          --macos_cpus=arm64
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
+      - name: Package macOS command-line examples
+        env:
+          BAZELRC: ${{ steps.bazel-cache.outputs.bazelrc }}
+        run: |
+          command_line=$(
+            bazel --bazelrc="$BAZELRC" cquery \
+              --macos_cpus=arm64 \
+              --output=files \
+              //examples/macos/CommandLine:CommandLine
+          )
+          command_line_swift=$(
+            bazel --bazelrc="$BAZELRC" cquery \
+              --macos_cpus=arm64 \
+              --output=files \
+              //examples/macos/CommandLineSwift:CommandLineSwift
+          )
+          mkdir CommandLineExamples
+          cp -L "$command_line" CommandLineExamples/CommandLine
+          cp -L "$command_line_swift" CommandLineExamples/CommandLineSwift
+          tar -cJvf CommandLineExamples.tar.xz CommandLineExamples
       - uses: actions/upload-artifact@v7
         with:
           name: Tests
@@ -52,10 +73,33 @@ jobs:
           name: UITests
           path: UITests.tar.xz
           retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CommandLineExamples
+          path: CommandLineExamples.tar.xz
+          retention-days: 1
   run_tests:
     needs: build
     runs-on: macOS-latest
     steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: CommandLineExamples
+          path: CommandLineExamples-artifact
+          # Work around actions/download-artifact#484 until its bundled
+          # unzip-stream dependency no longer uses the deprecated Buffer().
+          skip-decompress: true
+      - name: Run macOS command-line examples
+        run: |
+          unzip -q CommandLineExamples-artifact/* -d .
+          tar -xf CommandLineExamples.tar.xz
+          file CommandLineExamples/CommandLine CommandLineExamples/CommandLineSwift
+          command_line_output=$(./CommandLineExamples/CommandLine 2>&1)
+          printf '%s\n' "$command_line_output"
+          grep -Fq 'Hello World from com.example.command-line' <<< "$command_line_output"
+          command_line_swift_output=$(./CommandLineExamples/CommandLineSwift 2>&1)
+          printf '%s\n' "$command_line_swift_output"
+          grep -Fq 'Hello World from com.example.command-line-swift' <<< "$command_line_swift_output"
       - uses: actions/download-artifact@v8
         with:
           name: Tests
