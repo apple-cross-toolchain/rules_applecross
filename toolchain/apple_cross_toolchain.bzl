@@ -103,7 +103,9 @@ def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_
 
             src = "_{}_{}.S".format(platform_dir, lib)
             obj = "_{}_{}.o".format(platform_dir, lib)
-            symbol = "_swift_FORCE_LOAD_$_" + lib
+            # Mach-O symbols include their leading underscore in assembly.
+            # Swift emits a reference to __swift_FORCE_LOAD_$_<library>.
+            symbol = "__swift_FORCE_LOAD_$_" + lib
             rctx.file(src, content = """\
 .globl {symbol}
 .p2align 2
@@ -369,39 +371,6 @@ def _apple_cross_toolchain_impl(rctx):
     result = rctx.execute(["test", "-e", _security_path])
     if result.return_code != 0:
         _install_executable(rctx, "stubs/security.py", _security_path)
-
-    if rctx.os.name.startswith("linux"):
-        # Create stub Swift compatibility libraries with FORCE_LOAD symbols.
-        _swift_compat_symbols = {
-            "libswiftCompatibility51.a": "_swift_FORCE_LOAD_$_swiftCompatibility51",
-            "libswiftCompatibility56.a": "_swift_FORCE_LOAD_$_swiftCompatibility56",
-            "libswiftCompatibilityConcurrency.a": "_swift_FORCE_LOAD_$_swiftCompatibilityConcurrency",
-            "libswiftCompatibilityDynamicReplacements.a": "_swift_FORCE_LOAD_$_swiftCompatibilityDynamicReplacements",
-            "libswiftCompatibilityPacks.a": "_swift_FORCE_LOAD_$_swiftCompatibilityPacks",
-        }
-        _clang = xcode_toolchain_bindir + "clang"
-        _ar = xcode_toolchain_bindir + "ar"
-        _xcode_toolchain_libdir = xcode_toolchain_bindir + "../lib/swift/"
-        for _platform_info in [("iphoneos", "arm64-apple-ios13.0"), ("iphonesimulator", "arm64-apple-ios13.0-simulator"), ("macosx", "arm64-apple-macos11.0")]:
-            _platform_name = _platform_info[0]
-            _target_triple = _platform_info[1]
-            _swift_platform_lib = _xcode_toolchain_libdir + _platform_name
-            result = rctx.execute(["test", "-d", _swift_platform_lib])
-            if result.return_code == 0:
-                _sdk_platform = "iPhoneOS" if _platform_name == "iphoneos" else ("iPhoneSimulator" if _platform_name == "iphonesimulator" else "MacOSX")
-                _sdk_path = developer_dir + "/Platforms/" + _sdk_platform + ".platform/Developer/SDKs/" + _sdk_platform + ".sdk"
-                for _compat_lib, _symbol in _swift_compat_symbols.items():
-                    _lib_path = _swift_platform_lib + "/" + _compat_lib
-                    result = rctx.execute(["test", "-e", _lib_path])
-                    if result.return_code != 0:
-                        _c_symbol = _symbol.lstrip("_")
-                        _stub_c = _swift_platform_lib + "/_compat_stub.c"
-                        _stub_o = _swift_platform_lib + "/_compat_stub.o"
-                        rctx.file(_stub_c, content = "void " + _c_symbol + "(void) {}\n")
-                        rctx.execute([_clang, "-target", _target_triple, "-isysroot", _sdk_path, "-c", _stub_c, "-o", _stub_o])
-                        rctx.execute([_ar, "rcs", _lib_path, _stub_o])
-                        rctx.delete(_stub_c)
-                        rctx.delete(_stub_o)
 
     # Create arm64 swiftinterface files for arm64e-only frameworks.
     _patch_swiftinterfaces(rctx, [

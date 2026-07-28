@@ -66,6 +66,18 @@ std::string Dirname(const std::string &path) {
   return path.substr(0, last_slash);
 }
 
+#if !__APPLE__
+bool ContainsArgument(const std::vector<std::string> &args,
+                      const std::string &value) {
+  for (const auto &arg : args) {
+    if (arg == value) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
 // Unescape and unquote an argument read from a line of a response file.
 static std::string Unescape(const std::string &arg) {
   std::string result;
@@ -470,6 +482,17 @@ int main(int argc, char *argv[]) {
     ProcessArgument(arg, developer_dir, sdk_root, cwd, relative_ast_path,
                     strip_debug_symbols, linked_binary, dsym_path, consumer);
   }
+
+#if !__APPLE__
+  // Xcode 26's XCTest stubs use TBD v5 JSON, which the ported cctools linker
+  // cannot parse. XCTest bundles also intentionally leave symbols for the
+  // test runner to resolve when it loads them.
+  if (ContainsArgument(processed_args, "-bundle") &&
+      ContainsArgument(processed_args, "XCTest")) {
+    processed_args.push_back("-fuse-ld=lld");
+    processed_args.push_back("-Wl,-undefined,dynamic_lookup");
+  }
+#endif
 
   // Handle APPLE_SUPPORT_MODULEMAP VFS overlay for layering check support.
   const char *module_map_env = getenv("APPLE_SUPPORT_MODULEMAP");

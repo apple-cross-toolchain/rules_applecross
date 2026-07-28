@@ -259,6 +259,12 @@ filegroup(
     ],
 )
 
+_SWIFT_COMPATIBILITY_ARCHIVES = glob([
+    _XCODE_TOOLCHAIN_LIB + "/swift/iphoneos/libswiftCompatibility*.a",
+    _XCODE_TOOLCHAIN_LIB + "/swift/iphonesimulator/libswiftCompatibility*.a",
+    _XCODE_TOOLCHAIN_LIB + "/swift/macosx/libswiftCompatibility*.a",
+])
+
 filegroup(
     name = "link_tool_files",
     srcs = [
@@ -271,7 +277,7 @@ filegroup(
         _XCODE_TOOLCHAIN_BIN + "/strip",
         _XCODE_TOOLCHAIN_LIB + "/libtapi.so",
         _XCODE_TOOLCHAIN_LIB + "/libtapi.so.8svn",
-    ],
+    ] + _SWIFT_COMPATIBILITY_ARCHIVES,
 )
 
 filegroup(
@@ -457,7 +463,10 @@ _APPLE_SDK_PLATFORMS = {
             "@rules_cc//cc/toolchains/actions:link_actions",
             "@rules_cc//cc/toolchains/actions:objc_executable",
         ],
-        args = [
+        # The ported cctools linker predates visionOS. Select the bundled
+        # LLVM Mach-O linker for xros targets while retaining cctools for the
+        # platforms it already supports.
+        args = (["-fuse-ld=lld"] if arch.startswith("visionos_") else []) + [
             "-L{platform_libs}",
         ],
         data = [
