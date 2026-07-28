@@ -21,7 +21,7 @@ jobs:
         run: tools/fetch-sdks.sh
       - name: Start Bazel cache adapter
         id: bazel-cache
-        uses: thii/bazel-gha-remote-cache@6fe91116ddbdc1ed9fa879febe488875cbff7872 # v0.0.3
+        uses: thii/bazel-gha-remote-cache@90d79844e9ef5050829f8373ebe7ec6be67ad160 # v0.0.4
         with:
           storage-mode: pack
           github-token: ${{ github.token }}
