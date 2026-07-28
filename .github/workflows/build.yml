@@ -59,7 +59,12 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: Tests
+          path: Tests-artifact
+          # Work around actions/download-artifact#484 until its bundled
+          # unzip-stream dependency no longer uses the deprecated Buffer().
+          skip-decompress: true
       - run: |
+          unzip -q Tests-artifact/* -d .
           tar -xf Tests.tar.xz && cd Tests.runfiles/_main
           tmpdir=$(mktemp -d)
           exec env - PATH=/bin:/usr/bin \
@@ -71,7 +76,12 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: UITests
+          path: UITests-artifact
+          # Work around actions/download-artifact#484 until its bundled
+          # unzip-stream dependency no longer uses the deprecated Buffer().
+          skip-decompress: true
       - run: |
+          unzip -q UITests-artifact/* -d .
           tar -xf UITests.tar.xz && cd UITests.runfiles/_main
           tmpdir=$(mktemp -d)
           exec env - PATH=/bin:/usr/bin \
