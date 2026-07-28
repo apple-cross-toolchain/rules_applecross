@@ -148,7 +148,10 @@ APPLE_SUPPORT_ENABLED_FEATURES = APPLE_SUPPORT_ENABLED_MARKERS + [
     "@apple_support//toolchain:suppress_warnings_wrapper",
     "@apple_support//toolchain:treat_warnings_as_errors_wrapper",
     "@apple_support//toolchain:external_include_paths_wrapper",
-    "@apple_support_toolchain_env//:off_by_default_layering_check_enabled_features",
+    # NOTE: @apple_support_toolchain_env//:off_by_default_layering_check_enabled_features
+    # is intentionally absent: it depends on @apple_support//crosstool:generate_layering_check_modulemap,
+    # an apple_genrule that can only execute on a macOS host, which this
+    # Linux-only cross toolchain never has.
 ]
 
 APPLE_SUPPORT_KNOWN_FEATURES = APPLE_SUPPORT_MARKER_FEATURES + [
@@ -174,7 +177,6 @@ APPLE_SUPPORT_KNOWN_FEATURES = APPLE_SUPPORT_MARKER_FEATURES + [
     "@apple_support//toolchain/pgo:fdo_instrument",
     "@apple_support//toolchain/pgo:autofdo",
     "@apple_support//toolchain/pgo:fdo_optimize",
-    "@apple_support_toolchain_env//:off_by_default_layering_check_known_features",
     "@apple_support//toolchain:extra_known_features",
     "@rules_cc//cc/toolchains/args/layering_check:use_module_maps",
 ] + select({
