@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal xcstringtool stub for cross-compilation on Linux."""
+"""Minimal xcstringstool stub for cross-compilation on Linux."""
 
 import json
 import os
@@ -20,7 +20,7 @@ def compile_xcstrings(args):
             i += 1
 
     if not output_dir or not input_file:
-        print("Usage: xcstringtool compile --output-directory <dir> <input>", file=sys.stderr)
+        print("Usage: xcstringstool compile --output-directory <dir> <input>", file=sys.stderr)
         return 1
 
     with open(input_file, "r") as f:

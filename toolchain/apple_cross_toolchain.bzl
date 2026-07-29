@@ -351,11 +351,11 @@ def _apple_cross_toolchain_impl(rctx):
     if result.return_code != 0:
         _install_executable(rctx, "stubs/intentbuilderc.sh", _intentbuilderc_path)
 
-    # Create xcstringtool stub for Linux (compiles .xcstrings to .strings).
-    _xcstringtool_path = xcode_toolchain_bindir + "xcstringtool"
-    result = rctx.execute(["test", "-e", _xcstringtool_path])
+    # Create xcstringstool stub for Linux (compiles .xcstrings to .strings).
+    _xcstringstool_path = xcode_toolchain_bindir + "xcstringstool"
+    result = rctx.execute(["test", "-e", _xcstringstool_path])
     if result.return_code != 0:
-        _install_executable(rctx, "stubs/xcstringtool.py", _xcstringtool_path)
+        _install_executable(rctx, "stubs/xcstringstool.py", _xcstringstool_path)
 
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
     # Always overwrite — the SDK may ship real binaries (e.g. codesign_allocate
