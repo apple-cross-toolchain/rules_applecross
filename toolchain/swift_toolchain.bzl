@@ -114,6 +114,8 @@ _SIMULATOR_CPUS = [
     "ios_i386",
     "ios_x86_64",
     "tvos_x86_64",
+    # apple_support uses this legacy CPU name for the arm64 watchOS simulator.
+    "watchos_arm64",
     "watchos_i386",
     "watchos_x86_64",
     "visionos_x86_64",
@@ -123,6 +125,7 @@ _PLATFORM_TYPE_MAP = {
     "ios": apple_common.platform_type.ios,
     "macos": apple_common.platform_type.macos,
     "tvos": apple_common.platform_type.tvos,
+    "visionos": apple_common.platform_type.visionos,
     "watchos": apple_common.platform_type.watchos,
 }
 
@@ -244,6 +247,9 @@ def _swift_toolchain_impl(ctx):
     if arch.startswith("sim_"):
         arch = arch[len("sim_"):]
         is_simulator = True
+    elif arch.startswith("device_"):
+        arch = arch[len("device_"):]
+        is_simulator = False
     else:
         is_simulator = cpu in _SIMULATOR_CPUS
 

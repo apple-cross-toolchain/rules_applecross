@@ -327,7 +327,7 @@ _SWIFT_TOOLCHAIN_FILES_BY_ARCH = {
     "tvos_x86_64": ":swift_toolchain_files_AppleTVSimulator",
     "visionos_arm64": ":swift_toolchain_files_XROS",
     "visionos_sim_arm64": ":swift_toolchain_files_XRSimulator",
-    "watchos_arm64": ":swift_toolchain_files_WatchOS",
+    "watchos_arm64": ":swift_toolchain_files_WatchSimulator",
     "watchos_arm64_32": ":swift_toolchain_files_WatchOS",
     "watchos_device_arm64": ":swift_toolchain_files_WatchOS",
     "watchos_device_arm64e": ":swift_toolchain_files_WatchOS",
