@@ -507,3 +507,19 @@ diff --git a/apple/internal/watchos_rules.bzl b/apple/internal/watchos_rules.bzl
          xcode_stub_path = rule_descriptor.stub_binary_path,
      )
  
+diff --git a/apple/internal/partials/swift_dylibs.bzl b/apple/internal/partials/swift_dylibs.bzl
+--- a/apple/internal/partials/swift_dylibs.bzl
++++ b/apple/internal/partials/swift_dylibs.bzl
+@@ -104,6 +104,12 @@ def _swift_dylib_action(
+         actions = actions,
+         apple_fragment = platform_prerequisites.apple_fragment,
+         arguments = [swift_stdlib_tool_args],
++        # The Linux cross toolchain's SDK tools are discovered through PATH.
++        # Run locally outside the sandbox so xcrun can reach them.
++        execution_requirements = {
++            "no-remote": "1",
++            "no-sandbox": "1",
++        },
+         executable = swift_stdlib_tool,
+         inputs = binary_files,
+         mnemonic = "SwiftStdlibCopy",
