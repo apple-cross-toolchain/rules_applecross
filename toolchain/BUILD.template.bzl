@@ -1,4 +1,5 @@
 load("@apple_support//configs:platforms.bzl", "APPLE_PLATFORMS_CONSTRAINTS")
+load("@apple_support//toolchain:dynamic_toolchain_info.bzl", "dynamic_toolchain_info")
 load("@bazel_features//:features.bzl", "bazel_features")
 load("@rules_applecross//toolchain:builtin_include_directory.bzl", "builtin_include_directory")
 load("@rules_applecross//toolchain:exec_tool.bzl", "exec_tool")
@@ -569,6 +570,11 @@ cc_tool_map(
     },
 )
 
+dynamic_toolchain_info(
+    name = "applecross_dynamic_toolchain_info",
+    visibility = ["//visibility:private"],
+)
+
 [
     rule_based_cc_toolchain(
         name = "cc-compiler-" + arch,
@@ -590,7 +596,7 @@ cc_tool_map(
         supports_param_files = True,
         target_system_name = "$(TARGET)",
         tool_map = ":applecross_tools",
-        toolchains = ["@apple_support//toolchain:dynamic_toolchain_info"],
+        toolchains = [":applecross_dynamic_toolchain_info"],
     )
     for arch in _APPLE_ARCHS
 ]

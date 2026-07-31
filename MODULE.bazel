@@ -7,8 +7,6 @@ bazel_dep(name = "bazel_features", version = "1.50.0")
 bazel_dep(name = "apple_support", version = "2.8.0")
 single_version_override(
     module_name = "apple_support",
-    patch_strip = 1,
-    patches = ["//patches:apple_support_rule_based_visibility.patch"],
     version = "2.8.0",
 )
 
@@ -23,7 +21,6 @@ git_override(
     patch_strip = 1,
     patches = [
         "//patches:rules_apple_no_exec_platform_constraint.patch",
-        "//patches:rules_apple_linkstamps_compat.patch",
         "//patches:rules_apple_bundletool_path.patch",
         "//patches:rules_apple_no_absolute_tool_paths.patch",
         "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
