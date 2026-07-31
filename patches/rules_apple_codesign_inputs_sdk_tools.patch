@@ -1,0 +1,128 @@
+Make codesigning and archive processing work under strict remote
+execution.
+
+Default codesign_inputs to //apple:sdk_tool_files so that codesigning
+actions (ProcessAndSign, SignBinary, and bundletool-embedded signing)
+declare the cross-toolchain's xcrun/codesign/zip binaries as inputs.
+Local no-sandbox execution resolves them from the execroot either way,
+but strict remote execution only stages declared inputs.
+
+Also resolve relative PATH entries in the process-and-sign script before
+it changes directories: the toolchain bin directory is provided as an
+execroot-relative PATH entry, which stops resolving once the script
+pushd's into the archive root to zip the bundle.
+
+Also expose sdk_tool_files on AppleMacToolsToolchainInfo and feed them to
+the SwiftStdlibCopy action, replacing its no-remote/no-sandbox opt-out:
+with the tools declared as inputs the action can run remotely, which a
+macOS host requires because the staged tool binaries are Linux
+executables.
+
+diff --git a/apple/internal/rule_attrs.bzl b/apple/internal/rule_attrs.bzl
+--- a/apple/internal/rule_attrs.bzl
++++ b/apple/internal/rule_attrs.bzl
+@@ -188,6 +188,7 @@
+         _common_linking_api_attrs(deps_cfg = deps_cfg),
+         {
+             "codesign_inputs": attr.label_list(
++                default = [Label("//apple:sdk_tool_files")],
+                 doc = """
+ A list of dependencies targets that provide inputs that will be used by
+ `codesign` (referenced with `codesignopts`).
+diff --git a/tools/bundletool/process_and_sign.sh.template b/tools/bundletool/process_and_sign.sh.template
+--- a/tools/bundletool/process_and_sign.sh.template
++++ b/tools/bundletool/process_and_sign.sh.template
+@@ -6,6 +6,17 @@
+ # 2. This script is passed arguments but they are *NOT* used, the arguments
+ #    are there to allow action logging to have some visibility into what the
+ #    actions running the script is doing each time.
++
++# Resolve relative PATH entries (execroot-relative toolchain directories)
++# against the initial working directory so that tools stay reachable after
++# the script changes directories to archive the bundle.
++_abs_path=""
++IFS=':' read -r -a _path_entries <<< "$PATH"
++for _entry in "${_path_entries[@]}"; do
++  [[ "$_entry" == /* ]] || _entry="$PWD/$_entry"
++  _abs_path="${_abs_path:+$_abs_path:}$_entry"
++done
++export PATH="$_abs_path"
+ 
+ # The path where the archive should be created, including the name of the
+ # archive itself.
+diff -ur a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
+--- a/apple/internal/apple_toolchains.bzl
++++ b/apple/internal/apple_toolchains.bzl
+@@ -33,6 +33,10 @@
+         "process_and_sign_template": """\
+ A `File` referencing a template for a shell script to process and sign.
+ """,
++    "sdk_tool_files": """\
++Apple SDK/toolchain files that actions resolving SDK tools through PATH need as
++declared inputs under sandboxed or remote execution.
++""",
+         "alticonstool": """\
+ The files_to_run for a tool to insert alternate icons entries in the app
+ bundle's `Info.plist`.
+@@ -144,6 +148,7 @@
+         AppleMacToolsToolchainInfo(
+             dsym_info_plist_template = ctx.file.dsym_info_plist_template,
+             process_and_sign_template = ctx.file.process_and_sign_template,
++            sdk_tool_files = ctx.files._sdk_tool_files,
+             alticonstool = ctx.attr.alticonstool.files_to_run,
+             bundletool_experimental = ctx.attr.bundletool_experimental.files_to_run,
+             codesigningtool = ctx.attr.codesigningtool.files_to_run,
+@@ -163,6 +168,10 @@
+ 
+ apple_mac_tools_toolchain = rule(
+     attrs = {
++        "_sdk_tool_files": attr.label(
++            default = Label("//apple:sdk_tool_files"),
++            allow_files = True,
++        ),
+         "alticonstool": attr.label(
+             cfg = "exec",
+             executable = True,
+diff -ur a/apple/internal/partials/swift_dylibs.bzl b/apple/internal/partials/swift_dylibs.bzl
+--- a/apple/internal/partials/swift_dylibs.bzl
++++ b/apple/internal/partials/swift_dylibs.bzl
+@@ -82,6 +82,7 @@
+         output_dir,
+         platform_name,
+         platform_prerequisites,
++        sdk_tool_files,
+         strip_bitcode,
+         swift_stdlib_tool):
+     """Registers a swift-stlib-tool action to gather Swift dylibs to bundle."""
+@@ -104,14 +105,8 @@
+         actions = actions,
+         apple_fragment = platform_prerequisites.apple_fragment,
+         arguments = [swift_stdlib_tool_args],
+-        # The Linux cross toolchain's SDK tools are discovered through PATH.
+-        # Run locally outside the sandbox so xcrun can reach them.
+-        execution_requirements = {
+-            "no-remote": "1",
+-            "no-sandbox": "1",
+-        },
+         executable = swift_stdlib_tool,
+-        inputs = binary_files,
++        inputs = binary_files + sdk_tool_files,
+         mnemonic = "SwiftStdlibCopy",
+         outputs = [output_dir],
+         xcode_config = platform_prerequisites.xcode_version_config,
+@@ -182,6 +177,7 @@
+                 output_dir = output_dir,
+                 platform_name = platform_name,
+                 platform_prerequisites = platform_prerequisites,
++                sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+                 strip_bitcode = True,
+                 swift_stdlib_tool = apple_mac_toolchain_info.swift_stdlib_tool,
+             )
+@@ -204,6 +200,7 @@
+                     output_dir = swift_support_output_dir,
+                     platform_name = platform_name,
+                     platform_prerequisites = platform_prerequisites,
++                    sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+                     strip_bitcode = False,
+                     swift_stdlib_tool = apple_mac_toolchain_info.swift_stdlib_tool,
+                 )

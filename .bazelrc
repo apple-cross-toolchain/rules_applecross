@@ -12,16 +12,20 @@ build --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_too
 build --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
 build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
 
-build:remote --bes_backend=grpcs://cloud.buildbuddy.io
-build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
 build:remote --extra_execution_platforms=//platforms:linux_x86_64
+# The toolchain's codesign is a no-op stub, so bundle signing never produces
+# a signature anyway. Disabling it turns ProcessAndSign into a plain copy,
+# avoiding tools (zip, python3) that the remote executor image lacks.
+build:remote --features=disable_legacy_signing
 build:remote --host_features=fully_static_link
 build:remote --jobs=100
 build:remote --@rules_python//python/config_settings:bootstrap_impl=script
 build:remote --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
 build:remote --remote_download_toplevel
-build:remote --remote_executor=grpcs://cloud.buildbuddy.io
-build:remote --remote_timeout=3600
 build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
-# build:remote --tls_client_certificate=buildbuddy-cert.pem
-# build:remote --tls_client_key=buildbuddy-key.pem
+
+build --bes_results_url=https://apple-cross-toolchain.buildbuddy.io/invocation/
+build --bes_backend=grpcs://apple-cross-toolchain.buildbuddy.io
+common --remote_timeout=10m
+common:remote --remote_cache_compression
+common:remote --remote_executor=grpcs://apple-cross-toolchain.buildbuddy.io

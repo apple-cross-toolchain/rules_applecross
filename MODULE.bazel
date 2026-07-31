@@ -26,6 +26,7 @@ git_override(
         "//patches:rules_apple_linkstamps_compat.patch",
         "//patches:rules_apple_bundletool_path.patch",
         "//patches:rules_apple_no_absolute_tool_paths.patch",
+        "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
     ],
     remote = "https://github.com/bazelbuild/rules_apple.git",
 )

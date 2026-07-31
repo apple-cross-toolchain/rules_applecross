@@ -223,6 +223,8 @@ filegroup(
     srcs = glob(
         include = [
             _XCODE_TOOLCHAIN_BIN + "/*",
+            # xcrun refuses to run without a toolchain descriptor.
+            _XCODE_TOOLCHAIN_DIR + "/ToolchainInfo.plist",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Info.plist",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",

@@ -55,7 +55,11 @@ def _sdk_download(rctx, urls, sha256, strip_prefix):
     rctx.download_and_extract(**kwargs)
 
 def _toolchain_path(rctx, path):
-    return rctx.path(Label("@rules_applecross//toolchain:" + path))
+    resolved = rctx.path(Label("@rules_applecross//toolchain:" + path))
+    # Register the file as an input of this repository so edits to helper
+    # scripts invalidate and re-run the rule.
+    rctx.watch(resolved)
+    return resolved
 
 def _python3(rctx):
     python = rctx.which("python3")
@@ -68,14 +72,23 @@ def _install_executable(rctx, source, destination):
 
 def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_dir):
     """Create Swift compatibility stub archives expected by Apple linkers."""
-    if not rctx.os.name.startswith("linux"):
-        return
-
-    clang = toolchain_bindir + "clang"
-    llvm_ar = toolchain_bindir + "llvm-ar"
-    if rctx.execute(["test", "-x", clang]).return_code != 0:
-        return
-    if rctx.execute(["test", "-x", llvm_ar]).return_code != 0:
+    if rctx.os.name.startswith("linux"):
+        clang = toolchain_bindir + "clang"
+        llvm_ar = toolchain_bindir + "llvm-ar"
+        if rctx.execute(["test", "-x", clang]).return_code != 0:
+            return
+        if rctx.execute(["test", "-x", llvm_ar]).return_code != 0:
+            return
+    elif rctx.os.name.startswith("mac"):
+        # The repository's own bin dir holds Linux executables for remote
+        # executors, so build the stubs with the host toolchain instead.
+        host_clang = rctx.which("clang")
+        host_ar = rctx.which("ar")
+        if not host_clang or not host_ar:
+            return
+        clang = str(host_clang)
+        llvm_ar = str(host_ar)
+    else:
         return
 
     compatibility_targets = {
@@ -356,6 +369,15 @@ def _apple_cross_toolchain_impl(rctx):
     result = rctx.execute(["test", "-e", _xcstringstool_path])
     if result.return_code != 0:
         _install_executable(rctx, "stubs/xcstringstool.py", _xcstringstool_path)
+
+    # Provide `zip` for executor images that lack Info-ZIP (e.g. the
+    # swift:*-noble container); rules_apple's process-and-sign script
+    # archives bundles with it.
+    _zip_path = xcode_toolchain_bindir + "zip"
+    result = rctx.execute(["test", "-e", _zip_path])
+    if result.return_code != 0:
+        _install_executable(rctx, "stubs/zip.sh", _zip_path)
+        _install_executable(rctx, "stubs/zip.py", _zip_path + ".py")
 
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
     # Always overwrite — the SDK may ship real binaries (e.g. codesign_allocate
