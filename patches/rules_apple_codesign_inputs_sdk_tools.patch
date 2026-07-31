@@ -12,6 +12,11 @@ it changes directories: the toolchain bin directory is provided as an
 execroot-relative PATH entry, which stops resolving once the script
 pushd's into the archive root to zip the bundle.
 
+Also feed sdk_tool_files to every xcrun-based resource action (actool,
+ibtool, momc, coremlc, copypng, TextureAtlas, metal, xcstringstool) via
+resources_support, and export the calling tool's hermetic Python as
+PYTHON3 so interpreter-less executor images can run python stub tools.
+
 Also expose sdk_tool_files on AppleMacToolsToolchainInfo and feed them to
 the SwiftStdlibCopy action, replacing its no-remote/no-sandbox opt-out:
 with the tools declared as inputs the action can run remotely, which a
@@ -51,6 +56,7 @@ diff --git a/tools/bundletool/process_and_sign.sh.template b/tools/bundletool/pr
  # The path where the archive should be created, including the name of the
  # archive itself.
 diff -ur a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
+diff --git a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
 --- a/apple/internal/apple_toolchains.bzl
 +++ b/apple/internal/apple_toolchains.bzl
 @@ -33,6 +33,10 @@
@@ -84,6 +90,7 @@ diff -ur a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains
              cfg = "exec",
              executable = True,
 diff -ur a/apple/internal/partials/swift_dylibs.bzl b/apple/internal/partials/swift_dylibs.bzl
+diff --git a/apple/internal/partials/swift_dylibs.bzl b/apple/internal/partials/swift_dylibs.bzl
 --- a/apple/internal/partials/swift_dylibs.bzl
 +++ b/apple/internal/partials/swift_dylibs.bzl
 @@ -82,6 +82,7 @@
@@ -126,3 +133,428 @@ diff -ur a/apple/internal/partials/swift_dylibs.bzl b/apple/internal/partials/sw
                      strip_bitcode = False,
                      swift_stdlib_tool = apple_mac_toolchain_info.swift_stdlib_tool,
                  )
+diff --git a/apple/internal/partials/support/resources_support.bzl b/apple/internal/partials/support/resources_support.bzl
+--- a/apple/internal/partials/support/resources_support.bzl
++++ b/apple/internal/partials/support/resources_support.bzl
+@@ -59,6 +59,7 @@
+ def _compile_datamodels(
+         *,
+         actions,
++        apple_mac_toolchain_info,
+         datamodel_groups,
+         label_name,
+         output_discriminator,
+@@ -95,6 +96,7 @@
+         processed_origins[output_file.short_path] = [f.short_path for f in input_files]
+ 
+         resource_actions.compile_datamodels(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             datamodel_path = datamodel_path,
+             input_files = input_files,
+@@ -112,6 +114,7 @@
+ def _compile_mappingmodels(
+         *,
+         actions,
++        apple_mac_toolchain_info,
+         label_name,
+         mappingmodel_groups,
+         output_discriminator,
+@@ -134,6 +137,7 @@
+         processed_origins[output_file.short_path] = [f.short_path for f in input_files]
+ 
+         resource_actions.compile_mappingmodel(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             input_files = input_files,
+             mappingmodel_path = mappingmodel_path,
+@@ -231,6 +235,7 @@
+             )
+             processed_origins[png_file.short_path] = f.short_path
+             resource_actions.copy_png(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+                 actions = actions,
+                 input_file = f,
+                 output_file = png_file,
+@@ -241,6 +246,7 @@
+             asset_files.append(f)
+ 
+     resource_actions.compile_asset_catalog(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+         actions = actions,
+         alternate_icons = alternate_icons,
+         alticonstool = apple_mac_toolchain_info.alticonstool,
+@@ -326,6 +332,7 @@
+         datamodels_processed_origins,
+     ) = _compile_datamodels(
+         actions = actions,
++        apple_mac_toolchain_info = apple_mac_toolchain_info,
+         datamodel_groups = datamodel_groups,
+         label_name = rule_label.name,
+         output_discriminator = output_discriminator,
+@@ -340,6 +347,7 @@
+         mappingmodels_processed_origins,
+     ) = _compile_mappingmodels(
+         actions = actions,
++        apple_mac_toolchain_info = apple_mac_toolchain_info,
+         label_name = rule_label.name,
+         output_discriminator = output_discriminator,
+         parent_dir = parent_dir,
+@@ -427,6 +435,7 @@
+ def _metals(
+         *,
+         actions,
++        apple_mac_toolchain_info,
+         rule_label,
+         parent_dir,
+         platform_prerequisites,
+@@ -460,6 +469,7 @@
+     )
+     processed_origins[metallib_file.short_path] = [f.short_path for f in input_files]
+     resource_actions.compile_metals(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+         actions = actions,
+         input_files = input_files,
+         output_file = metallib_file,
+@@ -510,6 +520,7 @@
+         processed_origins[output_plist.short_path] = [file.short_path]
+ 
+         resource_actions.compile_mlmodel(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             input_file = file,
+             output_bundle = output_bundle,
+@@ -600,6 +611,7 @@
+ def _pngs(
+         *,
+         actions,
++        apple_mac_toolchain_info,
+         files,
+         output_discriminator,
+         parent_dir,
+@@ -635,6 +647,7 @@
+         )
+         processed_origins[png_file.short_path] = [file.short_path]
+         resource_actions.copy_png(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             input_file = file,
+             output_file = png_file,
+@@ -684,6 +697,7 @@
+         )
+         origin_short_paths.append(storyboard.short_path)
+         resource_actions.compile_storyboard(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             input_file = storyboard,
+             output_dir = storyboardc_dir,
+@@ -702,6 +716,7 @@
+         dir_name = paths.join("storyboards", parent_dir or "", swift_module or ""),
+     )
+     resource_actions.link_storyboards(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+         actions = actions,
+         output_dir = linked_storyboard_dir,
+         platform_prerequisites = platform_prerequisites,
+@@ -720,6 +735,7 @@
+ def _texture_atlases(
+         *,
+         actions,
++        apple_mac_toolchain_info,
+         files,
+         output_discriminator,
+         parent_dir,
+@@ -749,6 +765,7 @@
+         )
+         processed_origins[atlasc_dir.short_path] = [f.short_path for f in input_files]
+         resource_actions.compile_texture_atlas(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             input_files = input_files,
+             input_path = atlas_path,
+@@ -790,6 +807,7 @@
+         )
+         processed_origins[out_dir.short_path] = [file.short_path]
+         resource_actions.compile_xib(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             input_file = file,
+             output_dir = out_dir,
+@@ -828,6 +846,7 @@
+         )
+         processed_origins[out_dir.short_path] = [file.short_path]
+         resource_actions.compile_xcstrings(
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             actions = actions,
+             input_file = file,
+             output_dir = out_dir,
+diff --git a/apple/internal/resource_actions/actool.bzl b/apple/internal/resource_actions/actool.bzl
+--- a/apple/internal/resource_actions/actool.bzl
++++ b/apple/internal/resource_actions/actool.bzl
+@@ -515,7 +515,8 @@
+         primary_icon_name,
+         product_type,
+         rule_label,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that compiles asset catalogs.
+ 
+     This action populates a directory with compiled assets that must be merged
+@@ -621,7 +622,7 @@
+         apple_fragment = platform_prerequisites.apple_fragment,
+         executable = xctoolrunner,
+         execution_requirements = {"no-sandbox": "1"},
+-        inputs = asset_files,
++        inputs = asset_files + sdk_tool_files,
+         mnemonic = "AssetCatalogCompile",
+         outputs = outputs,
+         xcode_config = xcode_config,
+diff --git a/apple/internal/resource_actions/datamodel.bzl b/apple/internal/resource_actions/datamodel.bzl
+--- a/apple/internal/resource_actions/datamodel.bzl
++++ b/apple/internal/resource_actions/datamodel.bzl
+@@ -31,7 +31,8 @@
+         module_name,
+         output_file,
+         platform_prerequisites,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that compiles datamodels.
+ 
+     Args:
+@@ -62,7 +63,7 @@
+         apple_fragment = platform_prerequisites.apple_fragment,
+         arguments = args,
+         executable = xctoolrunner,
+-        inputs = input_files,
++        inputs = input_files + sdk_tool_files,
+         mnemonic = "MomCompile",
+         outputs = [output_file],
+         xcode_config = platform_prerequisites.xcode_version_config,
+@@ -75,7 +76,8 @@
+         mappingmodel_path,
+         output_file,
+         platform_prerequisites,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that compiles CoreData mapping models.
+ 
+     Args:
+@@ -96,7 +98,7 @@
+         arguments = [args],
+         apple_fragment = platform_prerequisites.apple_fragment,
+         executable = xctoolrunner,
+-        inputs = input_files,
++        inputs = input_files + sdk_tool_files,
+         mnemonic = "MappingModelCompile",
+         outputs = [output_file],
+         xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_actions/ibtool.bzl b/apple/internal/resource_actions/ibtool.bzl
+--- a/apple/internal/resource_actions/ibtool.bzl
++++ b/apple/internal/resource_actions/ibtool.bzl
+@@ -34,7 +34,8 @@
+         output_dir,
+         platform_prerequisites,
+         swift_module,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that compiles a storyboard.
+ 
+     Args:
+@@ -79,7 +80,7 @@
+         apple_fragment = platform_prerequisites.apple_fragment,
+         executable = xctoolrunner,
+         execution_requirements = {"no-sandbox": "1"},
+-        inputs = [input_file],
++        inputs = [input_file] + sdk_tool_files,
+         mnemonic = "StoryboardCompile",
+         outputs = [output_dir],
+         xcode_config = platform_prerequisites.xcode_version_config,
+@@ -91,7 +92,8 @@
+         output_dir,
+         platform_prerequisites,
+         storyboardc_dirs,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that links multiple compiled storyboards.
+ 
+     Storyboards that reference each other must be linked, and this operation also
+@@ -132,7 +134,7 @@
+         apple_fragment = platform_prerequisites.apple_fragment,
+         executable = xctoolrunner,
+         execution_requirements = {"no-sandbox": "1"},
+-        inputs = storyboardc_dirs,
++        inputs = storyboardc_dirs + sdk_tool_files,
+         mnemonic = "StoryboardLink",
+         outputs = [output_dir],
+         xcode_config = platform_prerequisites.xcode_version_config,
+@@ -145,7 +147,8 @@
+         output_dir,
+         platform_prerequisites,
+         swift_module,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that compiles a Xib file.
+ 
+     Args:
+@@ -186,7 +189,7 @@
+         apple_fragment = platform_prerequisites.apple_fragment,
+         executable = xctoolrunner,
+         execution_requirements = {"no-sandbox": "1"},
+-        inputs = [input_file],
++        inputs = [input_file] + sdk_tool_files,
+         mnemonic = "XibCompile",
+         outputs = [output_dir],
+         xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_actions/metals.bzl b/apple/internal/resource_actions/metals.bzl
+--- a/apple/internal/resource_actions/metals.bzl
++++ b/apple/internal/resource_actions/metals.bzl
+@@ -46,7 +46,7 @@
+         version = target_os_version,
+     )
+ 
+-def compile_metals(*, actions, input_files, output_file, platform_prerequisites, **_kwargs):
++def compile_metals(*, actions, input_files, output_file, platform_prerequisites, sdk_tool_files = [], **_kwargs):
+     """Creates actions that compile .metal files into a single .metallib file.
+ 
+     Args:
+@@ -108,7 +108,7 @@
+     apple_support.run(
+         actions = actions,
+         executable = "xcrun",
+-        inputs = air_files,
++        inputs = air_files + sdk_tool_files,
+         outputs = [output_file],
+         arguments = [args],
+         mnemonic = "MetallibCompile",
+diff --git a/apple/internal/resource_actions/mlmodel.bzl b/apple/internal/resource_actions/mlmodel.bzl
+--- a/apple/internal/resource_actions/mlmodel.bzl
++++ b/apple/internal/resource_actions/mlmodel.bzl
+@@ -30,7 +30,8 @@
+         output_bundle,
+         output_plist,
+         platform_prerequisites,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that compiles an mlmodel file into an mlmodelc bundle.
+ 
+     Args:
+@@ -57,7 +58,7 @@
+         apple_fragment = platform_prerequisites.apple_fragment,
+         arguments = [args],
+         executable = xctoolrunner,
+-        inputs = [input_file],
++        inputs = [input_file] + sdk_tool_files,
+         mnemonic = "MlmodelCompile",
+         outputs = [output_bundle, output_plist],
+         xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_actions/png.bzl b/apple/internal/resource_actions/png.bzl
+--- a/apple/internal/resource_actions/png.bzl
++++ b/apple/internal/resource_actions/png.bzl
+@@ -19,7 +19,8 @@
+     "apple_support",
+ )
+ 
+-def copy_png(*, actions, input_file, output_file, platform_prerequisites):
++def copy_png(*, actions, input_file, output_file, platform_prerequisites,
++        sdk_tool_files = []):
+     """Creates an action that copies and compresses a png using copypng.
+ 
+     Args:
+@@ -57,7 +58,7 @@
+                 output_file.path,
+             ],
+             executable = "xcrun",
+-            inputs = [input_file],
++            inputs = [input_file] + sdk_tool_files,
+             mnemonic = "CopyPng",
+             outputs = [output_file],
+             xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_actions/texture_atlas.bzl b/apple/internal/resource_actions/texture_atlas.bzl
+--- a/apple/internal/resource_actions/texture_atlas.bzl
++++ b/apple/internal/resource_actions/texture_atlas.bzl
+@@ -25,7 +25,8 @@
+         input_files,
+         input_path,
+         output_dir,
+-        platform_prerequisites):
++        platform_prerequisites,
++        sdk_tool_files = []):
+     """Creates an action that compiles texture atlas bundles (i.e. .atlas).
+ 
+     Args:
+@@ -44,7 +45,7 @@
+             output_dir.path,
+         ],
+         executable = "xcrun",
+-        inputs = input_files,
++        inputs = input_files + sdk_tool_files,
+         mnemonic = "CompileTextureAtlas",
+         outputs = [output_dir],
+         xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_actions/xcstrings.bzl b/apple/internal/resource_actions/xcstrings.bzl
+--- a/apple/internal/resource_actions/xcstrings.bzl
++++ b/apple/internal/resource_actions/xcstrings.bzl
+@@ -15,7 +15,8 @@
+         input_file,
+         output_dir,
+         platform_prerequisites,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     args = [
+         "xcstringstool",
+         "compile",
+@@ -29,7 +30,7 @@
+         apple_fragment = platform_prerequisites.apple_fragment,
+         arguments = args,
+         executable = xctoolrunner,
+-        inputs = [input_file],
++        inputs = [input_file] + sdk_tool_files,
+         mnemonic = "CompileXCStrings",
+         outputs = [output_dir],
+         xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/stub_support.bzl b/apple/internal/stub_support.bzl
+--- a/apple/internal/stub_support.bzl
++++ b/apple/internal/stub_support.bzl
+@@ -77,6 +77,7 @@
+                 out = shell.quote(binary_artifact.path),
+             ),
+             execution_requirements = {"no-sandbox": "1"},
++            inputs = sdk_tool_files,
+             mnemonic = "AppleLipoExtract",
+             outputs = [binary_artifact],
+             apple_fragment = platform_prerequisites.apple_fragment,
+@@ -91,6 +92,7 @@
+                 output_path = binary_artifact.path,
+                 xcode_stub_path = xcode_stub_path,
+             ),
++            inputs = sdk_tool_files,
+             mnemonic = "CopyStubExecutable",
+             outputs = [binary_artifact],
+             progress_message = "Copying stub executable for %s" % (rule_label),
+diff --git a/apple/internal/ios_rules.bzl b/apple/internal/ios_rules.bzl
+--- a/apple/internal/ios_rules.bzl
++++ b/apple/internal/ios_rules.bzl
+@@ -1972,6 +1972,7 @@
+         actions = actions,
+         platform_prerequisites = platform_prerequisites,
+         rule_label = label,
++        sdk_tool_files = ctx.files._sdk_tool_files,
+         xcode_stub_path = rule_descriptor.stub_binary_path,
+     )
+ 
+@@ -2449,6 +2450,7 @@
+         actions = actions,
+         platform_prerequisites = platform_prerequisites,
+         rule_label = label,
++        sdk_tool_files = ctx.files._sdk_tool_files,
+         xcode_stub_path = rule_descriptor.stub_binary_path,
+     )
+ 

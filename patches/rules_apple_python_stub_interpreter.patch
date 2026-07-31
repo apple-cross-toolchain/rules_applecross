@@ -1,0 +1,18 @@
+Export the calling tool's hermetic Python interpreter as PYTHON3 so
+python-based SDK tool stubs (e.g. xcstringstool) can run on executor
+images without a system python3.
+
+diff --git a/tools/wrapper_common/execute.py b/tools/wrapper_common/execute.py
+--- a/tools/wrapper_common/execute.py
++++ b/tools/wrapper_common/execute.py
+@@ -40,6 +40,10 @@
+ 
+ _ensure_toolchain_path()
+ 
++# Expose this tool's hermetic interpreter so python-based SDK tool stubs
++# (e.g. xcstringstool) can run on executor images without a system python3.
++os.environ.setdefault("PYTHON3", sys.executable)
++
+ # LINT.IfChange
+ _DEFAULT_TIMEOUT = 900
+ 

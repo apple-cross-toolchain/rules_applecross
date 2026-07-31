@@ -149,7 +149,12 @@ def _make_tool_configs(additional_tools, swift_tools, toolchain_path):
     # while keeping Apple SDK/resource configuration in this rule.
     # The worker substitutes __BAZEL_SWIFT_TOOLCHAIN_PATH__ in compiler flags.
     # Supplying it explicitly prevents the absolute /usr/bin/xcrun fallback.
-    env = {"TOOLCHAIN_PATH": toolchain_path}
+    # LD_LIBRARY_PATH lets the Swift driver find host libraries staged in the
+    # toolchain (libncurses, libsqlite3) on minimal executor images.
+    env = {
+        "LD_LIBRARY_PATH": toolchain_path + "/usr/lib",
+        "TOOLCHAIN_PATH": toolchain_path,
+    }
     persistent_tool_config = ToolConfigInfo(
         additional_tools = additional_tools,
         env = env,

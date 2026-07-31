@@ -137,6 +137,41 @@ def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_
             rctx.delete(src)
             rctx.delete(obj)
 
+# Ubuntu packages providing shared libraries that the swift.org toolchain's
+# driver binaries need at runtime but minimal executor images do not ship.
+_SWIFT_HOST_DEPS_DEBS = [
+    (
+        "libncurses6.deb",
+        "http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libncurses6_6.4+20240113-1ubuntu2.1_amd64.deb",
+        "c4d0fd9d7c997f4b13dbfdd9b9a5e14ed0222303ac931f9c2594c6b99696b63d",
+    ),
+    (
+        "libsqlite3.deb",
+        "http://archive.ubuntu.com/ubuntu/pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.7_amd64.deb",
+        "488511119cad001a00f7e00e597112cf743ccfbd3f7a03c82d66237e1bfd82c8",
+    ),
+]
+
+def _install_swift_host_deps(rctx, toolchain_dir):
+    """Stage Ubuntu shared libraries needed by the Swift driver at runtime."""
+    for name, url, sha256 in _SWIFT_HOST_DEPS_DEBS:
+        rctx.download(url = url, output = "_debs/" + name, sha256 = sha256)
+
+        # A .deb is an ar archive whose payload is data.tar.zst.
+        result = rctx.execute(["ar", "x", name], working_directory = "_debs")
+        if result.return_code != 0:
+            fail("Failed to unpack {}: {}".format(name, result.stderr))
+        rctx.extract(archive = "_debs/data.tar.zst", output = "_debs/root")
+
+    result = rctx.execute([
+        "bash",
+        "-c",
+        "cp -a _debs/root/usr/lib/x86_64-linux-gnu/*.so* " + toolchain_dir + "lib/",
+    ])
+    if result.return_code != 0:
+        fail("Failed to stage Swift host dependencies: " + result.stderr)
+    rctx.delete("_debs")
+
 def _restore_tbd_symlinks(rctx):
     result = rctx.execute([
         _python3(rctx),
@@ -247,6 +282,8 @@ def _apple_cross_toolchain_impl(rctx):
         ])
 
     _ensure_swift_compatibility_stub_archives(rctx, xcode_toolchain_bindir, xcode_toolchain_dir)
+
+    _install_swift_host_deps(rctx, xcode_toolchain_dir)
 
     # Create lib/swift/ symlinks so Swift binaries can find their runtime
     # libraries.  Swift binaries have RUNPATH $ORIGIN/../lib/swift/linux
@@ -365,10 +402,13 @@ def _apple_cross_toolchain_impl(rctx):
         _install_executable(rctx, "stubs/intentbuilderc.sh", _intentbuilderc_path)
 
     # Create xcstringstool stub for Linux (compiles .xcstrings to .strings).
+    # Installed as a shell trampoline so it can run under the calling tool's
+    # hermetic Python on executor images without a system python3.
     _xcstringstool_path = xcode_toolchain_bindir + "xcstringstool"
     result = rctx.execute(["test", "-e", _xcstringstool_path])
     if result.return_code != 0:
-        _install_executable(rctx, "stubs/xcstringstool.py", _xcstringstool_path)
+        _install_executable(rctx, "stubs/xcstringstool.sh", _xcstringstool_path)
+        _install_executable(rctx, "stubs/xcstringstool.py", _xcstringstool_path + ".py")
 
     # Provide `zip` for executor images that lack Info-ZIP (e.g. the
     # swift:*-noble container); rules_apple's process-and-sign script
