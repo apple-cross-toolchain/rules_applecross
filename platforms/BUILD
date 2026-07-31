@@ -7,6 +7,6 @@ platform(
     ],
     exec_properties = {
         "OSFamily": "Linux",
-        "container-image": "docker://swift:6.2.1-noble",
+        "container-image": "docker://ubuntu:24.04",
     },
 )
