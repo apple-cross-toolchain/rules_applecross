@@ -24,8 +24,8 @@ build:remote --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cr
 build:remote --remote_download_toplevel
 build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
 
-build --bes_results_url=https://apple-cross-toolchain.buildbuddy.io/invocation/
-build --bes_backend=grpcs://apple-cross-toolchain.buildbuddy.io
+build:remote --bes_results_url=https://apple-cross-toolchain.buildbuddy.io/invocation/
+build:remote --bes_backend=grpcs://apple-cross-toolchain.buildbuddy.io
 common --remote_timeout=10m
 common:remote --remote_cache_compression
 common:remote --remote_executor=grpcs://apple-cross-toolchain.buildbuddy.io
