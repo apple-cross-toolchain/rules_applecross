@@ -104,9 +104,6 @@ find "$PROJECT_ROOT/Xcode.app" -path "*.framework/*" -type f ! -name "*.*" \
         xcrun tapi stubify "$1" -o "$tbd" 2>/dev/null || true
       fi
       rm "$1"
-      if [ -f "$tbd" ]; then
-        ln -s "$(basename "$tbd")" "$1"
-      fi
     fi
   ' _ {} \;
 
@@ -162,6 +159,21 @@ for path in sys.argv[1:]:
 # Remove self-referencing symlinks (e.g. Ruby.framework/Headers/ruby/ruby -> .)
 # that cause infinite loops when Bazel globs the SDK tree.
 find "$PROJECT_ROOT/Xcode.app" -type l -exec sh -c 'test "$(readlink "$1")" = "." && rm "$1"' _ {} \;
+
+# Stubifying a versioned framework can leave Foo -> Versions/Current/Foo
+# dangling. Replace that extensionless link with the canonical
+# Foo.tbd -> Versions/Current/Foo.tbd form, then remove any other dangling
+# links whose targets were excluded from the package.
+find "$PROJECT_ROOT/Xcode.app" -type l ! -exec test -e {} \; \
+  -exec sh -c '
+    for link do
+      target="$(readlink "$link")"
+      if [ -f "$(dirname "$link")/$target.tbd" ] && [ ! -e "$link.tbd" ]; then
+        ln -s "$target.tbd" "$link.tbd"
+      fi
+      rm "$link"
+    done
+  ' _ {} +
 
 if find "$PROJECT_ROOT/Xcode.app" -type l ! -exec test -e {} \; -print -quit | grep -q .; then
   echo "error: broken symlinks remain in packaged Xcode tree" >&2

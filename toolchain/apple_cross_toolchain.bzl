@@ -172,15 +172,6 @@ def _install_swift_host_deps(rctx, toolchain_dir):
         fail("Failed to stage Swift host dependencies: " + result.stderr)
     rctx.delete("_debs")
 
-def _restore_tbd_symlinks(rctx):
-    result = rctx.execute([
-        _python3(rctx),
-        str(_toolchain_path(rctx, "repo_tools/restore_tbd_symlinks.py")),
-        "Xcode.app",
-    ])
-    if result.return_code != 0:
-        fail("Failed to restore SDK TBD symlinks: " + (result.stderr or result.stdout))
-
 def _normalize_sdk_modulemaps(rctx):
     result = rctx.execute([
         _python3(rctx),
@@ -247,7 +238,6 @@ def _apple_cross_toolchain_impl(rctx):
     elif rctx.attr.apple_sdk_urls:
         _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
 
-    _restore_tbd_symlinks(rctx)
     _normalize_sdk_modulemaps(rctx)
 
     # Resolve the @llvm_prebuilt alias imported from @llvm's minimal prebuilt

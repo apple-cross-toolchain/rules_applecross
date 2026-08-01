@@ -278,6 +278,11 @@ _SWIFT_COMPATIBILITY_ARCHIVES = glob([
     _XCODE_TOOLCHAIN_LIB + "/swift/macosx/libswiftCompatibility*.a",
 ])
 
+_SWIFT_TOOLCHAIN_LINK_STUBS = glob(
+    [_XCODE_TOOLCHAIN_LIB + "/swift/*/*.tbd"],
+    exclude = [_XCODE_TOOLCHAIN_LIB + "/swift/host/*.tbd"],
+)
+
 filegroup(
     name = "link_tool_files",
     srcs = [
@@ -290,7 +295,7 @@ filegroup(
         _XCODE_TOOLCHAIN_BIN + "/strip",
         _XCODE_TOOLCHAIN_LIB + "/libtapi.so",
         _XCODE_TOOLCHAIN_LIB + "/libtapi.so.8svn",
-    ] + _SWIFT_COMPATIBILITY_ARCHIVES,
+    ] + _SWIFT_COMPATIBILITY_ARCHIVES + _SWIFT_TOOLCHAIN_LINK_STUBS,
 )
 
 filegroup(
