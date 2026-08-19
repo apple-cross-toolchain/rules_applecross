@@ -29,8 +29,6 @@ SDK_EXCLUDES=(
   --exclude "_CodeSignature"
   # Swift documentation blobs (compiler needs .swiftmodule/.swiftinterface only)
   --exclude "*.swiftdoc"
-  # Static archives — the SDK provides .tbd text stubs for linking
-  --exclude "*.a"
   # Mach-O dynamic libraries — only .tbd text stubs are needed for linking
   # on Linux; the real binaries are large and architecture-specific
   --exclude "*.dylib"
@@ -55,11 +53,11 @@ for sdk in MacOSX iPhoneOS iPhoneSimulator WatchOS WatchSimulator AppleTVOS Appl
   rsync -a --relative "${SDK_EXCLUDES[@]}" "./Platforms/$sdk.platform/Developer/SDKs/" "$NEW_DEVELOPER_DIR"
 
   if [[ -d "Platforms/$sdk.platform/usr/lib" ]]; then
-    rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative --exclude "*.dylib" "./Platforms/$sdk.platform/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
   if [[ -d "Platforms/$sdk.platform/Developer/usr/lib" ]]; then
-    rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
+    rsync -a --relative --exclude "*.dylib" "./Platforms/$sdk.platform/Developer/usr/lib/" "$NEW_DEVELOPER_DIR"
   fi
 
   if [[ -d "Platforms/$sdk.platform/Developer/Library/Frameworks" ]]; then
@@ -81,12 +79,12 @@ if [[ -d "Toolchains/XcodeDefault.xctoolchain/usr/lib/arc" ]]; then
   rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/" "$NEW_DEVELOPER_DIR"
 fi
 rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/" "$NEW_DEVELOPER_DIR"
-# Exclude .a and .dylib from Swift runtime dirs — the cross-compilation
+# Exclude .dylibs from Swift runtime dirs — the cross-compilation
 # toolchain uses its own Swift runtime; only .tbd stubs, .swiftmodule/
 # and .swiftinterface files are needed for compilation and linking.
-rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
+rsync -a --relative --exclude "*.dylib" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" "$NEW_DEVELOPER_DIR"
 if [[ -d "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0" ]]; then
-  rsync -a --relative --exclude "*.a" --exclude "*.dylib" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
+  rsync -a --relative --exclude "*.dylib" "./Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/" "$NEW_DEVELOPER_DIR"
 fi
 
 # Create a placeholder bin directory
