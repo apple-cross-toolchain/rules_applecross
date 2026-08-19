@@ -20,8 +20,8 @@ build:remote --host_features=fully_static_link
 build:remote --jobs=100
 build:remote --@rules_python//python/config_settings:bootstrap_impl=script
 build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
-build:remote --bes_results_url=https://apple-cross-toolchain.buildbuddy.io/invocation/
-build:remote --bes_backend=grpcs://apple-cross-toolchain.buildbuddy.io
+build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+build:remote --bes_backend=grpcs://app.buildbuddy.io
 common --remote_timeout=10m
 common:remote --remote_cache_compression
-common:remote --remote_executor=grpcs://apple-cross-toolchain.buildbuddy.io
+common:remote --remote_executor=grpcs://app.buildbuddy.io

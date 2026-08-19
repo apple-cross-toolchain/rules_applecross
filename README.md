@@ -78,11 +78,11 @@ Current supported host is x86_64 Linux only. Requires Bazel 9+.
 2. Add the following to your `.bazelrc`:
 
     ```
-    build:remote --bes_backend=grpcs://cloud.buildbuddy.io
+    build:remote --bes_backend=grpcs://app.buildbuddy.io
     build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
     build:remote --jobs=100
     build:remote --remote_download_toplevel
-    build:remote --remote_executor=grpcs://cloud.buildbuddy.io
+    build:remote --remote_executor=grpcs://app.buildbuddy.io
     build:remote --remote_timeout=3600
     build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
     build:remote --tls_client_certificate=buildbuddy-cert.pem
