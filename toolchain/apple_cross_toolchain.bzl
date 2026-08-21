@@ -202,8 +202,7 @@ def _patch_swiftinterfaces(rctx, framework_dirs):
 # Every file this rule reads through a label. Resolving a not-yet-fetched
 # label mid-implementation aborts and re-runs the whole function (Bazel
 # repository-rule restarts), and any restart after the SDK download repays
-# the multi-gigabyte extraction. Resolving all of them up front confines the
-# restarts to the first milliseconds of the fetch.
+# the multi-gigabyte extraction. Resolving all of them upfront to avoid this behavior
 _RULE_INPUT_FILES = [
     "BUILD.template.bzl",
     "libtool.cc",
