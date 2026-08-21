@@ -199,7 +199,38 @@ def _patch_swiftinterfaces(rctx, framework_dirs):
     if result.return_code != 0:
         fail("Failed to patch SDK Swift interfaces: " + (result.stderr or result.stdout))
 
+# Every file this rule reads through a label. Resolving a not-yet-fetched
+# label mid-implementation aborts and re-runs the whole function (Bazel
+# repository-rule restarts), and any restart after the SDK download repays
+# the multi-gigabyte extraction. Resolving all of them up front confines the
+# restarts to the first milliseconds of the fetch.
+_RULE_INPUT_FILES = [
+    "BUILD.template.bzl",
+    "libtool.cc",
+    "wrapped_clang.cc",
+    "repo_tools/ensure_clang_resource_libs.py",
+    "repo_tools/normalize_sdk_modulemaps.py",
+    "repo_tools/patch_swiftinterfaces.py",
+    "repo_tools/read_sdk_settings_version.py",
+    "stubs/empty_output_tool.sh",
+    "stubs/intentbuilderc.sh",
+    "stubs/noop_tool.sh",
+    "stubs/security.py",
+    "stubs/xcstringstool.py",
+    "stubs/xcstringstool.sh",
+    "stubs/zip.py",
+    "stubs/zip.sh",
+]
+
+def _prefetch_rule_inputs(rctx):
+    for f in _RULE_INPUT_FILES:
+        _toolchain_path(rctx, f)
+    rctx.path(Label("@llvm_prebuilt//:bin/clang"))
+
 def _apple_cross_toolchain_impl(rctx):
+    # Force all label->path restarts before any expensive work below.
+    _prefetch_rule_inputs(rctx)
+
     # Resolve label paths
     libtool_cc = rctx.path(Label("@rules_applecross//toolchain:libtool.cc"))
     build_tpl = rctx.path(Label("@rules_applecross//toolchain:BUILD.template.bzl"))
