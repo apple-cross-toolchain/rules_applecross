@@ -70,73 +70,6 @@ def _python3(rctx):
 def _install_executable(rctx, source, destination):
     rctx.template(destination, _toolchain_path(rctx, source), {}, executable = True)
 
-def _ensure_swift_compatibility_stub_archives(rctx, toolchain_bindir, toolchain_dir):
-    """Create Swift compatibility stub archives expected by Apple linkers."""
-    if rctx.os.name.startswith("linux"):
-        clang = toolchain_bindir + "clang"
-        llvm_ar = toolchain_bindir + "llvm-ar"
-        if rctx.execute(["test", "-x", clang]).return_code != 0:
-            return
-        if rctx.execute(["test", "-x", llvm_ar]).return_code != 0:
-            return
-    elif rctx.os.name.startswith("mac"):
-        # The repository's own bin dir holds Linux executables for remote
-        # executors, so build the stubs with the host toolchain instead.
-        host_clang = rctx.which("clang")
-        host_ar = rctx.which("ar")
-        if not host_clang or not host_ar:
-            return
-        clang = str(host_clang)
-        llvm_ar = str(host_ar)
-    else:
-        return
-
-    compatibility_targets = {
-        "iphoneos": "arm64-apple-ios13.0",
-        "iphonesimulator": "arm64-apple-ios13.0-simulator",
-        "macosx": "arm64-apple-macosx10.15",
-    }
-    compatibility_libs = [
-        "swiftCompatibility51",
-        "swiftCompatibility56",
-        "swiftCompatibilityConcurrency",
-        "swiftCompatibilityDynamicReplacements",
-        "swiftCompatibilityPacks",
-    ]
-
-    for platform_dir, target in compatibility_targets.items():
-        swift_platform_dir = toolchain_dir + "lib/swift/" + platform_dir
-        if rctx.execute(["test", "-d", swift_platform_dir]).return_code != 0:
-            continue
-
-        for lib in compatibility_libs:
-            archive = swift_platform_dir + "/lib" + lib + ".a"
-            if rctx.execute(["test", "-e", archive]).return_code == 0:
-                continue
-
-            src = "_{}_{}.S".format(platform_dir, lib)
-            obj = "_{}_{}.o".format(platform_dir, lib)
-            # Mach-O symbols include their leading underscore in assembly.
-            # Swift emits a reference to __swift_FORCE_LOAD_$_<library>.
-            symbol = "__swift_FORCE_LOAD_$_" + lib
-            rctx.file(src, content = """\
-.globl {symbol}
-.p2align 2
-{symbol}:
-  ret
-""".format(symbol = symbol))
-
-            result = rctx.execute([clang, "-target", target, "-c", src, "-o", obj])
-            if result.return_code != 0:
-                fail("Failed to compile Swift compatibility stub {}: {}".format(archive, result.stderr or result.stdout))
-
-            result = rctx.execute([llvm_ar, "rcs", archive, obj])
-            if result.return_code != 0:
-                fail("Failed to create Swift compatibility archive {}: {}".format(archive, result.stderr or result.stdout))
-
-            rctx.delete(src)
-            rctx.delete(obj)
-
 # Ubuntu packages providing shared libraries that the swift.org toolchain's
 # driver binaries need at runtime but minimal executor images do not ship.
 _SWIFT_HOST_DEPS_DEBS = [
@@ -270,8 +203,6 @@ def _apple_cross_toolchain_impl(rctx):
             "-c",
             "cp -a " + llvm_prebuilt_lib + "/* " + xcode_toolchain_dir + "lib/",
         ])
-
-    _ensure_swift_compatibility_stub_archives(rctx, xcode_toolchain_bindir, xcode_toolchain_dir)
 
     _install_swift_host_deps(rctx, xcode_toolchain_dir)
 
