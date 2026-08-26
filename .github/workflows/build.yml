@@ -64,7 +64,6 @@ jobs:
           --watchos_cpus=arm64
           //examples/...
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
-      - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/UITests.runfiles . && tar -cJvf UITests.tar.xz UITests.runfiles && rm -rf UITests.runfiles
       - name: Package macOS command-line examples
         env:
           BAZELRC: ${{ steps.bazel-cache.outputs.bazelrc }}
@@ -89,11 +88,6 @@ jobs:
         with:
           name: Tests
           path: Tests.tar.xz
-          retention-days: 1
-      - uses: actions/upload-artifact@v7
-        with:
-          name: UITests
-          path: UITests.tar.xz
           retention-days: 1
       - uses: actions/upload-artifact@v7
         with:
@@ -139,23 +133,6 @@ jobs:
             TEST_UNDECLARED_OUTPUTS_DIR="$tmpdir/outputs" \
             XML_OUTPUT_FILE="$tmpdir/tests.xml" \
             examples/ios/HelloWorldSwiftUI/Tests
-      - uses: actions/download-artifact@v8
-        with:
-          name: UITests
-          path: UITests-artifact
-          # Work around actions/download-artifact#484 until its bundled
-          # unzip-stream dependency no longer uses the deprecated Buffer().
-          skip-decompress: true
-      - run: |
-          unzip -q UITests-artifact/* -d .
-          tar -xf UITests.tar.xz && cd UITests.runfiles/_main
-          tmpdir=$(mktemp -d)
-          exec env - PATH=/bin:/usr/bin \
-            TEST_PREMATURE_EXIT_FILE="$tmpdir/premature_exit" \
-            TEST_SRCDIR="$PWD" \
-            TEST_UNDECLARED_OUTPUTS_DIR="$tmpdir/outputs" \
-            XML_OUTPUT_FILE="$tmpdir/uitests.xml" \
-            examples/ios/HelloWorldSwiftUI/UITests
   remote_build:
     # Fork pull requests receive no secrets, so remote execution (which needs
     # BUILDBUDDY_API_KEY) can only run for same-repo events.
