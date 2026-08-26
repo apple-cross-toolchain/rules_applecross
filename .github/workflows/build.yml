@@ -196,3 +196,32 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
+  delete_sdks:
+    # The SDK tarball is only needed while the jobs that consume it run, so
+    # drop it instead of leaving it in the artifact store until its retention
+    # period expires. Fork pull requests receive a read-only token, which
+    # cannot delete artifacts, so there the retention period is the only
+    # cleanup.
+    if: >-
+      always() &&
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    needs:
+      - build
+      - remote_build
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Delete Apple SDKs artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=apple-sdks" \
+              --jq '.artifacts[].id'
+          )
+          for id in $ids; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          done
