@@ -5,9 +5,10 @@ set -euo pipefail
 # Downloads a pre-packaged Apple SDK archive to the workspace root, where
 # MODULE.bazel's `apple_sdk_path` expects to find it.
 #
-# On macOS `tools/package-sdks.sh` produces that archive locally. Machines
-# without macOS (CI included) fetch a pre-built one with this script instead,
-# so the checked-in MODULE.bazel works unmodified in both cases.
+# On macOS `tools/package-sdks.sh` produces that archive locally, and CI
+# packages it the same way on a macOS runner. Other machines without macOS
+# fetch a pre-built one with this script instead, so the checked-in
+# MODULE.bazel works unmodified in all cases.
 #
 # Environment:
 #   SDKS_URL      Required. URL of the packaged Apple SDK archive.

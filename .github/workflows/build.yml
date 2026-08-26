@@ -7,18 +7,40 @@ on:
       - main
 
 jobs:
+  package_sdks:
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Package Apple SDKs
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+        run: tools/package-sdks.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: apple-sdks
+          path: apple-sdks.tar.zst
+          # The archive is already zstd-compressed.
+          compression-level: 0
+          retention-days: 1
   build:
+    needs: package_sdks
     runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch Apple SDKs
-        env:
-          SDKS_URL: ${{ secrets.SDKS_URL }}
-          SDKS_TOKEN: ${{ secrets.SDKS_PASSWORD }}
-        run: tools/fetch-sdks.sh
+      - uses: actions/download-artifact@v8
+        with:
+          name: apple-sdks
+          path: apple-sdks-artifact
+          # Work around actions/download-artifact#484 until its bundled
+          # unzip-stream dependency no longer uses the deprecated Buffer().
+          skip-decompress: true
+      - name: Extract Apple SDKs
+        run: unzip -q apple-sdks-artifact/* -d . && rm -rf apple-sdks-artifact
       - name: Start Bazel cache adapter
         id: bazel-cache
         uses: thii/bazel-gha-remote-cache@ec0d6c63ffb5b90c35b5306ce4fdce621a724306 # v0.0.5
@@ -135,6 +157,12 @@ jobs:
             XML_OUTPUT_FILE="$tmpdir/uitests.xml" \
             examples/ios/HelloWorldSwiftUI/UITests
   remote_build:
+    # Fork pull requests receive no secrets, so remote execution (which needs
+    # BUILDBUDDY_API_KEY) can only run for same-repo events.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: package_sdks
     strategy:
       fail-fast: false
       matrix:
@@ -146,11 +174,15 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch Apple SDKs
-        env:
-          SDKS_URL: ${{ secrets.SDKS_URL }}
-          SDKS_TOKEN: ${{ secrets.SDKS_PASSWORD }}
-        run: tools/fetch-sdks.sh
+      - uses: actions/download-artifact@v8
+        with:
+          name: apple-sdks
+          path: apple-sdks-artifact
+          # Work around actions/download-artifact#484 until its bundled
+          # unzip-stream dependency no longer uses the deprecated Buffer().
+          skip-decompress: true
+      - name: Extract Apple SDKs
+        run: unzip -q apple-sdks-artifact/* -d . && rm -rf apple-sdks-artifact
       - name: Build examples and tests with remote execution
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
