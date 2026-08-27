@@ -154,30 +154,50 @@ for path in sys.argv[1:]:
             json.dump(tbd, f)
 ' {} +
 
-# Remove self-referencing symlinks (e.g. Ruby.framework/Headers/ruby/ruby -> .)
-# that cause infinite loops when Bazel globs the SDK tree.
-find "$PROJECT_ROOT/Xcode.app" -type l -exec sh -c 'test "$(readlink "$1")" = "." && rm "$1"' _ {} \;
+# Resolve every symlink in one pass. Doing this with `find -exec` spawns a
+# process per link, and over the thousands the tree holds that costs more than
+# all the copying above.
+python3 - "$PROJECT_ROOT/Xcode.app" <<'EOF'
+import os
+import sys
 
-# Stubifying a versioned framework can leave Foo -> Versions/Current/Foo
-# dangling. Replace that extensionless link with the canonical
-# Foo.tbd -> Versions/Current/Foo.tbd form, then remove any other dangling
-# links whose targets were excluded from the package.
-find "$PROJECT_ROOT/Xcode.app" -type l ! -exec test -e {} \; \
-  -exec sh -c '
-    for link do
-      target="$(readlink "$link")"
-      if [ -f "$(dirname "$link")/$target.tbd" ] && [ ! -e "$link.tbd" ]; then
-        ln -s "$target.tbd" "$link.tbd"
-      fi
-      rm "$link"
-    done
-  ' _ {} +
+root = sys.argv[1]
 
-if find "$PROJECT_ROOT/Xcode.app" -type l ! -exec test -e {} \; -print -quit | grep -q .; then
-  echo "error: broken symlinks remain in packaged Xcode tree" >&2
-  find "$PROJECT_ROOT/Xcode.app" -type l ! -exec test -e {} \; -print >&2
-  exit 1
-fi
+
+def symlinks():
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in dirnames + filenames:
+            path = os.path.join(dirpath, name)
+            if os.path.islink(path):
+                found.append(path)
+    return found
+
+
+for link in symlinks():
+    target = os.readlink(link)
+    # Self-referencing symlinks (e.g. Ruby.framework/Headers/ruby/ruby -> .)
+    # cause infinite loops when Bazel globs the SDK tree.
+    if target == ".":
+        os.unlink(link)
+        continue
+    if os.path.exists(link):
+        continue
+    # Stubifying a versioned framework can leave Foo -> Versions/Current/Foo
+    # dangling. Replace that extensionless link with the canonical
+    # Foo.tbd -> Versions/Current/Foo.tbd form, then remove any other dangling
+    # link whose target was excluded from the package.
+    stub = os.path.join(os.path.dirname(link), target + ".tbd")
+    if os.path.isfile(stub) and not os.path.lexists(link + ".tbd"):
+        os.symlink(target + ".tbd", link + ".tbd")
+    os.unlink(link)
+
+# Re-scan so the links just created are checked too.
+broken = [link for link in symlinks() if not os.path.exists(link)]
+if broken:
+    sys.exit("error: broken symlinks remain in packaged Xcode tree\n" +
+             "\n".join(broken))
+EOF
 
 if find "$PROJECT_ROOT/Xcode.app" \( -name "._*" -o -name "__MACOSX" \) -print -quit | grep -q .; then
   echo "error: AppleDouble files remain in packaged Xcode tree" >&2

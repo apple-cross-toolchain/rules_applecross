@@ -16,6 +16,7 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "apple_sdk_sha256": config.apple_sdk_sha256,
                 "apple_sdk_strip_prefix": config.apple_sdk_strip_prefix,
                 "apple_sdk_archive_type": config.apple_sdk_archive_type,
+                "local_xcode": config.local_xcode,
                 "swift_tools": config.swift_tools,
             }
 
@@ -29,6 +30,12 @@ _configure_tag = tag_class(
         "apple_sdk_sha256": attr.string(),
         "apple_sdk_strip_prefix": attr.string(),
         "apple_sdk_archive_type": attr.string(),
+        "local_xcode": attr.bool(
+            default = False,
+            doc = "Read the Apple SDKs from this host's installed Xcode. " +
+                  "macOS hosts only; ignored elsewhere, so one MODULE.bazel " +
+                  "can name both this and an archive source.",
+        ),
         "swift_tools": attr.string(mandatory = True),
     },
 )

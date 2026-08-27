@@ -3,3 +3,4 @@
 /MODULE.bazel.lock
 /apple-sdks*.tar.*
 /Xcode.app
+__pycache__/

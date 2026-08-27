@@ -274,12 +274,11 @@ def _swift_toolchain_impl(ctx):
         environment = environment,
     )
 
-    # Compute SDK path
+    # Compute SDK path. The version-neutral symlink is used rather than a
+    # versioned directory name so the toolchain works with whatever Xcode
+    # produced the SDK tree.
     sdk_platform = info.sdk_platform_sim if is_simulator else info.sdk_platform_device
-    xcode_version_str = str(xcode_config.xcode_version()) if xcode_config.xcode_version() else ""
-    xcode_parts = xcode_version_str.split(".")
-    sdk_version = ".".join(xcode_parts[:2]) if len(xcode_parts) >= 2 else xcode_version_str
-    sdk_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + sdk_version + ".sdk"
+    sdk_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + ".sdk"
 
     execution_requirements = xcode_config.execution_info()
 
