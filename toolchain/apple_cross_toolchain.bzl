@@ -54,12 +54,15 @@ def _sdk_download(rctx, urls, sha256, strip_prefix):
 
     rctx.download_and_extract(**kwargs)
 
-def _toolchain_path(rctx, path):
-    resolved = rctx.path(Label("@rules_applecross//toolchain:" + path))
+def _repo_file(rctx, label):
+    resolved = rctx.path(Label(label))
     # Register the file as an input of this repository so edits to helper
     # scripts invalidate and re-run the rule.
     rctx.watch(resolved)
     return resolved
+
+def _toolchain_path(rctx, path):
+    return _repo_file(rctx, "@rules_applecross//toolchain:" + path)
 
 def _python3(rctx):
     python = rctx.which("python3")
@@ -105,6 +108,99 @@ def _install_swift_host_deps(rctx, toolchain_dir):
         fail("Failed to stage Swift host dependencies: " + result.stderr)
     rctx.delete("_debs")
 
+# The SDK whose version apple_support reports for each Apple OS. Device and
+# simulator SDKs always ship together at the same version.
+_SDK_PLATFORM_FOR_OS = {
+    "ios": "iPhoneOS",
+    "macos": "MacOSX",
+    "tvos": "AppleTVOS",
+    "visionos": "XROS",
+    "watchos": "WatchOS",
+}
+
+def _local_developer_dir(rctx):
+    """Resolves the Developer directory of the Xcode selected on this host."""
+    developer_dir = rctx.os.environ.get("DEVELOPER_DIR", "").strip()
+    if not developer_dir:
+        result = rctx.execute(["xcode-select", "-p"])
+        if result.return_code != 0:
+            fail(
+                "local_xcode is set but no Xcode was found: `xcode-select -p` " +
+                "failed with: " + (result.stderr.strip() or result.stdout.strip()),
+            )
+        developer_dir = result.stdout.strip()
+
+    # DEVELOPER_DIR is conventionally the Developer directory, but accept an
+    # Xcode.app bundle too since that is what people usually have at hand.
+    if developer_dir.endswith(".app"):
+        developer_dir += "/Contents/Developer"
+
+    if developer_dir.endswith("/CommandLineTools"):
+        fail(
+            "The selected developer directory is " + developer_dir + ", which " +
+            "ships no Apple SDKs other than macOS. Select a full Xcode with " +
+            "`sudo xcode-select -s /Applications/Xcode.app` or DEVELOPER_DIR.",
+        )
+
+    if not rctx.path(developer_dir).exists:
+        fail("The selected developer directory does not exist: " + developer_dir)
+
+    return developer_dir
+
+def _link_local_xcode(rctx, developer_dir):
+    """Links a cross-compilable SDK tree to a locally installed Xcode."""
+
+    # An Xcode upgrade in place keeps the same path, so tie the repository to
+    # the version of the Xcode it was linked against.
+    #
+    # Only that case is caught automatically. `xcode-select -s` to a different
+    # Xcode leaves this file untouched, and watching the symlink it rewrites
+    # does not help: Bazel records a symlink to a directory as the literal
+    # "DIR" rather than a digest, so every Xcode on the machine looks alike.
+    # The rule is marked `configure` for that case instead.
+    rctx.watch(rctx.path(developer_dir + "/../version.plist"))
+
+    rctx.report_progress("Linking Apple SDKs from " + developer_dir)
+    result = rctx.execute(
+        [
+            _python3(rctx),
+            str(_toolchain_path(rctx, "repo_tools/link_local_xcode.py")),
+            developer_dir,
+            str(rctx.path("Xcode.app")),
+        ],
+        # Generating the framework stubs dominates, and a cold filesystem makes
+        # the scan that finds them much slower than the default 600s allows.
+        timeout = 3600,
+    )
+    if result.return_code != 0:
+        fail("Failed to link Apple SDKs from {}:\n{}".format(
+            developer_dir,
+            result.stderr or result.stdout,
+        ))
+
+def _read_xcode_versions(rctx):
+    """Returns (xcode_version, {sdk platform: sdk version}) for the staged tree."""
+    result = rctx.execute([
+        _python3(rctx),
+        str(_toolchain_path(rctx, "repo_tools/read_xcode_versions.py")),
+        "Xcode.app",
+    ])
+    if result.return_code != 0:
+        fail("Failed to read Xcode and SDK versions: " + (result.stderr or result.stdout))
+
+    xcode_version = ""
+    sdk_versions = {}
+    for line in result.stdout.splitlines():
+        fields = line.split(" ")
+        if fields[0] == "xcode":
+            xcode_version = fields[1]
+        elif fields[0] == "sdk":
+            sdk_versions[fields[1]] = fields[2]
+
+    if not xcode_version:
+        fail("Failed to read the Xcode version from the Apple SDK tree")
+    return xcode_version, sdk_versions
+
 def _normalize_sdk_modulemaps(rctx):
     result = rctx.execute([
         _python3(rctx),
@@ -142,8 +238,9 @@ _RULE_INPUT_FILES = [
     "wrapped_clang.cc",
     "repo_tools/ensure_clang_resource_libs.py",
     "repo_tools/normalize_sdk_modulemaps.py",
+    "repo_tools/link_local_xcode.py",
     "repo_tools/patch_swiftinterfaces.py",
-    "repo_tools/read_sdk_settings_version.py",
+    "repo_tools/read_xcode_versions.py",
     "stubs/empty_output_tool.sh",
     "stubs/intentbuilderc.sh",
     "stubs/noop_tool.sh",
@@ -159,6 +256,50 @@ def _prefetch_rule_inputs(rctx):
         _toolchain_path(rctx, f)
     rctx.path(Label("@llvm_prebuilt//:bin/clang"))
 
+def _use_local_xcode(rctx):
+    """Decides whether to read this host's Xcode or unpack an archive."""
+    override = rctx.os.environ.get("RULES_APPLECROSS_LOCAL_XCODE", "").strip()
+    if override:
+        if override not in ("0", "1"):
+            fail("RULES_APPLECROSS_LOCAL_XCODE must be \"0\" or \"1\", got: " + override)
+        if override == "1" and not rctx.os.name.startswith("mac"):
+            fail(
+                "RULES_APPLECROSS_LOCAL_XCODE=1 needs a macOS host, but this one " +
+                "reports os.name = \"" + rctx.os.name + "\". Unset it to read " +
+                "apple_sdk_path or apple_sdk_urls instead.",
+            )
+        return override == "1"
+
+    # Only macOS has an Xcode to read, so fall through to the archive rather
+    # than failing. That is what lets one MODULE.bazel serve both host kinds.
+    return rctx.attr.local_xcode and rctx.os.name.startswith("mac")
+
+def _materialize_apple_sdks(rctx):
+    """Populates the repository's Xcode.app tree from the configured source."""
+    if _use_local_xcode(rctx):
+        _link_local_xcode(rctx, _local_developer_dir(rctx))
+    elif rctx.attr.apple_sdk_path:
+        apple_sdk_local = rctx.workspace_root.get_child(rctx.attr.apple_sdk_path)
+        if rctx.execute(["test", "-d", str(apple_sdk_local)]).return_code == 0:
+            # Pre-extracted directory — hardlink copy (fast, no re-extraction,
+            # and tools like xcrun resolve paths correctly unlike symlinks).
+            rctx.execute(["bash", "-c", "cp -al '" + str(apple_sdk_local) + "/.' ."])
+        else:
+            # Tarball
+            rctx.extract(
+                archive = apple_sdk_local,
+                stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
+                type = rctx.attr.apple_sdk_archive_type or "",
+            )
+    elif rctx.attr.apple_sdk_urls:
+        _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
+    else:
+        fail(
+            "No Apple SDK source is configured for @{}. Set apple_sdk_path or ".format(rctx.name) +
+            "apple_sdk_urls to a packaged SDK archive, or set local_xcode = True " +
+            "to read the SDKs from an Xcode install (macOS hosts only).",
+        )
+
 def _apple_cross_toolchain_impl(rctx):
     # Force all label->path restarts before any expensive work below.
     _prefetch_rule_inputs(rctx)
@@ -168,7 +309,6 @@ def _apple_cross_toolchain_impl(rctx):
     build_tpl = rctx.path(Label("@rules_applecross//toolchain:BUILD.template.bzl"))
     wrapped_clang_src = rctx.path(Label("@rules_applecross//toolchain:wrapped_clang.cc"))
 
-    repo_path = str(rctx.path(""))
     relative_path_prefix = "external/{}/".format(rctx.name)
     toolchain_path_prefix = relative_path_prefix
     developer_dir = "Xcode.app/Contents/Developer"
@@ -184,22 +324,7 @@ def _apple_cross_toolchain_impl(rctx):
     rctx.symlink(libtool_cc, "libtool.cc")
     rctx.symlink(wrapped_clang_src, "wrapped_clang.cc")
 
-    # Extract Apple SDKs - either from local path/directory or URL
-    if rctx.attr.apple_sdk_path:
-        apple_sdk_local = rctx.workspace_root.get_child(rctx.attr.apple_sdk_path)
-        if rctx.execute(["test", "-d", str(apple_sdk_local)]).return_code == 0:
-            # Pre-extracted directory — hardlink copy (fast, no re-extraction,
-            # and tools like xcrun resolve paths correctly unlike symlinks).
-            rctx.execute(["bash", "-c", "cp -al '" + str(apple_sdk_local) + "/.' ."])
-        else:
-            # Tarball
-            rctx.extract(
-                archive = apple_sdk_local,
-                stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
-                type = rctx.attr.apple_sdk_archive_type or "",
-            )
-    elif rctx.attr.apple_sdk_urls:
-        _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
+    _materialize_apple_sdks(rctx)
 
     _normalize_sdk_modulemaps(rctx)
 
@@ -254,60 +379,15 @@ def _apple_cross_toolchain_impl(rctx):
     # Ensure the clang resource directory matches the actual clang version.
     _ensure_clang_resource_libs(rctx, xcode_toolchain_dir + "lib/clang/", xcode_toolchain_bindir)
 
-    # Populate cxx_builtin_include_directories with the absolute repo path so
-    # that Bazel's include scanner matches resolved absolute include paths from
-    # the compiler (clang resource dir, SDK headers, framework headers, etc.).
-    substitutions["%{cxx_builtin_include_directories}"] = repo_path
-
-    # Detect SDK directory paths for the rule-based toolchain.
-    # Computes full sdk_path, sdk_fw (framework dir), and plat_fw (platform
-    # developer framework dir) for each Apple SDK platform.
-    _developer_dir_path = "Xcode.app/Contents/Developer"
-    _sdk_names = [
-        "iPhoneOS",
-        "iPhoneSimulator",
-        "MacOSX",
-        "AppleTVOS",
-        "AppleTVSimulator",
-        "XROS",
-        "XRSimulator",
-        "WatchOS",
-        "WatchSimulator",
-    ]
-    for _sdk_name in _sdk_names:
-        _sdk_glob = _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/SDKs/" + _sdk_name + "*.sdk"
-        result = rctx.execute(["bash", "-c", "ls -d " + _sdk_glob + " 2>/dev/null | head -1"])
-        if result.return_code == 0 and result.stdout.strip():
-            _sdk_rel = result.stdout.strip()
-        else:
-            _sdk_rel = _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/SDKs/" + _sdk_name + ".sdk"
-
-        _lower = _sdk_name.lower()
-        substitutions["%{sdk_path_" + _lower + "}"] = toolchain_path_prefix + _sdk_rel
-        substitutions["%{sdk_fw_" + _lower + "}"] = toolchain_path_prefix + _sdk_rel + "/System/Library/Frameworks"
-        substitutions["%{plat_fw_" + _lower + "}"] = toolchain_path_prefix + _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/Library/Frameworks"
-        substitutions["%{plat_lib_" + _lower + "}"] = toolchain_path_prefix + _developer_dir_path + "/Platforms/" + _sdk_name + ".platform/Developer/usr/lib"
-
-    # Detect Xcode version and SDK version for environment variables.
-    _xcode_version_plist = "Xcode.app/Contents/version.plist"
-    result = rctx.execute([
-        "bash",
-        "-c",
-        xcode_toolchain_bindir + "PlistBuddy -c 'Print CFBundleShortVersionString' " + _xcode_version_plist + " 2>/dev/null || echo '16.0'",
-    ])
-    substitutions["%{xcode_version}"] = result.stdout.strip() if result.return_code == 0 else "16.0"
-
-    # Detect SDK version from SDKSettings.json (more reliable than directory name).
-    _sdk_settings = _developer_dir_path + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json"
-    result = rctx.execute([
-        _python3(rctx),
-        str(_toolchain_path(rctx, "repo_tools/read_sdk_settings_version.py")),
-        _sdk_settings,
-    ])
-    _sdk_version = result.stdout.strip()
-    if not _sdk_version:
-        fail("Failed to detect SDK version from {}: {}".format(_sdk_settings, result.stderr.strip()))
-    substitutions["%{sdk_version_override}"] = _sdk_version
+    # Describe the Xcode that produced this tree, so the generated xcode_config
+    # reports the versions the SDKs actually have rather than a pinned guess.
+    _xcode_version, _sdk_versions = _read_xcode_versions(rctx)
+    substitutions["%{xcode_version}"] = _xcode_version
+    for _os_name, _sdk_name in _SDK_PLATFORM_FOR_OS.items():
+        _sdk_version = _sdk_versions.get(_sdk_name)
+        if not _sdk_version:
+            fail("The Apple SDK tree is missing the {} SDK".format(_sdk_name))
+        substitutions["%{" + _os_name + "_sdk_version}"] = _sdk_version
 
     rctx.template("BUILD", build_tpl, substitutions)
 
@@ -396,6 +476,23 @@ apple_cross_toolchain = repository_rule(
         "apple_sdk_path": attr.string(
             doc = "Workspace-relative path to a local Apple SDK tarball or pre-extracted directory.",
         ),
+        "local_xcode": attr.bool(
+            default = False,
+            doc = """\
+Read the Apple SDKs from the Xcode installed on this host instead of from
+apple_sdk_path or apple_sdk_urls. The tree is assembled out of symlinks into
+that install, so it costs seconds and tens of megabytes rather than a full copy.
+
+The Xcode is the one DEVELOPER_DIR names, falling back to `xcode-select -p`.
+Only macOS has an Xcode to read, so every other host ignores this and uses the
+archive source instead; that is what lets one MODULE.bazel serve both a Linux CI
+host and a macOS developer host without editing a checked-in file.
+
+Set the repository environment variable RULES_APPLECROSS_LOCAL_XCODE to "0" to
+force the archive source on a macOS host, or to "1" to make a missing Xcode a
+hard error rather than a silent fallback.
+""",
+        ),
         "apple_sdk_urls": attr.string_list(),
         "apple_sdk_sha256": attr.string(
             mandatory = False,
@@ -412,6 +509,13 @@ apple_cross_toolchain = repository_rule(
             mandatory = True,
         ),
     },
-    environ = ["HOME", "PATH"],
+    # Reads the host's Xcode, so `bazel fetch --configure --force` refetches it.
+    configure = True,
+    environ = [
+        "DEVELOPER_DIR",
+        "HOME",
+        "PATH",
+        "RULES_APPLECROSS_LOCAL_XCODE",
+    ],
     implementation = _apple_cross_toolchain_impl,
 )

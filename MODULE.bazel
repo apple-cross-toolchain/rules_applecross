@@ -79,12 +79,15 @@ use_repo(
 )
 
 applecross_swift = use_extension("@build_bazel_rules_swift//swift:extensions.bzl", "swift")
+# Must match the Swift that built the Apple SDKs, which is the Swift of the
+# Xcode one release behind the SDKs' own: Xcode 26.6 ships the 26.5 SDKs, and
+# those were built by Swift 6.3.2.
 applecross_swift.toolchain(
     name = "applecross_swift",
     platform_sha256 = {
-        "ubuntu24.04": "4022cb64faf7e2681c19f9b62a22fb7d9055db6194d9e4a4bef9107b6ce10946",
+        "ubuntu24.04": "827b2e935b52425068729d277148f286b37886231299d71f9136bcffd7084339",
     },
-    swift_version = "6.2.1",
+    swift_version = "6.3.2",
 )
 use_repo(
     applecross_swift,
@@ -99,6 +102,8 @@ apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     apple_sdk_archive_type = "tar.zst",
     apple_sdk_path = "apple-sdks.tar.zst",
+    # macOS hosts read their own Xcode; other hosts need the archive above.
+    local_xcode = True,
     swift_tools = "@applecross_swift_ubuntu24.04//:tools",
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")

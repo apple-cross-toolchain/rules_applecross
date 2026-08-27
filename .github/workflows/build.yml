@@ -6,6 +6,11 @@ on:
     branches:
       - main
 
+env:
+  # Pinned rather than left to the runner default because MODULE.bazel pins the
+  # Swift toolchain that has to match the Swift these SDKs were built with.
+  XCODE_DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
 jobs:
   package_sdks:
     runs-on: macos-26
@@ -15,7 +20,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Package Apple SDKs
         env:
-          DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+          DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
         run: tools/package-sdks.sh
       - uses: actions/upload-artifact@v7
         with:
@@ -145,7 +150,7 @@ jobs:
       matrix:
         os:
           - ubuntu-24.04
-          - macos-latest
+          - macos-26
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -160,6 +165,8 @@ jobs:
           skip-decompress: true
       - name: Extract Apple SDKs
         run: unzip -q apple-sdks-artifact/* -d . && rm -rf apple-sdks-artifact
+      # MODULE.bazel prefers a local Xcode wherever one exists, so the macOS leg
+      # has to ask for the archive to be testing anything the Linux leg is not.
       - name: Build examples and tests with remote execution
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -168,6 +175,37 @@ jobs:
           build
           --config=remote
           --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+          --repo_env=RULES_APPLECROSS_LOCAL_XCODE=0
+          --ios_multi_cpus=sim_arm64
+          --macos_cpus=arm64
+          --tvos_cpus=sim_arm64
+          --watchos_cpus=arm64
+          //examples/...
+  remote_build_local_xcode:
+    # The same remote build reading the runner's own Xcode instead of a
+    # packaged archive. It is a separate job rather than a third leg of
+    # remote_build because it needs no artifact, and `needs` would make it wait
+    # for package_sdks anyway.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      # Asking for the local Xcode explicitly turns a missing one into an error
+      # rather than a silent fall back to an archive this job never downloaded.
+      - name: Build examples and tests with remote execution
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: >-
+          bazel
+          build
+          --config=remote
+          --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+          --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
+          --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
           --ios_multi_cpus=sim_arm64
           --macos_cpus=arm64
           --tvos_cpus=sim_arm64

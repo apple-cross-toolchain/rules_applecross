@@ -1,5 +1,7 @@
 load("@apple_support//configs:platforms.bzl", "APPLE_PLATFORMS_CONSTRAINTS")
 load("@apple_support//toolchain:dynamic_toolchain_info.bzl", "dynamic_toolchain_info")
+load("@apple_support//xcode:xcode_config.bzl", "xcode_config")
+load("@apple_support//xcode:xcode_version.bzl", "xcode_version")
 load("@bazel_features//:features.bzl", "bazel_features")
 load("@rules_applecross//toolchain:builtin_include_directory.bzl", "builtin_include_directory")
 load("@rules_applecross//toolchain:exec_tool.bzl", "exec_tool")
@@ -13,6 +15,26 @@ load("@rules_cc//cc/toolchains:toolchain.bzl", rule_based_cc_toolchain = "cc_too
 package(default_visibility = ["//visibility:public"])
 
 _APPLE_ARCHS = APPLE_PLATFORMS_CONSTRAINTS.keys()
+
+# Describes the Xcode that produced this SDK tree. Reported rather than pinned,
+# so any Xcode release works without editing a checked-in file. Consumers select
+# it with --xcode_version_config=@apple_cross_toolchain//:host_xcodes.
+xcode_version(
+    name = "sdk_xcode_version",
+    aliases = ["%{xcode_version}"],
+    default_ios_sdk_version = "%{ios_sdk_version}",
+    default_macos_sdk_version = "%{macos_sdk_version}",
+    default_tvos_sdk_version = "%{tvos_sdk_version}",
+    default_visionos_sdk_version = "%{visionos_sdk_version}",
+    default_watchos_sdk_version = "%{watchos_sdk_version}",
+    version = "%{xcode_version}",
+)
+
+xcode_config(
+    name = "host_xcodes",
+    default = ":sdk_xcode_version",
+    versions = [":sdk_xcode_version"],
+)
 
 cc_binary(
     name = "_libtool",
@@ -231,7 +253,8 @@ filegroup(
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/CoreServices/SystemVersion.plist",
-            _XCODE_DEVELOPER_DIR + "/version.plist",
+            # environment_plist reads this as "$DEVELOPER_DIR/../version.plist".
+            "Xcode.app/Contents/version.plist",
         ],
         allow_empty = True,
     ),
