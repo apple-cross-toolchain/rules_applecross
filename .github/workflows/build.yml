@@ -225,6 +225,56 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
+  remote_compile:
+    # A smoke test of the split build: compiling on the executors, everything
+    # rules_apple produces on the runner's own Xcode. watchOS and visionOS are
+    # left out because a real actool needs those simulator runtimes installed
+    # and the runner image ships only iOS and tvOS. HelloWorldArchive is tagged
+    # manual and named explicitly, since xcarchive shells out to
+    # /usr/bin/codesign and so cannot be built by the all-remote job at all.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build examples with remote compilation
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
+        run: >-
+          bazel
+          build
+          --config=remote_compile
+          --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+          --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
+          --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
+          --ios_multi_cpus=sim_arm64
+          --macos_cpus=arm64
+          --tvos_cpus=sim_arm64
+          --
+          //examples/...
+          //examples/ios/HelloWorldObjC:HelloWorldArchive
+          -//examples/watchos/...
+          -//examples/visionos/...
+      # Requiring the product toolchain on the XCFramework import rules makes
+      # any consumer of them fail analysis. Nothing else here imports one.
+      - name: Check XCFramework imports still analyze
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
+        run: >-
+          bazel
+          build
+          --nobuild
+          --config=remote_compile
+          --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+          --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
+          --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
+          --ios_multi_cpus=sim_arm64
+          //tests/xcframework_import:Probe
   delete_sdks:
     # The SDK tarball is only needed while the jobs that consume it run, so
     # drop it instead of leaving it in the artifact store until its retention

@@ -526,6 +526,11 @@ cc_args(
     env = {
         "DEVELOPER_DIR": "%{toolchain_path_prefix}Xcode.app/Contents/Developer",
         "LD_LIBRARY_PATH": "%{toolchain_path_prefix}Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
+        # Kept here rather than in a global --action_env so that a build which
+        # also runs actions on a local Xcode gives those the real one. Must stay
+        # identical to the value .bazelrc passes elsewhere, or these actions stop
+        # sharing the remote cache with all-remote builds.
+        "PATH": "%{toolchain_path_prefix}Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin",
     },
 )
 

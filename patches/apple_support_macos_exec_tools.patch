@@ -1,0 +1,14 @@
+--- a/crosstool/universal_exec_tool.bzl	2026-08-27 22:48:54
++++ b/crosstool/universal_exec_tool.bzl	2026-08-27 22:48:54
+@@ -19,6 +19,11 @@
+             mandatory = True,
+         ),
+     },
++    # These tools are produced by shelling out to `xcrun clang`, so they can
++    # only be built on macOS. Without this, an execution platform list that puts
++    # a Linux executor first configures the wrapped apple_genrule for Linux and
++    # it fails for want of an Apple platform constraint.
++    exec_compatible_with = ["@platforms//os:macos"],
+     implementation = _force_exec_impl,
+ )
+ 
