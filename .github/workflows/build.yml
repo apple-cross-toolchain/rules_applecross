@@ -18,7 +18,21 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      - name: Read Xcode identity
+        id: xcode
+        env:
+          DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
+        run: |
+          identity=$(xcodebuild -version)
+          echo "identity=${identity//$'\n'/-}" >> "$GITHUB_OUTPUT"
+      - name: Cache packaged Apple SDKs
+        id: apple-sdks-cache
+        uses: actions/cache@v6
+        with:
+          path: apple-sdks.tar.zst
+          key: apple-sdks-${{ steps.xcode.outputs.identity }}-${{ hashFiles('tools/package-sdks.sh') }}
       - name: Package Apple SDKs
+        if: steps.apple-sdks-cache.outputs.cache-hit != 'true'
         env:
           DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
         run: tools/package-sdks.sh
