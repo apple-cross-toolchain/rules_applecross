@@ -2,9 +2,30 @@ load(
     "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_runner.bzl",
     "ios_xctestrun_runner",
 )
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//testing:empty_toolchain.bzl", "empty_toolchain")
 
 package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "ios_vm_extension.bzl",
+    "ios_vm_repositories.bzl",
+    "ios_vm_runtime.bzl",
+    "ios_vm_test_runner.bzl",
+    "ios_vm_test_runner.template.sh",
+    "ios_vm_runner.py",
+    "ios_vm_runner_test.py",
+    "ios_vm_runner_test.sh",
+])
+
+sh_test(
+    name = "ios_vm_runner_test",
+    srcs = ["ios_vm_runner_test.sh"],
+    data = [
+        "ios_vm_runner.py",
+        "ios_vm_runner_test.py",
+    ],
+)
 
 # Test toolchain that allows iOS tests to execute on the Linux host.
 # The default test toolchain requires the execution platform to match

@@ -54,3 +54,17 @@ toolchain(
     toolchain = ":apple_bundling_marker",
     toolchain_type = ":apple_bundling_toolchain_type",
 )
+
+# Lets a locally executing VM-backed test action resolve the Apple bundling
+# marker on an ARM64 Linux host. Product/bundle actions still require the
+# Linux x86_64 C++ toolchain and therefore continue to resolve remotely.
+toolchain(
+    name = "apple_bundling_on_linux_arm64",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+    target_settings = [":apple_bundling_default"],
+    toolchain = ":apple_bundling_marker",
+    toolchain_type = ":apple_bundling_toolchain_type",
+)

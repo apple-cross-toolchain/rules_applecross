@@ -1,0 +1,88 @@
+module(
+    name = "ios_vm_consumer",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "rules_applecross", version = "0.0.3")
+local_path_override(
+    module_name = "rules_applecross",
+    path = "../../..",
+)
+
+bazel_dep(name = "rules_apple", version = "4.5.3", repo_name = "build_bazel_rules_apple")
+bazel_dep(name = "rules_swift", version = "4.0.0-rc4", repo_name = "build_bazel_rules_swift")
+bazel_dep(name = "rules_python", version = "1.7.0")
+
+# Overrides in dependency modules are ignored, so the consumer must repeat them.
+bazel_dep(name = "apple_support", version = "2.8.0")
+single_version_override(
+    module_name = "apple_support",
+    patch_strip = 1,
+    patches = ["//patches:apple_support_macos_exec_tools.patch"],
+    version = "2.8.0",
+)
+
+git_override(
+    module_name = "rules_apple",
+    commit = "74a3c3a2eb3d9c6432a32c158fc11e0cfaa4f881",
+    patch_strip = 1,
+    patches = [
+        "//patches:rules_apple_execution_platform.patch",
+        "//patches:rules_apple_bundletool_path.patch",
+        "//patches:rules_apple_no_absolute_tool_paths.patch",
+        "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
+        "//patches:rules_apple_python_stub_interpreter.patch",
+    ],
+    remote = "https://github.com/bazelbuild/rules_apple.git",
+)
+
+git_override(
+    module_name = "xctestrunner",
+    commit = "9548d93f29a2a93315d7a0458622682c0f76e6fe",
+    remote = "https://github.com/apple-cross-toolchain/xctestrunner-bash.git",
+)
+
+applecross_swift = use_extension("@build_bazel_rules_swift//swift:extensions.bzl", "swift")
+applecross_swift.toolchain(
+    name = "applecross_swift",
+    platform_sha256 = {
+        "ubuntu24.04": "827b2e935b52425068729d277148f286b37886231299d71f9136bcffd7084339",
+    },
+    swift_version = "6.3.2",
+)
+use_repo(applecross_swift, "applecross_swift_ubuntu24.04")
+
+apple_cross_toolchain = use_extension(
+    "@rules_applecross//toolchain:extensions.bzl",
+    "apple_cross_toolchain",
+)
+apple_cross_toolchain.configure(
+    name = "apple_cross_toolchain",
+    apple_sdk_archive_type = "tar.zst",
+    apple_sdk_path = "apple-sdks.tar.zst",
+    local_xcode = True,
+    swift_tools = "@applecross_swift_ubuntu24.04//:tools",
+)
+use_repo(apple_cross_toolchain, "apple_cross_toolchain")
+
+ios_vm = use_extension(
+    "@rules_applecross//testing:ios_vm_extension.bzl",
+    "ios_vm",
+)
+ios_vm.firmware(
+    name = "iphone12_ios26_5",
+    device_type = "iPhone 12",
+    os_version = "26.5",
+    path = "assets",
+)
+ios_vm.qemu(path = "assets/qemu-system-aarch64")
+use_repo(ios_vm, "ios_vm_runtime")
+
+register_toolchains("@apple_cross_toolchain//:all")
+
+register_toolchains("@rules_applecross//testing:ios_test_toolchain")
+
+register_toolchains(
+    "@rules_applecross//toolchain:apple_bundling_on_linux",
+    "@rules_applecross//toolchain:apple_bundling_on_linux_arm64",
+)

@@ -491,6 +491,12 @@ int main(int argc, char *argv[]) {
       ContainsArgument(processed_args, "XCTest")) {
     processed_args.push_back("-fuse-ld=lld");
     processed_args.push_back("-Wl,-undefined,dynamic_lookup");
+    // darwin-vm's restore environment loads XCTest bundles directly without
+    // the normal testmanagerd path. Use classic dyld rebase/bind opcodes,
+    // which are also what Apple's device linker emits for these bundles; the
+    // emulated SPTM/TXM path is not stable when validating an injected bundle
+    // that uses LC_DYLD_CHAINED_FIXUPS.
+    processed_args.push_back("-Wl,-no_fixup_chains");
   }
 #endif
 

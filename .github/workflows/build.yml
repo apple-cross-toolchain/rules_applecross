@@ -10,6 +10,13 @@ env:
   # Pinned rather than left to the runner default because MODULE.bazel pins the
   # Swift toolchain that has to match the Swift these SDKs were built with.
   XCODE_DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  DARWIN_VM_REPOSITORY: apple-cross-toolchain/darwin-vm
+  DARWIN_VM_REF: 6789fbe812d78e090bff28f07438f4ae4a04f911
+  QEMU_SPTM_REF: 006cc6b174e6177e64d06a6457e4125fd627649f
+  IOS_VM_DEVICE: iPhone13,2
+  IOS_VM_DDI_ID: 022-21793-062.dmg
+  IOS_VM_FIRMWARE_ID: iPhone13_2-iOS26.5-23F77
+  IOS_VM_IPSW_URL: https://updates.cdn-apple.com/2026SpringFCS/fullrestores/122-75946/B3FDFDC5-1A50-4B12-ACA7-CB28486FB561/iPhone13,2,iPhone13,3_26.5_23F77_Restore.ipsw
 
 jobs:
   package_sdks:
@@ -42,6 +49,109 @@ jobs:
           path: apple-sdks.tar.zst
           # The archive is already zstd-compressed.
           compression-level: 0
+          retention-days: 1
+  package_ios_vm_assets:
+    # Fork pull requests cannot access the BuildBuddy secret used downstream.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Restore iOS VM asset cache
+        id: ios-vm-assets-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ios-vm-assets.tar
+          key: ios-vm-assets-plain-v1-${{ runner.os }}-xcode-26.6-${{ env.IOS_VM_DDI_ID }}-${{ env.IOS_VM_FIRMWARE_ID }}-${{ env.DARWIN_VM_REF }}
+      - name: Clone pinned darwin-vm
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.DARWIN_VM_REPOSITORY }}
+          ref: ${{ env.DARWIN_VM_REF }}
+          path: .ci/darwin-vm
+          persist-credentials: false
+      - name: Validate darwin-vm XCTest image builder
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        run: |
+          bash -n .ci/darwin-vm/xctest/prepare_ramdisk.sh
+          python3 -m py_compile \
+            .ci/darwin-vm/xctest/test_slot.py \
+            .ci/darwin-vm/xctest/test_slot_test.py
+          python3 .ci/darwin-vm/xctest/test_slot_test.py
+          plutil -lint \
+            .ci/darwin-vm/xctest/xctest_host-Info.plist \
+            .ci/darwin-vm/xctest/test_bundle-Info.plist
+      - name: Install firmware extraction tools
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        run: brew install ipsw jq wget
+      - name: Check XCTest image prerequisites
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        env:
+          DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
+        run: |
+          sudo -n true
+          test -d "$DEVELOPER_DIR"
+          xcrun --sdk iphoneos --show-sdk-path
+          ddi_manifest=/Library/Developer/DeveloperDiskImages/iOS_DDI/Restore/BuildManifest.plist
+          test -f "$ddi_manifest"
+          ddi_name=$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :BuildIdentities:0:Manifest:PersonalizedDMG:Info:Path' \
+              "$ddi_manifest"
+          )
+          test "$ddi_name" = "$IOS_VM_DDI_ID"
+      - name: Extract non-SPTM iPhone firmware
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        working-directory: .ci/darwin-vm
+        env:
+          DEVNAME: ${{ env.IOS_VM_DEVICE }}
+          URL: ${{ env.IOS_VM_IPSW_URL }}
+          DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
+        run: ./get_files.sh
+      - name: Prepare XCTest ramdisk
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        working-directory: .ci/darwin-vm
+        env:
+          DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
+        run: >-
+          ./xctest/prepare_ramdisk.sh
+          --ramdisk firmware/ramdisk.dmg
+          --hashes firmware/all_hashes
+          --output-dir firmware/xctest
+      - name: Stage iOS VM artifact
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          source=.ci/darwin-vm/firmware
+          destination=ios-vm-assets
+          mkdir "$destination"
+          install -m 0644 "$source/bootkc" "$destination/bootkc"
+          install -m 0644 "$source/dtree" "$destination/dtree"
+          install -m 0644 "$source/xctest/ramdisk.dmg" "$destination/ramdisk.dmg"
+          install -m 0644 "$source/xctest/ramdisk.tc" "$destination/ramdisk.tc"
+          install -m 0644 "$source/xctest/slot.json" "$destination/slot.json"
+          test ! -e "$source/sptm"
+          test ! -e "$source/txm"
+      - name: Package iOS VM artifact
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        run: tar -C ios-vm-assets -cf ios-vm-assets.tar .
+      - name: Save iOS VM asset cache
+        if: steps.ios-vm-assets-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ios-vm-assets.tar
+          key: ${{ steps.ios-vm-assets-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-vm-assets
+          path: ios-vm-assets.tar
+          compression-level: 0
+          overwrite: true
           retention-days: 1
   build:
     needs: package_sdks
@@ -275,6 +385,189 @@ jobs:
           --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
           --ios_multi_cpus=sim_arm64
           //tests/xcframework_import:Probe
+  ios_vm_test:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs:
+      - package_sdks
+      - package_ios_vm_assets
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Clone pinned darwin-vm with QEMU
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.DARWIN_VM_REPOSITORY }}
+          ref: ${{ env.DARWIN_VM_REF }}
+          path: .ci/darwin-vm
+          submodules: true
+          persist-credentials: false
+      - name: Verify pinned darwin-vm checkout
+        run: |
+          test "$(git -C .ci/darwin-vm rev-parse HEAD)" = "$DARWIN_VM_REF"
+          test "$(git -C .ci/darwin-vm/qemu-sptm rev-parse HEAD)" = "$QEMU_SPTM_REF"
+      - name: Restore QEMU cache
+        id: qemu-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ci/darwin-vm/qemu-sptm/build/qemu-system-aarch64
+          key: qemu-sptm-v1-ubuntu-24.04-arm-${{ env.QEMU_SPTM_REF }}
+      - name: Install QEMU build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            device-tree-compiler \
+            git \
+            libfdt-dev \
+            libglib2.0-dev \
+            ninja-build \
+            pkg-config \
+            python3-venv \
+            zlib1g-dev
+      - name: Build darwin-vm QEMU
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        working-directory: .ci/darwin-vm/qemu-sptm
+        run: |
+          mkdir -p build
+          cd build
+          configured=false
+          for attempt in 1 2 3; do
+            if ../configure \
+              --target-list=aarch64-softmmu \
+              --without-default-features \
+              --enable-tcg \
+              --disable-docs; then
+              configured=true
+              break
+            fi
+            rm -rf \
+              ../subprojects/berkeley-softfloat-3 \
+              ../subprojects/berkeley-testfloat-3
+            echo "QEMU configure attempt $attempt failed; retrying" >&2
+          done
+          test "$configured" = true
+          ninja -j"$(nproc)" qemu-system-aarch64
+          strip --strip-unneeded qemu-system-aarch64
+      - name: Save QEMU cache
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .ci/darwin-vm/qemu-sptm/build/qemu-system-aarch64
+          key: ${{ steps.qemu-cache.outputs.cache-primary-key }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: apple-sdks
+          path: apple-sdks-artifact
+          # Work around actions/download-artifact#484 until its bundled
+          # unzip-stream dependency no longer uses the deprecated Buffer().
+          skip-decompress: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: ios-vm-assets
+          path: ios-vm-assets-artifact
+          skip-decompress: true
+      - name: Extract Apple SDKs and iOS VM assets
+        run: |
+          unzip -q apple-sdks-artifact/* -d examples/ios/VMUnitTest
+          mkdir .ci/ios-vm-assets-download
+          unzip -q ios-vm-assets-artifact/* -d .ci/ios-vm-assets-download
+          asset_archive=$(find .ci/ios-vm-assets-download -type f -name ios-vm-assets.tar -print -quit)
+          test -n "$asset_archive"
+          tar -xf "$asset_archive" -C examples/ios/VMUnitTest/assets
+          install -m 0755 \
+            .ci/darwin-vm/qemu-sptm/build/qemu-system-aarch64 \
+            examples/ios/VMUnitTest/assets/qemu-system-aarch64
+          rm -rf .ci/darwin-vm
+      - name: Verify iOS VM assets
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = aarch64
+          test "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -ge $((12 * 1024 * 1024))
+          test "$(df -Pk . | awk 'END {print $4}')" -ge $((6 * 1024 * 1024))
+          python3 -c 'import sys; assert sys.version_info >= (3, 10)'
+
+          root=examples/ios/VMUnitTest/assets
+          for file in \
+            qemu-system-aarch64 \
+            bootkc \
+            dtree \
+            ramdisk.dmg \
+            ramdisk.tc \
+            slot.json; do
+            test -s "$root/$file"
+          done
+          ldd_output=$(ldd "$root/qemu-system-aarch64")
+          ! grep -Fq 'not found' <<< "$ldd_output"
+          machine_output=$("$root/qemu-system-aarch64" -machine help)
+          grep -Eq '^darwin[[:space:]]' <<< "$machine_output"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("examples/ios/VMUnitTest/assets")
+          manifest = json.loads((root / "slot.json").read_text())
+          assert manifest["version"] == 2
+          assert manifest["architecture"] == "arm64"
+          expected = {
+              "bootkc": "bootkc",
+              "device_tree": "dtree",
+              "ramdisk": "ramdisk.dmg",
+              "trust_cache": "ramdisk.tc",
+          }
+          assert set(manifest["input_sha256"]) == set(expected)
+          for key, filename in expected.items():
+              digest = hashlib.sha256((root / filename).read_bytes()).hexdigest()
+              assert digest == manifest["input_sha256"][key], key
+          PY
+      - name: Run iOS unit test in darwin-vm
+        working-directory: examples/ios/VMUnitTest
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          bazel test \
+            --config=remote \
+            --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY" \
+            --repo_env=RULES_APPLECROSS_LOCAL_XCODE=0 \
+            --apple_platform_type=ios \
+            --ios_multi_cpus=arm64 \
+            --nocache_test_results \
+            --test_output=streamed \
+            --test_timeout=1200 \
+            //:UnitTests
+  delete_ios_vm_assets:
+    if: >-
+      always() &&
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    needs:
+      - ios_vm_test
+      - package_ios_vm_assets
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Delete iOS VM artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=ios-vm-assets" \
+              --jq '.artifacts[].id'
+          )
+          for id in $ids; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          done
   delete_sdks:
     # The SDK tarball is only needed while the jobs that consume it run, so
     # drop it instead of leaving it in the artifact store until its retention
@@ -287,6 +580,7 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository)
     needs:
       - build
+      - ios_vm_test
       - remote_build
     runs-on: ubuntu-24.04
     permissions:

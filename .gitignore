@@ -2,5 +2,8 @@
 /*.pem
 /MODULE.bazel.lock
 /apple-sdks*.tar.*
+/ios-vm-assets/
+/ios-vm-assets.tar
+/.ci/
 /Xcode.app
 __pycache__/
