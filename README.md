@@ -145,6 +145,36 @@ framework. Set `swift_version` on `applecross_swift.toolchain()` accordingly.
     bazel build --config=remote @rules_applecross//examples/ios/HelloWorldSwiftUI:HelloWorld
     ```
 
+## Splitting a build between Linux and macOS
+
+Compiling can run on the Linux executors while everything `rules_apple`
+produces — linking, `actool` and `ibtool`, plists, bundling, signing — runs on
+a Mac with a real Xcode. That allows you to build a complete app without
+relying on ported tools that may not have functional parity.
+
+Register the macOS instance to keep bundling actions on a Mac:
+
+```starlark
+register_toolchains("@rules_applecross//toolchain:apple_bundling_on_macos")
+```
+
+Then list the Linux platform first, so compiling lands there and everything
+else falls through to the Mac:
+
+```
+build --extra_execution_platforms=@rules_applecross//platforms:linux_x86_64,@rules_applecross//platforms:macos_arm64_local
+build --remote_executor=grpcs://<your-executor>
+```
+
+### Keeping bundling on Linux
+
+`@rules_applecross//toolchain:apple_bundling_on_linux` registers the same type
+for the Linux platform, which is what an all-remote build uses. It is
+incomplete: the ported `ibtool` writes an empty `.storyboardc` and `codesign`
+is a no-op stub, so bundles come out unsigned and missing their storyboards,
+and `-c opt` needs a `zip` the executor image does not have. Register it only
+if you are building everything remotely and can live with that.
+
 ## Developing rules_applecross
 
 This repository's own `MODULE.bazel` sets `local_xcode = True`, so on macOS the

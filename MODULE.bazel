@@ -7,6 +7,8 @@ bazel_dep(name = "bazel_features", version = "1.50.0")
 bazel_dep(name = "apple_support", version = "2.8.0")
 single_version_override(
     module_name = "apple_support",
+    patch_strip = 1,
+    patches = ["//patches:apple_support_macos_exec_tools.patch"],
     version = "2.8.0",
 )
 
@@ -20,7 +22,7 @@ git_override(
     commit = "74a3c3a2eb3d9c6432a32c158fc11e0cfaa4f881",
     patch_strip = 1,
     patches = [
-        "//patches:rules_apple_no_exec_platform_constraint.patch",
+        "//patches:rules_apple_execution_platform.patch",
         "//patches:rules_apple_bundletool_path.patch",
         "//patches:rules_apple_no_absolute_tool_paths.patch",
         "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
@@ -60,6 +62,17 @@ register_toolchains(
     dev_dependency = True,
 )
 
+# Marks the execution platforms allowed to build Apple products (link, bundle,
+# resources, signing, tests). Registered as a dev dependency so that a module
+# depending on this one chooses for itself which of the two it wants; see the
+# README. Here both are registered and the Linux one withdraws itself under
+# --//toolchain:apple_bundling=macos.
+register_toolchains(
+    "//toolchain:apple_bundling_on_macos",
+    "//toolchain:apple_bundling_on_linux",
+    dev_dependency = True,
+)
+
 register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64")
 
 LLVM_PREBUILT_VERSION = "22.1.7"
@@ -79,6 +92,7 @@ use_repo(
 )
 
 applecross_swift = use_extension("@build_bazel_rules_swift//swift:extensions.bzl", "swift")
+
 # Must match the Swift that built the Apple SDKs, which is the Swift of the
 # Xcode one release behind the SDKs' own: Xcode 26.6 ships the 26.5 SDKs, and
 # those were built by Swift 6.3.2.

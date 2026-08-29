@@ -142,7 +142,7 @@ def _make_resource_directory_configurator(developer_dir):
 
     return _resource_directory_configurator
 
-def _make_tool_configs(additional_tools, swift_tools, toolchain_path):
+def _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path):
     """Creates tool configurations for Swift actions."""
 
     # Use rules_swift's hermetic Swift distribution as explicit action tools,
@@ -151,8 +151,15 @@ def _make_tool_configs(additional_tools, swift_tools, toolchain_path):
     # Supplying it explicitly prevents the absolute /usr/bin/xcrun fallback.
     # LD_LIBRARY_PATH lets the Swift driver find host libraries staged in the
     # toolchain (libncurses, libsqlite3) on minimal executor images.
+    # DEVELOPER_DIR and PATH point at the staged tree here rather than coming
+    # from a global --action_env, so that a build which also runs actions on a
+    # local Xcode gives those the real one. The values must stay identical to
+    # the ones .bazelrc passes elsewhere, or these actions stop sharing the
+    # remote cache with builds that do everything on the executors.
     env = {
+        "DEVELOPER_DIR": developer_dir,
         "LD_LIBRARY_PATH": toolchain_path + "/usr/lib",
+        "PATH": toolchain_path + "/usr/bin:/bin:/usr/bin:/usr/local/bin",
         "TOOLCHAIN_PATH": toolchain_path,
     }
     persistent_tool_config = ToolConfigInfo(
@@ -185,10 +192,17 @@ def _make_tool_configs(additional_tools, swift_tools, toolchain_path):
         ),
     }
 
-def _swift_linkopts_cc_info(swift_platform_name, sdk_platform, developer_dir, toolchain_label):
+def _swift_linkopts_cc_info(swift_platform_name, sdk_platform, toolchain_label):
     """Returns a CcInfo with linker flags for Swift standard library linking."""
-    swift_lib_dir = developer_dir + "/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" + swift_platform_name
-    platform_developer_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer"
+
+    # Both wrapped_clang ports expand this from their own DEVELOPER_DIR, so the
+    # paths follow whichever Xcode is linking: the staged tree on an executor,
+    # the installed one when the link runs on a Mac. Naming the staged tree
+    # outright would point a local link at Apple frameworks that were stubbed
+    # for cross compilation, and it would find, for instance, an XCTest
+    # exporting a single symbol.
+    swift_lib_dir = "__BAZEL_XCODE_DEVELOPER_DIR__/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/" + swift_platform_name
+    platform_developer_dir = "__BAZEL_XCODE_DEVELOPER_DIR__/Platforms/" + sdk_platform + ".platform/Developer"
     platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
     platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
 
@@ -211,9 +225,9 @@ def _swift_linkopts_cc_info(swift_platform_name, sdk_platform, developer_dir, to
         ),
     )
 
-def _test_linking_context(sdk_platform, developer_dir, toolchain_label):
+def _test_linking_context(sdk_platform, toolchain_label):
     """Returns a CcLinkingContext with linker flags for test binaries."""
-    platform_developer_dir = developer_dir + "/Platforms/" + sdk_platform + ".platform/Developer"
+    platform_developer_dir = "__BAZEL_XCODE_DEVELOPER_DIR__/Platforms/" + sdk_platform + ".platform/Developer"
     platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
     platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
 
@@ -396,7 +410,7 @@ def _swift_toolchain_impl(ctx):
     # Collect toolchain files as additional tools for sandbox access.
     swift_tools = ctx.attr.swift_tools[SwiftToolsInfo]
     additional_tools = ctx.attr.toolchain_files.files.to_list() + list(swift_tools.additional_inputs)
-    tool_configs = _make_tool_configs(additional_tools, swift_tools, toolchain_path)
+    tool_configs = _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path)
 
     # Build Swift linker opts provider
     swift_platform_name = info.swift_platform_name
@@ -406,14 +420,12 @@ def _swift_toolchain_impl(ctx):
     swift_linkopts = _swift_linkopts_cc_info(
         swift_platform_name = swift_platform_name,
         sdk_platform = sdk_platform,
-        developer_dir = developer_dir,
         toolchain_label = ctx.label,
     )
 
     # Build test linking context
     test_linking_ctx = _test_linking_context(
         sdk_platform = sdk_platform,
-        developer_dir = developer_dir,
         toolchain_label = ctx.label,
     )
 

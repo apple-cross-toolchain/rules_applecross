@@ -1,6 +1,7 @@
 startup --host_jvm_args=-DBAZEL_TRACK_SOURCE_DIRECTORIES=1
 
 common --downloader_config=tools/downloader.cfg
+common --enable_platform_specific_config
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
 common --repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1
@@ -8,21 +9,48 @@ common --repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1
 build --use_top_level_targets_for_symlinks
 build --verbose_failures
 build --xcode_version_config=@apple_cross_toolchain//:host_xcodes
-build --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
-build --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
 build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
 
+# rules_apple's own actions (actool, plists, codesign) find the staged Apple
+# tools through these. The C++ and Swift toolchains carry the same values
+# themselves, so compile actions keep them under --config=remote_compile, where
+# these are deliberately absent and the Apple tools are the ones in a local
+# Xcode. Keep the values in sync with toolchain/BUILD.template.bzl and
+# toolchain/swift_toolchain.bzl.
+build:linux --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+build:linux --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
+build:remote --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+build:remote --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
+
+# Shared by the two remote modes below. Never select this config directly.
+build:remote_base --jobs=100
+build:remote_base --@rules_python//python/config_settings:bootstrap_impl=script
+build:remote_base --strategy=SwiftCompile=remote,sandboxed,worker,local
+build:remote_base --bes_results_url=https://app.buildbuddy.io/invocation/
+build:remote_base --bes_backend=grpcs://app.buildbuddy.io
+common:remote_base --remote_cache_compression
+common:remote_base --remote_executor=grpcs://app.buildbuddy.io
+
+# Everything on the executors, including linking, bundling and signing.
+common:remote --config=remote_base
 build:remote --extra_execution_platforms=//platforms:linux_x86_64
 # The toolchain's codesign is a no-op stub, so bundle signing never produces
 # a signature anyway. Disabling it turns ProcessAndSign into a plain copy,
 # avoiding tools (zip, python3) that the remote executor image lacks.
 build:remote --features=disable_legacy_signing
 build:remote --host_features=fully_static_link
-build:remote --jobs=100
-build:remote --@rules_python//python/config_settings:bootstrap_impl=script
-build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
-build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-build:remote --bes_backend=grpcs://app.buildbuddy.io
+
+# Compiling and archiving on the executors, everything downstream on this Mac
+# with its real Xcode. Compile actions are identical to --config=remote, so both
+# configs share the remote cache.
+common:remote_compile --config=remote_base
+build:remote_compile --extra_execution_platforms=//platforms:linux_x86_64,//platforms:macos_arm64_local
+build:remote_compile --//toolchain:apple_bundling=macos
+# Linking Apple products locally needs a macOS-executable C++ toolchain, which
+# the global BAZEL_NO_APPLE_CPP_TOOLCHAIN above suppresses.
+common:remote_compile --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=0
+# A remote outage must fail the build rather than compile on this Mac. Bazel
+# already defaults to this; stated because the split depends on it.
+build:remote_compile --noremote_local_fallback
+
 common --remote_timeout=10m
-common:remote --remote_cache_compression
-common:remote --remote_executor=grpcs://app.buildbuddy.io
