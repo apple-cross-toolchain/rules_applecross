@@ -1,0 +1,8 @@
+exports_files([
+    "apple_support_macos_exec_tools.patch",
+    "rules_apple_bundletool_path.patch",
+    "rules_apple_codesign_inputs_sdk_tools.patch",
+    "rules_apple_execution_platform.patch",
+    "rules_apple_no_absolute_tool_paths.patch",
+    "rules_apple_python_stub_interpreter.patch",
+])

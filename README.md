@@ -46,7 +46,8 @@ macOS](#building-on-macos) for what a macOS host does differently.
 
     ```
     build --xcode_version_config=@apple_cross_toolchain//:host_xcodes
-    build --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+    build --action_env=DEVELOPER_DIR=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+    build --action_env=PATH=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
     build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
     ```
 
@@ -106,6 +107,192 @@ Swift of the Xcode *one release behind* the SDKs' own: Xcode 26.6 ships the 26.5
 SDKs, and those were built by Swift 6.3.2. A mismatch shows up as `this SDK is
 not supported by the compiler` when compiling any Swift that imports a system
 framework. Set `swift_version` on `applecross_swift.toolchain()` accordingly.
+
+## Running iOS unit tests on Linux
+
+`//testing:ios_vm_test_runner.bzl` provides an `AppleTestRunnerInfo` runner for
+unhosted iOS unit tests. It boots a prepared
+[`darwin-vm`](https://github.com/apple-cross-toolchain/darwin-vm) image under
+QEMU, patches the device-arm64 test executable into a reserved APFS slot, adds
+its ad-hoc signature to a per-test trust cache, and invokes XCTest in the guest.
+The test action is local-only by default, so firmware and Xcode runtime files
+are not uploaded to a remote executor or cache.
+
+Use a **non-SPTM** restore image. The tested combination is iPhone 12
+(`iPhone13,2`), iOS 26.5, Xcode 26.6, arm64, and an arm64 Linux host. Newer
+SPTM/TXM images can hit `nested panic count exceeds limit` and currently kill
+Linux-built XCTest bundles even when a retry boots successfully.
+
+Prepare the XCTest-enabled ramdisk on a Mac using darwin-vm's
+`xctest/prepare_ramdisk.sh`. The script reserves a 4 MiB executable slot,
+installs the matching device XCTest runtime from Xcode's Restore DDI, fixes the
+restore image ownership, and emits a manifest that binds all firmware hashes:
+
+```sh
+DEVNAME=iPhone13,2 URL='<Apple iPhone 12 restore IPSW URL>' ./get_files.sh
+
+./xctest/prepare_ramdisk.sh \
+  --ramdisk firmware/ramdisk.dmg \
+  --hashes firmware/all_hashes \
+  --output-dir firmware/xctest
+```
+
+The runtime consists of five matching firmware files (`bootkc`, `dtree`,
+`ramdisk.dmg`, `ramdisk.tc`, and `slot.json`) plus a native Linux
+`qemu-system-aarch64` built from darwin-vm's `qemu-sptm` fork. Stock distro
+QEMU does not provide the `darwin` machine. The firmware and prepared ramdisk
+contain Apple IPSW and Xcode software; do not commit, redistribute, or upload
+them to a third-party remote execution service unless the applicable licenses
+permit it. This repository's CI deletes its one-run transfer artifact after
+the Linux consumer finishes.
+
+Consumers running the test on an arm64 Linux host while building products on
+x86_64 Linux must register the test toolchain and both Linux bundling markers
+in `MODULE.bazel`:
+
+```starlark
+register_toolchains("@rules_applecross//testing:ios_test_toolchain")
+register_toolchains("@rules_applecross//toolchain:apple_bundling_on_linux")
+register_toolchains("@rules_applecross//toolchain:apple_bundling_on_linux_arm64")
+```
+
+Use the `ios_vm` module extension to declare prepared firmware runtimes and a
+QEMU binary. For downloaded inputs, provide immutable URLs and SHA-256
+digests:
+
+```starlark
+ios_vm = use_extension(
+    "@rules_applecross//testing:ios_vm_extension.bzl",
+    "ios_vm",
+)
+ios_vm.firmware(
+    name = "iphone12_ios26_5",
+    device_type = "iPhone 12",
+    os_version = "26.5",
+    urls = ["https://example.invalid/ios-vm-iphone12-26.5.tar.zst"],
+    sha256 = "<firmware archive SHA-256>",
+    archive_type = "tar.zst",
+)
+ios_vm.qemu(
+    urls = ["https://example.invalid/qemu-sptm-linux-arm64.tar.xz"],
+    sha256 = "<QEMU archive SHA-256>",
+    archive_type = "tar.xz",
+)
+use_repo(ios_vm, "ios_vm_runtime")
+```
+
+Repeat `ios_vm.firmware` for every available runtime, giving each declaration
+a unique, stable Bazel target `name`. Names must start with a lowercase ASCII
+letter or digit; subsequent characters may also be `_`, `.`, or `-`, and
+`all` is reserved. The extension materializes these typed targets in
+`@ios_vm_runtime`. Firmware archives are fetched lazily, so selecting one
+runtime target does not download the others. The extension is the sole source
+of each runtime's `device_type` and `os_version`; include the OS build
+identifier in `os_version` when more than one build shares a marketing
+version.
+
+After extraction and any `strip_prefix`, the firmware archive must contain
+`bootkc`, `dtree`, `ramdisk.dmg`, `ramdisk.tc`, and `slot.json` at its root.
+It may additionally contain both `sptm` and `txm` for the experimental SPTM
+configuration. The QEMU archive must contain `qemu-system-aarch64` at its root
+by default; set `binary_path` when the executable has another relative path.
+It must match the Linux OS and architecture that will execute the local test;
+the current CI test host is Linux arm64.
+Set `archive_type` when it cannot be inferred from the URL. Both tags also
+accept `strip_prefix` for archives with a common top-level directory. Preserve
+the QEMU executable bit, and do not include Bazel repository files such as
+`BUILD.bazel` or `MODULE.bazel`; the extension generates those files.
+
+For assets already staged beside the consumer's `MODULE.bazel`, use paths
+relative to that module instead. The firmware `path` names the flat directory,
+while the QEMU `path` names the executable:
+
+```starlark
+ios_vm = use_extension(
+    "@rules_applecross//testing:ios_vm_extension.bzl",
+    "ios_vm",
+)
+ios_vm.firmware(
+    name = "iphone12_ios26_5",
+    device_type = "iPhone 12",
+    os_version = "26.5",
+    path = "assets",
+)
+ios_vm.qemu(path = "assets/qemu-system-aarch64")
+use_repo(ios_vm, "ios_vm_runtime")
+```
+
+There is deliberately no default firmware or QEMU download. In particular,
+`qemu-sptm` is GPLv2 software: anyone distributing a prebuilt QEMU archive
+must preserve its notices and provide the complete corresponding source under
+the GPL. Supply a release that meets those obligations or point at a local
+build. See the
+[`qemu-sptm` license](https://github.com/jprx/qemu-sptm/blob/006cc6b174e6177e64d06a6457e4125fd627649f/LICENSE).
+
+Define the test runner by selecting the materialized runtime target. The
+extension keeps the shared QEMU implementation private inside each runtime, so
+the runner needs only this one label:
+
+```starlark
+load("@rules_applecross//testing:ios_vm_test_runner.bzl", "ios_vm_test_runner")
+
+ios_vm_test_runner(
+    name = "ios_vm_runner",
+    runtime = "@ios_vm_runtime//:iphone12_ios26_5",
+)
+
+ios_unit_test(
+    name = "UnitTests",
+    runner = ":ios_vm_runner",
+    minimum_os_version = "16.0",
+    timeout = "long",
+    deps = [":TestsLib"],
+)
+```
+
+The runner gets its device type and OS version from the selected typed target,
+whose metadata comes from the extension declaration. Those runtime values are
+separate from the test target's
+`minimum_os_version`, which is the deployment target used when compiling the
+test bundle. A test built with `minimum_os_version = "16.0"` can therefore run
+in the selected iOS 26.5 VM.
+
+The VM emulates an iOS device, so select device arm64 rather than a simulator:
+
+```sh
+bazel test --config=remote \
+  --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY" \
+  --apple_platform_type=ios \
+  --ios_multi_cpus=arm64 \
+  //:UnitTests
+```
+
+On arm64 Linux, `--config=remote` supplies the x86_64 Linux execution platform
+needed by the current Apple build tools while the `no-remote` test action runs
+QEMU on the local host. An equivalent self-hosted x86_64 execution platform can
+be used instead.
+
+The initial runner supports one unhosted XCTest bundle executable and positive
+test filters. Hosted tests, UI tests, nested frameworks, bundle resources,
+coverage, arm64e payloads, and negative filters fail explicitly rather than
+silently producing incorrect results. It requires `python3` on the Linux test
+host (Python 3.10 or newer). Its JUnit XML currently represents the whole
+XCTest invocation as one synthetic testcase rather than one element per XCTest
+method. SPTM/TXM inputs and `boot_attempts > 1` remain available for
+experiments; only recognized SPTM/TXM panic signatures are retried.
+
+The license-controlled CI smoke test is a standalone consumer workspace under
+`examples/ios/VMUnitTest`. Once its ignored assets and `apple-sdks.tar.zst`
+have been staged as described in its README, run:
+
+```sh
+cd examples/ios/VMUnitTest
+bazel test --config=remote \
+  --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY" \
+  --apple_platform_type=ios \
+  --ios_multi_cpus=arm64 \
+  //:UnitTests
+```
 
 ## Remote Build Execution Setup (for BuildBuddy)
 

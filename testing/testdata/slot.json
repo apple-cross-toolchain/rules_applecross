@@ -1,0 +1,15 @@
+{
+  "architecture": "arm64",
+  "bundle_path": "/AppleInternal/DarwinVMTestRunner/Test.xctest",
+  "guest_path": "/AppleInternal/DarwinVMTestRunner/Test.xctest/Test",
+  "input_sha256": {
+    "bootkc": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "device_tree": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "ramdisk": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "trust_cache": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "offset": 0,
+  "placeholder_sha256": "e2f898eb0f7e1d64ac62d2b4029aba1b79c698226b6ca66bfe470125b93e0dd8",
+  "size": 4096,
+  "version": 2
+}
