@@ -492,6 +492,27 @@ int main(int argc, char *argv[]) {
     processed_args.push_back("-fuse-ld=lld");
     processed_args.push_back("-Wl,-undefined,dynamic_lookup");
   }
+
+  // Links go through the ported cctools ld64-609. The clang driver hands the
+  // linker an @response file only when it believes ld64 is 705 or newer;
+  // below that it falls back to -filelist, which covers object files only, so
+  // a large app link (tens of thousands of -force_load / -add_ast_path flags,
+  // several MB) exceeds Linux's argv limit ("posix_spawn failed: Argument list
+  // too long"). ld64-609 does implement @file (Options::expandResponseFiles),
+  // so claim the threshold version unless the caller pinned one.
+  if (!ContainsArgument(processed_args, "-c") &&
+      !ContainsArgument(processed_args, "-fuse-ld=lld")) {
+    bool has_linker_version = false;
+    for (const std::string &processed_arg : processed_args) {
+      if (StartsWith(processed_arg, "-mlinker-version=")) {
+        has_linker_version = true;
+        break;
+      }
+    }
+    if (!has_linker_version) {
+      processed_args.push_back("-mlinker-version=705");
+    }
+  }
 #endif
 
   // Handle APPLE_SUPPORT_MODULEMAP VFS overlay for layering check support.
