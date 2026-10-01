@@ -1,0 +1,25 @@
+startup --host_jvm_args=-DBAZEL_TRACK_SOURCE_DIRECTORIES=1
+
+common --enable_platform_specific_config
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
+common --repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1
+
+build --verbose_failures
+build --xcode_version_config=@apple_cross_toolchain//:host_xcodes
+build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
+
+build:linux --action_env=DEVELOPER_DIR=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+build:linux --action_env=PATH=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
+build:remote --action_env=DEVELOPER_DIR=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+build:remote --action_env=PATH=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
+
+common:remote --remote_executor=grpcs://app.buildbuddy.io
+common:remote --remote_cache_compression
+common:remote --remote_timeout=10m
+build:remote --jobs=100
+build:remote --@rules_python//python/config_settings:bootstrap_impl=script
+build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
+build:remote --extra_execution_platforms=@rules_applecross//platforms:linux_x86_64
+build:remote --features=disable_legacy_signing
+build:remote --host_features=fully_static_link
