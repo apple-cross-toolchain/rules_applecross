@@ -41,6 +41,7 @@ load(
 )
 load(
     "@build_bazel_rules_swift//swift/toolchains/config:compile_config.bzl",
+    "command_line_objc_copts",
     "compile_action_configs",
 )
 load(
@@ -429,7 +430,16 @@ def _swift_toolchain_impl(ctx):
 
     # Add all the standard rules_swift action configs.
     action_configs.extend(all_actions_action_configs())
-    action_configs.extend(compile_action_configs())
+    # As in rules_swift's Xcode toolchain: --objccopt and the compilation
+    # mode's ClangImporter flags (e.g. -DDEBUG=1), so imported headers see the
+    # same macros as when compiled as Objective-C.
+    action_configs.extend(compile_action_configs(
+        additional_objc_copts = command_line_objc_copts(
+            ctx.var["COMPILATION_MODE"],
+            ctx.fragments.cpp,
+            ctx.fragments.objc,
+        ),
+    ))
     action_configs.extend(modulewrap_action_configs())
     action_configs.extend(symbol_graph_action_configs())
     action_configs.extend(compile_module_interface_action_configs())
@@ -603,6 +613,7 @@ swift_toolchain = rule(
     fragments = [
         "apple",
         "cpp",
+        "objc",
         "swift",
     ],
     toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
