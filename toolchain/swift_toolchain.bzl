@@ -27,6 +27,10 @@ load(
     "SwiftToolchainInfo",
 )
 load(
+    "@build_bazel_rules_swift//swift/internal:features.bzl",
+    "features_for_build_modes",
+)
+load(
     "@build_bazel_rules_swift//swift/toolchains/config:action_config.bzl",
     "ActionConfigInfo",
     "add_arg",
@@ -432,7 +436,10 @@ def _swift_toolchain_impl(ctx):
     action_configs.extend(synthesize_interface_action_configs())
 
     # Requested features for Swift compilation
-    requested_features = list(ctx.features)
+    # Like rules_swift's Xcode toolchain: swift.dbg and friends, which carry
+    # -DDEBUG, -Onone and the debug info settings for the compilation mode.
+    requested_features = features_for_build_modes(ctx, cpp_fragment = ctx.fragments.cpp)
+    requested_features.extend(ctx.features)
     requested_features.extend([
         "swift.bundled_xctests",
         "swift.enable_testing",
@@ -595,6 +602,7 @@ swift_toolchain = rule(
     doc = "Represents a Swift compiler toolchain for cross-compiling Apple targets from Linux.",
     fragments = [
         "apple",
+        "cpp",
         "swift",
     ],
     toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
