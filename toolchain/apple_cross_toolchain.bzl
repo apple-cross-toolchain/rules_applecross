@@ -330,6 +330,7 @@ def _apple_cross_toolchain_impl(rctx):
 
     substitutions = {
         "%{swift_tools}": rctx.attr.swift_tools,
+        "%{swift_tools_macos}": rctx.attr.swift_tools_macos,
         "%{toolchain_path_prefix}": toolchain_path_prefix,
     }
 
@@ -521,6 +522,9 @@ hard error rather than a silent fallback.
         "swift_tools": attr.string(
             doc = "Label of a rules_swift swift_tools target used as the Linux-host Swift compiler payload.",
             mandatory = True,
+        ),
+        "swift_tools_macos": attr.string(
+            doc = "Label of a rules_swift swift_tools target from swift.org's macOS Swift, used by Swift toolchains for macOS execution platforms.",
         ),
     },
     # Reads the host's Xcode, so `bazel fetch --configure --force` refetches it.

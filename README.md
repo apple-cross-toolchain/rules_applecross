@@ -166,6 +166,13 @@ build --extra_execution_platforms=@rules_applecross//platforms:linux_x86_64,@rul
 build --remote_executor=grpcs://<your-executor>
 ```
 
+A Swift compile forced onto the Mac (say, a `swift_library` with
+`exec_compatible_with = ["@platforms//os:macos"]`) still uses swift.org's
+Swift, the macOS build of the same release, rather than Xcode's `swiftc`:
+Xcode's compiler refuses modules built by a different compiler, so it could
+not import the libraries compiled on Linux. Configure it with
+`swift_tools_macos` (see this repository's `MODULE.bazel`).
+
 ### Keeping bundling on Linux
 
 `@rules_applecross//toolchain:apple_bundling_on_linux` registers the same type
