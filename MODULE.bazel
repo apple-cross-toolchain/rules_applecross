@@ -67,7 +67,7 @@ register_toolchains(
     dev_dependency = True,
 )
 
-register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64")
+register_toolchains("@llvm//toolchain:linux_x86_64_to_linux_x86_64", dev_dependency = True)
 
 LLVM_PREBUILT_VERSION = "22.1.7"
 
@@ -115,4 +115,4 @@ apple_cross_toolchain.configure(
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")
 
-register_toolchains("@apple_cross_toolchain//:all")
+register_toolchains("@apple_cross_toolchain//:all", dev_dependency = True)
