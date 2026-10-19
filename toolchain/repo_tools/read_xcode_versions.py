@@ -4,6 +4,7 @@
 Emits one `key value` pair per line:
 
     xcode 26.6
+    build 17F42
     sdk iPhoneOS 26.5
     ...
 
@@ -58,8 +59,10 @@ def main() -> int:
 
     version_plist = os.path.join(xcode_app, "Contents", "version.plist")
     with open(version_plist, "rb") as f:
-        xcode_version = plistlib.load(f)["CFBundleShortVersionString"]
-    print("xcode", xcode_version)
+        version_info = plistlib.load(f)
+    print("xcode", version_info["CFBundleShortVersionString"])
+    if version_info.get("ProductBuildVersion"):
+        print("build", version_info["ProductBuildVersion"])
 
     developer_dir = os.path.join(xcode_app, "Contents", "Developer")
     for platform in PLATFORMS:
