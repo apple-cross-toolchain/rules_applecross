@@ -446,6 +446,8 @@ def _swift_toolchain_impl(ctx):
         cross_import_overlays = [],
         debug_outputs_provider = None,
         developer_dirs = [],
+        # Like rules_swift's Xcode toolchain, the runtime comes from the SDK.
+        dynamic_runtime_cc_info = None,
         entry_point_linkopts_provider = _entry_point_linkopts_provider,
         feature_allowlists = [],
         generated_header_module_implicit_deps_providers = struct(
@@ -460,7 +462,7 @@ def _swift_toolchain_impl(ctx):
         package_configurations = [],
         requested_features = requested_features,
         root_dir = toolchain_root,
-        runtime = depset(),
+        static_runtime_cc_info = None,
         swift_worker = ctx.attr._worker[DefaultInfo].files_to_run,
         system_modules = struct(
             cc_infos = [],
