@@ -521,13 +521,22 @@ _APPLE_SDK_PLATFORMS = {
     for arch, sdk_platform in _APPLE_SDK_PLATFORMS_BY_ARCH.items()
 ]
 
-# The SDK headers use Apple clang-only attributes (e.g. stack_protector_ignore in
-# os/signpost.h macros) that upstream LLVM warns about where the macro expands,
-# so -Werror builds would fail on Apple's code rather than their own.
+# Where Apple clang and upstream LLVM disagree, keep -Werror builds that pass
+# with Apple clang passing here too:
+# - unknown-attributes: SDK macros (e.g. os/signpost.h) use Apple-only
+#   attributes such as stack_protector_ignore, reported where they expand.
+# - unknown-warning-option: Apple-only warning groups (e.g. objc-load-method)
+#   in #pragma clang diagnostic.
+# - mismatched-parameter-types: upstream also flags __kindof generic block
+#   parameters that Apple clang accepts.
 cc_args(
     name = "applecross_apple_clang_compat",
     actions = ["@rules_cc//cc/toolchains/actions:compile_actions"],
-    args = ["-Wno-error=unknown-attributes"],
+    args = [
+        "-Wno-error=mismatched-parameter-types",
+        "-Wno-error=unknown-attributes",
+        "-Wno-error=unknown-warning-option",
+    ],
 )
 
 cc_args(
