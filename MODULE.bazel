@@ -18,10 +18,9 @@ apple_support_toolchain_env = use_repo_rule("@apple_support//toolchain:toolchain
 
 apple_support_toolchain_env(name = "apple_support_toolchain_env")
 
-bazel_dep(name = "rules_apple", version = "4.5.3", repo_name = "build_bazel_rules_apple")
-git_override(
+bazel_dep(name = "rules_apple", version = "5.2.0", repo_name = "build_bazel_rules_apple")
+single_version_override(
     module_name = "rules_apple",
-    commit = "74a3c3a2eb3d9c6432a32c158fc11e0cfaa4f881",
     patch_strip = 1,
     patches = [
         "//patches:rules_apple_execution_platform.patch",
@@ -30,7 +29,7 @@ git_override(
         "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
         "//patches:rules_apple_python_stub_interpreter.patch",
     ],
-    remote = "https://github.com/bazelbuild/rules_apple.git",
+    version = "5.2.0",
 )
 
 bazel_dep(name = "rules_swift", version = "4.1.2", repo_name = "build_bazel_rules_swift")
@@ -50,13 +49,6 @@ git_override(
     module_name = "xctestrunner",
     commit = "9548d93f29a2a93315d7a0458622682c0f76e6fe",
     remote = "https://github.com/apple-cross-toolchain/xctestrunner-bash.git",
-)
-
-non_module_deps = use_extension("@build_bazel_rules_apple//apple:extensions.bzl", "non_module_deps", dev_dependency = True)
-
-override_repo(
-    non_module_deps,
-    xctestrunner = "xctestrunner",
 )
 
 register_toolchains(

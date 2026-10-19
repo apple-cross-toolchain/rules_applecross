@@ -1,9 +1,13 @@
 diff --git a/MODULE.bazel b/MODULE.bazel
-index d04a764a..8c973712 100644
+index 1c5fe968..77c28809 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
-@@ -11,6 +11,10 @@ bazel_dep(name = "apple_support", version = "2.2.0", repo_name = "build_bazel_ap
- bazel_dep(name = "bazel_features", version = "1.36.0")
+@@ -8,8 +8,14 @@ module(
+ )
+ 
+ bazel_dep(name = "apple_support", version = "2.8.3")
++# rule_factory.bzl gates the test exec group on bazel_features.
++bazel_dep(name = "bazel_features", version = "1.36.0")
  bazel_dep(name = "bazel_skylib", version = "1.8.2")
  bazel_dep(name = "platforms", version = "1.0.0")
 +# Declared so the execution platform patch can name the toolchain type that
@@ -14,10 +18,10 @@ index d04a764a..8c973712 100644
  bazel_dep(
      name = "rules_swift",
 diff --git a/apple/BUILD b/apple/BUILD
-index 56da86e7..709fa1f8 100644
+index cdecb419..ecd40006 100644
 --- a/apple/BUILD
 +++ b/apple/BUILD
-@@ -331,3 +331,16 @@ apple_resource_hint(
+@@ -314,3 +314,16 @@ apple_resource_hint(
      name = "suppress_resources",
      action = apple_resource_hint_action.suppress,
  )
@@ -35,10 +39,10 @@ index 56da86e7..709fa1f8 100644
 +    srcs = [],
 +)
 diff --git a/apple/cc_toolchain_forwarder.bzl b/apple/cc_toolchain_forwarder.bzl
-index 1e0facff..09b0964f 100644
+index 66dd8cc6..7bb23cd4 100644
 --- a/apple/cc_toolchain_forwarder.bzl
 +++ b/apple/cc_toolchain_forwarder.bzl
-@@ -60,5 +60,9 @@ for the purposes of understanding what constraints the results of each Apple spl
+@@ -48,5 +48,9 @@ for the purposes of understanding what constraints the results of each Apple spl
  resolve to from the perspective of any bundling and binary rules that generate "fat" Apple binaries.
  """,
      # Anticipated "new" toolchain assignment.
@@ -50,7 +54,7 @@ index 1e0facff..09b0964f 100644
 +    toolchains = use_cc_toolchain() + ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/dtrace.bzl b/apple/dtrace.bzl
-index 3c110aeb..4d01c1bf 100644
+index 7d6e28bc..b548ff22 100644
 --- a/apple/dtrace.bzl
 +++ b/apple/dtrace.bzl
 @@ -115,4 +115,5 @@ structure. For example with a directory structure of
@@ -60,40 +64,45 @@ index 3c110aeb..4d01c1bf 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
-index 541c32f2..75c5e11e 100644
+index 343c14d9..6f718d54 100644
 --- a/apple/internal/apple_toolchains.bzl
 +++ b/apple/internal/apple_toolchains.bzl
-@@ -123,6 +123,10 @@ for deterministic JSON handling.
- def _shared_attrs():
-     """Private attributes on every rule to provide access to bundling tools and other file deps."""
-     return {
-+        "_sdk_tool_files": attr.label(
-+            default = Label("//apple:sdk_tool_files"),
-+            allow_files = True,
-+        ),
-         "_mac_toolchain": attr.label(
-             default = Label("//apple/internal:mac_tools_toolchain"),
-             providers = [[AppleMacToolsToolchainInfo]],
-diff --git a/apple/internal/aspects/resource_aspect.bzl b/apple/internal/aspects/resource_aspect.bzl
-index b7b9fe99..e136b66c 100644
---- a/apple/internal/aspects/resource_aspect.bzl
-+++ b/apple/internal/aspects/resource_aspect.bzl
-@@ -449,6 +449,10 @@ apple_resource_aspect = aspect(
-         apple_toolchain_utils.shared_attrs(),
-     ),
-     fragments = ["apple", "cpp"],
-+    # Resource actions (actool, ibtool, plists, strings) are registered by this
-+    # aspect against library targets, so it needs the same execution platform
-+    # requirement as the bundling rules that consume its output.
-+    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
-     doc = """Aspect that collects and propagates resource information to be bundled by a top-level
- bundling rule.""",
- )
+@@ -266,6 +266,10 @@ APPLE_XPLAT_EXEC_GROUP = "_xplat_tool_group"
+ APPLE_MAC_TOOLCHAIN_TYPE = "//apple/internal:mac_tools_toolchain_type"
+ APPLE_MAC_EXEC_GROUP = "_mac_tool_group"
+ 
++# Decides where Apple product actions run instead of a hardcoded macOS
++# constraint; see rule_factory.bzl.
++_APPLE_BUNDLING_TOOLCHAIN_TYPE = "@rules_applecross//toolchain:apple_bundling_toolchain_type"
++
+ def _apple_xplat_tools_toolchain_impl(ctx):
+     xplat_info = AppleXPlatToolsToolchainInfo(
+         build_settings = struct(
+@@ -340,11 +344,16 @@ def _use_apple_exec_group_toolchain():
+     """
+     groups = {
+         APPLE_XPLAT_EXEC_GROUP: exec_group(
+-            toolchains = [config_common.toolchain_type(APPLE_XPLAT_TOOLCHAIN_TYPE)],
++            toolchains = [
++                config_common.toolchain_type(APPLE_XPLAT_TOOLCHAIN_TYPE),
++                config_common.toolchain_type(_APPLE_BUNDLING_TOOLCHAIN_TYPE),
++            ],
+         ),
+         APPLE_MAC_EXEC_GROUP: exec_group(
+-            exec_compatible_with = ["@platforms//os:macos"],
+-            toolchains = [config_common.toolchain_type(APPLE_MAC_TOOLCHAIN_TYPE)],
++            toolchains = [
++                config_common.toolchain_type(APPLE_MAC_TOOLCHAIN_TYPE),
++                config_common.toolchain_type(_APPLE_BUNDLING_TOOLCHAIN_TYPE),
++            ],
+         ),
+     }
+ 
 diff --git a/apple/internal/codesigning_support.bzl b/apple/internal/codesigning_support.bzl
-index 61bbc88a..092c6adf 100644
+index 1d34fead..ea6ca08b 100644
 --- a/apple/internal/codesigning_support.bzl
 +++ b/apple/internal/codesigning_support.bzl
-@@ -121,7 +121,7 @@ def _codesign_args_for_path(
+@@ -126,7 +126,7 @@ def _codesign_args_for_path(
  
      cmd_codesigning = [
          "--codesign",
@@ -103,23 +112,23 @@ index 61bbc88a..092c6adf 100644
  
      # Add quotes for sanitizing inputs when they're invoked directly from a shell script, for
 diff --git a/apple/internal/compilation_support.bzl b/apple/internal/compilation_support.bzl
-index 8aed565e..5d4a7a39 100644
+index 0357b7fa..3d47dd4f 100644
 --- a/apple/internal/compilation_support.bzl
 +++ b/apple/internal/compilation_support.bzl
-@@ -180,7 +180,7 @@ def _register_binary_strip_action(
- 
-     ctx.actions.run(
-         mnemonic = "ObjcBinarySymbolStrip",
+@@ -190,7 +190,7 @@ def _register_binary_strip_action(
+             apple_common.apple_host_system_env(xcode_config) |
+             apple_common.target_apple_env(xcode_config, apple_common_platform)
+         ),
 -        executable = "/usr/bin/xcrun",
 +        executable = "xcrun",
-         arguments = [args],
+         execution_requirements = xcode_config.execution_info(),
          inputs = [binary],
-         outputs = [stripped_binary],
+         mnemonic = "ObjcBinarySymbolStrip",
 diff --git a/apple/internal/docc.bzl b/apple/internal/docc.bzl
-index 05f7a9a5..0a6b21bb 100644
+index a9af86b1..0a009e6f 100644
 --- a/apple/internal/docc.bzl
 +++ b/apple/internal/docc.bzl
-@@ -160,7 +160,7 @@ def _docc_archive_impl(ctx):
+@@ -184,7 +184,7 @@ done
          inputs = depset(docc_build_inputs),
          outputs = [doccarchive_dir],
          mnemonic = "DocCConvert",
@@ -128,17 +137,17 @@ index 05f7a9a5..0a6b21bb 100644
          arguments = [arguments],
          progress_message = "Converting .doccarchive for %{label}",
          execution_requirements = execution_requirements,
-@@ -311,4 +311,5 @@ This value must be either `fileprivate`, `internal`, `private`, or `public`. The
+@@ -335,4 +335,5 @@ This value must be either `fileprivate`, `internal`, `private`, or `public`. The
          },
      ),
      executable = True,
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/entitlements_support.bzl b/apple/internal/entitlements_support.bzl
-index 40f3d1f8..1c0e447b 100644
+index aae3e1f2..b95f8133 100644
 --- a/apple/internal/entitlements_support.bzl
 +++ b/apple/internal/entitlements_support.bzl
-@@ -386,20 +386,10 @@ def _generate_der_entitlements(
+@@ -407,22 +407,12 @@ def _generate_der_entitlements(
      der_entitlements = actions.declare_file(
          "entitlements/%s.der" % label_name,
      )
@@ -156,42 +165,55 @@ index 40f3d1f8..1c0e447b 100644
 -            der_entitlements.path,
 -            "--raw",
 -        ],
--        executable = "/usr/bin/derq",
 +        command = "touch " + der_entitlements.path,
+         env = shared_environment.default_env,
+         exec_group = mac_exec_group,
+-        executable = "/usr/bin/derq",
          inputs = [entitlements],
          mnemonic = "ProcessDEREntitlements",
          outputs = [der_entitlements],
 diff --git a/apple/internal/environment_plist.bzl b/apple/internal/environment_plist.bzl
-index 8d429aa8..7cec824e 100644
+index c31321a3..9cf4dcf3 100644
 --- a/apple/internal/environment_plist.bzl
 +++ b/apple/internal/environment_plist.bzl
-@@ -65,6 +65,7 @@ def _environment_plist_impl(ctx):
-     environment_plist_tool = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo].environment_plist_tool
+@@ -69,6 +69,7 @@ def _environment_plist_impl(ctx):
+     environment_plist_tool = apple_toolchain_utils.get_mac_toolchain(ctx).environment_plist_tool
      platform = platform_prerequisites.platform
      sdk_version = platform_prerequisites.sdk_version
 +    sdk_tool_files = ctx.files._sdk_tool_files
      apple_support.run(
          actions = ctx.actions,
          apple_fragment = platform_prerequisites.apple_fragment,
-@@ -75,6 +76,7 @@ def _environment_plist_impl(ctx):
-             ctx.outputs.plist.path,
+@@ -81,6 +82,7 @@ def _environment_plist_impl(ctx):
          ],
+         exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
          executable = environment_plist_tool,
 +        inputs = sdk_tool_files,
          outputs = [ctx.outputs.plist],
          xcode_config = platform_prerequisites.xcode_version_config,
      )
-@@ -100,4 +102,5 @@ amount of duplicative work done generating these plists for the same platforms.
+@@ -90,6 +92,10 @@ environment_plist = rule(
+         apple_support.platform_constraint_attrs(),
+         rule_attrs.common_tool_attrs(),
+         {
++            "_sdk_tool_files": attr.label(
++                default = Label("//apple:sdk_tool_files"),
++                allow_files = True,
++            ),
+             "platform_type": attr.string(
+                 mandatory = True,
+                 doc = """
+@@ -107,4 +113,5 @@ amount of duplicative work done generating these plists for the same platforms.
      fragments = ["apple"],
      outputs = {"plist": "%{name}.plist"},
      implementation = _environment_plist_impl,
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/ios_rules.bzl b/apple/internal/ios_rules.bzl
-index e020315c..84e9b101 100644
+index 487b544f..d6c632ac 100644
 --- a/apple/internal/ios_rules.bzl
 +++ b/apple/internal/ios_rules.bzl
-@@ -438,7 +438,7 @@ def _ios_application_impl(ctx):
+@@ -459,7 +459,7 @@ def _ios_application_impl(ctx):
          ),
      )
  
@@ -201,38 +223,20 @@ index e020315c..84e9b101 100644
              partials.provisioning_profile_partial(
                  actions = actions,
 diff --git a/apple/internal/local_provisioning_profiles.bzl b/apple/internal/local_provisioning_profiles.bzl
-index 84f6c06d..53ee851c 100644
+index b278af35..6115b271 100644
 --- a/apple/internal/local_provisioning_profiles.bzl
 +++ b/apple/internal/local_provisioning_profiles.bzl
-@@ -265,4 +265,5 @@ ios_application(
+@@ -247,4 +247,5 @@ ios_application(
          ios_extension = _IOS_PROFILE_EXTENSION,
          macos_extension = _MACOS_PROFILE_EXTENSION,
      ),
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
-diff --git a/apple/internal/macos_binary_support.bzl b/apple/internal/macos_binary_support.bzl
-index 4aaa382c..4c6dac90 100644
---- a/apple/internal/macos_binary_support.bzl
-+++ b/apple/internal/macos_binary_support.bzl
-@@ -203,6 +203,7 @@ macos_binary_infoplist = rule(
-         },
-     ),
-     fragments = ["apple", "cpp", "objc"],
-+    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
- )
- 
- def _macos_command_line_launchdplist_impl(ctx):
-@@ -288,4 +289,5 @@ macos_command_line_launchdplist = rule(
-         },
-     ),
-     fragments = ["apple", "cpp", "objc"],
-+    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
- )
 diff --git a/apple/internal/partials/apple_symbols_file.bzl b/apple/internal/partials/apple_symbols_file.bzl
-index 1a5cfb35..b9e3e7fd 100644
+index 028c783e..fb3916fe 100644
 --- a/apple/internal/partials/apple_symbols_file.bzl
 +++ b/apple/internal/partials/apple_symbols_file.bzl
-@@ -76,7 +76,7 @@ def _apple_symbols_file_partial_impl(
+@@ -78,7 +78,7 @@ def _apple_symbols_file_partial_impl(
              inputs = inputs,
              outputs = [output],
              command = (
@@ -242,13 +246,13 @@ index 1a5cfb35..b9e3e7fd 100644
              ).format(
                  output = shell.quote(output.path),
 diff --git a/apple/internal/partials/swift_dylibs.bzl b/apple/internal/partials/swift_dylibs.bzl
-index 24f21ad1..d7fa6fe6 100644
+index 45646d44..05258764 100644
 --- a/apple/internal/partials/swift_dylibs.bzl
 +++ b/apple/internal/partials/swift_dylibs.bzl
-@@ -104,6 +104,12 @@ def _swift_dylib_action(
-         actions = actions,
-         apple_fragment = platform_prerequisites.apple_fragment,
+@@ -111,6 +111,12 @@ def _swift_dylib_action(
          arguments = [swift_stdlib_tool_args],
+         env = shared_environment.default_env,
+         exec_group = mac_exec_group,
 +        # The Linux cross toolchain's SDK tools are discovered through PATH.
 +        # Run locally outside the sandbox so xcrun can reach them.
 +        execution_requirements = {
@@ -259,11 +263,11 @@ index 24f21ad1..d7fa6fe6 100644
          inputs = binary_files,
          mnemonic = "SwiftStdlibCopy",
 diff --git a/apple/internal/resource_actions/app_intents.bzl b/apple/internal/resource_actions/app_intents.bzl
-index 7336f935..0299d3c9 100644
+index ba057f00..4398c2bf 100644
 --- a/apple/internal/resource_actions/app_intents.bzl
 +++ b/apple/internal/resource_actions/app_intents.bzl
-@@ -86,7 +86,7 @@ def generate_app_intents_metadata_bundle(
-         actions.write(output = static_metadata_file_list, content = static_metadata_file_list_content)
+@@ -71,7 +71,7 @@ def generate_app_intents_metadata_bundle(
+     )
  
      args = actions.args()
 -    args.add("/usr/bin/xcrun")
@@ -272,91 +276,91 @@ index 7336f935..0299d3c9 100644
  
      # FB347041279: Though this is not required for --compile-time-extraction, which is the only
 diff --git a/apple/internal/resource_actions/metals.bzl b/apple/internal/resource_actions/metals.bzl
-index 48f6c441..84c72367 100644
+index 49dba111..662697a6 100644
 --- a/apple/internal/resource_actions/metals.bzl
 +++ b/apple/internal/resource_actions/metals.bzl
-@@ -89,7 +89,7 @@ def compile_metals(*, actions, input_files, output_file, platform_prerequisites,
- 
+@@ -91,7 +91,7 @@ def compile_metals(*, actions, mac_exec_group, input_files, output_file, platfor
          apple_support.run(
              actions = actions,
+             exec_group = mac_exec_group,
 -            executable = "/usr/bin/xcrun",
 +            executable = "xcrun",
              inputs = [input_metal] + hdrs,
              outputs = [air_file],
              arguments = [args],
-@@ -107,7 +107,7 @@ def compile_metals(*, actions, input_files, output_file, platform_prerequisites,
- 
+@@ -110,7 +110,7 @@ def compile_metals(*, actions, mac_exec_group, input_files, output_file, platfor
      apple_support.run(
          actions = actions,
+         exec_group = mac_exec_group,
 -        executable = "/usr/bin/xcrun",
 +        executable = "xcrun",
          inputs = air_files,
          outputs = [output_file],
          arguments = [args],
 diff --git a/apple/internal/resource_actions/png.bzl b/apple/internal/resource_actions/png.bzl
-index 2357f32e..574ae56e 100644
+index d31c51b9..2c4f6aca 100644
 --- a/apple/internal/resource_actions/png.bzl
 +++ b/apple/internal/resource_actions/png.bzl
-@@ -56,7 +56,7 @@ def copy_png(*, actions, input_file, output_file, platform_prerequisites):
-                 input_file.path,
-                 output_file.path,
+@@ -63,7 +63,7 @@ def copy_png(*, actions, mac_exec_group, input_file, output_file, platform_prere
              ],
+             env = shared_environment.default_env,
+             exec_group = mac_exec_group,
 -            executable = "/usr/bin/xcrun",
 +            executable = "xcrun",
              inputs = [input_file],
              mnemonic = "CopyPng",
              outputs = [output_file],
 diff --git a/apple/internal/resource_actions/texture_atlas.bzl b/apple/internal/resource_actions/texture_atlas.bzl
-index ffa0ba43..79be6191 100644
+index 73b43b5b..990a50a0 100644
 --- a/apple/internal/resource_actions/texture_atlas.bzl
 +++ b/apple/internal/resource_actions/texture_atlas.bzl
-@@ -43,7 +43,7 @@ def compile_texture_atlas(
-             input_path,
+@@ -51,7 +51,7 @@ def compile_texture_atlas(
              output_dir.path,
          ],
+         exec_group = mac_exec_group,
 -        executable = "/usr/bin/xcrun",
 +        executable = "xcrun",
          inputs = input_files,
          mnemonic = "CompileTextureAtlas",
          outputs = [output_dir],
 diff --git a/apple/internal/resource_rules/apple_core_data_model.bzl b/apple/internal/resource_rules/apple_core_data_model.bzl
-index 94e2a467..6bf95ab7 100644
+index 3fe29f4e..a97bd4a3 100644
 --- a/apple/internal/resource_rules/apple_core_data_model.bzl
 +++ b/apple/internal/resource_rules/apple_core_data_model.bzl
-@@ -165,4 +165,5 @@ This rule takes one or more Core Data model definitions from .xcdatamodeld
+@@ -163,4 +163,5 @@ This rule takes one or more Core Data model definitions from .xcdatamodeld
  bundles and generates Swift or Objective-C source files that can be added
  as srcs of a swift_library target.
  """,
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/resource_rules/apple_core_ml_library.bzl b/apple/internal/resource_rules/apple_core_ml_library.bzl
-index 2e33da9d..17101a19 100644
+index ffef0c44..84ace34c 100644
 --- a/apple/internal/resource_rules/apple_core_ml_library.bzl
 +++ b/apple/internal/resource_rules/apple_core_ml_library.bzl
-@@ -196,4 +196,5 @@ as `#import my/package/MyModel.h`.
+@@ -194,4 +194,5 @@ as `#import my/package/MyModel.h`.
  This rule will also compile the `mlmodel` into an `mlmodelc` and propagate it
  upstream so that it is packaged as a resource inside the top level bundle.
  """,
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/resource_rules/apple_intent_library.bzl b/apple/internal/resource_rules/apple_intent_library.bzl
-index b9fd90f3..7305a674 100644
+index 8f2ec03e..ea6f841a 100644
 --- a/apple/internal/resource_rules/apple_intent_library.bzl
 +++ b/apple/internal/resource_rules/apple_intent_library.bzl
-@@ -156,4 +156,5 @@ This target generates a header named `<target_name>.h` that can be imported from
+@@ -155,4 +155,5 @@ This target generates a header named `<target_name>.h` that can be imported from
  resides. For example, if this target's label is `//my/package:intent`, you can import the header as
  `#import "my/package/intent.h"`.
  """,
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/resource_rules/apple_metal_library.bzl b/apple/internal/resource_rules/apple_metal_library.bzl
-index 4a4e2110..1f269a6c 100644
+index f8d5f1f0..f8468711 100644
 --- a/apple/internal/resource_rules/apple_metal_library.bzl
 +++ b/apple/internal/resource_rules/apple_metal_library.bzl
 @@ -98,7 +98,7 @@ def _apple_metal_library_impl(ctx):
-         actions = ctx.actions,
          apple_fragment = platform_prerequisites.apple_fragment,
          arguments = [args],
+         exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
 -        executable = "/usr/bin/xcrun",
 +        executable = "xcrun",
          inputs = ctx.files.srcs + ctx.files.hdrs,
@@ -369,17 +373,17 @@ index 4a4e2110..1f269a6c 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/resource_rules/apple_precompiled_resource_bundle.bzl b/apple/internal/resource_rules/apple_precompiled_resource_bundle.bzl
-index 9c88da81..ddda4871 100644
+index ef0067af..d0167108 100644
 --- a/apple/internal/resource_rules/apple_precompiled_resource_bundle.bzl
 +++ b/apple/internal/resource_rules/apple_precompiled_resource_bundle.bzl
-@@ -349,4 +349,5 @@ This rule encapsulates a target which is provided to dependers as a bundle. An
+@@ -350,4 +350,5 @@ This rule encapsulates a target which is provided to dependers as a bundle. An
  level Apple bundle dependent. `apple_precompiled_resource_bundle` targets need to be added to
  library targets through the `data` attribute.
  """,
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/rule_factory.bzl b/apple/internal/rule_factory.bzl
-index b6b03a4d..3380e7a5 100644
+index ac4fa9ab..67033187 100644
 --- a/apple/internal/rule_factory.bzl
 +++ b/apple/internal/rule_factory.bzl
 @@ -14,6 +14,7 @@
@@ -390,7 +394,7 @@ index b6b03a4d..3380e7a5 100644
  load(
      "@bazel_skylib//lib:dicts.bzl",
      "dicts",
-@@ -37,6 +38,31 @@ load(
+@@ -41,6 +42,31 @@ load(
      "coverage_files_aspect",
  )
  
@@ -422,49 +426,50 @@ index b6b03a4d..3380e7a5 100644
  # Returns the common set of rule attributes to support Apple test rules.
  # TODO(b/246990309): Move _COMMON_TEST_ATTRS to rule attrs in a follow up CL.
  _COMMON_TEST_ATTRS = {
-@@ -146,12 +172,9 @@ def _create_apple_rule(
-         ),
+@@ -143,13 +169,10 @@ def _create_apple_rule(
+         attrs = dicts.add(*attrs),
          cfg = cfg,
          doc = doc,
 -        exec_compatible_with = [
 -            "@platforms//os:macos",
 -        ],
          executable = is_executable,
-         fragments = ["apple", "cpp", "objc", "j2objc"],
+         exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
+         fragments = ["apple", "cpp", "objc"],
 -        toolchains = toolchains,
 +        toolchains = toolchains + [_APPLE_BUNDLING_TOOLCHAIN_TYPE],
          **extra_args
      )
  
-@@ -181,11 +204,7 @@ def _create_apple_test_rule(*, doc, implementation, platform_type):
-         ),
+@@ -180,11 +203,7 @@ def _create_apple_test_rule(*, doc, implementation, platform_type):
          doc = doc,
-         exec_groups = {
--            "test": exec_group(
--                exec_compatible_with = [
--                    "@platforms//os:macos",
--                ],
--            ),
-+            "test": exec_group(**_TEST_EXEC_GROUP_ARGS),
-         },
-         test = True,
-     )
+         exec_groups = dicts.add(
+             {
+-                "test": exec_group(
+-                    exec_compatible_with = [
+-                        "@platforms//os:macos",
+-                    ],
+-                ),
++                "test": exec_group(**_TEST_EXEC_GROUP_ARGS),
+             },
+             apple_toolchain_utils.use_apple_exec_group_toolchain(),
+         ),
 diff --git a/apple/internal/stub_support.bzl b/apple/internal/stub_support.bzl
-index 50126547..abbaa7a7 100644
+index 67d9f0cf..6b618680 100644
 --- a/apple/internal/stub_support.bzl
 +++ b/apple/internal/stub_support.bzl
 @@ -19,8 +19,8 @@ load(
      "apple_support",
  )
  load(
--    "@build_bazel_apple_support//lib:lipo.bzl",
+-    "@apple_support//lib:lipo.bzl",
 -    "lipo",
 +    "@bazel_skylib//lib:shell.bzl",
 +    "shell",
  )
  load(
      "//apple/internal:intermediates.bzl",
-@@ -34,6 +34,7 @@ def _create_stub_binary(
+@@ -38,6 +38,7 @@ def _create_stub_binary(
          output_discriminator = None,
          platform_prerequisites,
          rule_label,
@@ -472,7 +477,7 @@ index 50126547..abbaa7a7 100644
          xcode_stub_path):
      """Returns a symlinked stub binary from the Xcode distribution.
  
-@@ -60,13 +61,24 @@ def _create_stub_binary(
+@@ -64,13 +65,24 @@ def _create_stub_binary(
      )
  
      if archs_for_lipo:
@@ -536,10 +541,10 @@ index faf66566..4777577c 100644
  # Launch the app binary
  # Do *not* use exec here because we want the trap above to execute after the
 diff --git a/apple/internal/watchos_rules.bzl b/apple/internal/watchos_rules.bzl
-index 358fb204..0fa94ba8 100644
+index ae7f8a19..1b10e3ed 100644
 --- a/apple/internal/watchos_rules.bzl
 +++ b/apple/internal/watchos_rules.bzl
-@@ -846,6 +846,7 @@ reproducible error case.".format(
+@@ -869,6 +869,7 @@ reproducible error case.".format(
          archs_for_lipo = sets.to_list(requested_archs),
          platform_prerequisites = platform_prerequisites,
          rule_label = label,
@@ -558,7 +563,7 @@ index 27105d61..d5c14fcb 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/xctrunner.bzl b/apple/internal/xctrunner.bzl
-index e1765f9c..7148289c 100644
+index 4badee70..2c541221 100644
 --- a/apple/internal/xctrunner.bzl
 +++ b/apple/internal/xctrunner.bzl
 @@ -200,4 +200,5 @@ xctrunner(
@@ -568,10 +573,10 @@ index e1765f9c..7148289c 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/versioning.bzl b/apple/versioning.bzl
-index d9bd8cba..bd40f3df 100644
+index 3a8124ad..ae722ea5 100644
 --- a/apple/versioning.bzl
 +++ b/apple/versioning.bzl
-@@ -272,4 +272,5 @@ Provides:
+@@ -271,4 +271,5 @@ Provides:
    AppleBundleVersionInfo: Contains a reference to the JSON file that holds the
        version information for a bundle.
  """,
