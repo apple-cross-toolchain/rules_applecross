@@ -442,7 +442,7 @@ def _swift_toolchain_impl(ctx):
             cc_infos = [],
             swift_infos = [],
         ),
-        const_protocols_to_gather = None,
+        const_protocols_to_gather = ctx.file._const_protocols_to_gather,
         cross_import_overlays = [],
         debug_outputs_provider = None,
         developer_dirs = [],
@@ -510,6 +510,12 @@ swift_toolchain = rule(
             mandatory = True,
             providers = [SwiftToolsInfo],
             doc = "rules_swift SwiftToolsInfo target providing Linux-host Swift executables.",
+        ),
+        # Same as rules_swift's Xcode toolchain; rules_apple's app_intents_aspect
+        # requires the const_values output group this enables.
+        "_const_protocols_to_gather": attr.label(
+            default = Label("@build_bazel_rules_swift//swift/toolchains/config:const_protocols_to_gather.json"),
+            allow_single_file = True,
         ),
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
