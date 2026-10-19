@@ -96,15 +96,14 @@ use_repo(
 
 applecross_swift = use_extension("@build_bazel_rules_swift//swift:extensions.bzl", "swift")
 
-# Must match the Swift that built the Apple SDKs, which is the Swift of the
-# Xcode one release behind the SDKs' own: Xcode 26.6 ships the 26.5 SDKs, and
-# those were built by Swift 6.3.2.
+# Must match the Swift that built the Apple SDKs: Xcode 27.0's SDKs were built
+# by Swift 6.4.
 applecross_swift.toolchain(
     name = "applecross_swift",
     platform_sha256 = {
-        "ubuntu24.04": "827b2e935b52425068729d277148f286b37886231299d71f9136bcffd7084339",
+        "ubuntu24.04": "69f7b2b4dbce6090b6c92194b71149a057e16269093b5a9dded38afc4a05094e",
     },
-    swift_version = "6.3.2",
+    swift_version = "6.4.0",
 )
 use_repo(
     applecross_swift,
