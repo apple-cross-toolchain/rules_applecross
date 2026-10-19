@@ -411,6 +411,18 @@ def _swift_toolchain_impl(ctx):
             )],
         ))
 
+    # Xcode's driver turns these on itself; the swift.org one does not, so
+    # e.g. SwiftUI's VideoPlayer (in AVKit's SwiftUI overlay) goes missing.
+    action_configs.append(ActionConfigInfo(
+        actions = [
+            _SWIFT_ACTION_COMPILE,
+            _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
+            _SWIFT_ACTION_DERIVE_FILES,
+            _SWIFT_ACTION_DUMP_AST,
+        ],
+        configurators = [add_arg("-Xfrontend", "-enable-cross-import-overlays")],
+    ))
+
     # Add all the standard rules_swift action configs.
     action_configs.extend(all_actions_action_configs())
     action_configs.extend(compile_action_configs())
