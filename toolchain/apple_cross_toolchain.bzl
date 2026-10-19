@@ -204,6 +204,17 @@ def _read_xcode_versions(rctx):
         fail("Failed to read the Xcode version from the Apple SDK tree")
     return xcode_version, xcode_build, sdk_versions
 
+def _xcode_version_and_aliases(version, build):
+    """Returns the version xcode-locator would report and its aliases, e.g.
+    ("27.0.0.27A266a", ["27.0", "27.0.0", "27A266a"]) for 27.0 build 27A266a.
+
+    rules_apple reads the build number from the fourth component."""
+    if not build:
+        return version, repr([version])
+    components = version.split(".")
+    full = ".".join((components + ["0", "0"])[:3])
+    return full + "." + build, repr(sorted({version: None, full: None, build: None}.keys()))
+
 def _normalize_sdk_modulemaps(rctx):
     result = rctx.execute([
         _python3(rctx),
@@ -385,8 +396,7 @@ def _apple_cross_toolchain_impl(rctx):
     # Describe the Xcode that produced this tree, so the generated xcode_config
     # reports the versions the SDKs actually have rather than a pinned guess.
     _xcode_version, _xcode_build, _sdk_versions = _read_xcode_versions(rctx)
-    substitutions["%{xcode_version}"] = _xcode_version
-    substitutions["%{xcode_aliases}"] = repr([_xcode_version] + ([_xcode_build] if _xcode_build else []))
+    substitutions["%{xcode_version}"], substitutions["%{xcode_aliases}"] = _xcode_version_and_aliases(_xcode_version, _xcode_build)
     for _os_name, _sdk_name in _SDK_PLATFORM_FOR_OS.items():
         _sdk_version = _sdk_versions.get(_sdk_name)
         if not _sdk_version:
