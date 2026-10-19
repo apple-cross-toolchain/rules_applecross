@@ -379,10 +379,18 @@ index 9c88da81..ddda4871 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/rule_factory.bzl b/apple/internal/rule_factory.bzl
-index b6b03a4d..0356aa5e 100644
+index b6b03a4d..3380e7a5 100644
 --- a/apple/internal/rule_factory.bzl
 +++ b/apple/internal/rule_factory.bzl
-@@ -37,6 +37,17 @@ load(
+@@ -14,6 +14,7 @@
+ 
+ """Helpers for defining Apple bundling rules uniformly."""
+ 
++load("@bazel_features//:features.bzl", "bazel_features")
+ load(
+     "@bazel_skylib//lib:dicts.bzl",
+     "dicts",
+@@ -37,6 +38,31 @@ load(
      "coverage_files_aspect",
  )
  
@@ -397,10 +405,24 @@ index b6b03a4d..0356aa5e 100644
 +# being built or a dependency of it.
 +_APPLE_BUNDLING_TOOLCHAIN_TYPE = "@rules_applecross//toolchain:apple_bundling_toolchain_type"
 +
++# Bazel's own test toolchain is re-declared so it keeps applying the target
++# platform constraints. Without it the group resolves to whichever platform
++# comes first and an Apple test is shipped to a Linux executor. Bazel 8 has no
++# such toolchain, so the group pins macOS directly instead.
++_TEST_EXEC_GROUP_ARGS = dict(
++    toolchains = [
++        _APPLE_BUNDLING_TOOLCHAIN_TYPE,
++        "@bazel_tools//tools/test:default_test_toolchain_type",
++    ],
++) if bazel_features.toolchains.has_default_test_toolchain_type else dict(
++    toolchains = [_APPLE_BUNDLING_TOOLCHAIN_TYPE],
++    exec_compatible_with = ["@platforms//os:macos"],
++)
++
  # Returns the common set of rule attributes to support Apple test rules.
  # TODO(b/246990309): Move _COMMON_TEST_ATTRS to rule attrs in a follow up CL.
  _COMMON_TEST_ATTRS = {
-@@ -146,12 +157,9 @@ def _create_apple_rule(
+@@ -146,12 +172,9 @@ def _create_apple_rule(
          ),
          cfg = cfg,
          doc = doc,
@@ -414,22 +436,19 @@ index b6b03a4d..0356aa5e 100644
          **extra_args
      )
  
-@@ -182,8 +190,13 @@ def _create_apple_test_rule(*, doc, implementation, platform_type):
+@@ -181,11 +204,7 @@ def _create_apple_test_rule(*, doc, implementation, platform_type):
+         ),
          doc = doc,
          exec_groups = {
-             "test": exec_group(
+-            "test": exec_group(
 -                exec_compatible_with = [
 -                    "@platforms//os:macos",
-+                toolchains = [
-+                    _APPLE_BUNDLING_TOOLCHAIN_TYPE,
-+                    # Re-declared so Bazel's own test toolchain keeps applying
-+                    # the target platform constraints. Without it the group
-+                    # resolves to whichever platform comes first and an Apple
-+                    # test is shipped to a Linux executor.
-+                    "@bazel_tools//tools/test:default_test_toolchain_type",
-                 ],
-             ),
+-                ],
+-            ),
++            "test": exec_group(**_TEST_EXEC_GROUP_ARGS),
          },
+         test = True,
+     )
 diff --git a/apple/internal/stub_support.bzl b/apple/internal/stub_support.bzl
 index 50126547..abbaa7a7 100644
 --- a/apple/internal/stub_support.bzl

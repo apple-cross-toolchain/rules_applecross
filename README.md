@@ -2,7 +2,7 @@
 
 This repository contains toolchain configuration rules for Bazel that can be
 used to build apps and frameworks for Apple platforms from non-Apple platforms.
-Requires Bazel 9+.
+Requires Bazel 8.8+ or 9+.
 
 Builds execute on x86_64 Linux, either locally or through remote execution. The
 host driving them can be x86_64 Linux or macOS; see [Building on
