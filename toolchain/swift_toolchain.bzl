@@ -142,7 +142,7 @@ def _make_resource_directory_configurator(developer_dir):
 
     return _resource_directory_configurator
 
-def _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path):
+def _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path, xcode_env):
     """Creates tool configurations for Swift actions."""
 
     # Use rules_swift's hermetic Swift distribution as explicit action tools,
@@ -156,12 +156,20 @@ def _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_p
     # local Xcode gives those the real one. The values must stay identical to
     # the ones .bazelrc passes elsewhere, or these actions stop sharing the
     # remote cache with builds that do everything on the executors.
-    env = {
-        "DEVELOPER_DIR": developer_dir,
-        "LD_LIBRARY_PATH": toolchain_path + "/usr/lib",
-        "PATH": toolchain_path + "/usr/bin:/bin:/usr/bin:/usr/local/bin",
-        "TOOLCHAIN_PATH": toolchain_path,
-    }
+    if xcode_env == None:
+        env = {
+            "DEVELOPER_DIR": developer_dir,
+            "LD_LIBRARY_PATH": toolchain_path + "/usr/lib",
+            "PATH": toolchain_path + "/usr/bin:/bin:/usr/bin:/usr/local/bin",
+            "TOOLCHAIN_PATH": toolchain_path,
+        }
+    else:
+        # On a Mac the worker runs the driver through /usr/bin/xcrun, which
+        # rejects the staged tree as a DEVELOPER_DIR. These variables have
+        # Bazel set DEVELOPER_DIR and SDKROOT to the installed Xcode instead.
+        env = dict(xcode_env)
+        env["PATH"] = "/bin:/usr/bin"
+        env["TOOLCHAIN_PATH"] = toolchain_path
     persistent_tool_config = ToolConfigInfo(
         additional_tools = additional_tools,
         env = env,
@@ -383,6 +391,26 @@ def _swift_toolchain_impl(ctx):
         ),
     ]
 
+    if ctx.attr.exec_os == "macos":
+        # Apple's macro plugins (SwiftUI's @State, for one) ship as macOS
+        # dylibs that the staged tree leaves out, and simulator platforms keep
+        # theirs in the device platform. The worker links this name to the
+        # DEVELOPER_DIR Bazel sets, i.e. the installed Xcode.
+        xcode_link = "__bazel_developer_dir_" + apple_common.apple_host_system_env(xcode_config)["XCODE_VERSION_OVERRIDE"].replace(".", "_")
+        plugin_platform_dir = "{}/Platforms/{}.platform/Developer".format(xcode_link, info.sdk_platform_device)
+        action_configs.append(ActionConfigInfo(
+            actions = [
+                _SWIFT_ACTION_COMPILE,
+                _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
+                _SWIFT_ACTION_DERIVE_FILES,
+                _SWIFT_ACTION_DUMP_AST,
+            ],
+            configurators = [add_arg(
+                "-external-plugin-path",
+                "{0}/usr/lib/swift/host/plugins#{0}/usr/bin/swift-plugin-server".format(plugin_platform_dir),
+            )],
+        ))
+
     # Add all the standard rules_swift action configs.
     action_configs.extend(all_actions_action_configs())
     action_configs.extend(compile_action_configs())
@@ -406,11 +434,23 @@ def _swift_toolchain_impl(ctx):
         "swift.experimental.AccessLevelOnImport",
         "swift.remap_xcode_path",
     ])
+    if ctx.attr.exec_os == "macos":
+        # As in rules_swift's Xcode toolchain: the compiler cannot run macro
+        # plugins in its own sandbox from inside Bazel's.
+        requested_features.append("swift.disable_swift_sandbox")
 
     # Collect toolchain files as additional tools for sandbox access.
     swift_tools = ctx.attr.swift_tools[SwiftToolsInfo]
     additional_tools = ctx.attr.toolchain_files.files.to_list() + list(swift_tools.additional_inputs)
-    tool_configs = _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path)
+    xcode_env = None
+    if ctx.attr.exec_os == "macos":
+        apple_platform = apple_common.platform.macos if info.platform_type == "macos" else getattr(
+            apple_common.platform,
+            info.platform_type + ("_simulator" if is_simulator else "_device"),
+        )
+        xcode_env = dict(apple_common.apple_host_system_env(xcode_config))
+        xcode_env.update(apple_common.target_apple_env(xcode_config, apple_platform))
+    tool_configs = _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path, xcode_env)
 
     # Build Swift linker opts provider
     swift_platform_name = info.swift_platform_name
@@ -498,6 +538,11 @@ swift_toolchain = rule(
             mandatory = True,
             doc = "The target CPU (e.g. ios_arm64, darwin_arm64).",
         ),
+        "exec_os": attr.string(
+            default = "linux",
+            values = ["linux", "macos"],
+            doc = "Operating system of the execution platforms this toolchain is registered for.",
+        ),
         "toolchain_path_prefix": attr.string(
             mandatory = True,
             doc = "Path prefix for the cross-compilation toolchain (e.g. 'external/apple_cross_toolchain/').",
@@ -509,7 +554,7 @@ swift_toolchain = rule(
         "swift_tools": attr.label(
             mandatory = True,
             providers = [SwiftToolsInfo],
-            doc = "rules_swift SwiftToolsInfo target providing Linux-host Swift executables.",
+            doc = "rules_swift SwiftToolsInfo target providing Swift executables for exec_os.",
         ),
         # Same as rules_swift's Xcode toolchain; rules_apple's app_intents_aspect
         # requires the const_values output group this enables.

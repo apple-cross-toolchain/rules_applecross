@@ -688,3 +688,36 @@ cc_toolchain_suite(
     )
     for arch in _APPLE_ARCHS
 ]
+
+_SWIFT_TOOLS_MACOS = "%{swift_tools_macos}"
+
+# For Swift compiles pinned to a Mac. Xcode's swiftc rejects modules built by
+# the Linux toolchain's swift.org compiler, so these use the same release
+# built for macOS.
+[
+    swift_toolchain(
+        name = "swift-compiler-" + arch + "-macos-exec",
+        cpu = arch,
+        exec_os = "macos",
+        swift_tools = _SWIFT_TOOLS_MACOS,
+        toolchain_files = _SWIFT_TOOLCHAIN_FILES_BY_ARCH[arch],
+        toolchain_path_prefix = "%{toolchain_path_prefix}",
+    )
+    for arch in _APPLE_ARCHS
+    if _SWIFT_TOOLS_MACOS
+]
+
+[
+    toolchain(
+        name = "swift-toolchain-" + arch + "-macos-exec",
+        exec_compatible_with = [
+            "@platforms//os:macos",
+            "@platforms//cpu:arm64",
+        ],
+        target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
+        toolchain = ":swift-compiler-" + arch + "-macos-exec",
+        toolchain_type = "@build_bazel_rules_swift//toolchains:toolchain_type",
+    )
+    for arch in _APPLE_ARCHS
+    if _SWIFT_TOOLS_MACOS
+]

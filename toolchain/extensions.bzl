@@ -18,6 +18,7 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "apple_sdk_archive_type": config.apple_sdk_archive_type,
                 "local_xcode": config.local_xcode,
                 "swift_tools": config.swift_tools,
+                "swift_tools_macos": config.swift_tools_macos,
             }
 
             _apple_cross_toolchain_rule(**kwargs)
@@ -37,6 +38,13 @@ _configure_tag = tag_class(
                   "can name both this and an archive source.",
         ),
         "swift_tools": attr.string(mandatory = True),
+        "swift_tools_macos": attr.string(
+            doc = "Label of a rules_swift swift_tools target from swift.org's " +
+                  "macOS Swift, matching swift_tools' version. When set, Swift " +
+                  "compiles that land on a macOS execution platform use it " +
+                  "rather than Xcode's swiftc, which rejects modules built by " +
+                  "swift_tools.",
+        ),
     },
 )
 
