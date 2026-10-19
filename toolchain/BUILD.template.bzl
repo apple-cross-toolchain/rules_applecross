@@ -521,6 +521,15 @@ _APPLE_SDK_PLATFORMS = {
     for arch, sdk_platform in _APPLE_SDK_PLATFORMS_BY_ARCH.items()
 ]
 
+# The SDK headers use Apple clang-only attributes (e.g. stack_protector_ignore in
+# os/signpost.h macros) that upstream LLVM warns about where the macro expands,
+# so -Werror builds would fail on Apple's code rather than their own.
+cc_args(
+    name = "applecross_apple_clang_compat",
+    actions = ["@rules_cc//cc/toolchains/actions:compile_actions"],
+    args = ["-Wno-error=unknown-attributes"],
+)
+
 cc_args(
     name = "applecross_env",
     actions = ["@rules_cc//cc/toolchains/actions:all_actions"],
@@ -615,6 +624,7 @@ dynamic_toolchain_info(
         args = [
             "@apple_support_toolchain_env//:include_directories_from_xcode",
             ":applecross_env",
+            ":applecross_apple_clang_compat",
             ":applecross_sysroot_" + arch,
             ":applecross_platform_link_paths_" + arch,
             "@apple_support//toolchain:xcode_env",
