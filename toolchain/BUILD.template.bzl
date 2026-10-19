@@ -21,7 +21,8 @@ _APPLE_ARCHS = APPLE_PLATFORMS_CONSTRAINTS.keys()
 # it with --xcode_version_config=@apple_cross_toolchain//:host_xcodes.
 xcode_version(
     name = "sdk_xcode_version",
-    aliases = ["%{xcode_version}"],
+    # Also the build number, which --xcode_version may be given instead.
+    aliases = %{xcode_aliases},
     default_ios_sdk_version = "%{ios_sdk_version}",
     default_macos_sdk_version = "%{macos_sdk_version}",
     default_tvos_sdk_version = "%{tvos_sdk_version}",

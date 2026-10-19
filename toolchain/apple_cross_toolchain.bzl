@@ -179,7 +179,7 @@ def _link_local_xcode(rctx, developer_dir):
         ))
 
 def _read_xcode_versions(rctx):
-    """Returns (xcode_version, {sdk platform: sdk version}) for the staged tree."""
+    """Returns (xcode_version, xcode_build, {sdk platform: sdk version}) for the staged tree."""
     result = rctx.execute([
         _python3(rctx),
         str(_toolchain_path(rctx, "repo_tools/read_xcode_versions.py")),
@@ -189,17 +189,20 @@ def _read_xcode_versions(rctx):
         fail("Failed to read Xcode and SDK versions: " + (result.stderr or result.stdout))
 
     xcode_version = ""
+    xcode_build = ""
     sdk_versions = {}
     for line in result.stdout.splitlines():
         fields = line.split(" ")
         if fields[0] == "xcode":
             xcode_version = fields[1]
+        elif fields[0] == "build":
+            xcode_build = fields[1]
         elif fields[0] == "sdk":
             sdk_versions[fields[1]] = fields[2]
 
     if not xcode_version:
         fail("Failed to read the Xcode version from the Apple SDK tree")
-    return xcode_version, sdk_versions
+    return xcode_version, xcode_build, sdk_versions
 
 def _normalize_sdk_modulemaps(rctx):
     result = rctx.execute([
@@ -381,8 +384,9 @@ def _apple_cross_toolchain_impl(rctx):
 
     # Describe the Xcode that produced this tree, so the generated xcode_config
     # reports the versions the SDKs actually have rather than a pinned guess.
-    _xcode_version, _sdk_versions = _read_xcode_versions(rctx)
+    _xcode_version, _xcode_build, _sdk_versions = _read_xcode_versions(rctx)
     substitutions["%{xcode_version}"] = _xcode_version
+    substitutions["%{xcode_aliases}"] = repr([_xcode_version] + ([_xcode_build] if _xcode_build else []))
     for _os_name, _sdk_name in _SDK_PLATFORM_FOR_OS.items():
         _sdk_version = _sdk_versions.get(_sdk_name)
         if not _sdk_version:
