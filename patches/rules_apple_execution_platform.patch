@@ -394,7 +394,7 @@ index ac4fa9ab..67033187 100644
  load(
      "@bazel_skylib//lib:dicts.bzl",
      "dicts",
-@@ -41,6 +42,31 @@ load(
+@@ -41,6 +42,26 @@ load(
      "coverage_files_aspect",
  )
  
@@ -412,21 +412,16 @@ index ac4fa9ab..67033187 100644
 +# Bazel's own test toolchain is re-declared so it keeps applying the target
 +# platform constraints. Without it the group resolves to whichever platform
 +# comes first and an Apple test is shipped to a Linux executor. Bazel 8 has no
-+# such toolchain, so the group pins macOS directly instead.
-+_TEST_EXEC_GROUP_ARGS = dict(
-+    toolchains = [
-+        _APPLE_BUNDLING_TOOLCHAIN_TYPE,
-+        "@bazel_tools//tools/test:default_test_toolchain_type",
-+    ],
-+) if bazel_features.toolchains.has_default_test_toolchain_type else dict(
-+    toolchains = [_APPLE_BUNDLING_TOOLCHAIN_TYPE],
-+    exec_compatible_with = ["@platforms//os:macos"],
-+)
++# such toolchain, so rules_applecross declares one like it.
++_TEST_EXEC_GROUP_TOOLCHAINS = [
++    _APPLE_BUNDLING_TOOLCHAIN_TYPE,
++    "@bazel_tools//tools/test:default_test_toolchain_type" if bazel_features.toolchains.has_default_test_toolchain_type else "@rules_applecross//testing:test_toolchain_type",
++]
 +
  # Returns the common set of rule attributes to support Apple test rules.
  # TODO(b/246990309): Move _COMMON_TEST_ATTRS to rule attrs in a follow up CL.
  _COMMON_TEST_ATTRS = {
-@@ -143,13 +169,10 @@ def _create_apple_rule(
+@@ -143,13 +164,10 @@ def _create_apple_rule(
          attrs = dicts.add(*attrs),
          cfg = cfg,
          doc = doc,
@@ -441,7 +436,7 @@ index ac4fa9ab..67033187 100644
          **extra_args
      )
  
-@@ -180,11 +203,7 @@ def _create_apple_test_rule(*, doc, implementation, platform_type):
+@@ -180,11 +198,7 @@ def _create_apple_test_rule(*, doc, implementation, platform_type):
          doc = doc,
          exec_groups = dicts.add(
              {
@@ -450,7 +445,7 @@ index ac4fa9ab..67033187 100644
 -                        "@platforms//os:macos",
 -                    ],
 -                ),
-+                "test": exec_group(**_TEST_EXEC_GROUP_ARGS),
++                "test": exec_group(toolchains = _TEST_EXEC_GROUP_TOOLCHAINS),
              },
              apple_toolchain_utils.use_apple_exec_group_toolchain(),
          ),
