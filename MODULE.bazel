@@ -47,7 +47,7 @@ bazel_dep(name = "zlib", version = "1.3.2", dev_dependency = True)
 
 git_override(
     module_name = "xctestrunner",
-    commit = "9548d93f29a2a93315d7a0458622682c0f76e6fe",
+    commit = "5bcb17328a6fe51c9800075362414d46f1f824bf",
     remote = "https://github.com/apple-cross-toolchain/xctestrunner-bash.git",
 )
 
