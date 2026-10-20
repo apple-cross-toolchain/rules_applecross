@@ -30,5 +30,6 @@ ios_application(
     families = ["iphone"],
     infoplists = ["App/Info.plist"],
     minimum_os_version = "17.0",
+    tags = ["manual"],
     deps = [":App"],
 )
