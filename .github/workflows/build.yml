@@ -45,7 +45,16 @@ jobs:
           retention-days: 1
   build:
     needs: package_sdks
+    strategy:
+      fail-fast: false
+      matrix:
+        bazel: &bazel_versions
+          - 8
+          - 9
+          - 10
     runs-on: ubuntu-24.04
+    env:
+      USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
     permissions:
       actions: read
       contents: read
@@ -66,6 +75,7 @@ jobs:
         with:
           storage-mode: pack
           github-token: ${{ github.token }}
+          expected-writers: ${{ strategy.job-total }}
           mode: >-
             ${{ github.event_name == 'push' &&
                 github.ref == format(
@@ -105,21 +115,35 @@ jobs:
           tar -cJvf CommandLineExamples.tar.xz CommandLineExamples
       - uses: actions/upload-artifact@v7
         with:
-          name: Tests
+          name: Tests-bazel${{ matrix.bazel }}
           path: Tests.tar.xz
           retention-days: 1
       - uses: actions/upload-artifact@v7
         with:
-          name: CommandLineExamples
+          name: CommandLineExamples-bazel${{ matrix.bazel }}
           path: CommandLineExamples.tar.xz
           retention-days: 1
+  build_status:
+    name: build
+    if: always()
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - env:
+          RESULT: ${{ needs.build.result }}
+        run: test "$RESULT" = success
   run_tests:
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        bazel: *bazel_versions
     runs-on: macOS-latest
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: CommandLineExamples
+          name: CommandLineExamples-bazel${{ matrix.bazel }}
           path: CommandLineExamples-artifact
           # Work around actions/download-artifact#484 until its bundled
           # unzip-stream dependency no longer uses the deprecated Buffer().
@@ -137,7 +161,7 @@ jobs:
           grep -Fq 'Hello World from com.example.command-line-swift' <<< "$command_line_swift_output"
       - uses: actions/download-artifact@v8
         with:
-          name: Tests
+          name: Tests-bazel${{ matrix.bazel }}
           path: Tests-artifact
           # Work around actions/download-artifact#484 until its bundled
           # unzip-stream dependency no longer uses the deprecated Buffer().
@@ -165,7 +189,10 @@ jobs:
         os:
           - ubuntu-24.04
           - macos-26
+        bazel: *bazel_versions
     runs-on: ${{ matrix.os }}
+    env:
+      USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
     permissions:
       contents: read
     steps:
@@ -197,13 +224,19 @@ jobs:
           //examples/...
   remote_build_local_xcode:
     # The same remote build reading the runner's own Xcode instead of a
-    # packaged archive. It is a separate job rather than a third leg of
+    # packaged archive. It is a separate job rather than another leg of
     # remote_build because it needs no artifact, and `needs` would make it wait
     # for package_sdks anyway.
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        bazel: *bazel_versions
     runs-on: macos-26
+    env:
+      USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
     permissions:
       contents: read
     steps:
@@ -235,7 +268,13 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        bazel: *bazel_versions
     runs-on: macos-26
+    env:
+      USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
     permissions:
       contents: read
     steps:
