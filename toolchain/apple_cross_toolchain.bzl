@@ -300,10 +300,13 @@ def _materialize_apple_sdks(rctx):
             rctx.execute(["bash", "-c", "cp -al '" + str(apple_sdk_local) + "/.' ."])
         else:
             # Tarball
+            kwargs = {}
+            if rctx.attr.apple_sdk_archive_type:
+                kwargs["type"] = rctx.attr.apple_sdk_archive_type
             rctx.extract(
                 archive = apple_sdk_local,
                 stripPrefix = rctx.attr.apple_sdk_strip_prefix or "",
-                type = rctx.attr.apple_sdk_archive_type or "",
+                **kwargs
             )
     elif rctx.attr.apple_sdk_urls:
         _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
