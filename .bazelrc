@@ -5,6 +5,7 @@ common --enable_platform_specific_config
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
 common --repo_env=BAZEL_DO_NOT_DETECT_SWIFT_TOOLCHAIN=1
+common --incompatible_repo_env_ignores_action_env
 
 build --use_top_level_targets_for_symlinks
 build --verbose_failures
