@@ -45,6 +45,7 @@ macOS](#building-on-macos) for what a macOS host does differently.
 3. Add the following to your `.bazelrc`:
 
     ```
+    common --incompatible_repo_env_ignores_action_env
     build --xcode_version_config=@apple_cross_toolchain//:host_xcodes
     build --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
     build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
@@ -52,6 +53,8 @@ macOS](#building-on-macos) for what a macOS host does differently.
 
     The Xcode and SDK versions are read out of the SDK tree when
     `@apple_cross_toolchain` is fetched, so there is nothing to pin by hand.
+    The first line keeps that relative `DEVELOPER_DIR` out of repository rules
+    on Bazel 8, as Bazel 9 already does.
 
 4. Build an example:
 
