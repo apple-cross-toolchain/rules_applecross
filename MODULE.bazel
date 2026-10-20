@@ -56,6 +56,8 @@ register_toolchains(
     dev_dependency = True,
 )
 
+register_toolchains("//testing:default_test_toolchain")
+
 # Marks the execution platforms allowed to build Apple products (link, bundle,
 # resources, signing, tests). Registered as a dev dependency so that a module
 # depending on this one chooses for itself which of the two it wants; see the

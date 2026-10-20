@@ -16,11 +16,18 @@ toolchain(
     name = "ios_test_toolchain",
     target_compatible_with = ["@platforms//os:ios"],
     toolchain = ":empty_test_toolchain",
-    # Bazel 8 has no test toolchain type; keep the target so registration resolves.
-    toolchain_type = "@bazel_tools//tools/test:default_test_toolchain_type" if bazel_features.toolchains.has_default_test_toolchain_type else ":unused_test_toolchain_type",
+    # Bazel 8 has no test toolchain type; :test_toolchain_type stands in for it.
+    toolchain_type = "@bazel_tools//tools/test:default_test_toolchain_type" if bazel_features.toolchains.has_default_test_toolchain_type else ":test_toolchain_type",
 )
 
-toolchain_type(name = "unused_test_toolchain_type")
+toolchain_type(name = "test_toolchain_type")
+
+toolchain(
+    name = "default_test_toolchain",
+    toolchain = ":empty_test_toolchain",
+    toolchain_type = ":test_toolchain_type",
+    use_target_platform_constraints = True,
+)
 
 ios_xctestrun_runner(
     name = "ios_xctestrun_ordered_runner",
