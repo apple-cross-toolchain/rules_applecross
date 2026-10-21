@@ -67,6 +67,20 @@ std::string Dirname(const std::string &path) {
 }
 
 #if !__APPLE__
+std::string ResolveFromAncestor(const std::string &path,
+                                const std::string &cwd) {
+  if (path.empty() || path[0] == '/' || access(path.c_str(), F_OK) == 0) {
+    return path;
+  }
+  for (std::string dir = Dirname(cwd); !dir.empty(); dir = Dirname(dir)) {
+    std::string candidate = dir + "/" + path;
+    if (access(candidate.c_str(), F_OK) == 0) {
+      return candidate;
+    }
+  }
+  return path;
+}
+
 bool ContainsArgument(const std::vector<std::string> &args,
                       const std::string &value) {
   for (const auto &arg : args) {
@@ -118,12 +132,15 @@ static std::string Unescape(const std::string &arg) {
 }
 
 // Converts an array of string arguments to char *arguments.
-// The first arg is reduced to its basename as per execve conventions.
 // Note that the lifetime of the char* arguments in the returned array
 // are controlled by the lifetime of the strings in args.
 std::vector<const char *> ConvertToCArgs(const std::vector<std::string> &args) {
   std::vector<const char *> c_args;
+#if __APPLE__
   c_args.push_back(Basename(args[0].c_str()));
+#else
+  c_args.push_back(args[0].c_str());
+#endif
   for (int i = 1; i < args.size(); i++) {
     c_args.push_back(args[i].c_str());
   }
@@ -421,6 +438,7 @@ int main(int argc, char *argv[]) {
     abort();
   }
 
+  const std::string cwd = GetCurrentDirectory();
 #if __APPLE__
   std::string developer_dir = GetMandatoryEnvVar("DEVELOPER_DIR");
   std::string sdk_root = GetMandatoryEnvVar("SDKROOT");
@@ -445,6 +463,7 @@ int main(int argc, char *argv[]) {
               << "Set DEVELOPER_DIR.\n";
     abort();
   }
+  developer_dir = ResolveFromAncestor(developer_dir, cwd);
 
   std::string sdk_root = GetEnvVar("SDKROOT");
   if (sdk_root == "") {
@@ -456,11 +475,11 @@ int main(int argc, char *argv[]) {
     sdk_root = developer_dir + "/Platforms/" + sdk_platform +
         ".platform/Developer/SDKs/" + sdk_platform + sdk_version + ".sdk";
   }
+  sdk_root = ResolveFromAncestor(sdk_root, cwd);
 #endif
   std::string linked_binary, dsym_path;
   bool strip_debug_symbols = false;
 
-  const std::string cwd = GetCurrentDirectory();
 #if __APPLE__
   std::vector<std::string> invocation_args = {"/usr/bin/xcrun", tool_name};
 #else
