@@ -86,11 +86,12 @@ llvm_toolchain_minimal.release(
 use_repo(
     llvm_toolchain_minimal,
     "llvm-toolchain-minimal-%s-darwin-amd64" % LLVM_PREBUILT_VERSION,
-    "llvm-toolchain-minimal-%s-darwin-arm64" % LLVM_PREBUILT_VERSION,
     "llvm-toolchain-minimal-%s-windows-amd64" % LLVM_PREBUILT_VERSION,
     "llvm-toolchain-minimal-%s-windows-arm64" % LLVM_PREBUILT_VERSION,
     llvm_prebuilt = "llvm-toolchain-minimal-%s-linux-amd64" % LLVM_PREBUILT_VERSION,
     llvm_prebuilt_aarch64 = "llvm-toolchain-minimal-%s-linux-arm64" % LLVM_PREBUILT_VERSION,
+    # For the macOS execution platform's toolchains.
+    llvm_prebuilt_macos = "llvm-toolchain-minimal-%s-darwin-arm64" % LLVM_PREBUILT_VERSION,
 )
 
 apple_cross_toolchain = use_extension(

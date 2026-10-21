@@ -80,6 +80,7 @@ std::string ResolveFromAncestor(const std::string &path,
   }
   return path;
 }
+#endif
 
 bool ContainsArgument(const std::vector<std::string> &args,
                       const std::string &value) {
@@ -90,7 +91,6 @@ bool ContainsArgument(const std::vector<std::string> &args,
   }
   return false;
 }
-#endif
 
 // Unescape and unquote an argument read from a line of a response file.
 static std::string Unescape(const std::string &arg) {
@@ -441,7 +441,11 @@ int main(int argc, char *argv[]) {
   const std::string cwd = GetCurrentDirectory();
 #if __APPLE__
   std::string developer_dir = GetMandatoryEnvVar("DEVELOPER_DIR");
-  std::string sdk_root = GetMandatoryEnvVar("SDKROOT");
+  // Bazel sets SDKROOT to the Mac's Xcode; APPLECROSS_SYSROOT overrides it.
+  std::string sdk_root = GetEnvVar("APPLECROSS_SYSROOT");
+  if (sdk_root.empty()) {
+    sdk_root = GetMandatoryEnvVar("SDKROOT");
+  }
 #else
   // On non-Apple platforms, get DEVELOPER_DIR from the environment (set by
   // the CC toolchain config's apple_env feature).
@@ -480,15 +484,24 @@ int main(int argc, char *argv[]) {
   std::string linked_binary, dsym_path;
   bool strip_debug_symbols = false;
 
+  // Set by macOS execution platforms to use the staged LLVM instead of xcrun.
+  std::string toolchain_bin = GetEnvVar("APPLECROSS_TOOLCHAIN_BIN");
 #if __APPLE__
-  std::vector<std::string> invocation_args = {"/usr/bin/xcrun", tool_name};
+  bool use_xcrun = toolchain_bin.empty();
 #else
-  std::string toolchain_bin = developer_dir +
-      "/Toolchains/XcodeDefault.xctoolchain/usr/bin";
-  std::string tool_path = toolchain_bin + "/" + tool_name;
-  setenv("SDKROOT", sdk_root.c_str(), 1);
-  std::vector<std::string> invocation_args = {tool_path};
+  bool use_xcrun = false;
+  if (toolchain_bin.empty()) {
+    toolchain_bin = developer_dir +
+        "/Toolchains/XcodeDefault.xctoolchain/usr/bin";
+  }
 #endif
+  std::vector<std::string> invocation_args;
+  if (use_xcrun) {
+    invocation_args = {"/usr/bin/xcrun", tool_name};
+  } else {
+    setenv("SDKROOT", sdk_root.c_str(), 1);
+    invocation_args = {toolchain_bin + "/" + tool_name};
+  }
   std::vector<std::string> processed_args = {};
 
   bool relative_ast_path = getenv("RELATIVE_AST_PATH") != nullptr;
@@ -502,15 +515,13 @@ int main(int argc, char *argv[]) {
                     strip_debug_symbols, linked_binary, dsym_path, consumer);
   }
 
-#if !__APPLE__
-  // XCTest bundles intentionally leave symbols for the test runner to resolve
-  // when it loads them.
-  if (ContainsArgument(processed_args, "-bundle") &&
-      ContainsArgument(processed_args, "XCTest")) {
-    processed_args.push_back("-Wl,-undefined,dynamic_lookup");
+  if (!use_xcrun) {
+    // XCTest bundles leave symbols for the test runner to resolve.
+    if (ContainsArgument(processed_args, "-bundle") &&
+        ContainsArgument(processed_args, "XCTest")) {
+      processed_args.push_back("-Wl,-undefined,dynamic_lookup");
+    }
   }
-
-#endif
 
   // Handle APPLE_SUPPORT_MODULEMAP VFS overlay for layering check support.
   const char *module_map_env = getenv("APPLE_SUPPORT_MODULEMAP");
@@ -544,29 +555,22 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-#if __APPLE__
-  std::string dsym_xcrun = "/usr/bin/xcrun";
-#else
-  std::string dsymutil_path = toolchain_bin + "/dsymutil";
-  std::string strip_path = toolchain_bin + "/strip";
-#endif
+  // dsymutil and strip come from the same place clang did.
+  auto tool = [&](const std::string &name, const std::string &llvm_name) {
+    std::vector<std::string> args;
+    if (use_xcrun) {
+      args = {"/usr/bin/xcrun", name};
+    } else {
+      args = {toolchain_bin + "/" + llvm_name};
+    }
+    return args;
+  };
 
   // Generate dSYM if dsym_path is set.
   if (!dsym_path.empty()) {
-#if __APPLE__
-    std::vector<std::string> dsymutil_args = {dsym_xcrun,
-                                              "dsymutil",
-                                              linked_binary,
-                                              "-o",
-                                              dsym_path,
-                                              "--no-swiftmodule-timestamp"};
-#else
-    std::vector<std::string> dsymutil_args = {dsymutil_path,
-                                              linked_binary,
-                                              "-o",
-                                              dsym_path,
-                                              "--no-swiftmodule-timestamp"};
-#endif
+    std::vector<std::string> dsymutil_args = tool("dsymutil", "dsymutil");
+    dsymutil_args.insert(dsymutil_args.end(),
+                         {linked_binary, "-o", dsym_path, "--no-swiftmodule-timestamp"});
     // If dsym_path ends with .dSYM, generate a bundle; otherwise use --flat.
     if (dsym_path.size() < 5 ||
         dsym_path.compare(dsym_path.size() - 5, 5, ".dSYM") != 0) {
@@ -579,12 +583,8 @@ int main(int argc, char *argv[]) {
 
   // Strip debug symbols if requested.
   if (strip_debug_symbols) {
-#if __APPLE__
-    std::vector<std::string> strip_args = {dsym_xcrun, "strip", "-S",
-                                           linked_binary};
-#else
-    std::vector<std::string> strip_args = {strip_path, "-S", linked_binary};
-#endif
+    std::vector<std::string> strip_args = tool("strip", "strip");
+    strip_args.insert(strip_args.end(), {"-S", linked_binary});
     if (!RunSubProcess(strip_args)) {
       return 2;
     }
