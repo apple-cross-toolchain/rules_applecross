@@ -714,7 +714,7 @@ cc_toolchain_suite(
         ],
         target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
         toolchain = ":swift-compiler-" + arch,
-        toolchain_type = "@build_bazel_rules_swift//toolchains:toolchain_type",
+        toolchain_type = "@rules_swift//toolchains:toolchain_type",
     )
     for arch in _APPLE_ARCHS
 ]
@@ -746,7 +746,7 @@ _SWIFT_TOOLS_MACOS = "%{swift_tools_macos}"
         ],
         target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
         toolchain = ":swift-compiler-" + arch + "-macos-exec",
-        toolchain_type = "@build_bazel_rules_swift//toolchains:toolchain_type",
+        toolchain_type = "@rules_swift//toolchains:toolchain_type",
     )
     for arch in _APPLE_ARCHS
     if _SWIFT_TOOLS_MACOS
