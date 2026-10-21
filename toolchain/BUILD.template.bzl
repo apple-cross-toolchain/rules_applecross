@@ -545,6 +545,19 @@ cc_args(
 )
 
 cc_args(
+    name = "applecross_no_cxx_modules",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:cpp_compile",
+        "@rules_cc//cc/toolchains/actions:cpp_header_parsing",
+        "@rules_cc//cc/toolchains/actions:objcpp_compile",
+    ],
+    args = [
+        "-fno-cxx-modules",
+        "-Wno-unused-command-line-argument",
+    ],
+)
+
+cc_args(
     name = "applecross_env",
     actions = ["@rules_cc//cc/toolchains/actions:all_actions"],
     env = {
@@ -639,6 +652,7 @@ dynamic_toolchain_info(
             "@apple_support_toolchain_env//:include_directories_from_xcode",
             ":applecross_env",
             ":applecross_apple_clang_compat",
+            ":applecross_no_cxx_modules",
             ":applecross_sysroot_" + arch,
             ":applecross_platform_link_paths_" + arch,
             "@apple_support//toolchain:xcode_env",
