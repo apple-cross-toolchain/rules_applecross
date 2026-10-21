@@ -78,20 +78,26 @@ def _install_executable(rctx, source, destination):
 _SWIFT_HOST_DEPS_DEBS = [
     (
         "libncurses6.deb",
-        "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/n/ncurses/libncurses6_6.4+20240113-1ubuntu2.1_amd64.deb",
+        [
+            "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/n/ncurses/libncurses6_6.4+20240113-1ubuntu2.1_amd64.deb",
+            "https://launchpad.net/ubuntu/+archive/primary/+files/libncurses6_6.4+20240113-1ubuntu2.1_amd64.deb",
+        ],
         "c4d0fd9d7c997f4b13dbfdd9b9a5e14ed0222303ac931f9c2594c6b99696b63d",
     ),
     (
         "libsqlite3.deb",
-        "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.7_amd64.deb",
+        [
+            "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.7_amd64.deb",
+            "https://launchpad.net/ubuntu/+archive/primary/+files/libsqlite3-0_3.45.1-1ubuntu2.7_amd64.deb",
+        ],
         "488511119cad001a00f7e00e597112cf743ccfbd3f7a03c82d66237e1bfd82c8",
     ),
 ]
 
 def _install_swift_host_deps(rctx, toolchain_dir):
     """Stage Ubuntu shared libraries needed by the Swift driver at runtime."""
-    for name, url, sha256 in _SWIFT_HOST_DEPS_DEBS:
-        rctx.download(url = url, output = "_debs/" + name, sha256 = sha256)
+    for name, urls, sha256 in _SWIFT_HOST_DEPS_DEBS:
+        rctx.download(url = urls, output = "_debs/" + name, sha256 = sha256)
 
         # A .deb is an ar archive whose payload is data.tar.zst.
         result = rctx.execute(["ar", "x", name], working_directory = "_debs")
