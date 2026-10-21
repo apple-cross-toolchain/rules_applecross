@@ -4,21 +4,21 @@ module(
 )
 
 bazel_dep(name = "bazel_features", version = "1.51.0")
-bazel_dep(name = "apple_support", version = "2.8.4")
+bazel_dep(name = "apple_support", version = "2.10.1")
 single_version_override(
     module_name = "apple_support",
     patch_strip = 1,
     patches = [
         "//patches:apple_support_bazel8_xcode_properties.patch",
     ],
-    version = "2.8.4",
+    version = "2.10.1",
 )
 
 apple_support_toolchain_env = use_repo_rule("@apple_support//toolchain:toolchain_env.bzl", "toolchain_env")
 
 apple_support_toolchain_env(name = "apple_support_toolchain_env")
 
-bazel_dep(name = "rules_apple", version = "5.2.0", repo_name = "build_bazel_rules_apple")
+bazel_dep(name = "rules_apple", version = "5.3.1", repo_name = "build_bazel_rules_apple")
 single_version_override(
     module_name = "rules_apple",
     patch_strip = 1,
@@ -29,12 +29,13 @@ single_version_override(
         "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
         "//patches:rules_apple_python_stub_interpreter.patch",
         "//patches:rules_apple_alticonstool_missing_icons.patch",
+        "//patches:rules_apple_dossier_zipfile.patch",
     ],
-    version = "5.2.0",
+    version = "5.3.1",
 )
 
-bazel_dep(name = "rules_swift", version = "4.1.2", repo_name = "build_bazel_rules_swift")
-bazel_dep(name = "rules_cc", version = "0.2.20")
+bazel_dep(name = "rules_swift", version = "4.2.2", repo_name = "build_bazel_rules_swift")
+bazel_dep(name = "rules_cc", version = "0.2.26")
 bazel_dep(name = "rules_python", version = "1.7.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "llvm", version = "0.8.9")

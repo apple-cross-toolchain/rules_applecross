@@ -1,8 +1,8 @@
 diff --git a/tools/bundletool/bundletool_experimental.py b/tools/bundletool/bundletool_experimental.py
-index c66bd7e8..12bf1222 100644
+index 02043559..d0654a5e 100644
 --- a/tools/bundletool/bundletool_experimental.py
 +++ b/tools/bundletool/bundletool_experimental.py
-@@ -400,7 +400,7 @@ class Bundler(object):
+@@ -407,7 +407,7 @@ class Bundler(object):
      for command in command_lines.splitlines():
        argv = [arg.replace('$WORK_DIR', bundle_root) for arg in shlex.split(command)]
        try:

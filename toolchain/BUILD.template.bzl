@@ -192,6 +192,8 @@ APPLE_SUPPORT_KNOWN_FEATURES = APPLE_SUPPORT_MARKER_FEATURES + [
     "@apple_support//toolchain:dbg",
     "@apple_support//toolchain:fastbuild",
     "@apple_support//toolchain/coverage:coverage",
+    "@apple_support//toolchain/coverage:coverage_enabled",
+    "@apple_support//toolchain/coverage:coverage_instrumented",
     "@apple_support//toolchain:kernel_extension",
     "@apple_support//toolchain:serialized_diagnostics_file",
     "@apple_support//toolchain/coverage:llvm_coverage_map_format",

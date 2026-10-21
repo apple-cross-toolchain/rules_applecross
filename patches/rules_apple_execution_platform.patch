@@ -1,11 +1,11 @@
 diff --git a/MODULE.bazel b/MODULE.bazel
-index 1c5fe968..77c28809 100644
+index c6cbdb60..3634131b 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
 @@ -8,8 +8,14 @@ module(
  )
  
- bazel_dep(name = "apple_support", version = "2.8.3")
+ bazel_dep(name = "apple_support", version = "2.9.1")
 +# rule_factory.bzl gates the test exec group on bazel_features.
 +bazel_dep(name = "bazel_features", version = "1.36.0")
  bazel_dep(name = "bazel_skylib", version = "1.8.2")
@@ -64,10 +64,10 @@ index 7d6e28bc..b548ff22 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
-index 343c14d9..6f718d54 100644
+index f11af417..35f1640c 100644
 --- a/apple/internal/apple_toolchains.bzl
 +++ b/apple/internal/apple_toolchains.bzl
-@@ -266,6 +266,10 @@ APPLE_XPLAT_EXEC_GROUP = "_xplat_tool_group"
+@@ -278,6 +278,10 @@ APPLE_XPLAT_EXEC_GROUP = "_xplat_tool_group"
  APPLE_MAC_TOOLCHAIN_TYPE = "//apple/internal:mac_tools_toolchain_type"
  APPLE_MAC_EXEC_GROUP = "_mac_tool_group"
  
@@ -78,7 +78,7 @@ index 343c14d9..6f718d54 100644
  def _apple_xplat_tools_toolchain_impl(ctx):
      xplat_info = AppleXPlatToolsToolchainInfo(
          build_settings = struct(
-@@ -340,11 +344,16 @@ def _use_apple_exec_group_toolchain():
+@@ -352,11 +356,16 @@ def _use_apple_exec_group_toolchain():
      """
      groups = {
          APPLE_XPLAT_EXEC_GROUP: exec_group(
@@ -99,7 +99,7 @@ index 343c14d9..6f718d54 100644
      }
  
 diff --git a/apple/internal/codesigning_support.bzl b/apple/internal/codesigning_support.bzl
-index 1d34fead..ea6ca08b 100644
+index 7a8eeec0..8f766540 100644
 --- a/apple/internal/codesigning_support.bzl
 +++ b/apple/internal/codesigning_support.bzl
 @@ -126,7 +126,7 @@ def _codesign_args_for_path(
@@ -210,10 +210,10 @@ index c31321a3..9cf4dcf3 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/ios_rules.bzl b/apple/internal/ios_rules.bzl
-index 487b544f..d6c632ac 100644
+index c66919a8..5be0fda4 100644
 --- a/apple/internal/ios_rules.bzl
 +++ b/apple/internal/ios_rules.bzl
-@@ -459,7 +459,7 @@ def _ios_application_impl(ctx):
+@@ -462,7 +462,7 @@ def _ios_application_impl(ctx):
          ),
      )
  
@@ -263,10 +263,10 @@ index 45646d44..05258764 100644
          inputs = binary_files,
          mnemonic = "SwiftStdlibCopy",
 diff --git a/apple/internal/resource_actions/app_intents.bzl b/apple/internal/resource_actions/app_intents.bzl
-index ba057f00..4398c2bf 100644
+index de2fc8be..431e3f4e 100644
 --- a/apple/internal/resource_actions/app_intents.bzl
 +++ b/apple/internal/resource_actions/app_intents.bzl
-@@ -71,7 +71,7 @@ def generate_app_intents_metadata_bundle(
+@@ -83,7 +83,7 @@ def generate_app_intents_metadata_bundle(
      )
  
      args = actions.args()
@@ -383,7 +383,7 @@ index ef0067af..d0167108 100644
 +    toolchains = ["@rules_applecross//toolchain:apple_bundling_toolchain_type"],
  )
 diff --git a/apple/internal/rule_factory.bzl b/apple/internal/rule_factory.bzl
-index ac4fa9ab..67033187 100644
+index ac4fa9ab..4f6a2329 100644
 --- a/apple/internal/rule_factory.bzl
 +++ b/apple/internal/rule_factory.bzl
 @@ -14,6 +14,7 @@
@@ -536,10 +536,10 @@ index faf66566..4777577c 100644
  # Launch the app binary
  # Do *not* use exec here because we want the trap above to execute after the
 diff --git a/apple/internal/watchos_rules.bzl b/apple/internal/watchos_rules.bzl
-index ae7f8a19..1b10e3ed 100644
+index 838f5ef5..36e3f253 100644
 --- a/apple/internal/watchos_rules.bzl
 +++ b/apple/internal/watchos_rules.bzl
-@@ -869,6 +869,7 @@ reproducible error case.".format(
+@@ -874,6 +874,7 @@ reproducible error case.".format(
          archs_for_lipo = sets.to_list(requested_archs),
          platform_prerequisites = platform_prerequisites,
          rule_label = label,

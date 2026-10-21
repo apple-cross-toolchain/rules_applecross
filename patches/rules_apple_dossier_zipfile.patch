@@ -1,0 +1,71 @@
+Zip and unzip codesigning dossiers with Python's zipfile instead of
+/usr/bin/zip and /usr/bin/unzip, which executor images may lack.
+
+rules_apple builds the test bundle and test host dossiers whenever
+disable_legacy_signing is enabled, as --config=remote does.
+
+diff --git a/tools/dossier_codesigningtool/dossier_codesigning_reader.py b/tools/dossier_codesigningtool/dossier_codesigning_reader.py
+index 0ce68d5d..5dd82865 100755
+--- a/tools/dossier_codesigningtool/dossier_codesigning_reader.py
++++ b/tools/dossier_codesigningtool/dossier_codesigning_reader.py
+@@ -71,6 +71,7 @@ import subprocess
+ import sys
+ import tempfile
+ import traceback
++import zipfile
+ 
+ _MACOS = sys.platform == "darwin"
+ 
+@@ -912,12 +913,8 @@ def _extract_zipped_dossier(zipped_dossier_path):
+     OSError: If unable to execute the unpacking command.
+   """
+   dossier_path = tempfile.mkdtemp()
+-  command = ('/usr/bin/unzip', '-q', zipped_dossier_path, '-d', dossier_path)
+-  process = subprocess.Popen(
+-      command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+-  _, stderr = process.communicate()
+-  if process.poll() != 0:
+-    raise OSError('Fail to unzip dossier at path: %s' % stderr)
++  with zipfile.ZipFile(zipped_dossier_path) as archive:
++    archive.extractall(dossier_path)
+   return dossier_path
+ 
+ 
+diff --git a/tools/dossier_codesigningtool/dossier_codesigningtool.py b/tools/dossier_codesigningtool/dossier_codesigningtool.py
+index c724ce0d..39da666c 100644
+--- a/tools/dossier_codesigningtool/dossier_codesigningtool.py
++++ b/tools/dossier_codesigningtool/dossier_codesigningtool.py
+@@ -27,6 +27,7 @@ import sys
+ import tempfile
+ from typing import Dict, List, Optional, Tuple, Union
+ import uuid
++import zipfile
+ 
+ from tools.dossier_codesigningtool import dossier_codesigning_reader as dossier_reader
+ 
+@@ -469,21 +470,10 @@ def _zip_dossier(dossier_path: str, destination_path: str) -> None:
+   Raises:
+     OSError: If unable to execute packaging command
+   """
+-  command = (
+-      '/usr/bin/zip',
+-      '--recurse-paths',
+-      '--junk-paths',
+-      '--quiet',
+-      '--strip-extra',
+-      '--compression-method', 'store',
+-      destination_path,
+-      dossier_path,
+-  )
+-  process = subprocess.Popen(
+-      command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+-  _, stderr = process.communicate()
+-  if process.poll() != 0:
+-    raise OSError('Fail to zip dossier: %s' % stderr)
++  with zipfile.ZipFile(destination_path, 'w', zipfile.ZIP_STORED) as archive:
++    for root, _, filenames in os.walk(dossier_path):
++      for filename in sorted(filenames):
++        archive.write(os.path.join(root, filename), filename)
+ 
+ 
+ def _merge_dossier_contents(
