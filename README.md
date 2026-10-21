@@ -108,7 +108,8 @@ The Swift toolchain must match the Swift that built those SDKs, which is the
 Swift of the Xcode *one release behind* the SDKs' own: Xcode 26.6 ships the 26.5
 SDKs, and those were built by Swift 6.3.2. A mismatch shows up as `this SDK is
 not supported by the compiler` when compiling any Swift that imports a system
-framework. Set `swift_version` on `applecross_swift.toolchain()` accordingly.
+framework. Set `swift_version` (and the archives' `platform_sha256`) on
+`apple_cross_toolchain.swift()` accordingly.
 
 ## Remote Build Execution Setup (for BuildBuddy)
 

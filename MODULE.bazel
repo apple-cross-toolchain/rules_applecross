@@ -32,7 +32,7 @@ single_version_override(
     version = "5.2.0",
 )
 
-bazel_dep(name = "rules_swift", version = "4.1.2", repo_name = "build_bazel_rules_swift")
+bazel_dep(name = "rules_swift", version = "4.1.2")
 bazel_dep(name = "rules_cc", version = "0.2.20")
 bazel_dep(name = "rules_python", version = "1.7.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
@@ -87,11 +87,14 @@ use_repo(
     llvm_prebuilt = "llvm-toolchain-minimal-%s-linux-amd64" % LLVM_PREBUILT_VERSION,
 )
 
-applecross_swift = use_extension("@build_bazel_rules_swift//swift:extensions.bzl", "swift")
+apple_cross_toolchain = use_extension(
+    "//toolchain:extensions.bzl",
+    "apple_cross_toolchain",
+)
 
 # Must match the Swift that built the Apple SDKs: Xcode 27.0's SDKs were built
 # by Swift 6.4.
-applecross_swift.toolchain(
+apple_cross_toolchain.swift(
     name = "applecross_swift",
     platform_sha256 = {
         "ubuntu24.04": "69f7b2b4dbce6090b6c92194b71149a057e16269093b5a9dded38afc4a05094e",
@@ -100,16 +103,7 @@ applecross_swift.toolchain(
     },
     swift_version = "6.4.0",
 )
-use_repo(
-    applecross_swift,
-    "applecross_swift_ubuntu24.04",
-    "applecross_swift_xcode",
-)
 
-apple_cross_toolchain = use_extension(
-    "//toolchain:extensions.bzl",
-    "apple_cross_toolchain",
-)
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     apple_sdk_path = "apple-sdks.tar.zst",

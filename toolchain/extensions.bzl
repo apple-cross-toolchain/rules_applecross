@@ -1,8 +1,27 @@
 """Module extension for configuring the Apple cross-compilation toolchain."""
 
+load("@rules_swift//swift/internal/extensions:standalone_toolchain.bzl", "standalone_toolchain")
 load("//toolchain:apple_cross_toolchain.bzl", _apple_cross_toolchain_rule = "apple_cross_toolchain")
 
 def _apple_cross_toolchain_impl(module_ctx):
+    # swift.org's toolchains, one repository per platform (<name>_<platform>),
+    # as rules_swift's `swift` extension makes them. That extension serves
+    # only the root module, which may need it for its own toolchains.
+    swift_repos = {}
+    for mod in module_ctx.modules:
+        for swift in mod.tags.swift:
+            for platform, sha256 in swift.platform_sha256.items():
+                name = "{}_{}".format(swift.name, platform)
+                if name in swift_repos:
+                    continue
+                swift_repos[name] = True
+                standalone_toolchain(
+                    name = name,
+                    platform = platform,
+                    sha256 = sha256,
+                    swift_version = swift.swift_version,
+                )
+
     created = {}
     for mod in module_ctx.modules:
         for config in mod.tags.configure:
@@ -48,9 +67,24 @@ _configure_tag = tag_class(
     },
 )
 
+_swift_tag = tag_class(
+    attrs = {
+        "name": attr.string(mandatory = True),
+        "platform_sha256": attr.string_dict(
+            mandatory = True,
+            doc = "SHA-256 of swift.org's archive per rules_swift platform " +
+                  "name (\"ubuntu24.04\", \"ubuntu24.04-aarch64\", \"xcode\").",
+        ),
+        "swift_version": attr.string(mandatory = True),
+    },
+    doc = "swift.org's Swift for the toolchain's compilers, as repositories " +
+          "<name>_<platform> holding rules_swift's swift_tools targets.",
+)
+
 apple_cross_toolchain = module_extension(
     implementation = _apple_cross_toolchain_impl,
     tag_classes = {
         "configure": _configure_tag,
+        "swift": _swift_tag,
     },
 )
