@@ -1,6 +1,5 @@
 startup --host_jvm_args=-DBAZEL_TRACK_SOURCE_DIRECTORIES=1
 
-common --downloader_config=tools/downloader.cfg
 common --enable_platform_specific_config
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
@@ -40,7 +39,6 @@ build:remote --extra_execution_platforms=//platforms:linux_x86_64
 # a signature anyway. Disabling it turns ProcessAndSign into a plain copy,
 # avoiding tools (zip, python3) that the remote executor image lacks.
 build:remote --features=disable_legacy_signing
-build:remote --host_features=fully_static_link
 
 # Compiling and archiving on the executors, everything downstream on this Mac
 # with its real Xcode. Compile actions are identical to --config=remote, so both

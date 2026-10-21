@@ -118,6 +118,7 @@ framework. Set `swift_version` on `applecross_swift.toolchain()` accordingly.
     platform(
         name = "docker_image_platform",
         constraint_values = [
+            "@llvm//constraints/libc:gnu.2.28",
             "@platforms//cpu:x86_64",
             "@platforms//os:linux",
         ],
@@ -127,6 +128,9 @@ framework. Set `swift_version` on `applecross_swift.toolchain()` accordingly.
         },
     )
     ```
+
+    Exec tools link against glibc, so the image must provide glibc 2.28 or
+    newer.
 
 2. Add the following to your `.bazelrc`:
 

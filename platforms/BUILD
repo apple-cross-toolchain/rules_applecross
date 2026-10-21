@@ -27,7 +27,7 @@ platform(
 platform(
     name = "linux_x86_64",
     constraint_values = [
-        "@llvm//constraints/libc:musl",
+        "@llvm//constraints/libc:gnu.2.28",
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",
     ],

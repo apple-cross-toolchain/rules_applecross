@@ -11,6 +11,6 @@
 - [ ] Split `toolchain_files` by platform and action. Swift compile, C/ObjC compile, archive, link, bundle, and plist actions should each receive only the files they actually need.
 - [ ] Normalize and minimize SDK archive generation: no AppleDouble/xattrs, pre-normalized modulemaps, and ideally platform-sliced archives or filegroups.
 - [ ] Register and generate only the Apple toolchains needed by the requested platforms, starting with `ios_arm64` for the RBE demo path.
-- [ ] Avoid cold-building musl/LLVM/rules_swift exec tools by using prebuilt static helpers or an executor image with compatible host Swift/glibc dependencies.
+- [ ] Avoid cold-building LLVM/rules_swift exec tools by using prebuilt static helpers or an executor image with compatible host Swift/glibc dependencies.
 - [ ] Decide whether to standardize on a custom BuildBuddy executor image or hermetically bundle Swift host runtime libraries.
 - [ ] Upstream or otherwise harden the needed `rules_apple`/`apple_support` integration points so the implementation is maintainable.
