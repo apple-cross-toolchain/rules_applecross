@@ -19,49 +19,49 @@ Adapted for rules_swift 3.x.
 
 load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
-    "@build_bazel_rules_swift//swift:providers.bzl",
+    "@rules_swift//swift:providers.bzl",
     "SwiftToolsInfo",
 )
 load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
+    "@rules_swift//swift:swift.bzl",
     "SwiftToolchainInfo",
 )
 load(
-    "@build_bazel_rules_swift//swift/internal:features.bzl",
+    "@rules_swift//swift/internal:features.bzl",
     "features_for_build_modes",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:action_config.bzl",
+    "@rules_swift//swift/toolchains/config:action_config.bzl",
     "ActionConfigInfo",
     "add_arg",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:all_actions_config.bzl",
+    "@rules_swift//swift/toolchains/config:all_actions_config.bzl",
     "all_actions_action_configs",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:compile_config.bzl",
+    "@rules_swift//swift/toolchains/config:compile_config.bzl",
     "command_line_objc_copts",
     "compile_action_configs",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:compile_module_interface_config.bzl",
+    "@rules_swift//swift/toolchains/config:compile_module_interface_config.bzl",
     "compile_module_interface_action_configs",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:modulewrap_config.bzl",
+    "@rules_swift//swift/toolchains/config:modulewrap_config.bzl",
     "modulewrap_action_configs",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:symbol_graph_config.bzl",
+    "@rules_swift//swift/toolchains/config:symbol_graph_config.bzl",
     "symbol_graph_action_configs",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:synthesize_interface_config.bzl",
+    "@rules_swift//swift/toolchains/config:synthesize_interface_config.bzl",
     "synthesize_interface_action_configs",
 )
 load(
-    "@build_bazel_rules_swift//swift/toolchains/config:tool_config.bzl",
+    "@rules_swift//swift/toolchains/config:tool_config.bzl",
     "ToolConfigInfo",
 )
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
@@ -588,7 +588,7 @@ swift_toolchain = rule(
         # Same as rules_swift's Xcode toolchain; rules_apple's app_intents_aspect
         # requires the const_values output group this enables.
         "_const_protocols_to_gather": attr.label(
-            default = Label("@build_bazel_rules_swift//swift/toolchains/config:const_protocols_to_gather.json"),
+            default = Label("@rules_swift//swift/toolchains/config:const_protocols_to_gather.json"),
             allow_single_file = True,
         ),
         "_cc_toolchain": attr.label(
@@ -598,7 +598,7 @@ swift_toolchain = rule(
             cfg = "exec",
             allow_files = True,
             default = Label(
-                "@build_bazel_rules_swift//tools/worker",
+                "@rules_swift//tools/worker",
             ),
             executable = True,
         ),
