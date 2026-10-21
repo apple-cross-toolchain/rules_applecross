@@ -27,3 +27,10 @@ approximated.
 | [swiftui-macros.md](swiftui-macros.md) | `SwiftUIMacros`: SwiftUI's `@State` macro for the Swift compiler on Linux |
 | [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |
 | [foundation-hashing.md](foundation-hashing.md) | Hash-table orders NIB and property-list writers follow |
+
+## Result
+
+`tools/compare_ipa.sh` builds `examples/ios/CleanRoom` (SwiftUI with `@State`,
+an app icon, a launch storyboard, ad hoc signed for arm64 devices) on a Mac
+with Xcode's tools and in the Linux VM with these. The two `.ipa` files are
+identical.

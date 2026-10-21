@@ -14,6 +14,12 @@ WORKDIR="${RULES_APPLECROSS_WORKDIR:-$PWD}"
 volumes=()
 for v in ${RULES_APPLECROSS_VOLUMES:-}; do volumes+=(-v "$v"); done
 
+# Record this Mac's macOS build as BuildMachineOSBuild.
+build_machine=()
+if command -v sw_vers >/dev/null; then
+  build_machine=(-e "RULES_APPLECROSS_BUILD_MACHINE_OS_BUILD=$(sw_vers -buildVersion)")
+fi
+
 tty=()
 if [ -t 0 ] && [ -t 1 ]; then tty=(-it); fi
 
@@ -23,5 +29,6 @@ exec podman run --rm ${tty[@]+"${tty[@]}"} \
   -v "/Users:/Users" \
   -v "$CACHE_VOLUME:/root/.cache" \
   ${volumes[@]+"${volumes[@]}"} \
+  ${build_machine[@]+"${build_machine[@]}"} \
   -w "$WORKDIR" \
   "$IMAGE" "$@"
