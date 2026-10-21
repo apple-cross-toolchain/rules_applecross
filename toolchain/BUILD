@@ -45,10 +45,7 @@ toolchain(
 
 toolchain(
     name = "apple_bundling_on_linux",
-    exec_compatible_with = [
-        "@platforms//os:linux",
-        "@platforms//cpu:x86_64",
-    ],
+    exec_compatible_with = ["@platforms//os:linux"],
     # Withdrawn by --//toolchain:apple_bundling=macos.
     target_settings = [":apple_bundling_default"],
     toolchain = ":apple_bundling_marker",
