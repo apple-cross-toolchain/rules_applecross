@@ -165,9 +165,14 @@ _SDK_PLATFORM_FOR_OS = {
     "watchos": "WatchOS",
 }
 
+_LINUX_XCODE_DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
+
 def _local_developer_dir(rctx):
     """Resolves the Developer directory of the Xcode selected on this host."""
     developer_dir = rctx.os.environ.get("DEVELOPER_DIR", "").strip()
+    if not developer_dir and not rctx.os.name.startswith("mac"):
+        # On Linux, an Xcode mounted at the usual place.
+        developer_dir = _LINUX_XCODE_DEVELOPER_DIR
     if not developer_dir:
         result = rctx.execute(["xcode-select", "-p"])
         if result.return_code != 0:
@@ -194,7 +199,7 @@ def _local_developer_dir(rctx):
 
     return developer_dir
 
-def _link_local_xcode(rctx, developer_dir):
+def _link_local_xcode(rctx, developer_dir, cpu):
     """Links a cross-compilable SDK tree to a locally installed Xcode."""
 
     # An Xcode upgrade in place keeps the same path, so tie the repository to
@@ -214,7 +219,9 @@ def _link_local_xcode(rctx, developer_dir):
             str(_toolchain_path(rctx, "repo_tools/link_local_xcode.py")),
             developer_dir,
             str(rctx.path("Xcode.app")),
-        ],
+        ] + ([] if rctx.os.name.startswith("mac") else [
+            str(rctx.path(Label(_LLVM_PREBUILT[cpu])).dirname) + "/llvm-readtapi",
+        ]),
         # Generating the framework stubs dominates, and a cold filesystem makes
         # the scan that finds them much slower than the default 600s allows.
         timeout = 3600,
@@ -340,22 +347,21 @@ def _use_local_xcode(rctx):
     if override:
         if override not in ("0", "1"):
             fail("RULES_APPLECROSS_LOCAL_XCODE must be \"0\" or \"1\", got: " + override)
-        if override == "1" and not rctx.os.name.startswith("mac"):
-            fail(
-                "RULES_APPLECROSS_LOCAL_XCODE=1 needs a macOS host, but this one " +
-                "reports os.name = \"" + rctx.os.name + "\". Unset it to read " +
-                "apple_sdk_path or apple_sdk_urls instead.",
-            )
         return override == "1"
 
-    # Only macOS has an Xcode to read, so fall through to the archive rather
-    # than failing. That is what lets one MODULE.bazel serve both host kinds.
-    return rctx.attr.local_xcode and rctx.os.name.startswith("mac")
+    if not rctx.attr.local_xcode:
+        return False
+    if rctx.os.name.startswith("mac"):
+        return True
 
-def _materialize_apple_sdks(rctx):
+    # On Linux, only if an Xcode is mounted; otherwise use the archive.
+    developer_dir = rctx.os.environ.get("DEVELOPER_DIR", "").strip() or _LINUX_XCODE_DEVELOPER_DIR
+    return rctx.path(developer_dir + "/Platforms").exists
+
+def _materialize_apple_sdks(rctx, cpu):
     """Populates the repository's Xcode.app tree from the configured source."""
     if _use_local_xcode(rctx):
-        _link_local_xcode(rctx, _local_developer_dir(rctx))
+        _link_local_xcode(rctx, _local_developer_dir(rctx), cpu)
     elif rctx.attr.apple_sdk_path:
         apple_sdk_local = rctx.workspace_root.get_child(rctx.attr.apple_sdk_path)
         if rctx.execute(["test", "-d", str(apple_sdk_local)]).return_code == 0:
@@ -384,10 +390,9 @@ def _materialize_apple_sdks(rctx):
 def _install_ported_tools(rctx, cpu, destination):
     archive = rctx.attr.ported_tools_archives.get(cpu)
     if archive:
-        rctx.extract(
-            archive = rctx.workspace_root.get_child(archive),
-            output = destination,
-        )
+        path = rctx.workspace_root.get_child(archive)
+        rctx.watch(path)
+        rctx.extract(archive = path, output = destination)
         return
     if cpu not in _PORTED_TOOLS:
         fail(
@@ -429,7 +434,7 @@ def _apple_cross_toolchain_impl(rctx):
     rctx.symlink(libtool_cc, "libtool.cc")
     rctx.symlink(wrapped_clang_src, "wrapped_clang.cc")
 
-    _materialize_apple_sdks(rctx)
+    _materialize_apple_sdks(rctx, cpu)
 
     _normalize_sdk_modulemaps(rctx)
     _normalize_sdk_tbds(rctx)
