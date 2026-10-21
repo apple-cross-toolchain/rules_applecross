@@ -258,7 +258,7 @@ _RULE_INPUT_FILES = [
     "stubs/empty_output_tool.sh",
     "stubs/intentbuilderc.sh",
     "stubs/noop_tool.sh",
-    "stubs/security.py",
+    "stubs/security.sh",
     "stubs/strip.sh",
     "stubs/xcstringstool.py",
     "stubs/xcstringstool.sh",
@@ -487,7 +487,7 @@ def _apple_cross_toolchain_impl(rctx):
     _security_path = xcode_toolchain_bindir + "security"
     result = rctx.execute(["test", "-e", _security_path])
     if result.return_code != 0:
-        _install_executable(rctx, "stubs/security.py", _security_path)
+        _install_executable(rctx, "stubs/security.sh", _security_path)
 
     # Create arm64 swiftinterface files for arm64e-only frameworks.
     _patch_swiftinterfaces(rctx, [
