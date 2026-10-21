@@ -512,10 +512,15 @@ filegroup(
             "@rules_cc//cc/toolchains/actions:link_actions",
             "@rules_cc//cc/toolchains/actions:objc_executable",
         ],
-        # The ported cctools linker predates visionOS. Select the bundled
-        # LLVM Mach-O linker for xros targets while retaining cctools for the
-        # platforms it already supports.
-        args = (["-fuse-ld=lld"] if arch.startswith("visionos_") else []) + [
+        # LLVM's Mach-O linker. The ported cctools ld64-609 predates visionOS,
+        # cannot parse the TBD v5 stubs of Xcode 26's XCTest, and ignores the
+        # SDKs' per-symbol $ld$previous$ entries, which move symbols to the
+        # library that held them on older OS versions (SwiftUICore's to
+        # SwiftUI before iOS 18, Span's to libswiftCompatibilitySpan before
+        # iOS 26, CoreMedia's Swift API to libswiftCoreMedia before iOS 27):
+        # binaries it links for those deployment targets fail to load.
+        args = [
+            "-fuse-ld=lld",
             "-L{platform_libs}",
         ],
         data = [
