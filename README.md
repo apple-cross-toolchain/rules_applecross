@@ -21,6 +21,10 @@ macOS](#building-on-macos) for what a macOS host does differently.
     )
     ```
 
+    Bazel applies `single_version_override` only in the root module, so also
+    copy this repository's `patches/` and its `rules_apple` and `apple_support`
+    overrides from `MODULE.bazel`.
+
 2. Configure the toolchain in `MODULE.bazel`:
 
     ```starlark
@@ -45,16 +49,21 @@ macOS](#building-on-macos) for what a macOS host does differently.
 3. Add the following to your `.bazelrc`:
 
     ```
+    startup --host_jvm_args=-DBAZEL_TRACK_SOURCE_DIRECTORIES=1
     common --incompatible_repo_env_ignores_action_env
     build --xcode_version_config=@apple_cross_toolchain//:host_xcodes
-    build --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+    build --action_env=DEVELOPER_DIR=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
+    build --action_env=PATH=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
     build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
     ```
 
     The Xcode and SDK versions are read out of the SDK tree when
     `@apple_cross_toolchain` is fetched, so there is nothing to pin by hand.
-    The first line keeps that relative `DEVELOPER_DIR` out of repository rules
-    on Bazel 8, as Bazel 9 already does.
+    The startup flag lets Bazel track the SDK directories the toolchain
+    declares as inputs. `incompatible_repo_env_ignores_action_env` keeps the
+    relative `DEVELOPER_DIR` out of repository rules on Bazel 8, as Bazel 9
+    already does. Inside this repository the paths start with
+    `external/+apple_cross_toolchain+apple_cross_toolchain`.
 
 4. Build an example:
 
