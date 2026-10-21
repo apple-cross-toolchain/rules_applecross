@@ -262,6 +262,7 @@ _RULE_INPUT_FILES = [
     "repo_tools/patch_swiftinterfaces.py",
     "repo_tools/read_xcode_versions.py",
     "stubs/empty_output_tool.sh",
+    "stubs/intentbuilderc.py",
     "stubs/intentbuilderc.sh",
     "stubs/noop_tool.sh",
     "stubs/security.sh",
@@ -461,6 +462,7 @@ def _apple_cross_toolchain_impl(rctx):
     result = rctx.execute(["test", "-e", _intentbuilderc_path])
     if result.return_code != 0:
         _install_executable(rctx, "stubs/intentbuilderc.sh", _intentbuilderc_path)
+        _install_executable(rctx, "stubs/intentbuilderc.py", _intentbuilderc_path + ".py")
 
     # Create xcstringstool stub for Linux (compiles .xcstrings to .strings).
     # Installed as a shell trampoline so it can run under the calling tool's

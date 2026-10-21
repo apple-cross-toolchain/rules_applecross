@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application")
-load("@build_bazel_rules_apple//apple:resources.bzl", "apple_precompiled_resource_bundle")
+load("@build_bazel_rules_apple//apple:resources.bzl", "apple_precompiled_resource_bundle", "objc_intent_library")
 load("@build_bazel_rules_apple//apple:versioning.bzl", "apple_bundle_version")
 load("@build_bazel_rules_apple//apple:xcarchive.bzl", "xcarchive")
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
@@ -17,6 +17,13 @@ objc_library(
     data = [
         "Resources/Main.storyboard",
     ],
+    tags = ["manual"],
+    deps = [":ExampleIntents"],
+)
+
+objc_intent_library(
+    name = "ExampleIntents",
+    src = "//examples/resources:Intents.intentdefinition",
     tags = ["manual"],
 )
 

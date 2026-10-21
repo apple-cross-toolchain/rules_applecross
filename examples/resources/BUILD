@@ -5,6 +5,7 @@ package(default_visibility = [
 licenses(["notice"])
 
 exports_files([
+    "Intents.intentdefinition",
     "Launch.storyboard",
     "Localizable.xcstrings",
 ])

@@ -1,5 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application", "ios_ui_test", "ios_unit_test")
+load("@build_bazel_rules_apple//apple:resources.bzl", "swift_intent_library")
 load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
 
 licenses(["notice"])
@@ -12,6 +13,14 @@ swift_library(
     # TODO: Restore Localizable.xcstrings once xcrun is available in sandbox
     # data = ["//examples/resources:Localizable.xcstrings"],
     module_name = "Sources",
+    tags = ["manual"],
+    deps = [":ExampleIntents"],
+)
+
+swift_intent_library(
+    name = "ExampleIntents",
+    src = "//examples/resources:Intents.intentdefinition",
+    module_name = "ExampleIntents",
     tags = ["manual"],
 )
 
