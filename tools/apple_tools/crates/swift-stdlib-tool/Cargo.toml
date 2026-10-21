@@ -1,0 +1,9 @@
+[package]
+name = "swift-stdlib-tool"
+description = "Copies the Swift runtime libraries an app needs into its bundle, like Xcode's swift-stdlib-tool."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+macho.workspace = true

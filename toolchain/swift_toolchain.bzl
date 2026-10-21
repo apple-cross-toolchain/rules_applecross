@@ -219,8 +219,12 @@ def _swift_linkopts_cc_info(swift_platform_name, sdk_platform, toolchain_label):
     platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
     platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
 
+    # Back-deployment libraries, as rules_swift's Xcode toolchain adds.
+    swift_back_deployment_dir = "__BAZEL_XCODE_DEVELOPER_DIR__/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/" + swift_platform_name
+
     linkopts = [
         "-L" + swift_lib_dir,
+        "-L" + swift_back_deployment_dir,
         "-L/usr/lib/swift",
         "-L" + platform_developer_lib_dir,
         "-Wl,-objc_abi_version,2",

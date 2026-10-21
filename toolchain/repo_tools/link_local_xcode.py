@@ -71,7 +71,20 @@ def _never_excluded(name, parent_rel):
     return False
 
 
-def _includes():
+def _back_deployment_runtimes(source):
+    """The back-deployment Swift runtimes (usr/lib/swift-5.5, swift-6.2, ...),
+    kept whole for swift-stdlib-tool. swift-5.0 gets stubs like usr/lib/swift."""
+    lib = os.path.join(source, _TOOLCHAIN, "usr/lib")
+    if not os.path.isdir(lib):
+        return []
+    return sorted(
+        _TOOLCHAIN + "/usr/lib/" + name
+        for name in os.listdir(lib)
+        if name.startswith("swift-") and name != "swift-5.0"
+    )
+
+
+def _includes(source):
     """(relative path, exclude predicate) pairs, mirroring package-sdks.sh."""
     items = []
     for p in PLATFORMS:
@@ -88,6 +101,7 @@ def _includes():
     items.append((_TOOLCHAIN + "/usr/lib/clang", _never_excluded))
     items.append((_TOOLCHAIN + "/usr/lib/swift", _lib_excluded))
     items.append((_TOOLCHAIN + "/usr/lib/swift-5.0", _lib_excluded))
+    items += [(rel, _never_excluded) for rel in _back_deployment_runtimes(source)]
     return items
 
 
@@ -170,7 +184,7 @@ class Linker(object):
         # Packaging stubifies every one it can find anywhere under a .framework
         # directory, including bundles nested inside the SDKs, and removes the
         # binary either way.
-        for rel_root, excluded in _includes():
+        for rel_root, excluded in _includes(self.source):
             for dirpath, rel in self._walk(rel_root, excluded):
                 if ".framework" + os.sep not in rel + os.sep:
                     continue
@@ -266,7 +280,7 @@ class Linker(object):
             self._mark(_TOOLCHAIN + sub)
         self.writable.add(_TOOLCHAIN + "/usr/bin")
 
-        for rel, excluded in _includes():
+        for rel, excluded in _includes(self.source):
             self._graft(rel, excluded)
 
         self._real_dir(_TOOLCHAIN + "/usr/bin")

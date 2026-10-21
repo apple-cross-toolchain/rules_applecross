@@ -23,5 +23,6 @@ approximated.
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
+| [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |
 | [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |
 | [foundation-hashing.md](foundation-hashing.md) | Hash-table orders NIB and property-list writers follow |
