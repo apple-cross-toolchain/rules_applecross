@@ -25,7 +25,7 @@ fi
 tar -C "$OUT" -xf "$archive"
 
 (cd "$ROOT/tools/apple_tools" && CARGO_TARGET_DIR="$WORK/apple_tools" cargo build -q --release --locked)
-for tool in codesign; do
+for tool in codesign ibtool; do
   install -m 755 "$WORK/apple_tools/release/$tool" "$OUT/bin/$tool"
 done
 # The marker tells the toolchain repository to keep this codesign.

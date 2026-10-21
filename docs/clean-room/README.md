@@ -21,3 +21,5 @@ approximated.
 | Page | Tool |
 | --- | --- |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
+| [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
+| [foundation-hashing.md](foundation-hashing.md) | Hash-table orders NIB and property-list writers follow |
