@@ -368,6 +368,10 @@ def _apple_cross_toolchain_impl(rctx):
     if result.return_code != 0:
         fail("Failed to copy LLVM binaries: " + result.stderr)
 
+    result = rctx.execute(["ln", "-f", xcode_toolchain_bindir + "llvm", xcode_toolchain_bindir + "clang"])
+    if result.return_code != 0:
+        fail("Failed to link clang: " + result.stderr)
+
     # Also copy clang resource headers (lib/clang/<ver>/include/) if present
     result = rctx.execute(["test", "-d", llvm_prebuilt_lib])
     if result.return_code == 0:
