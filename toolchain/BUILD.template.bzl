@@ -316,6 +316,12 @@ filegroup(
     srcs = glob([_XCODE_TOOLCHAIN_BIN + "/*"]),
 )
 
+# Clean-room SwiftUIMacros plugin, if the ported tools include it.
+filegroup(
+    name = "macro_plugins",
+    srcs = glob([_XCODE_TOOLCHAIN_BIN + "/SwiftUIMacros"], allow_empty = True),
+)
+
 filegroup(
     name = "sdk_tool_files",
     srcs = glob(
@@ -777,6 +783,7 @@ cc_toolchain_suite(
     swift_toolchain(
         name = "swift-compiler-" + arch,
         cpu = arch,
+        macro_plugins = [":macro_plugins"],
         swift_tools = "%{swift_tools}",
         toolchain_files = _SWIFT_TOOLCHAIN_FILES_BY_ARCH[arch],
         toolchain_path_prefix = "%{toolchain_path_prefix}",
