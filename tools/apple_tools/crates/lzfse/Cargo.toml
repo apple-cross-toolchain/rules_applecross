@@ -1,0 +1,9 @@
+[package]
+name = "lzfse"
+description = "The reference LZFSE encoder, with the window schedule of a streaming encoder."
+edition.workspace = true
+license = "Apache-2.0 AND BSD-3-Clause"
+version.workspace = true
+
+[build-dependencies]
+cc = "1"

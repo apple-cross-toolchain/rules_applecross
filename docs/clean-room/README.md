@@ -22,4 +22,5 @@ approximated.
 | --- | --- |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
+| [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |
 | [foundation-hashing.md](foundation-hashing.md) | Hash-table orders NIB and property-list writers follow |
