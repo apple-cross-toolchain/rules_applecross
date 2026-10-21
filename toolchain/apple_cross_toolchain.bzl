@@ -599,10 +599,10 @@ def _apple_cross_toolchain_impl(rctx):
         _install_executable(rctx, "stubs/zip.py", _zip_path + ".py")
 
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
-    # Always overwrite — the SDK may ship real binaries (e.g. codesign_allocate
-    # from LLVM) that fail on Linux with "unable to find any toolchains".
+    # Stub codesign unless the ported tools carry the clean-room one.
     _codesign_path = xcode_toolchain_bindir + "codesign"
-    _install_executable(rctx, "stubs/noop_tool.sh", _codesign_path)
+    if not rctx.path(xcode_toolchain_bindir + ".apple-tools-revision").exists:
+        _install_executable(rctx, "stubs/noop_tool.sh", _codesign_path)
 
     _codesign_allocate_path = xcode_toolchain_bindir + "codesign_allocate"
     _install_executable(rctx, "stubs/noop_tool.sh", _codesign_allocate_path)

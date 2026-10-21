@@ -1,0 +1,21 @@
+# Clean-room Apple tools for Linux; see docs/clean-room.
+[workspace]
+resolver = "2"
+members = [
+    "crates/cf",
+    "crates/codesign",
+    "crates/macho",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"
+
+[workspace.dependencies]
+cf = { path = "crates/cf" }
+macho = { path = "crates/macho" }
+
+[profile.release]
+codegen-units = 1
+lto = true

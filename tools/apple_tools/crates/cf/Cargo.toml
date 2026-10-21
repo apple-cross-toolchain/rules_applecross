@@ -1,0 +1,10 @@
+[package]
+name = "cf"
+description = "Property lists and CoreFoundation value semantics as Apple's tools write them."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+base64 = "0.22"
+plist = "1"
