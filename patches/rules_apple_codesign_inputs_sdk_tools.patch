@@ -28,7 +28,7 @@ Also feed them to ExtractFromProvisioningProfile, whose tool runs the
 toolchain's security.
 
 diff --git a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
-index 6f718d54..41b71e86 100644
+index 35f1640c..ed3bccbb 100644
 --- a/apple/internal/apple_toolchains.bzl
 +++ b/apple/internal/apple_toolchains.bzl
 @@ -32,6 +32,10 @@ A `File` referencing a plist template for dSYM bundles.
@@ -42,15 +42,15 @@ index 6f718d54..41b71e86 100644
  """,
          "alticonstool": """\
  The files_to_run for a tool to insert alternate icons entries in the app
-@@ -126,6 +130,7 @@ def _apple_mac_tools_toolchain_impl(ctx):
+@@ -130,6 +134,7 @@ def _apple_mac_tools_toolchain_impl(ctx):
      mac_tools_info = AppleMacToolsToolchainInfo(
          dsym_info_plist_template = ctx.file.dsym_info_plist_template,
          process_and_sign_template = ctx.file.process_and_sign_template,
 +        sdk_tool_files = ctx.files._sdk_tool_files,
          alticonstool = ctx.attr.alticonstool.files_to_run,
+         app_intents_nl_training_tool = ctx.attr.app_intents_nl_training_tool.files_to_run,
          bundletool_experimental = ctx.attr.bundletool_experimental.files_to_run,
-         codesigningtool = ctx.attr.codesigningtool.files_to_run,
-@@ -149,6 +154,10 @@ def _apple_mac_tools_toolchain_impl(ctx):
+@@ -154,6 +159,10 @@ def _apple_mac_tools_toolchain_impl(ctx):
  
  apple_mac_tools_toolchain = rule(
      attrs = {
@@ -93,10 +93,10 @@ index b95f8133..d9ca3613 100644
      )
      plists = []
 diff --git a/apple/internal/ios_rules.bzl b/apple/internal/ios_rules.bzl
-index d6c632ac..a6288edc 100644
+index 5be0fda4..29d8beb9 100644
 --- a/apple/internal/ios_rules.bzl
 +++ b/apple/internal/ios_rules.bzl
-@@ -2054,6 +2054,7 @@ def _ios_imessage_application_impl(ctx):
+@@ -2060,6 +2060,7 @@ def _ios_imessage_application_impl(ctx):
          actions = actions,
          platform_prerequisites = platform_prerequisites,
          rule_label = label,
@@ -104,7 +104,7 @@ index d6c632ac..a6288edc 100644
          xcode_stub_path = rule_descriptor.stub_binary_path,
      )
  
-@@ -2549,6 +2550,7 @@ def _ios_sticker_pack_extension_impl(ctx):
+@@ -2555,6 +2556,7 @@ def _ios_sticker_pack_extension_impl(ctx):
          actions = actions,
          platform_prerequisites = platform_prerequisites,
          rule_label = label,
@@ -113,10 +113,10 @@ index d6c632ac..a6288edc 100644
      )
  
 diff --git a/apple/internal/partials/support/resources_support.bzl b/apple/internal/partials/support/resources_support.bzl
-index d7b2e789..f2c36e70 100644
+index 2be5e300..78b12d06 100644
 --- a/apple/internal/partials/support/resources_support.bzl
 +++ b/apple/internal/partials/support/resources_support.bzl
-@@ -60,6 +60,7 @@ def _compile_datamodels(
+@@ -79,6 +79,7 @@ def _compile_datamodels(
          *,
          actions,
          mac_exec_group,
@@ -124,7 +124,7 @@ index d7b2e789..f2c36e70 100644
          datamodel_groups,
          label_name,
          output_discriminator,
-@@ -96,6 +97,7 @@ def _compile_datamodels(
+@@ -115,6 +116,7 @@ def _compile_datamodels(
          processed_origins[output_file.short_path] = [f.short_path for f in input_files]
  
          resource_actions.compile_datamodels(
@@ -132,7 +132,7 @@ index d7b2e789..f2c36e70 100644
              actions = actions,
              datamodel_path = datamodel_path,
              input_files = input_files,
-@@ -115,6 +117,7 @@ def _compile_mappingmodels(
+@@ -134,6 +136,7 @@ def _compile_mappingmodels(
          *,
          actions,
          mac_exec_group,
@@ -140,7 +140,7 @@ index d7b2e789..f2c36e70 100644
          label_name,
          mappingmodel_groups,
          output_discriminator,
-@@ -137,6 +140,7 @@ def _compile_mappingmodels(
+@@ -156,6 +159,7 @@ def _compile_mappingmodels(
          processed_origins[output_file.short_path] = [f.short_path for f in input_files]
  
          resource_actions.compile_mappingmodel(
@@ -148,7 +148,7 @@ index d7b2e789..f2c36e70 100644
              actions = actions,
              input_files = input_files,
              mac_exec_group = mac_exec_group,
-@@ -236,6 +240,7 @@ was declared. Skipping asset catalog compilation.
+@@ -255,6 +259,7 @@ was declared. Skipping asset catalog compilation.
              )
              processed_origins[png_file.short_path] = f.short_path
              resource_actions.copy_png(
@@ -156,7 +156,7 @@ index d7b2e789..f2c36e70 100644
                  actions = actions,
                  input_file = f,
                  mac_exec_group = mac_exec_group,
-@@ -247,6 +252,7 @@ was declared. Skipping asset catalog compilation.
+@@ -266,6 +271,7 @@ was declared. Skipping asset catalog compilation.
              asset_files.append(f)
  
      resource_actions.compile_asset_catalog(
@@ -164,7 +164,7 @@ index d7b2e789..f2c36e70 100644
          actions = actions,
          alternate_icons = alternate_icons,
          alticonstool = apple_mac_toolchain_info.alticonstool,
-@@ -335,6 +341,7 @@ def _datamodels(
+@@ -354,6 +360,7 @@ def _datamodels(
          datamodels_processed_origins,
      ) = _compile_datamodels(
          actions = actions,
@@ -172,7 +172,7 @@ index d7b2e789..f2c36e70 100644
          datamodel_groups = datamodel_groups,
          label_name = rule_label.name,
          mac_exec_group = mac_exec_group,
-@@ -350,6 +357,7 @@ def _datamodels(
+@@ -369,6 +376,7 @@ def _datamodels(
          mappingmodels_processed_origins,
      ) = _compile_mappingmodels(
          actions = actions,
@@ -180,7 +180,7 @@ index d7b2e789..f2c36e70 100644
          label_name = rule_label.name,
          output_discriminator = output_discriminator,
          parent_dir = parent_dir,
-@@ -442,6 +450,7 @@ def _metals(
+@@ -461,6 +469,7 @@ def _metals(
          *,
          actions,
          mac_exec_group,
@@ -188,7 +188,7 @@ index d7b2e789..f2c36e70 100644
          rule_label,
          parent_dir,
          platform_prerequisites,
-@@ -476,6 +485,7 @@ def _metals(
+@@ -495,6 +504,7 @@ def _metals(
      )
      processed_origins[metallib_file.short_path] = [f.short_path for f in input_files]
      resource_actions.compile_metals(
@@ -196,7 +196,7 @@ index d7b2e789..f2c36e70 100644
          actions = actions,
          input_files = input_files,
          mac_exec_group = mac_exec_group,
-@@ -528,6 +538,7 @@ def _mlmodels(
+@@ -547,6 +557,7 @@ def _mlmodels(
          processed_origins[output_plist.short_path] = [file.short_path]
  
          resource_actions.compile_mlmodel(
@@ -204,7 +204,7 @@ index d7b2e789..f2c36e70 100644
              actions = actions,
              input_file = file,
              mac_exec_group = mac_exec_group,
-@@ -623,6 +634,7 @@ def _pngs(
+@@ -643,6 +654,7 @@ def _pngs(
          *,
          actions,
          mac_exec_group,
@@ -212,7 +212,7 @@ index d7b2e789..f2c36e70 100644
          files,
          output_discriminator,
          parent_dir,
-@@ -659,6 +671,7 @@ def _pngs(
+@@ -679,6 +691,7 @@ def _pngs(
          )
          processed_origins[png_file.short_path] = [file.short_path]
          resource_actions.copy_png(
@@ -220,7 +220,7 @@ index d7b2e789..f2c36e70 100644
              actions = actions,
              input_file = file,
              mac_exec_group = mac_exec_group,
-@@ -710,6 +723,7 @@ def _storyboards(
+@@ -730,6 +743,7 @@ def _storyboards(
          )
          origin_short_paths.append(storyboard.short_path)
          resource_actions.compile_storyboard(
@@ -228,7 +228,7 @@ index d7b2e789..f2c36e70 100644
              actions = actions,
              input_file = storyboard,
              mac_exec_group = mac_exec_group,
-@@ -729,6 +743,7 @@ def _storyboards(
+@@ -749,6 +763,7 @@ def _storyboards(
          dir_name = paths.join("storyboards", parent_dir or "", swift_module or ""),
      )
      resource_actions.link_storyboards(
@@ -236,7 +236,7 @@ index d7b2e789..f2c36e70 100644
          actions = actions,
          mac_exec_group = mac_exec_group,
          output_dir = linked_storyboard_dir,
-@@ -749,6 +764,7 @@ def _texture_atlases(
+@@ -769,6 +784,7 @@ def _texture_atlases(
          *,
          actions,
          mac_exec_group,
@@ -244,7 +244,7 @@ index d7b2e789..f2c36e70 100644
          files,
          output_discriminator,
          parent_dir,
-@@ -778,6 +794,7 @@ def _texture_atlases(
+@@ -798,6 +814,7 @@ def _texture_atlases(
          )
          processed_origins[atlasc_dir.short_path] = [f.short_path for f in input_files]
          resource_actions.compile_texture_atlas(
@@ -252,7 +252,7 @@ index d7b2e789..f2c36e70 100644
              actions = actions,
              input_files = input_files,
              input_path = atlas_path,
-@@ -821,6 +838,7 @@ def _xibs(
+@@ -841,6 +858,7 @@ def _xibs(
          )
          processed_origins[out_dir.short_path] = [file.short_path]
          resource_actions.compile_xib(
@@ -260,7 +260,7 @@ index d7b2e789..f2c36e70 100644
              actions = actions,
              input_file = file,
              mac_exec_group = mac_exec_group,
-@@ -861,6 +879,7 @@ def _xcstrings(
+@@ -881,6 +899,7 @@ def _xcstrings(
          )
          processed_origins[out_dir.short_path] = [file.short_path]
          resource_actions.compile_xcstrings(
@@ -596,10 +596,10 @@ index ea6f841a..f651506c 100644
  
      if is_swift:
 diff --git a/apple/internal/rule_attrs.bzl b/apple/internal/rule_attrs.bzl
-index d51c7a8d..c522226d 100644
+index cf632cbe..7494032b 100644
 --- a/apple/internal/rule_attrs.bzl
 +++ b/apple/internal/rule_attrs.bzl
-@@ -161,6 +161,7 @@ def _binary_linking_attrs(
+@@ -180,6 +180,7 @@ def _binary_linking_attrs(
          _common_linking_api_attrs(deps_cfg = deps_cfg),
          {
              "codesign_inputs": attr.label_list(
@@ -628,10 +628,10 @@ index 6b618680..1d76820b 100644
              outputs = [binary_artifact],
              progress_message = "Copying stub executable for %s" % (rule_label),
 diff --git a/apple/internal/watchos_rules.bzl b/apple/internal/watchos_rules.bzl
-index 1b10e3ed..1db6f02f 100644
+index 36e3f253..9b3fa1fb 100644
 --- a/apple/internal/watchos_rules.bzl
 +++ b/apple/internal/watchos_rules.bzl
-@@ -869,7 +869,7 @@ reproducible error case.".format(
+@@ -874,7 +874,7 @@ reproducible error case.".format(
          archs_for_lipo = sets.to_list(requested_archs),
          platform_prerequisites = platform_prerequisites,
          rule_label = label,
