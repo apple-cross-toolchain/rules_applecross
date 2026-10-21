@@ -259,6 +259,7 @@ _RULE_INPUT_FILES = [
     "stubs/intentbuilderc.sh",
     "stubs/noop_tool.sh",
     "stubs/security.py",
+    "stubs/strip.sh",
     "stubs/xcstringstool.py",
     "stubs/xcstringstool.sh",
     "stubs/zip.py",
@@ -425,7 +426,6 @@ def _apple_cross_toolchain_impl(rctx):
         "ar": "llvm-ar",
         "ranlib": "llvm-ranlib",
         "otool": "llvm-otool",
-        "strip": "llvm-strip",
         "nm": "llvm-nm",
         "objdump": "llvm-objdump",
     }
@@ -440,6 +440,8 @@ def _apple_cross_toolchain_impl(rctx):
             sys_tool = rctx.which(apple_name)
             if sys_tool:
                 rctx.execute(["bash", "-c", "rm -f " + link + " && cp " + str(sys_tool) + " " + link])
+
+    _install_executable(rctx, "stubs/strip.sh", xcode_toolchain_bindir + "strip")
 
     # Create metal/metallib stubs for Linux (Metal compiler is macOS-only).
     for _tool_name in ["metal", "metallib"]:
