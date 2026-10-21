@@ -13,15 +13,19 @@ execroot-relative PATH entry, which stops resolving once the script
 pushd's into the archive root to zip the bundle.
 
 Also feed sdk_tool_files to every xcrun-based resource action (actool,
-ibtool, momc, coremlc, copypng, TextureAtlas, metal, xcstringstool) via
-resources_support, and export the calling tool's hermetic Python as
-PYTHON3 so interpreter-less executor images can run python stub tools.
+ibtool, momc, coremlc, copypng, TextureAtlas, metal and metallib,
+xcstringstool) via resources_support and to IntentGenerate, and export
+the calling tool's hermetic Python as PYTHON3 so interpreter-less
+executor images can run python stub tools.
 
 Also expose sdk_tool_files on AppleMacToolsToolchainInfo and feed them to
 the SwiftStdlibCopy action, replacing its no-remote/no-sandbox opt-out:
 with the tools declared as inputs the action can run remotely, which a
 macOS host requires because the staged tool binaries are Linux
 executables.
+
+Also feed them to ExtractFromProvisioningProfile, whose tool runs the
+toolchain's security.
 
 diff --git a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
 index 6f718d54..41b71e86 100644
@@ -57,6 +61,37 @@ index 6f718d54..41b71e86 100644
          "alticonstool": attr.label(
              cfg = "exec",
              executable = True,
+diff --git a/apple/internal/entitlements_support.bzl b/apple/internal/entitlements_support.bzl
+index b95f8133..d9ca3613 100644
+--- a/apple/internal/entitlements_support.bzl
++++ b/apple/internal/entitlements_support.bzl
+@@ -132,7 +132,8 @@ def _extract_signing_info(
+         platform_prerequisites,
+         provisioning_profile,
+         provisioning_profile_tool,
+-        rule_label):
++        rule_label,
++        sdk_tool_files = []):
+     """Inspects the current context and extracts the signing information.
+ 
+     Args:
+@@ -193,7 +194,7 @@ def _extract_signing_info(
+             # Since the tools spawns openssl and/or security tool, it doesn't
+             # support being sandboxed.
+             execution_requirements = {"no-sandbox": "1"},
+-            inputs = [control_file, provisioning_profile],
++            inputs = [control_file, provisioning_profile] + sdk_tool_files,
+             mnemonic = "ExtractFromProvisioningProfile",
+             outputs = outputs,
+             xcode_config = platform_prerequisites.xcode_version_config,
+@@ -268,6 +269,7 @@ def _process_entitlements(
+         platform_prerequisites = platform_prerequisites,
+         provisioning_profile = provisioning_profile,
+         provisioning_profile_tool = apple_mac_toolchain_info.provisioning_profile_tool,
++        sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+         rule_label = rule_label,
+     )
+     plists = []
 diff --git a/apple/internal/ios_rules.bzl b/apple/internal/ios_rules.bzl
 index d6c632ac..a6288edc 100644
 --- a/apple/internal/ios_rules.bzl
@@ -403,8 +438,31 @@ index bef0dac3..0eea04f7 100644
          mnemonic = "XibCompile",
          outputs = [output_dir],
          xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_actions/intent.bzl b/apple/internal/resource_actions/intent.bzl
+index 3cf1623c..305747ca 100644
+--- a/apple/internal/resource_actions/intent.bzl
++++ b/apple/internal/resource_actions/intent.bzl
+@@ -41,7 +41,8 @@ def generate_intent_classes_sources(
+         swift_version,
+         class_visibility,
+         platform_prerequisites,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that cgenerates intent classes from an intentdefinition file.
+ 
+     Args:
+@@ -107,7 +108,7 @@ def generate_intent_classes_sources(
+         arguments = arguments,
+         exec_group = mac_exec_group,
+         executable = xctoolrunner,
+-        inputs = [input_file],
++        inputs = [input_file] + sdk_tool_files,
+         mnemonic = "IntentGenerate",
+         outputs = outputs,
+         xcode_config = platform_prerequisites.xcode_version_config,
 diff --git a/apple/internal/resource_actions/metals.bzl b/apple/internal/resource_actions/metals.bzl
-index 662697a6..8a412311 100644
+index 662697a6..f52b1c43 100644
 --- a/apple/internal/resource_actions/metals.bzl
 +++ b/apple/internal/resource_actions/metals.bzl
 @@ -46,7 +46,7 @@ def _metal_apple_target_triple(platform_prerequisites):
@@ -416,6 +474,15 @@ index 662697a6..8a412311 100644
      """Creates actions that compile .metal files into a single .metallib file.
  
      Args:
+@@ -92,7 +92,7 @@ def compile_metals(*, actions, mac_exec_group, input_files, output_file, platfor
+             actions = actions,
+             exec_group = mac_exec_group,
+             executable = "xcrun",
+-            inputs = [input_metal] + hdrs,
++            inputs = [input_metal] + hdrs + sdk_tool_files,
+             outputs = [air_file],
+             arguments = [args],
+             mnemonic = "MetalCompile",
 @@ -111,7 +111,7 @@ def compile_metals(*, actions, mac_exec_group, input_files, output_file, platfor
          actions = actions,
          exec_group = mac_exec_group,
@@ -516,6 +583,18 @@ index 1d12e874..99e3c23b 100644
          mnemonic = "CompileXCStrings",
          outputs = [output_dir],
          xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_rules/apple_intent_library.bzl b/apple/internal/resource_rules/apple_intent_library.bzl
+index ea6f841a..f651506c 100644
+--- a/apple/internal/resource_rules/apple_intent_library.bzl
++++ b/apple/internal/resource_rules/apple_intent_library.bzl
+@@ -94,6 +94,7 @@ def _apple_intent_library_impl(ctx):
+         class_visibility = ctx.attr.class_visibility,
+         platform_prerequisites = platform_prerequisites,
+         xctoolrunner = apple_mac_toolchain_info.xctoolrunner,
++        sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+     )
+ 
+     if is_swift:
 diff --git a/apple/internal/rule_attrs.bzl b/apple/internal/rule_attrs.bzl
 index d51c7a8d..c522226d 100644
 --- a/apple/internal/rule_attrs.bzl
