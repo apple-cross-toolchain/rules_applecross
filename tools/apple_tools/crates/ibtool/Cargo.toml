@@ -1,0 +1,14 @@
+[package]
+name = "ibtool"
+description = "Storyboard compilation compatible with Xcode's ibtool, for a supported subset."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "ibtool"
+path = "src/main.rs"
+
+[dependencies]
+cf.workspace = true
+roxmltree = "0.20"

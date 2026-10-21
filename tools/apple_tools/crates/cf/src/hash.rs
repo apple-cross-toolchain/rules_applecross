@@ -73,6 +73,21 @@ pub fn table_order(keys: &[&str]) -> Vec<usize> {
     table.into_iter().flatten().collect()
 }
 
+/// The same for a table created at the size its entries need, as
+/// CoreFoundation creates a dictionary from all its entries at once (reading
+/// a binary property list): no growth, so no rehashing.
+pub fn sized_table_order(keys: &[&str]) -> Vec<usize> {
+    let mut level = 0;
+    while TABLE_CAPACITIES[level] < keys.len() {
+        level += 1;
+    }
+    let mut table: Vec<Option<usize>> = vec![None; TABLE_SIZES[level]];
+    for (n, k) in keys.iter().enumerate() {
+        insert(&mut table, string_hash(k), n);
+    }
+    table.into_iter().flatten().collect()
+}
+
 fn insert(table: &mut [Option<usize>], hash: u64, key: usize) {
     let size = table.len();
     let mut i = (hash % size as u64) as usize;

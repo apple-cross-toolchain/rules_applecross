@@ -1,11 +1,25 @@
 //! Binary property lists, as Interface Builder's compiler writes them.
 
-use crate::hash::table_order;
+use crate::hash::{sized_table_order, table_order};
 use crate::Value;
 
-struct Writer {
+struct Writer<'a> {
     objects: Vec<Vec<u8>>,
     ref_size: usize,
+    /// Whether an equal string or number already written is written again
+    /// or shared: Apple's writer shares by identity, so only the values a
+    /// producer reuses (constants, small numbers) are shared.
+    share: &'a dyn Fn(&Value) -> bool,
+    written: Vec<(Value, usize)>,
+    dictionaries: Dictionaries,
+}
+
+/// How the writer's dictionaries were filled, which decides their keys'
+/// order: one insertion at a time, or created whole.
+#[derive(Clone, Copy)]
+pub enum Dictionaries {
+    Grown,
+    Created,
 }
 
 fn count(v: &Value) -> usize {
@@ -39,14 +53,23 @@ fn marker(out: &mut Vec<u8>, kind: u8, n: usize) {
     }
 }
 
-impl Writer {
+impl Writer<'_> {
     fn refs(&self, out: &mut Vec<u8>, r: usize) {
         out.extend_from_slice(&r.to_be_bytes()[8 - self.ref_size..]);
     }
 
     /// Writes `v` and everything below it; returns its object number.
     fn add(&mut self, v: &Value) -> usize {
+        let shareable = matches!(v, Value::String(_) | Value::Integer(_) | Value::Real(_)) && (self.share)(v);
+        if shareable {
+            if let Some((_, n)) = self.written.iter().find(|(w, _)| w == v) {
+                return *n;
+            }
+        }
         let me = self.objects.len();
+        if shareable {
+            self.written.push((v.clone(), me));
+        }
         self.objects.push(Vec::new());
         let mut out = Vec::new();
         match v {
@@ -89,7 +112,10 @@ impl Writer {
             Value::Dictionary(entries) => {
                 marker(&mut out, 0xd, entries.len());
                 let keys: Vec<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
-                let order = table_order(&keys);
+                let order = match self.dictionaries {
+                    Dictionaries::Grown => table_order(&keys),
+                    Dictionaries::Created => sized_table_order(&keys),
+                };
                 let key_refs: Vec<usize> = order.iter().map(|&i| self.add(&Value::String(entries[i].0.clone()))).collect();
                 let value_refs: Vec<usize> = order.iter().map(|&i| self.add(&entries[i].1)).collect();
                 for r in key_refs.into_iter().chain(value_refs) {
@@ -115,8 +141,18 @@ fn width(n: usize) -> usize {
 }
 
 pub fn to_bytes(v: &Value) -> Vec<u8> {
-    let n = count(v);
-    let mut w = Writer { objects: Vec::with_capacity(n), ref_size: width(n) };
+    to_bytes_with(v, &|_| false, Dictionaries::Grown)
+}
+
+/// As `to_bytes`, sharing the equal strings and numbers `share` accepts,
+/// with dictionaries filled as `dictionaries` says.
+pub fn to_bytes_with(v: &Value, share: &dyn Fn(&Value) -> bool, dictionaries: Dictionaries) -> Vec<u8> {
+    // References are sized for the objects written; count those first.
+    let mut probe = Writer { objects: Vec::new(), ref_size: 8, share, written: Vec::new(), dictionaries };
+    probe.add(v);
+    let n = probe.objects.len();
+    debug_assert!(n <= count(v));
+    let mut w = Writer { objects: Vec::with_capacity(n), ref_size: width(n), share, written: Vec::new(), dictionaries };
     w.add(v);
     let mut out = b"bplist00".to_vec();
     let mut offsets = Vec::with_capacity(n);
