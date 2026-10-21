@@ -454,6 +454,11 @@ def _swift_toolchain_impl(ctx):
         "swift.bundled_xctests",
         "swift.enable_testing",
         "swift.module_map_no_private_headers",
+        # As rules_swift's own toolchains do. Without it the .swiftdoc is not a
+        # declared output, yet the worker still copies one beside the module
+        # on every incremental compile; on macOS, where copyfile(3) will not
+        # replace a file, the second compile fails with "File exists".
+        "swift.emit_swiftdoc",
         "swift.enable_batch_mode",
         "swift.use_response_files",
         "swift.debug_prefix_map",
