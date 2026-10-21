@@ -237,6 +237,31 @@ _XCODE_TOOLCHAIN_DIR = _XCODE_DEVELOPER_DIR + "/Toolchains/XcodeDefault.xctoolch
 _XCODE_TOOLCHAIN_BIN = _XCODE_TOOLCHAIN_DIR + "/usr/bin"
 _XCODE_TOOLCHAIN_LIB = _XCODE_TOOLCHAIN_DIR + "/usr/lib"
 
+_APPLE_SDK_PLATFORMS_BY_ARCH = {
+    "darwin_arm64": "MacOSX",
+    "darwin_arm64e": "MacOSX",
+    "darwin_x86_64": "MacOSX",
+    "ios_arm64": "iPhoneOS",
+    "ios_arm64e": "iPhoneOS",
+    "ios_sim_arm64": "iPhoneSimulator",
+    "ios_x86_64": "iPhoneSimulator",
+    "tvos_arm64": "AppleTVOS",
+    "tvos_sim_arm64": "AppleTVSimulator",
+    "tvos_x86_64": "AppleTVSimulator",
+    "visionos_arm64": "XROS",
+    "visionos_sim_arm64": "XRSimulator",
+    "watchos_arm64": "WatchSimulator",
+    "watchos_arm64_32": "WatchOS",
+    "watchos_device_arm64": "WatchOS",
+    "watchos_device_arm64e": "WatchOS",
+    "watchos_x86_64": "WatchSimulator",
+}
+
+_APPLE_SDK_PLATFORMS = {
+    sdk_platform: None
+    for sdk_platform in _APPLE_SDK_PLATFORMS_BY_ARCH.values()
+}.keys()
+
 filegroup(
     name = "ported_tools",
     srcs = glob([_XCODE_TOOLCHAIN_BIN + "/*"]),
@@ -250,12 +275,17 @@ filegroup(
             # xcrun refuses to run without a toolchain descriptor.
             _XCODE_TOOLCHAIN_DIR + "/ToolchainInfo.plist",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Info.plist",
-            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/Library/Application Support/WatchKit/*",
-            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.json",
-            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/SDKSettings.plist",
-            _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Developer/SDKs/*.sdk/System/Library/CoreServices/SystemVersion.plist",
             # environment_plist reads this as "$DEVELOPER_DIR/../version.plist".
             "Xcode.app/Contents/version.plist",
+        ] + [
+            _XCODE_DEVELOPER_DIR + "/Platforms/{0}.platform/Developer/SDKs/{0}.sdk/{1}".format(sdk_platform, path)
+            for sdk_platform in _APPLE_SDK_PLATFORMS
+            for path in [
+                "Library/Application Support/WatchKit/*",
+                "SDKSettings.json",
+                "SDKSettings.plist",
+                "System/Library/CoreServices/SystemVersion.plist",
+            ]
         ],
         allow_empty = True,
     ),
@@ -382,31 +412,6 @@ filegroup(
         _XCODE_DEVELOPER_DIR + "/Platforms",
     ],
 )
-
-_APPLE_SDK_PLATFORMS_BY_ARCH = {
-    "darwin_arm64": "MacOSX",
-    "darwin_arm64e": "MacOSX",
-    "darwin_x86_64": "MacOSX",
-    "ios_arm64": "iPhoneOS",
-    "ios_arm64e": "iPhoneOS",
-    "ios_sim_arm64": "iPhoneSimulator",
-    "ios_x86_64": "iPhoneSimulator",
-    "tvos_arm64": "AppleTVOS",
-    "tvos_sim_arm64": "AppleTVSimulator",
-    "tvos_x86_64": "AppleTVSimulator",
-    "visionos_arm64": "XROS",
-    "visionos_sim_arm64": "XRSimulator",
-    "watchos_arm64": "WatchSimulator",
-    "watchos_arm64_32": "WatchOS",
-    "watchos_device_arm64": "WatchOS",
-    "watchos_device_arm64e": "WatchOS",
-    "watchos_x86_64": "WatchSimulator",
-}
-
-_APPLE_SDK_PLATFORMS = {
-    sdk_platform: None
-    for sdk_platform in _APPLE_SDK_PLATFORMS_BY_ARCH.values()
-}.keys()
 
 [
     filegroup(
