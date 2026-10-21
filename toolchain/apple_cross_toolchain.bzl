@@ -336,10 +336,53 @@ _LLVM_PREBUILT = {
     "x86_64": "@llvm_prebuilt//:bin/clang",
 }
 
+# The same LLVM release for macOS execution platforms.
+_LLVM_PREBUILT_MACOS = "@llvm_prebuilt_macos//:bin/clang"
+
+_LLVM_TOOL_ALIASES = {
+    "install_name_tool": "llvm-install-name-tool",
+    "lipo": "llvm-lipo",
+    "ar": "llvm-ar",
+    "ranlib": "llvm-ranlib",
+    "otool": "llvm-otool",
+    "nm": "llvm-nm",
+    "objdump": "llvm-objdump",
+}
+
+def _stage_macos_llvm(rctx):
+    """Stages macOS LLVM at macos_toolchain/usr on a macOS host."""
+    clang = rctx.path(Label(_LLVM_PREBUILT_MACOS))
+    root = clang.dirname.dirname
+    result = rctx.execute(["bash", "-c", "mkdir -p macos_toolchain/usr && cp -a '{0}/bin' '{0}/lib' macos_toolchain/usr/".format(root)])
+    if result.return_code != 0:
+        fail("Failed to stage macOS LLVM: " + result.stderr)
+    for apple_name, llvm_name in _LLVM_TOOL_ALIASES.items():
+        rctx.execute(["ln", "-sf", llvm_name, "macos_toolchain/usr/bin/" + apple_name])
+    # llvm-strip -S -T crashes on macOS too; split it as on Linux.
+    _install_executable(rctx, "stubs/strip.sh", "macos_toolchain/usr/bin/strip")
+
+    # Use the SDK's Darwin runtime libraries, as Linux does; LLVM's only has
+    # macOS ones.
+    result = rctx.execute([_python3(rctx), "-c", """
+import glob, os, shutil
+llvm = sorted(glob.glob("macos_toolchain/usr/lib/clang/*/"))
+xcode = sorted(glob.glob("Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/*/lib/darwin"))
+if llvm and xcode:
+    darwin = os.path.join(llvm[0], "lib", "darwin")
+    shutil.rmtree(darwin, ignore_errors = True)
+    os.makedirs(darwin)
+    for name in sorted(os.listdir(xcode[0])):
+        os.symlink(os.path.relpath(os.path.join(xcode[0], name), darwin), os.path.join(darwin, name))
+"""])
+    if result.return_code != 0:
+        fail("Failed to stage the Darwin runtime libraries for macOS LLVM: " + result.stderr)
+
 def _prefetch_rule_inputs(rctx, cpu):
     for f in _RULE_INPUT_FILES:
         _toolchain_path(rctx, f)
     rctx.path(Label(_LLVM_PREBUILT[cpu]))
+    if rctx.os.name.startswith("mac"):
+        rctx.path(Label(_LLVM_PREBUILT_MACOS))
 
 def _use_local_xcode(rctx):
     """Decides whether to read this host's Xcode or unpack an archive."""
@@ -500,24 +543,16 @@ def _apple_cross_toolchain_impl(rctx):
             fail("The Apple SDK tree is missing the {} SDK".format(_sdk_name))
         substitutions["%{" + _os_name + "_sdk_version}"] = _sdk_version
 
+    if rctx.os.name.startswith("mac"):
+        _stage_macos_llvm(rctx)
+
     rctx.template("BUILD", build_tpl, substitutions)
 
     # Create Apple-compatible symlinks for LLVM tools so that actions can
     # invoke them by their traditional Apple names. Done AFTER all extractions
     # so that symlinks don't interfere with tarball extraction.
-    _llvm_symlinks = {
-        # NOTE: "libtool" is intentionally omitted — the llvm multicall binary
-        # doesn't recognize "libtool" as a subcommand (only "libtool-darwin").
-        # The libtool wrapper (libtool.cc) handles this instead.
-        "install_name_tool": "llvm-install-name-tool",
-        "lipo": "llvm-lipo",
-        "ar": "llvm-ar",
-        "ranlib": "llvm-ranlib",
-        "otool": "llvm-otool",
-        "nm": "llvm-nm",
-        "objdump": "llvm-objdump",
-    }
-    for apple_name, llvm_name in _llvm_symlinks.items():
+    # Not libtool: libtool.cc wraps llvm-libtool-darwin.
+    for apple_name, llvm_name in _LLVM_TOOL_ALIASES.items():
         target = xcode_toolchain_bindir + llvm_name
         link = xcode_toolchain_bindir + apple_name
         result = rctx.execute(["test", "-e", target])
