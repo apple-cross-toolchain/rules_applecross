@@ -4,9 +4,22 @@ This repository contains toolchain configuration rules for Bazel that can be
 used to build apps and frameworks for Apple platforms from non-Apple platforms.
 Requires Bazel 8.8+ or 9+.
 
-Builds execute on x86_64 Linux, either locally or through remote execution. The
-host driving them can be x86_64 Linux or macOS; see [Building on
-macOS](#building-on-macos) for what a macOS host does differently.
+Builds execute on x86_64 Linux, either locally or through remote execution, or
+locally on arm64 Linux. The host driving them can be Linux or macOS; see
+[Building on macOS](#building-on-macos) for what a macOS host does differently.
+
+On arm64 Linux, the toolchain needs ported Apple tools built for arm64, which
+are not published: build them with `tools/build-ported-tools.sh` and name the
+archive in `ported_tools_archives`, and set `swift_tools_linux_aarch64`:
+
+```starlark
+apple_cross_toolchain.configure(
+    name = "apple_cross_toolchain",
+    # ...
+    ported_tools_archives = {"aarch64": "ported-tools-linux-aarch64.tar.xz"},
+    swift_tools_linux_aarch64 = "@applecross_swift_ubuntu24.04-aarch64//:tools",
+)
+```
 
 ## Setup
 

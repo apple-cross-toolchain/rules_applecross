@@ -74,23 +74,70 @@ def _install_executable(rctx, source, destination):
     rctx.template(destination, _toolchain_path(rctx, source), {}, executable = True)
 
 # Ubuntu packages providing shared libraries that the swift.org toolchain's
-# driver binaries need at runtime but minimal executor images do not ship.
-_SWIFT_HOST_DEPS_DEBS = [
-    (
-        "libncurses6.deb",
-        "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/n/ncurses/libncurses6_6.4+20240113-1ubuntu2.1_amd64.deb",
-        "c4d0fd9d7c997f4b13dbfdd9b9a5e14ed0222303ac931f9c2594c6b99696b63d",
-    ),
-    (
-        "libsqlite3.deb",
-        "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.7_amd64.deb",
-        "488511119cad001a00f7e00e597112cf743ccfbd3f7a03c82d66237e1bfd82c8",
-    ),
-]
+# driver binaries need at runtime but minimal executor images do not ship,
+# keyed by the Linux execution CPU.
+_SWIFT_HOST_DEPS_DEBS = {
+    "aarch64": [
+        (
+            "libncurses6.deb",
+            "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/n/ncurses/libncurses6_6.4+20240113-1ubuntu2.1_arm64.deb",
+            "a75589876c510b0cc163a92efedbba0f4744bd1584736d29ccedb7b7a620fed2",
+        ),
+        (
+            "libsqlite3.deb",
+            "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.7_arm64.deb",
+            "2633907e89b37ae88fb1b18736b0a7a14feb614382c6297fca91cea4182fbbad",
+        ),
+    ],
+    "x86_64": [
+        (
+            "libncurses6.deb",
+            "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/n/ncurses/libncurses6_6.4+20240113-1ubuntu2.1_amd64.deb",
+            "c4d0fd9d7c997f4b13dbfdd9b9a5e14ed0222303ac931f9c2594c6b99696b63d",
+        ),
+        (
+            "libsqlite3.deb",
+            "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.7_amd64.deb",
+            "488511119cad001a00f7e00e597112cf743ccfbd3f7a03c82d66237e1bfd82c8",
+        ),
+    ],
+}
 
-def _install_swift_host_deps(rctx, toolchain_dir):
+# The Debian multiarch directory holding each CPU's libraries.
+_MULTIARCH = {
+    "aarch64": "aarch64-linux-gnu",
+    "x86_64": "x86_64-linux-gnu",
+}
+
+# Ported Apple tools (cctools, ld64, libtapi, xcbuild) built for each Linux
+# execution CPU. apple-cross-toolchain/ci publishes x86_64 only; other CPUs
+# build their own with tools/build-ported-tools.sh and name it with
+# ported_tools_archives.
+_PORTED_TOOLS = {
+    "x86_64": (
+        "https://github.com/apple-cross-toolchain/ci/releases/download/0.0.22/ported-tools-linux-x86_64.tar.xz",
+        "a41beff504746258ffd62d012b4ab8f09ab38136696472252dbc623f92a09a01",
+    ),
+}
+
+def _linux_exec_cpu(rctx):
+    """The CPU of the Linux machines this repository's tools run on.
+
+    A Linux host builds for itself. Any other host drives remote Linux
+    executors, which are x86_64.
+    """
+    if rctx.os.name.startswith("linux"):
+        arch = rctx.os.arch
+        if arch in ("aarch64", "arm64"):
+            return "aarch64"
+        if arch in ("amd64", "x86_64"):
+            return "x86_64"
+        fail("Unsupported Linux host CPU: " + arch)
+    return "x86_64"
+
+def _install_swift_host_deps(rctx, toolchain_dir, cpu):
     """Stage Ubuntu shared libraries needed by the Swift driver at runtime."""
-    for name, url, sha256 in _SWIFT_HOST_DEPS_DEBS:
+    for name, url, sha256 in _SWIFT_HOST_DEPS_DEBS[cpu]:
         rctx.download(url = url, output = "_debs/" + name, sha256 = sha256)
 
         # A .deb is an ar archive whose payload is data.tar.zst.
@@ -102,7 +149,7 @@ def _install_swift_host_deps(rctx, toolchain_dir):
     result = rctx.execute([
         "bash",
         "-c",
-        "cp -a _debs/root/usr/lib/x86_64-linux-gnu/*.so* " + toolchain_dir + "lib/",
+        "cp -a _debs/root/usr/lib/" + _MULTIARCH[cpu] + "/*.so* " + toolchain_dir + "lib/",
     ])
     if result.return_code != 0:
         fail("Failed to stage Swift host dependencies: " + result.stderr)
@@ -265,10 +312,17 @@ _RULE_INPUT_FILES = [
     "stubs/zip.sh",
 ]
 
-def _prefetch_rule_inputs(rctx):
+# Upstream LLVM for each Linux execution CPU, imported from @llvm's minimal
+# prebuilt toolchain extension in MODULE.bazel.
+_LLVM_PREBUILT = {
+    "aarch64": "@llvm_prebuilt_aarch64//:bin/clang",
+    "x86_64": "@llvm_prebuilt//:bin/clang",
+}
+
+def _prefetch_rule_inputs(rctx, cpu):
     for f in _RULE_INPUT_FILES:
         _toolchain_path(rctx, f)
-    rctx.path(Label("@llvm_prebuilt//:bin/clang"))
+    rctx.path(Label(_LLVM_PREBUILT[cpu]))
 
 def _use_local_xcode(rctx):
     """Decides whether to read this host's Xcode or unpack an archive."""
@@ -317,9 +371,30 @@ def _materialize_apple_sdks(rctx):
             "to read the SDKs from an Xcode install (macOS hosts only).",
         )
 
+def _install_ported_tools(rctx, cpu, destination):
+    """Unpacks the Linux-hosted Apple tools for one execution CPU."""
+    archive = rctx.attr.ported_tools_archives.get(cpu)
+    if archive:
+        rctx.extract(
+            archive = rctx.workspace_root.get_child(archive),
+            output = destination,
+        )
+        return
+    if cpu not in _PORTED_TOOLS:
+        fail(
+            ("No ported Apple tools are published for linux-{0}. Build them with " +
+             "tools/build-ported-tools.sh and set ported_tools_archives = " +
+             "{{\"{0}\": \"ported-tools-linux-{0}.tar.xz\"}} on " +
+             "apple_cross_toolchain.configure().").format(cpu),
+        )
+    url, sha256 = _PORTED_TOOLS[cpu]
+    rctx.download_and_extract(url = [url], sha256 = sha256, output = destination)
+
 def _apple_cross_toolchain_impl(rctx):
+    cpu = _linux_exec_cpu(rctx)
+
     # Force all label->path restarts before any expensive work below.
-    _prefetch_rule_inputs(rctx)
+    _prefetch_rule_inputs(rctx, cpu)
 
     # Resolve label paths
     libtool_cc = rctx.path(Label("@rules_applecross//toolchain:libtool.cc"))
@@ -331,8 +406,15 @@ def _apple_cross_toolchain_impl(rctx):
     developer_dir = "Xcode.app/Contents/Developer"
     xcode_toolchain_bindir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/"
 
+    swift_tools = rctx.attr.swift_tools
+    if cpu == "aarch64":
+        swift_tools = rctx.attr.swift_tools_linux_aarch64
+        if not swift_tools:
+            fail("This Linux host is aarch64: set swift_tools_linux_aarch64 on apple_cross_toolchain.configure().")
+
     substitutions = {
-        "%{swift_tools}": rctx.attr.swift_tools,
+        "%{linux_exec_cpu}": cpu,
+        "%{swift_tools}": swift_tools,
         "%{swift_tools_macos}": rctx.attr.swift_tools_macos,
         "%{toolchain_path_prefix}": toolchain_path_prefix,
     }
@@ -348,15 +430,11 @@ def _apple_cross_toolchain_impl(rctx):
 
     # Resolve the @llvm_prebuilt alias imported from @llvm's minimal prebuilt
     # toolchain extension.
-    llvm_prebuilt_bin = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname)
-    llvm_prebuilt_lib = str(rctx.path(Label("@llvm_prebuilt//:bin/clang")).dirname.dirname) + "/lib"
+    llvm_prebuilt_bin = str(rctx.path(Label(_LLVM_PREBUILT[cpu])).dirname)
+    llvm_prebuilt_lib = str(rctx.path(Label(_LLVM_PREBUILT[cpu])).dirname.dirname) + "/lib"
     xcode_toolchain_dir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
 
-    rctx.download_and_extract(
-        url = ["https://github.com/apple-cross-toolchain/ci/releases/download/0.0.22/ported-tools-linux-x86_64.tar.xz"],
-        sha256 = "a41beff504746258ffd62d012b4ab8f09ab38136696472252dbc623f92a09a01",
-        output = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/",
-    )
+    _install_ported_tools(rctx, cpu, xcode_toolchain_dir)
 
     # Copy LLVM binaries from @llvm's prebuilt repo AFTER ported-tools
     # extraction so they take precedence.
@@ -377,7 +455,7 @@ def _apple_cross_toolchain_impl(rctx):
             "cp -a " + llvm_prebuilt_lib + "/* " + xcode_toolchain_dir + "lib/",
         ])
 
-    _install_swift_host_deps(rctx, xcode_toolchain_dir)
+    _install_swift_host_deps(rctx, xcode_toolchain_dir, cpu)
 
     # Create lib/swift/ symlinks so Swift binaries can find their runtime
     # libraries.  Swift binaries have RUNPATH $ORIGIN/../lib/swift/linux
@@ -522,9 +600,20 @@ hard error rather than a silent fallback.
             doc = "Archive type (e.g. 'tar.zst') when it can't be inferred from the archive name.",
             mandatory = False,
         ),
+        "ported_tools_archives": attr.string_dict(
+            doc = """\
+Workspace-relative ported Apple tools archives keyed by Linux CPU ("x86_64",
+"aarch64"), as tools/build-ported-tools.sh writes them. A CPU without
+one uses the archive apple-cross-toolchain/ci publishes, which exists for
+x86_64 only.
+""",
+        ),
         "swift_tools": attr.string(
-            doc = "Label of a rules_swift swift_tools target used as the Linux-host Swift compiler payload.",
+            doc = "Label of a rules_swift swift_tools target used as the x86_64 Linux-host Swift compiler payload.",
             mandatory = True,
+        ),
+        "swift_tools_linux_aarch64": attr.string(
+            doc = "Label of a rules_swift swift_tools target used as the aarch64 Linux-host Swift compiler payload.",
         ),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's macOS Swift, used by Swift toolchains for macOS execution platforms.",

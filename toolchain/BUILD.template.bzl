@@ -659,7 +659,7 @@ dynamic_toolchain_info(
         name = "cc-toolchain-" + arch,
         exec_compatible_with = [
             "@platforms//os:linux",
-            "@platforms//cpu:x86_64",
+            "@platforms//cpu:%{linux_exec_cpu}",
         ],
         target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
         toolchain = ":cc-compiler-" + arch,
@@ -689,7 +689,7 @@ cc_toolchain_suite(
         name = "swift-toolchain-" + arch,
         exec_compatible_with = [
             "@platforms//os:linux",
-            "@platforms//cpu:x86_64",
+            "@platforms//cpu:%{linux_exec_cpu}",
         ],
         target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
         toolchain = ":swift-compiler-" + arch,

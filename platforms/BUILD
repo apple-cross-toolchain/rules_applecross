@@ -36,3 +36,12 @@ platform(
         "container-image": "docker://ubuntu:24.04",
     },
 )
+
+# An arm64 Linux machine running the build itself.
+platform(
+    name = "linux_aarch64",
+    constraint_values = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+    ],
+)
