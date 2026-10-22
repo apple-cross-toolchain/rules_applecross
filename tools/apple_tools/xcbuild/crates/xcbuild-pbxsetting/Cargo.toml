@@ -1,0 +1,9 @@
+[package]
+name = "xcbuild-pbxsetting"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcbuild-plist = { path = "../xcbuild-plist" }
+thiserror.workspace = true
+anyhow.workspace = true

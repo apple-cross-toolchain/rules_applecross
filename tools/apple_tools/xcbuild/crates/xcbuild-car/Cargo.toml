@@ -1,0 +1,10 @@
+[package]
+name = "xcbuild-car"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcbuild-bom = { path = "../xcbuild-bom" }
+thiserror.workspace = true
+byteorder.workspace = true
+flate2.workspace = true

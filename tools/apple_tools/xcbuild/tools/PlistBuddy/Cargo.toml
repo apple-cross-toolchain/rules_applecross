@@ -1,0 +1,14 @@
+[package]
+name = "plist-buddy"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "PlistBuddy"
+path = "src/main.rs"
+
+[dependencies]
+xcbuild-plist = { path = "../../crates/xcbuild-plist" }
+plist.workspace = true
+anyhow.workspace = true
+rustyline.workspace = true

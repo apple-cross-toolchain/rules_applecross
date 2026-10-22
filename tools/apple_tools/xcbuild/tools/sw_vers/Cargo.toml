@@ -1,0 +1,9 @@
+[package]
+name = "sw_vers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcbuild-sdk = { path = "../../crates/xcbuild-sdk" }
+anyhow.workspace = true
+clap.workspace = true

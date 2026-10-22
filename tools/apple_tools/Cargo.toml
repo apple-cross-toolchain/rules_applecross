@@ -1,4 +1,3 @@
-# Clean-room Apple tools for Linux; see docs/clean-room.
 [workspace]
 resolver = "2"
 members = [
@@ -9,6 +8,17 @@ members = [
     "crates/lzfse",
     "crates/macho",
     "crates/swift-stdlib-tool",
+    "xcbuild/crates/xcbuild-acdriver",
+    "xcbuild/crates/xcbuild-bom",
+    "xcbuild/crates/xcbuild-car",
+    "xcbuild/crates/xcbuild-pbxsetting",
+    "xcbuild/crates/xcbuild-plist",
+    "xcbuild/crates/xcbuild-sdk",
+    "xcbuild/crates/xcbuild-xcassets",
+    "xcbuild/tools/PlistBuddy",
+    "xcbuild/tools/plutil",
+    "xcbuild/tools/sw_vers",
+    "xcbuild/tools/xcrun",
 ]
 
 [workspace.package]
@@ -17,9 +27,19 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
+anyhow = "1"
+byteorder = "1"
 cf = { path = "crates/cf" }
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
 lzfse = { path = "crates/lzfse" }
 macho = { path = "crates/macho" }
+plist = "1"
+rustyline = "15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+xcbuild-acdriver = { path = "xcbuild/crates/xcbuild-acdriver" }
 
 [profile.release]
 codegen-units = 1
