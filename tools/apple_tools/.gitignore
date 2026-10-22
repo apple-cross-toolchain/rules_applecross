@@ -1,2 +1,4 @@
 target/
 swiftui_macros/.build/
+/bazel-*
+/MODULE.bazel.lock

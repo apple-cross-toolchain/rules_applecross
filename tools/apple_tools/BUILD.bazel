@@ -1,0 +1,13 @@
+filegroup(
+    name = "tools",
+    srcs = [
+        "//crates/actool",
+        "//crates/codesign",
+        "//crates/ibtool",
+        "//crates/swift-stdlib-tool",
+        "//xcbuild/tools/PlistBuddy",
+        "//xcbuild/tools/plutil",
+        "//xcbuild/tools/sw_vers",
+        "//xcbuild/tools/xcrun",
+    ],
+)

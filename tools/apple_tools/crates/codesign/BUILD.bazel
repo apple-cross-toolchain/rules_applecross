@@ -1,0 +1,14 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+
+rust_binary(
+    name = "codesign",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//crates/cf",
+        "//crates/macho",
+        "@crates//:regex",
+        "@crates//:sha1",
+        "@crates//:sha2",
+    ],
+)
