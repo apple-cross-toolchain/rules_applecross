@@ -2,56 +2,90 @@ name: build
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   push:
     branches:
       - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Pinned rather than left to the runner default because MODULE.bazel pins the
   # Swift toolchain that has to match the Swift these SDKs were built with.
   XCODE_DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  XCODE_BUILD: 17F113
+  BAZEL_VERSIONS: "[8, 9, 10]"
 
 jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      bazel: ${{ steps.bazel.outputs.all }}
+      macos-bazel: ${{ steps.bazel.outputs.macos }}
+      sdks-key: ${{ steps.sdks.outputs.cache-primary-key }}
+      sdks-hit: ${{ steps.sdks.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Look up packaged Apple SDKs
+        id: sdks
+        uses: actions/cache/restore@v6
+        with:
+          path: apple-sdks.tar.zst
+          key: apple-sdks-${{ env.XCODE_BUILD }}-${{ hashFiles('tools/package-sdks.sh') }}
+          lookup-only: true
+      - name: Pick Bazel versions
+        id: bazel
+        env:
+          FULL_MACOS_MATRIX: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+        run: |
+          echo "all=$BAZEL_VERSIONS" >> "$GITHUB_OUTPUT"
+          if [ "$FULL_MACOS_MATRIX" = true ]; then
+            echo "macos=$BAZEL_VERSIONS" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos=[$(cut -d. -f1 .bazelversion)]" >> "$GITHUB_OUTPUT"
+          fi
   package_sdks:
+    needs: setup
+    if: needs.setup.outputs.sdks-hit != 'true'
     runs-on: macos-26
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - name: Read Xcode identity
-        id: xcode
+      - name: Check Xcode build
         env:
           DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
         run: |
-          identity=$(xcodebuild -version)
-          echo "identity=${identity//$'\n'/-}" >> "$GITHUB_OUTPUT"
-      - name: Cache packaged Apple SDKs
-        id: apple-sdks-cache
-        uses: actions/cache@v6
-        with:
-          path: apple-sdks.tar.zst
-          key: apple-sdks-${{ steps.xcode.outputs.identity }}-${{ hashFiles('tools/package-sdks.sh') }}
+          build=$(xcodebuild -version | sed -n 's/^Build version //p')
+          if [ "$build" != "$XCODE_BUILD" ]; then
+            echo "::error::$XCODE_DEVELOPER_DIR is build $build, but XCODE_BUILD is $XCODE_BUILD"
+            exit 1
+          fi
       - name: Package Apple SDKs
-        if: steps.apple-sdks-cache.outputs.cache-hit != 'true'
         env:
           DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
         run: tools/package-sdks.sh
-      - uses: actions/upload-artifact@v7
+      - uses: actions/cache/save@v6
         with:
-          name: apple-sdks
           path: apple-sdks.tar.zst
-          # The archive is already zstd-compressed.
-          compression-level: 0
-          retention-days: 1
+          key: ${{ needs.setup.outputs.sdks-key }}
   build:
-    needs: package_sdks
+    needs:
+      - setup
+      - package_sdks
+    if: ${{ !cancelled() && !failure() }}
     strategy:
       fail-fast: false
       matrix:
-        bazel: &bazel_versions
-          - 8
-          - 9
-          - 10
+        bazel: ${{ fromJSON(needs.setup.outputs.bazel) }}
     runs-on: ubuntu-24.04
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
@@ -59,15 +93,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - name: Restore packaged Apple SDKs
+        uses: actions/cache/restore@v6
         with:
-          name: apple-sdks
-          path: apple-sdks-artifact
-          # Work around actions/download-artifact#484 until its bundled
-          # unzip-stream dependency no longer uses the deprecated Buffer().
-          skip-decompress: true
-      - name: Extract Apple SDKs
-        run: unzip -q apple-sdks-artifact/* -d . && rm -rf apple-sdks-artifact
+          path: apple-sdks.tar.zst
+          key: ${{ needs.setup.outputs.sdks-key }}
+          fail-on-cache-miss: true
       # Fork pull requests receive no secrets, so they build without the cache.
       - name: Configure BuildBuddy cache
         env:
@@ -126,11 +157,14 @@ jobs:
           RESULT: ${{ needs.build.result }}
         run: test "$RESULT" = success
   run_tests:
-    needs: build
+    needs:
+      - setup
+      - build
+    if: ${{ !cancelled() && !failure() }}
     strategy:
       fail-fast: false
       matrix:
-        bazel: *bazel_versions
+        bazel: ${{ fromJSON(needs.setup.outputs.macos-bazel) }}
     runs-on: macOS-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -172,32 +206,29 @@ jobs:
     # Fork pull requests receive no secrets, so remote execution (which needs
     # BUILDBUDDY_API_KEY) can only run for same-repo events.
     if: >-
-      github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    needs: package_sdks
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      !cancelled() && !failure()
+    needs:
+      - setup
+      - package_sdks
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-24.04
-          - macos-26
-        bazel: *bazel_versions
-    runs-on: ${{ matrix.os }}
+        bazel: ${{ fromJSON(needs.setup.outputs.bazel) }}
+    runs-on: ubuntu-24.04
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
     permissions:
       contents: read
-    steps:
+    steps: &remote_build_steps
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - name: Restore packaged Apple SDKs
+        uses: actions/cache/restore@v6
         with:
-          name: apple-sdks
-          path: apple-sdks-artifact
-          # Work around actions/download-artifact#484 until its bundled
-          # unzip-stream dependency no longer uses the deprecated Buffer().
-          skip-decompress: true
-      - name: Extract Apple SDKs
-        run: unzip -q apple-sdks-artifact/* -d . && rm -rf apple-sdks-artifact
+          path: apple-sdks.tar.zst
+          key: ${{ needs.setup.outputs.sdks-key }}
+          fail-on-cache-miss: true
       # MODULE.bazel prefers a local Xcode wherever one exists, so the macOS leg
       # has to ask for the archive to be testing anything the Linux leg is not.
       - name: Build examples and tests with remote execution
@@ -214,18 +245,37 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
-  remote_build_local_xcode:
-    # The same remote build reading the runner's own Xcode instead of a
-    # packaged archive. It is a separate job rather than another leg of
-    # remote_build because it needs no artifact, and `needs` would make it wait
-    # for package_sdks anyway.
+  remote_build_macos:
     if: >-
-      github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      !cancelled() && !failure()
+    needs:
+      - setup
+      - package_sdks
     strategy:
       fail-fast: false
       matrix:
-        bazel: *bazel_versions
+        bazel: ${{ fromJSON(needs.setup.outputs.macos-bazel) }}
+    runs-on: macos-26
+    env:
+      USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
+    permissions:
+      contents: read
+    steps: *remote_build_steps
+  remote_build_local_xcode:
+    # The same remote build reading the runner's own Xcode instead of a
+    # packaged archive. It is a separate job rather than another leg of
+    # remote_build_macos because it needs no archive, and `needs` would make it
+    # wait for package_sdks anyway.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        bazel: ${{ fromJSON(needs.setup.outputs.macos-bazel) }}
     runs-on: macos-26
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
@@ -260,10 +310,11 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
+    needs: setup
     strategy:
       fail-fast: false
       matrix:
-        bazel: *bazel_versions
+        bazel: ${{ fromJSON(needs.setup.outputs.macos-bazel) }}
     runs-on: macos-26
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
@@ -307,32 +358,3 @@ jobs:
           --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
           --ios_multi_cpus=sim_arm64
           //tests/xcframework_import:Probe
-  delete_sdks:
-    # The SDK tarball is only needed while the jobs that consume it run, so
-    # drop it instead of leaving it in the artifact store until its retention
-    # period expires. Fork pull requests receive a read-only token, which
-    # cannot delete artifacts, so there the retention period is the only
-    # cleanup.
-    if: >-
-      always() &&
-      (github.event_name == 'push' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    needs:
-      - build
-      - remote_build
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: write
-    steps:
-      - name: Delete Apple SDKs artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ids=$(
-            gh api \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=apple-sdks" \
-              --jq '.artifacts[].id'
-          )
-          for id in $ids; do
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
-          done
