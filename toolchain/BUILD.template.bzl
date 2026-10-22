@@ -404,13 +404,10 @@ filegroup(
     srcs = [
         ":clang_tool_files",
         _XCODE_TOOLCHAIN_BIN + "/dsymutil",
-        _XCODE_TOOLCHAIN_BIN + "/ld",
         _XCODE_TOOLCHAIN_BIN + "/ld64.lld",
         _XCODE_TOOLCHAIN_BIN + "/lld",
         _XCODE_TOOLCHAIN_BIN + "/llvm-strip",
         _XCODE_TOOLCHAIN_BIN + "/strip",
-        _XCODE_TOOLCHAIN_LIB + "/libtapi.so",
-        _XCODE_TOOLCHAIN_LIB + "/libtapi.so.8svn",
     ] + _SWIFT_COMPATIBILITY_ARCHIVES + _SWIFT_TOOLCHAIN_LINK_STUBS + _SWIFT_BACK_DEPLOYMENT_LIBS,
 )
 

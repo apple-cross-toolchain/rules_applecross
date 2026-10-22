@@ -104,16 +104,7 @@ _MULTIARCH = {
     "x86_64": "x86_64-linux-gnu",
 }
 
-_PORTED_TOOLS = {
-    "aarch64": (
-        "https://github.com/apple-cross-toolchain/ci/releases/download/0.0.23/ported-tools-linux-aarch64.tar.xz",
-        "0e9de81f2ba7104996e7e65a456f4b69057c254ff352e10b515a4bcff28423f3",
-    ),
-    "x86_64": (
-        "https://github.com/apple-cross-toolchain/ci/releases/download/0.0.23/ported-tools-linux-x86_64.tar.xz",
-        "a1665d58c21ff9401c194e1925ab8a9963c35558ab1b3949b1e686025b65dfc1",
-    ),
-}
+_PORTED_TOOLS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/ported-tools-0.0.25/"
 
 def _linux_exec_cpu(rctx):
     """The host's CPU on Linux; x86_64 (remote executors) elsewhere."""
@@ -303,6 +294,7 @@ def _patch_swiftinterfaces(rctx, framework_dirs):
 _RULE_INPUT_FILES = [
     "BUILD.template.bzl",
     "libtool.cc",
+    "ported_tools.sha256",
     "wrapped_clang.cc",
     "repo_tools/ensure_clang_resource_libs.py",
     "repo_tools/normalize_sdk_modulemaps.py",
@@ -331,6 +323,7 @@ _LLVM_PREBUILT = {
 _LLVM_PREBUILT_MACOS = "@llvm_prebuilt_macos//:bin/clang"
 
 _LLVM_TOOL_ALIASES = {
+    "bitcode_strip": "llvm-bitcode-strip",
     "install_name_tool": "llvm-install-name-tool",
     "lipo": "llvm-lipo",
     "ar": "llvm-ar",
@@ -422,19 +415,44 @@ def _materialize_apple_sdks(rctx, cpu):
         )
 
 def _install_ported_tools(rctx, cpu, destination):
-    archive = rctx.attr.ported_tools_archives.get(cpu)
-    if archive:
-        path = rctx.workspace_root.get_child(archive)
-        rctx.watch(path)
-        rctx.extract(archive = path, output = destination)
+    suffix = "-linux-{}.tar.zst".format(cpu)
+    local = rctx.attr.ported_tools_archives.get(cpu)
+    if local:
+        path = rctx.workspace_root.get_child(local)
+        if path.is_dir:
+            rctx.watch_tree(path)
+            archives = [p for p in path.readdir() if p.basename.endswith(suffix)]
+        else:
+            rctx.watch(path)
+            archives = [path]
+        for archive in archives:
+            rctx.extract(archive = archive, output = destination)
         return
-    if cpu not in _PORTED_TOOLS:
+
+    archives = {}
+    for line in rctx.read(_toolchain_path(rctx, "ported_tools.sha256")).splitlines():
+        fields = [field for field in line.split(" ") if field]
+        if len(fields) == 2 and fields[1].endswith(suffix):
+            archives[fields[1]] = fields[0]
+    if not archives:
         fail(
             ("No ported Apple tools are published for linux-{0}; set " +
              "ported_tools_archives on apple_cross_toolchain.configure().").format(cpu),
         )
-    url, sha256 = _PORTED_TOOLS[cpu]
-    rctx.download_and_extract(url = [url], sha256 = sha256, output = destination)
+    downloads = [
+        rctx.download(
+            url = _PORTED_TOOLS_URL + name,
+            output = "_ported_tools/" + name,
+            sha256 = sha256,
+            block = False,
+        )
+        for name, sha256 in archives.items()
+    ]
+    for download in downloads:
+        download.wait()
+    for name in archives:
+        rctx.extract(archive = "_ported_tools/" + name, output = destination)
+    rctx.delete("_ported_tools")
 
 def _apple_cross_toolchain_impl(rctx):
     cpu = _linux_exec_cpu(rctx)
@@ -589,9 +607,9 @@ def _apple_cross_toolchain_impl(rctx):
         _install_executable(rctx, "stubs/zip.py", _zip_path + ".py")
 
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
-    # Stub codesign unless the ported tools carry the clean-room one.
+    # Stub codesign unless the ported tools carry one.
     _codesign_path = xcode_toolchain_bindir + "codesign"
-    if not rctx.path(xcode_toolchain_bindir + ".apple-tools-revision").exists:
+    if not rctx.path(_codesign_path).exists:
         _install_executable(rctx, "stubs/noop_tool.sh", _codesign_path)
 
     _codesign_allocate_path = xcode_toolchain_bindir + "codesign_allocate"
@@ -655,8 +673,10 @@ hard error rather than a silent fallback.
         ),
         "ported_tools_archives": attr.string_dict(
             doc = """\
-Workspace-relative ported Apple tools archives keyed by Linux CPU ("x86_64",
-"aarch64"), used instead of the ones apple-cross-toolchain/ci publishes.
+Workspace-relative ported Apple tools keyed by Linux CPU ("x86_64",
+"aarch64"), used instead of the ones this repository releases: a directory of
+<tool>-linux-<cpu>.tar.zst archives, as tools/build-ported-tools.sh writes
+them, or a single archive.
 """,
         ),
         "swift_tools": attr.string_dict(
