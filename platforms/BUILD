@@ -36,3 +36,12 @@ platform(
         "container-image": "docker://ubuntu:24.04",
     },
 )
+
+platform(
+    name = "linux_aarch64",
+    constraint_values = [
+        "@llvm//constraints/libc:gnu.2.28",
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+    ],
+)

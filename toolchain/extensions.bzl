@@ -36,6 +36,7 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "apple_sdk_strip_prefix": config.apple_sdk_strip_prefix,
                 "apple_sdk_archive_type": config.apple_sdk_archive_type,
                 "local_xcode": config.local_xcode,
+                "ported_tools_archives": config.ported_tools_archives,
                 "swift_tools": config.swift_tools,
                 "swift_tools_macos": config.swift_tools_macos,
             }
@@ -56,7 +57,16 @@ _configure_tag = tag_class(
                   "macOS hosts only; ignored elsewhere, so one MODULE.bazel " +
                   "can name both this and an archive source.",
         ),
-        "swift_tools": attr.string(mandatory = True),
+        "ported_tools_archives": attr.string_dict(
+            doc = "Workspace-relative ported Apple tools archives keyed by " +
+                  "Linux CPU (\"x86_64\", \"aarch64\"). CPUs without one " +
+                  "download apple-cross-toolchain/ci's, published for x86_64 only.",
+        ),
+        "swift_tools": attr.string_dict(
+            mandatory = True,
+            doc = "Labels of rules_swift swift_tools targets keyed by Linux " +
+                  "CPU (\"x86_64\", \"aarch64\").",
+        ),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's " +
                   "macOS Swift, matching swift_tools' version. When set, Swift " +
