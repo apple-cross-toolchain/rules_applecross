@@ -11,7 +11,10 @@ these paths as directory artifacts, so any extra or missing file changes the
 directory's digest, and a build from a local Xcode would stop sharing the remote
 cache with one from a packaged archive.
 
-Usage: link_local_xcode.py <developer-dir> <destination-Xcode.app>
+Usage: link_local_xcode.py <developer-dir> <destination-Xcode.app> [<llvm-readtapi>]
+
+Stubs come from `xcrun tapi stubify` on macOS. A Linux host, reading an Xcode
+mounted into it, has no xcrun and names LLVM's llvm-readtapi instead.
 """
 
 import fnmatch
@@ -89,7 +92,8 @@ def _includes():
 
 
 class Linker(object):
-    def __init__(self, source, xcode_app):
+    def __init__(self, source, xcode_app, readtapi=None):
+        self.readtapi = readtapi
         self.source = source
         self.xcode_app = xcode_app
         # Everything grafted from the install lands under Contents/Developer,
@@ -266,8 +270,14 @@ class Linker(object):
             self._graft(rel, excluded)
 
         self._real_dir(_TOOLCHAIN + "/usr/bin")
+        # Copied, not linked: xcrun follows the link and would run the
+        # install's own tools.
+        _copy_file(
+            os.path.join(self.source, _TOOLCHAIN, "ToolchainInfo.plist"),
+            os.path.join(self.destination, _TOOLCHAIN, "ToolchainInfo.plist"),
+        )
         _copy_plists(self.source, self.xcode_app)
-        _stubify(stub_targets, self.destination)
+        _stubify(stub_targets, self.destination, self.readtapi)
         self._retarget_stub_aliases()
         return len(stub_targets)
 
@@ -313,6 +323,15 @@ def _is_macho(path):
                      b"\xce\xfa\xed\xfe", b"\xbe\xba\xfe\xca")
 
 
+def _copy_file(src, dst):
+    if os.path.lexists(dst):
+        os.unlink(dst)
+    with open(src, "rb") as f:
+        data = f.read()
+    with open(dst, "wb") as f:
+        f.write(data)
+
+
 def _copy_plists(source, xcode_app):
     for name in ("Info.plist", "version.plist"):
         src = os.path.join(os.path.dirname(source), name)
@@ -324,16 +343,19 @@ def _copy_plists(source, xcode_app):
             f.write(data)
 
 
-def _stubify(targets, destination):
+def _stubify(targets, destination, readtapi):
     """Generate the .tbd stubs that no Xcode ships."""
     for source_binary, rel_tbd in targets:
         out = os.path.join(destination, rel_tbd)
         if os.path.exists(out):
             continue
         os.makedirs(os.path.dirname(out), exist_ok=True)
+        if readtapi:
+            command = [readtapi, "--stubify", "--filetype=tbd-v5", source_binary, "-o", out]
+        else:
+            command = ["xcrun", "tapi", "stubify", source_binary, "-o", out]
         subprocess.run(
-            ["xcrun", "tapi", "stubify", source_binary, "-o", out],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
         if _is_developer_framework(rel_tbd):
             _strip_reexports(out)
@@ -370,10 +392,11 @@ def _strip_reexports(path):
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: link_local_xcode.py <developer-dir> <destination-Xcode.app>",
+    if len(sys.argv) not in (3, 4):
+        print("usage: link_local_xcode.py <developer-dir> <destination-Xcode.app> [<llvm-readtapi>]",
               file=sys.stderr)
         return 2
+    readtapi = os.path.abspath(sys.argv[3]) if len(sys.argv) == 4 else None
     source = os.path.realpath(sys.argv[1])
     destination = os.path.abspath(sys.argv[2])
 
@@ -386,7 +409,7 @@ def main() -> int:
             destination, source), file=sys.stderr)
         return 1
 
-    stubs = Linker(source, destination).run()
+    stubs = Linker(source, destination, readtapi).run()
     print("linked {} from {} ({} stubs generated)".format(
         destination, source, stubs), file=sys.stderr)
     return 0

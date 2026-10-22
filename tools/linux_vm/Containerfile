@@ -1,0 +1,23 @@
+# Linux build environment (x86_64 or arm64). Swift is on PATH for
+# rules_swift_package_manager; builds use the toolchain's own.
+#
+#   podman build -t rules-applecross-linux tools/linux_vm
+FROM docker.io/library/swift:6.4-noble
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && apt-get install -qqy --no-install-recommends \
+      binutils build-essential ca-certificates clang cmake curl file git \
+      libpng-dev libxml2-dev libz3-dev ninja-build openjdk-21-jdk-headless \
+      patchelf pkg-config python3 python-is-python3 unzip xz-utils zip \
+      zlib1g-dev zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG BAZELISK_VERSION=v1.27.0
+RUN arch="$(dpkg --print-architecture)" \
+    && curl -fsSL -o /usr/local/bin/bazel \
+         "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-${arch}" \
+    && chmod +x /usr/local/bin/bazel
+
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+    && chmod -R a+rwX /opt/cargo /opt/rustup
