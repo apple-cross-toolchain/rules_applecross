@@ -1,0 +1,6 @@
+[package]
+name = "macho"
+description = "The Mach-O facts code signing needs, and codesign_allocate's edit."
+edition.workspace = true
+license.workspace = true
+version.workspace = true

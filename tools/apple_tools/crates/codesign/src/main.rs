@@ -1,0 +1,221 @@
+//! Clean-room `codesign` for Linux: ad hoc signing and `--verify`; see
+//! docs/clean-room/codesign.md.
+
+mod der;
+mod resources;
+mod sign;
+
+use cf::Value;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+#[derive(Default)]
+struct Options {
+    identity: Option<String>,
+    identifier: Option<String>,
+    entitlements: Option<PathBuf>,
+    generate_der: bool,
+    force: bool,
+    verify: bool,
+    verbose: bool,
+    paths: Vec<PathBuf>,
+}
+
+fn usage() -> String {
+    "usage: codesign -s identity [--force] [--entitlements file] [--generate-entitlement-der] [-i identifier] path ...\n       codesign --verify path ...".into()
+}
+
+fn parse(args: Vec<String>) -> Result<Options, String> {
+    let mut o = Options::default();
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
+        match a.as_str() {
+            "-s" | "--sign" => o.identity = Some(value(&a)?),
+            "-i" | "--identifier" => o.identifier = Some(value(&a)?),
+            "--entitlements" => o.entitlements = Some(PathBuf::from(value(&a)?)),
+            "--generate-entitlement-der" => o.generate_der = true,
+            "-f" | "--force" => o.force = true,
+            "-v" | "--verbose" => {
+                if o.identity.is_none() && !o.force {
+                    // `-v` alone means verify; with signing it means verbose.
+                    o.verify = true;
+                }
+                o.verbose = true;
+            }
+            "--verify" => o.verify = true,
+            "--timestamp=none" | "--timestamp" | "--deep" | "--strict" => {}
+            s if s.starts_with("--timestamp=") || s.starts_with("--preserve-metadata") || s.starts_with("--options") => {
+                if s == "--options" {
+                    value(&a)?;
+                }
+            }
+            s if s.starts_with("-v") && s.chars().skip(1).all(|c| c == 'v') => o.verbose = true,
+            s if s.starts_with('-') => return Err(format!("unsupported option {s}\n{}", usage())),
+            _ => o.paths.push(PathBuf::from(a)),
+        }
+    }
+    if o.identity.is_some() {
+        o.verify = false;
+    }
+    if o.paths.is_empty() {
+        return Err(usage());
+    }
+    Ok(o)
+}
+
+struct Bundle {
+    root: PathBuf,
+    info_path: PathBuf,
+    executable: Option<String>,
+    identifier: Option<String>,
+}
+
+/// An iOS-style bundle keeps Info.plist at its root.
+fn bundle(path: &Path) -> Option<Bundle> {
+    if !path.is_dir() {
+        return None;
+    }
+    let info_path = path.join("Info.plist");
+    let info = Value::parse(&std::fs::read(&info_path).ok()?).ok()?;
+    Some(Bundle {
+        root: path.to_path_buf(),
+        info_path,
+        executable: info.get("CFBundleExecutable").and_then(|v| v.as_str()).map(String::from),
+        identifier: info.get("CFBundleIdentifier").and_then(|v| v.as_str()).map(String::from),
+    })
+}
+
+fn default_identifier(path: &Path) -> String {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem.to_string(),
+        _ => name,
+    }
+}
+
+/// The identifier codesign gives a Mach-O file with none of its own: the
+/// file name without its extension, made unique when it has no dot by
+/// appending "-", then "UUID" and the image's LC_UUID, in hex.
+fn file_identifier(path: &Path, image: &macho::Image) -> Result<String, String> {
+    let stem = default_identifier(path);
+    if stem.contains('.') {
+        return Ok(stem);
+    }
+    let uuid = image.uuid.ok_or_else(|| format!("{}: has no LC_UUID to derive an identifier from; pass -i", path.display()))?;
+    let hex: String = b"UUID".iter().chain(&uuid).map(|b| format!("{b:02x}")).collect();
+    Ok(format!("{stem}-{hex}"))
+}
+
+fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
+    let identity = o.identity.as_deref().unwrap();
+    if identity != "-" {
+        return Err(format!(
+            "{}: signing with identity \"{identity}\" needs a private key; this codesign signs ad hoc only (-s -)",
+            path.display()
+        ));
+    }
+    let entitlements = match &o.entitlements {
+        Some(p) => Some(std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?),
+        None => None,
+    };
+    let entitlements_value = match &entitlements {
+        Some(e) => Some(Value::parse(e).map_err(|e| format!("entitlements: {e}"))?),
+        None => None,
+    };
+    let der = match (&entitlements_value, o.generate_der) {
+        (Some(v), true) => Some(der::encode(v)?),
+        _ => None,
+    };
+
+    let (exe_path, identifier, info, code_resources) = if let Some(b) = bundle(path) {
+        let exe = b.executable.clone().ok_or_else(|| format!("{}: bundle has no CFBundleExecutable", path.display()))?;
+        let entries = resources::collect(&b.root, Some(&exe)).map_err(|e| e.to_string())?;
+        let seal = cf::xml::to_bytes(&resources::build(&entries).map_err(|e| e.to_string())?);
+        let dir = b.root.join("_CodeSignature");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join("CodeResources"), &seal).map_err(|e| e.to_string())?;
+        let info = std::fs::read(&b.info_path).map_err(|e| e.to_string())?;
+        let identifier = o.identifier.clone().or(b.identifier).unwrap_or_else(|| default_identifier(path));
+        (b.root.join(exe), Some(identifier), Some(info), Some(seal))
+    } else {
+        (path.to_path_buf(), None, None, None)
+    };
+
+    let data = std::fs::read(&exe_path).map_err(|e| format!("{}: {e}", exe_path.display()))?;
+    let mut universal = macho::Universal::parse(data).map_err(|e| format!("{}: {e}", exe_path.display()))?;
+    // A lone Mach-O file binds the Info.plist embedded in it, if any, and is
+    // named by it.
+    let (identifier, info) = match identifier {
+        Some(i) => (i, info),
+        None => {
+            let first = universal.images()[0];
+            let embedded = first.section("__TEXT", "__info_plist").map(<[u8]>::to_vec);
+            let embedded_id = embedded.as_ref().and_then(|e| Value::parse(e).ok()).and_then(|v| v.get("CFBundleIdentifier").and_then(|i| i.as_str()).map(String::from));
+            let identifier = match o.identifier.clone().or(embedded_id) {
+                Some(i) => i,
+                None => file_identifier(path, first)?,
+            };
+            (identifier, embedded)
+        }
+    };
+    for image in universal.images_mut() {
+        if image.code_signature.is_some() && !o.force {
+            let cd = sign::existing_code_directory(image);
+            // A linker's ad-hoc signature may always be replaced.
+            let linker_signed = cd.map_or(true, |cd| cd.len() > 16 && u32::from_be_bytes(cd[12..16].try_into().unwrap()) & 0x20000 != 0);
+            if !linker_signed {
+                return Err(format!("{}: is already signed", path.display()));
+            }
+        }
+        let inputs = sign::Inputs {
+            identifier: &identifier,
+            info_plist: info.as_deref(),
+            code_resources: code_resources.as_deref(),
+            entitlements: entitlements.as_deref(),
+            der_entitlements: der.as_deref(),
+            entitlement_flags: sign::exec_seg_flags(entitlements_value.as_ref()),
+        };
+        sign::sign(image, &inputs).map_err(|e| format!("{}: {e}", exe_path.display()))?;
+    }
+    let out = universal.into_bytes();
+    std::fs::write(&exe_path, out).map_err(|e| format!("{}: {e}", exe_path.display()))?;
+    if o.verbose {
+        eprintln!("{}: signed", path.display());
+    }
+    Ok(())
+}
+
+fn verify_path(path: &Path) -> Result<(), String> {
+    let exe = match bundle(path) {
+        Some(b) => b.root.join(b.executable.ok_or("bundle has no executable")?),
+        None => path.to_path_buf(),
+    };
+    let data = std::fs::read(&exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+    let mut universal = macho::Universal::parse(data).map_err(|e| e.to_string())?;
+    for image in universal.images_mut() {
+        if sign::existing_code_directory(image).is_none() {
+            return Err(format!("{}: code object is not signed at all", path.display()));
+        }
+    }
+    Ok(())
+}
+
+fn main() -> ExitCode {
+    let o = match parse(std::env::args().skip(1).collect()) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut status = ExitCode::SUCCESS;
+    for p in &o.paths {
+        let r = if o.verify { verify_path(p) } else if o.identity.is_some() { sign_path(p, &o) } else { Err(usage()) };
+        if let Err(e) = r {
+            eprintln!("{e}");
+            status = ExitCode::FAILURE;
+        }
+    }
+    status
+}

@@ -1,0 +1,17 @@
+[package]
+name = "codesign"
+description = "Ad-hoc code signing for Apple bundles and Mach-O files, compatible with codesign(1)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "codesign"
+path = "src/main.rs"
+
+[dependencies]
+cf.workspace = true
+macho.workspace = true
+regex = "1"
+sha1 = "0.10"
+sha2 = "0.10"
