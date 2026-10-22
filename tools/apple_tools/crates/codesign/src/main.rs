@@ -14,7 +14,6 @@ struct Options {
     identity: Option<String>,
     identifier: Option<String>,
     entitlements: Option<PathBuf>,
-    generate_der: bool,
     force: bool,
     verify: bool,
     verbose: bool,
@@ -34,7 +33,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "-s" | "--sign" => o.identity = Some(value(&a)?),
             "-i" | "--identifier" => o.identifier = Some(value(&a)?),
             "--entitlements" => o.entitlements = Some(PathBuf::from(value(&a)?)),
-            "--generate-entitlement-der" => o.generate_der = true,
+            // DER entitlements are the default since macOS 12.
+            "--generate-entitlement-der" => {}
             "-f" | "--force" => o.force = true,
             "-v" | "--verbose" => {
                 if o.identity.is_none() && !o.force {
@@ -65,21 +65,40 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
 }
 
 struct Bundle {
+    /// The directory sealed: the bundle itself, or its `Contents`.
     root: PathBuf,
+    layout: resources::Layout,
     info_path: PathBuf,
     executable: Option<String>,
     identifier: Option<String>,
 }
 
-/// An iOS-style bundle keeps Info.plist at its root.
+impl Bundle {
+    /// The main executable, relative to `root`.
+    fn executable_path(&self) -> Option<String> {
+        let exe = self.executable.as_ref()?;
+        Some(match self.layout {
+            resources::Layout::Shallow => exe.clone(),
+            resources::Layout::Deep => format!("MacOS/{exe}"),
+        })
+    }
+}
+
+/// An iOS-style bundle keeps Info.plist at its root; a macOS one in Contents.
 fn bundle(path: &Path) -> Option<Bundle> {
     if !path.is_dir() {
         return None;
     }
-    let info_path = path.join("Info.plist");
+    let (root, layout) = if path.join("Contents/Info.plist").is_file() {
+        (path.join("Contents"), resources::Layout::Deep)
+    } else {
+        (path.to_path_buf(), resources::Layout::Shallow)
+    };
+    let info_path = root.join("Info.plist");
     let info = Value::parse(&std::fs::read(&info_path).ok()?).ok()?;
     Some(Bundle {
-        root: path.to_path_buf(),
+        root,
+        layout,
         info_path,
         executable: info.get("CFBundleExecutable").and_then(|v| v.as_str()).map(String::from),
         identifier: info.get("CFBundleIdentifier").and_then(|v| v.as_str()).map(String::from),
@@ -123,15 +142,15 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
         Some(e) => Some(Value::parse(e).map_err(|e| format!("entitlements: {e}"))?),
         None => None,
     };
-    let der = match (&entitlements_value, o.generate_der) {
-        (Some(v), true) => Some(der::encode(v)?),
-        _ => None,
+    let der = match &entitlements_value {
+        Some(v) => Some(der::encode(v)?),
+        None => None,
     };
 
     let (exe_path, identifier, info, code_resources) = if let Some(b) = bundle(path) {
-        let exe = b.executable.clone().ok_or_else(|| format!("{}: bundle has no CFBundleExecutable", path.display()))?;
+        let exe = b.executable_path().ok_or_else(|| format!("{}: bundle has no CFBundleExecutable", path.display()))?;
         let entries = resources::collect(&b.root, Some(&exe)).map_err(|e| e.to_string())?;
-        let seal = cf::xml::to_bytes(&resources::build(&entries).map_err(|e| e.to_string())?);
+        let seal = cf::xml::to_bytes(&resources::build(&entries, b.layout).map_err(|e| format!("{}: {e}", path.display()))?);
         let dir = b.root.join("_CodeSignature");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         std::fs::write(dir.join("CodeResources"), &seal).map_err(|e| e.to_string())?;
@@ -188,7 +207,7 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
 
 fn verify_path(path: &Path) -> Result<(), String> {
     let exe = match bundle(path) {
-        Some(b) => b.root.join(b.executable.ok_or("bundle has no executable")?),
+        Some(b) => b.root.join(b.executable_path().ok_or("bundle has no executable")?),
         None => path.to_path_buf(),
     };
     let data = std::fs::read(&exe).map_err(|e| format!("{}: {e}", exe.display()))?;
