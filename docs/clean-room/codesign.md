@@ -2,7 +2,7 @@
 
 Reproduced: `codesign -v --sign - [--generate-entitlement-der --entitlements
 F] --force --timestamp=none PATH`, as rules_apple runs it, for iOS-style
-bundles and Mach-O files. Output was byte-identical to Xcode 27.0's codesign
+and macOS bundles and Mach-O files. Output was byte-identical to Xcode 27.0's codesign
 on the first comparison, and Apple's `codesign --verify --strict` accepts it.
 
 Observed: two ad hoc signatures of the same input are identical; two
@@ -42,6 +42,9 @@ file name without its extension, and when that has no dot, `-`, the hex of
 `some.name`). A file without `LC_UUID` gets some other suffix, not
 established, and is refused.
 
+Entitlements are embedded in DER as well as XML with or without
+`--generate-entitlement-der`, as codesign's manual says of macOS 12 and later.
+
 DER entitlements: `[APPLICATION 16] { INTEGER 1, [CONTEXT 16] { SEQUENCE {
 UTF8String key, value } ... } }`, keys in byte order.
 
@@ -56,3 +59,12 @@ libraries (`Frameworks/libswiftCompatibilitySpan.dylib`) are sealed by
 their hashes like any other file, as Xcode's codesign seals Visor's.
 Signing Visor's library, widget and app ad hoc, in that order, gives the
 same bytes as Apple's codesign.
+
+A macOS bundle (`Contents/Info.plist`) is sealed from `Contents`: the
+executable is `Contents/MacOS/<CFBundleExecutable>` and `_CodeSignature`
+goes in `Contents`. Its rule sets differ: v1 seals `^Resources/` (with the
+same `.lproj` rules under it) and `^version.plist$`; v2 adds `^Resources/`
+at weight 20 and two `nested` rules at weight 10,
+`^(Frameworks|SharedFrameworks|PlugIns|Plug-ins|XPCServices|Helpers|MacOS|Library/(Automator|Spotlight|LoginItems))/`
+and `^[^/]+$`. Files those match are nested code, sealed differently;
+not reproduced, so refused.

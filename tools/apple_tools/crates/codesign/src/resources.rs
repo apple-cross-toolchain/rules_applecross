@@ -1,4 +1,4 @@
-//! `_CodeSignature/CodeResources`, with the iOS default rule sets.
+//! `_CodeSignature/CodeResources`, with the iOS and macOS default rule sets.
 
 use cf::Value;
 use regex::Regex;
@@ -11,20 +11,42 @@ struct Rule {
     pattern: &'static str,
     omit: bool,
     optional: bool,
+    nested: bool,
     weight: f64,
     /// Whether the rule is written as `true` rather than a dictionary.
     plain: bool,
 }
 
 const fn plain(pattern: &'static str) -> Rule {
-    Rule { pattern, omit: false, optional: false, weight: 1.0, plain: true }
+    Rule { pattern, omit: false, optional: false, nested: false, weight: 1.0, plain: true }
 }
 
 const fn rule(pattern: &'static str, omit: bool, optional: bool, weight: f64) -> Rule {
-    Rule { pattern, omit, optional, weight, plain: false }
+    Rule { pattern, omit, optional, nested: false, weight, plain: false }
 }
 
-fn rules_v1() -> Vec<Rule> {
+const fn nested(pattern: &'static str) -> Rule {
+    Rule { pattern, omit: false, optional: false, nested: true, weight: 10.0, plain: false }
+}
+
+/// Where a bundle keeps its resources: at its root (iOS and the other
+/// embedded platforms) or in `Contents/Resources` (macOS).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Layout {
+    Shallow,
+    Deep,
+}
+
+fn rules_v1(layout: Layout) -> Vec<Rule> {
+    if layout == Layout::Deep {
+        return vec![
+            plain("^Resources/"),
+            rule("^Resources/.*\\.lproj/", false, true, 1000.0),
+            rule("^Resources/.*\\.lproj/locversion.plist$", true, false, 1100.0),
+            rule("^Resources/Base\\.lproj/", false, false, 1010.0),
+            plain("^version.plist$"),
+        ];
+    }
     vec![
         plain("^.*"),
         rule("^.*\\.lproj/", false, true, 1000.0),
@@ -34,7 +56,24 @@ fn rules_v1() -> Vec<Rule> {
     ]
 }
 
-fn rules_v2() -> Vec<Rule> {
+fn rules_v2(layout: Layout) -> Vec<Rule> {
+    if layout == Layout::Deep {
+        return vec![
+            rule(".*\\.dSYM($|/)", false, false, 11.0),
+            rule("^(.*/)?\\.DS_Store$", true, false, 2000.0),
+            nested("^(Frameworks|SharedFrameworks|PlugIns|Plug-ins|XPCServices|Helpers|MacOS|Library/(Automator|Spotlight|LoginItems))/"),
+            plain("^.*"),
+            rule("^Info\\.plist$", true, false, 20.0),
+            rule("^PkgInfo$", true, false, 20.0),
+            rule("^Resources/", false, false, 20.0),
+            rule("^Resources/.*\\.lproj/", false, true, 1000.0),
+            rule("^Resources/.*\\.lproj/locversion.plist$", true, false, 1100.0),
+            rule("^Resources/Base\\.lproj/", false, false, 1010.0),
+            nested("^[^/]+$"),
+            rule("^embedded\\.provisionprofile$", false, false, 20.0),
+            rule("^version\\.plist$", false, false, 20.0),
+        ];
+    }
     vec![
         rule(".*\\.dSYM($|/)", false, false, 11.0),
         rule("^(.*/)?\\.DS_Store$", true, false, 2000.0),
@@ -55,6 +94,9 @@ fn rules_value(rules: &[Rule]) -> Value {
             Value::Boolean(true)
         } else {
             let mut d = Vec::new();
+            if r.nested {
+                d.push(("nested".to_string(), Value::Boolean(true)));
+            }
             if r.omit {
                 d.push(("omit".to_string(), Value::Boolean(true)));
             }
@@ -93,7 +135,8 @@ pub enum Entry {
     Symlink(String),
 }
 
-/// Collects the bundle's files, relative to `root`, in path order.
+/// Collects the bundle's files, relative to `root`, in path order, leaving out
+/// the main executable (a path relative to `root`).
 pub fn collect(root: &Path, executable: Option<&str>) -> std::io::Result<Vec<(String, Entry)>> {
     let mut out = Vec::new();
     walk(root, root, executable, &mut out)?;
@@ -107,7 +150,7 @@ fn walk(root: &Path, dir: &Path, executable: Option<&str>, out: &mut Vec<(String
     for entry in names {
         let path = entry.path();
         let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-        if dir == root && (rel == "_CodeSignature" || Some(rel.as_str()) == executable) {
+        if (dir == root && rel == "_CodeSignature") || Some(rel.as_str()) == executable {
             continue;
         }
         let meta = std::fs::symlink_metadata(&path)?;
@@ -122,14 +165,14 @@ fn walk(root: &Path, dir: &Path, executable: Option<&str>, out: &mut Vec<(String
     Ok(())
 }
 
-pub fn build(entries: &[(String, Entry)]) -> std::io::Result<Value> {
-    let v1 = compile(rules_v1());
-    let v2 = compile(rules_v2());
+pub fn build(entries: &[(String, Entry)], layout: Layout) -> Result<Value, String> {
+    let v1 = compile(rules_v1(layout));
+    let v2 = compile(rules_v2(layout));
     let mut files = Vec::new();
     let mut files2 = Vec::new();
     for (rel, entry) in entries {
         let contents = match entry {
-            Entry::File(path) => Some(std::fs::read(path)?),
+            Entry::File(path) => Some(std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?),
             _ => None,
         };
         if let Some(r) = decide(&v1, rel) {
@@ -141,6 +184,9 @@ pub fn build(entries: &[(String, Entry)]) -> std::io::Result<Value> {
             }
         }
         if let Some(r) = decide(&v2, rel) {
+            if r.nested {
+                return Err(format!("{rel}: sealing nested code is not supported by this codesign"));
+            }
             if !r.omit {
                 let mut d: Vec<(String, Value)> = match entry {
                     Entry::File(_) => vec![("hash2".into(), Value::Data(Sha256::digest(contents.as_ref().unwrap()).to_vec()))],
@@ -156,7 +202,7 @@ pub fn build(entries: &[(String, Entry)]) -> std::io::Result<Value> {
     Ok(Value::dict([
         ("files", Value::Dictionary(files)),
         ("files2", Value::Dictionary(files2)),
-        ("rules", rules_value(&rules_v1())),
-        ("rules2", rules_value(&rules_v2())),
+        ("rules", rules_value(&rules_v1(layout))),
+        ("rules2", rules_value(&rules_v2(layout))),
     ]))
 }
