@@ -36,9 +36,9 @@ single_version_override(
 
 bazel_dep(name = "rules_swift", version = "4.2.2")
 bazel_dep(name = "rules_cc", version = "0.2.26")
-bazel_dep(name = "rules_python", version = "1.7.0")
+bazel_dep(name = "rules_python", version = "1.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
-bazel_dep(name = "llvm", version = "0.8.9")
+bazel_dep(name = "llvm", version = "0.8.25")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "xctestrunner", version = "0.0.1", dev_dependency = True)
 
@@ -77,21 +77,16 @@ register_toolchains(
     dev_dependency = True,
 )
 
-LLVM_PREBUILT_VERSION = "22.1.7"
-
 llvm_toolchain_minimal = use_extension("@llvm//extensions:llvm_toolchain_minimal.bzl", "llvm_toolchain_minimal")
-llvm_toolchain_minimal.release(
-    llvm_version = LLVM_PREBUILT_VERSION,
-)
 use_repo(
     llvm_toolchain_minimal,
-    "llvm-toolchain-minimal-%s-darwin-amd64" % LLVM_PREBUILT_VERSION,
-    "llvm-toolchain-minimal-%s-windows-amd64" % LLVM_PREBUILT_VERSION,
-    "llvm-toolchain-minimal-%s-windows-arm64" % LLVM_PREBUILT_VERSION,
-    llvm_prebuilt = "llvm-toolchain-minimal-%s-linux-amd64" % LLVM_PREBUILT_VERSION,
-    llvm_prebuilt_aarch64 = "llvm-toolchain-minimal-%s-linux-arm64" % LLVM_PREBUILT_VERSION,
+    "llvm-toolchain-minimal-darwin-amd64",
+    "llvm-toolchain-minimal-windows-amd64",
+    "llvm-toolchain-minimal-windows-arm64",
+    llvm_prebuilt = "llvm-toolchain-minimal-linux-amd64",
+    llvm_prebuilt_aarch64 = "llvm-toolchain-minimal-linux-arm64",
     # For the macOS execution platform's toolchains.
-    llvm_prebuilt_macos = "llvm-toolchain-minimal-%s-darwin-arm64" % LLVM_PREBUILT_VERSION,
+    llvm_prebuilt_macos = "llvm-toolchain-minimal-darwin-arm64",
 )
 
 apple_cross_toolchain = use_extension(

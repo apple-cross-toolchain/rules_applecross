@@ -269,15 +269,6 @@ def _xcode_version_and_aliases(version, build):
     full = ".".join((components + ["0", "0"])[:3])
     return full + "." + build, repr(sorted({version: None, full: None, build: None}.keys()))
 
-def _normalize_sdk_tbds(rctx):
-    result = rctx.execute([
-        _python3(rctx),
-        str(_toolchain_path(rctx, "repo_tools/normalize_sdk_tbds.py")),
-        "Xcode.app",
-    ], timeout = 1800)
-    if result.return_code != 0:
-        fail("Failed to normalize SDK text stubs: " + (result.stderr or result.stdout))
-
 def _normalize_sdk_modulemaps(rctx):
     result = rctx.execute([
         _python3(rctx),
@@ -316,7 +307,6 @@ _RULE_INPUT_FILES = [
     "repo_tools/ensure_clang_resource_libs.py",
     "repo_tools/normalize_sdk_modulemaps.py",
     "repo_tools/link_local_xcode.py",
-    "repo_tools/normalize_sdk_tbds.py",
     "repo_tools/patch_swiftinterfaces.py",
     "repo_tools/read_xcode_versions.py",
     "stubs/empty_output_tool.sh",
@@ -481,7 +471,6 @@ def _apple_cross_toolchain_impl(rctx):
     _materialize_apple_sdks(rctx, cpu)
 
     _normalize_sdk_modulemaps(rctx)
-    _normalize_sdk_tbds(rctx)
 
     # Resolve the @llvm_prebuilt alias imported from @llvm's minimal prebuilt
     # toolchain extension.
