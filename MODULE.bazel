@@ -30,6 +30,7 @@ single_version_override(
         "//patches:rules_apple_python_stub_interpreter.patch",
         "//patches:rules_apple_alticonstool_missing_icons.patch",
         "//patches:rules_apple_dossier_zipfile.patch",
+        "//patches:rules_apple_xctoolrunner_sorted_listdir.patch",
     ],
     version = "5.3.1",
 )

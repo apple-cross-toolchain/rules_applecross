@@ -645,6 +645,14 @@ cc_args(
     },
 )
 
+# wrapped_clang otherwise makes -add_ast_path absolute, and that path (in a
+# sandbox, with its number) goes into the binary's UUID before strip -S.
+cc_args(
+    name = "applecross_relative_ast_path",
+    actions = ["@rules_cc//cc/toolchains/actions:link_actions"],
+    env = {"RELATIVE_AST_PATH": "1"},
+)
+
 cc_tool(
     name = "clang_tool",
     src = ":wrapped_clang",
@@ -725,6 +733,7 @@ dynamic_toolchain_info(
         args = [
             "@apple_support_toolchain_env//:include_directories_from_xcode",
             ":applecross_env",
+            ":applecross_relative_ast_path",
             ":applecross_apple_clang_compat",
             ":applecross_no_cxx_modules",
             ":applecross_sysroot_" + arch,
@@ -975,6 +984,7 @@ cc_tool_map(
             "@apple_support_toolchain_env//:include_directories_from_xcode",
             "@apple_support//toolchain:xcode_env",
             ":applecross_env_macos",
+            ":applecross_relative_ast_path",
             ":applecross_apple_clang_compat",
             ":applecross_sysroot_" + arch + "_macos",
             ":applecross_platform_link_paths_" + arch,
@@ -993,7 +1003,6 @@ cc_tool_map(
         toolchains = [":applecross_dynamic_toolchain_info"],
     )
     for arch in _APPLE_ARCHS
-    if not arch.startswith("darwin")
 ]
 
 [
@@ -1008,5 +1017,4 @@ cc_tool_map(
         toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
     )
     for arch in _APPLE_ARCHS
-    if not arch.startswith("darwin")
 ]
