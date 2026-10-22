@@ -38,6 +38,94 @@ DEPRECATION = "%s is deprecated. Please use %s instead. You can update this by t
 
 HIDDEN = '__attribute__((visibility("hidden")))'
 
+DOCS = {
+    "protocol": [
+        " @abstract Protocol to declare support for handling a %(c)s. By implementing this protocol, a class can provide logic for resolving, confirming and handling the intent.",
+        " @discussion The minimum requirement for an implementing class is that it should be able to handle the intent. The confirmation method is optional. The handling method is always called last, after confirming the intent.",
+    ],
+    "handle": [
+        " @abstract Handling method - Execute the task represented by the %(c)s that's passed in",
+        " @discussion Called to actually execute the intent. The app must return a response for this intent.",
+        "",
+        " @param  intent The input intent",
+        " @param  completion The response handling block takes a %(c)sResponse containing the details of the result of having executed the intent",
+        "",
+        " @see  %(c)sResponse",
+    ],
+    "resolve": [
+        " @abstract Resolution methods - Determine if this intent is ready for the next step (confirmation)",
+        " @discussion Called to make sure the app extension is capable of handling this intent in its current form. This method is for validating if the intent needs any further fleshing out.",
+        "",
+        " @param  intent The input intent",
+        " @param  completion The response block contains an INIntentResolutionResult for the parameter being resolved",
+        "",
+        " @see INIntentResolutionResult",
+    ],
+    "options": [
+        " @abstract Dynamic options methods - provide options for the parameter at runtime",
+        " @discussion Called to query dynamic options for the parameter and this intent in its current form.",
+        "",
+        " @param  intent The input intent",
+    ],
+    "search": [
+        " @param  searchTerm The search term",
+    ],
+    "options_completion": [
+        " @param  completion The response block contains options for the parameter",
+    ],
+    "confirm": [
+        " @abstract Confirmation method - Validate that this intent is ready for the next step (i.e. handling)",
+        " @discussion Called prior to asking the app to handle the intent. The app should return a response object that contains additional information about the intent, which may be relevant for the system to show the user prior to handling. If unimplemented, the system will assume the intent is valid, and will assume there is no additional information relevant to this intent.",
+        "",
+        " @param  intent The input intent",
+        " @param  completion The response block contains a %(c)sResponse containing additional details about the intent that may be relevant for the system to show the user prior to handling.",
+        "",
+        " @see %(c)sResponse",
+    ],
+    "default": [
+        " @abstract Default values for parameters with dynamic options",
+        " @discussion Called to query the parameter default value.",
+    ],
+    "deprecated": [
+        " @abstract Deprecated dynamic options methods.",
+    ],
+    "response_code": [
+        " @abstract Constants indicating the state of the response.",
+    ],
+    "code": [
+        " @abstract The response code indicating your success or failure in confirming or handling the intent.",
+    ],
+    "init": [
+        " @abstract Initializes the response object with the specified code and user activity object.",
+        " @discussion The app extension has the option of capturing its private state as an NSUserActivity and returning it as the 'currentActivity'. If the app is launched, an NSUserActivity will be passed in with the private state. The NSUserActivity may also be used to query the app's UI extension (if provided) for a view controller representing the current intent handling state. In the case of app launch, the NSUserActivity will have its activityType set to the name of the intent. This intent object will also be available in the NSUserActivity.interaction property.",
+        "",
+        " @param  code The response code indicating your success or failure in confirming or handling the intent.",
+        " @param  userActivity The user activity object to use when launching your app. Provide an object if you want to add information that is specific to your app. If you specify nil, the system automatically creates a user activity object for you, sets its type to the class name of the intent being handled, and fills it with an INInteraction object containing the intent and your response.",
+    ],
+    "code_init": [
+        " @abstract Initializes and returns the response object with the %(code)s code.",
+    ],
+}
+
+SUCCESS_COMMENT = [
+    "// This resolution result is for when the app extension wants to tell Siri to proceed, with a given %(c)s. The resolvedValue can be different than the original %(c)s. This allows app extensions to apply business logic constraints.",
+    "// Use %(not_required)s to continue with a 'nil' value.",
+]
+DISAMBIGUATION_COMMENT = ["// This resolution result is to ask Siri to disambiguate between the provided %(c)s."]
+CONFIRMATION_COMMENT = ["// This resolution result is to ask Siri to confirm if this is the value with which the user wants to continue."]
+
+
+def doc(names, indent="", **values):
+    lines = ["/*!"]
+    for name in names.split():
+        lines += DOCS[name]
+    lines.append(" */")
+    return [indent + line % values if line else "" for line in lines]
+
+
+def comment(lines, indent="", **values):
+    return [indent + line % values for line in lines]
+
 
 def _type(swift, objc, resolution=None, collection=None, reference=None,
           availability=None, swift_import=None, objc_import=None):
@@ -144,16 +232,20 @@ class Type:
     def __init__(self, data, prefix):
         self.name = data["INTypeName"]
         self.class_name = data.get("INTypeClassName") or prefix + self.name
-        self.properties = [
-            Property(p, "INTypeProperty")
-            for p in data.get("INTypeProperties", [])
-            if not p.get("INTypePropertyDefault")
-        ]
+        self.properties = sorted_properties(
+            [p for p in data.get("INTypeProperties", []) if not p.get("INTypePropertyDefault")],
+            "INTypeProperty",
+        )
+
+
+def sorted_properties(items, key):
+    return sorted((Property(data, key) for data in items), key=lambda prop: prop.priority)
 
 
 class Property:
     def __init__(self, data, key):
         self.name = data[key + "Name"]
+        self.priority = data.get(key + "DisplayPriority", 0)
         self.type = data.get(key + "Type", "String")
         self.object_type = data.get(key + "ObjectType")
         self.enum_type = data.get(key + "EnumType")
@@ -199,12 +291,9 @@ class Intent:
         self.class_name = data.get("INIntentClassName") or prefix + self.name + "Intent"
         self.category = data.get("INIntentCategory")
         self.widgets = bool(data.get("INIntentEligibleForWidgets"))
-        self.parameters = [Property(p, "INIntentParameter") for p in data.get("INIntentParameters", [])]
+        self.parameters = sorted_properties(data.get("INIntentParameters", []), "INIntentParameter")
         response = data.get("INIntentResponse", {})
-        self.response_parameters = [
-            Property(p, "INIntentResponseParameter")
-            for p in response.get("INIntentResponseParameters", [])
-        ]
+        self.response_parameters = sorted_properties(response.get("INIntentResponseParameters", []), "INIntentResponseParameter")
         self.codes = self._codes(response.get("INIntentResponseCodes", []))
 
     def _codes(self, definitions):
@@ -392,8 +481,8 @@ class Swift(Generator):
             if availability is not None:
                 lines += ["", "    " + swift_availability(availability)]
             lines.append("    @NSManaged %s var %s: %s" % (self.visibility, prop.name, self.property_type(prop)))
-            if in_type:
-                lines.append("")
+        if in_type:
+            lines.append("")
         return lines
 
     def enum_cases(self, enum):
@@ -417,11 +506,17 @@ class Swift(Generator):
             "@objc(%sResolutionResult)" % c,
             "%s class %sResolutionResult: INEnumResolutionResult {" % (v, c),
             "",
+        ]
+        lines += comment(SUCCESS_COMMENT, "    ", c=c, not_required="notRequired()")
+        lines += [
             "    @objc(successWithResolved%s:)" % enum.name,
             "    %s class func success(with resolvedValue: %s) -> Self {" % (v, c),
             "        return __success(withResolvedValue: resolvedValue.rawValue)",
             "    }",
             "",
+        ]
+        lines += comment(CONFIRMATION_COMMENT, "    ")
+        lines += [
             "    @objc(confirmationRequiredWith%sToConfirm:)" % enum.name,
             "    %s class func confirmationRequired(with valueToConfirm: %s) -> Self {" % (v, c),
             "        return __confirmationRequiredWithValue(toConfirm: valueToConfirm.rawValue)",
@@ -453,16 +548,25 @@ class Swift(Generator):
             "@objc(%sResolutionResult)" % c,
             "%s class %sResolutionResult: INObjectResolutionResult {" % (v, c),
             "",
+        ]
+        lines += comment(SUCCESS_COMMENT, "    ", c=c, not_required="notRequired()")
+        lines += [
             "    @objc(successWithResolved%s:)" % t.name,
             "    %s class func success(with resolvedObject: %s) -> Self {" % (v, c),
             "        return super.success(with: resolvedObject)",
             "    }",
             "",
+        ]
+        lines += comment(DISAMBIGUATION_COMMENT, "    ", c=c)
+        lines += [
             "    @objc(disambiguationWith%ssToDisambiguate:)" % t.name,
             "    %s class func disambiguation(with objectsToDisambiguate: [%s]) -> Self {" % (v, c),
             "        return super.disambiguation(with: objectsToDisambiguate)",
             "    }",
             "",
+        ]
+        lines += comment(CONFIRMATION_COMMENT, "    ")
+        lines += [
             "    @objc(confirmationRequiredWith%sToConfirm:)" % t.name,
             "    %s class func confirmationRequired(with objectToConfirm: %s?) -> Self {" % (v, c),
             "        return super.confirmationRequired(with: objectToConfirm)",
@@ -497,10 +601,13 @@ class Swift(Generator):
         c = intent.class_name
         o = "optional " if optional else ""
         selector = "handle%s:completion:" % intent.name
-        return (
-            self.method(None, selector, "%sfunc handle(intent: %s, completion: @escaping (%sResponse) -> Swift.Void)" % (o, c, c), "handle(intent:)")
-            + self.method(swift_availability(IOS13), selector, "%sfunc handle(intent: %s) async -> %sResponse" % (o, c, c))
-        )
+        handling = doc("handle", "    ", c=c)
+        completion = self.method(None, selector, "%sfunc handle(intent: %s, completion: @escaping (%sResponse) -> Swift.Void)" % (o, c, c), "handle(intent:)")
+        completion[-1] = "    "
+        asynchronous = self.method(swift_availability(IOS13), selector, "%sfunc handle(intent: %s) async -> %sResponse" % (o, c, c))
+        if optional:
+            return handling + completion + asynchronous
+        return completion + handling + asynchronous
 
     def options_methods(self, intent, prop):
         c = intent.class_name
@@ -539,9 +646,10 @@ class Swift(Generator):
         ]
         if not intent.widgets:
             lines += self.handle_methods(intent, False)
-        for prop in intent.parameters:
-            if not prop.resolution:
-                continue
+        resolved = [prop for prop in intent.parameters if prop.resolution]
+        if resolved:
+            lines += doc("resolve", "    ")
+        for prop in resolved:
             p = upper_first(prop.name)
             result = self.result(prop)
             if prop.multiple:
@@ -550,17 +658,25 @@ class Swift(Generator):
             lines += self.method(swift_availability(IOS13), selector, "func resolve%s(for intent: %s, with completion: @escaping (%s) -> Swift.Void)" % (p, c, result), "resolve%s(for:)" % p)
             lines += self.method(swift_availability(IOS13), selector, "func resolve%s(for intent: %s) async -> %s" % (p, c, result))
         options = [prop for prop in intent.parameters if prop.provides_options]
-        for prop in [prop for prop in options if prop.search] + [prop for prop in options if not prop.search]:
+        ordered = [prop for prop in options if prop.search] + [prop for prop in options if not prop.search]
+        if ordered:
+            lines += doc("options search options_completion" if ordered[0].search else "options options_completion", "    ")
+        for prop in ordered:
             lines += self.options_methods(intent, prop)
         selector = "confirm%s:completion:" % n
         lines += self.method(None, selector, "optional func confirm(intent: %s, completion: @escaping (%sResponse) -> Swift.Void)" % (c, c), "confirm(intent:)")
+        lines += doc("confirm", "    ", c=c)
         lines += self.method(swift_availability(IOS13), selector, "optional func confirm(intent: %s) async -> %sResponse" % (c, c))
         if intent.widgets:
             lines += self.handle_methods(intent, True)
+        if options:
+            lines += doc("default", "    ")
         for prop in options:
             p = upper_first(prop.name)
             lines += self.method(swift_availability(IOS14), "default%sFor%s:" % (p, n), "optional func default%s(for intent: %s) -> %s?" % (p, c, self.value_type(prop)))
         if not self.model.legacy:
+            if options:
+                lines += doc("deprecated", "    ")
             for prop in options:
                 p = upper_first(prop.name)
                 lines += [
@@ -574,7 +690,7 @@ class Swift(Generator):
     def response(self, intent):
         c = intent.class_name
         v = self.visibility
-        lines = [
+        lines = doc("response_code") + [
             swift_availability(IOS12, tvos=True),
             "@objc %s enum %sResponseCode: Int {" % (v, c),
         ]
@@ -594,9 +710,13 @@ class Swift(Generator):
         lines += self.properties(intent.response_parameters)
         if intent.response_parameters:
             lines.append("")
+        lines += doc("code", "    ")
         lines += [
             "    @objc %s fileprivate(set) var code: %sResponseCode = .unspecified" % (v, c),
             "",
+        ]
+        lines += doc("init", "    ")
+        lines += [
             "    @objc(initWithCode:userActivity:)",
             "    %s convenience init(code: %sResponseCode, userActivity: NSUserActivity?) {" % (v, c),
             "        self.init()",
@@ -608,6 +728,7 @@ class Swift(Generator):
             if not code.parameters:
                 continue
             lines.append("")
+            lines += doc("code_init", "    ", code=code.name)
             availability = code.availability(self.type_availability)
             if availability:
                 lines.append("    " + swift_availability(availability))
@@ -641,7 +762,6 @@ class Swift(Generator):
                 swift_availability(IOS13),
                 "@objc(%sResolutionResult)" % base,
                 "%s class %sResolutionResult: %s {" % (v, base, self.result_parent(prop)),
-                "",
             ]
             if prop.unsupported_reasons:
                 lines += [
@@ -649,7 +769,6 @@ class Swift(Generator):
                     "    %s class func unsupported(forReason reason: %sUnsupportedReason) -> Self {" % (v, base),
                     "        return __unsupported(withReason: reason.rawValue)",
                     "    }",
-                    "",
                 ]
             if prop.confirmation_reasons:
                 lines += [
@@ -657,7 +776,6 @@ class Swift(Generator):
                     "    %s class func confirmationRequired(with itemToConfirm: %s, forReason reason: %sConfirmationReason) -> Self {" % (v, self.value_type(prop), base),
                     "        return __confirmationRequiredWithItem(toConfirm: itemToConfirm, forReason: reason.rawValue)",
                     "    }",
-                    "",
                 ]
             lines += ["}", ""]
         return lines
@@ -685,6 +803,7 @@ class Swift(Generator):
         ]
         lines += self.properties(intent.parameters)
         lines += ["", "}", ""]
+        lines += doc("protocol", c=c)
         lines += self.protocol(intent)
         lines += self.response(intent)
         lines += self.resolution_results(intent)
@@ -775,10 +894,14 @@ class ObjC(Generator):
         header += self.enum_body(c, enum.values)
         header += ["} %s%s;" % (self.enum_attribute, objc_availability(IOS12, tvos=True)), ""]
         header += self.interface(objc_availability(IOS13, tvos=True), "@interface %sResolutionResult : INEnumResolutionResult" % c)
+        header.append("")
+        header += comment(SUCCESS_COMMENT, c=c, not_required="+notRequired")
         header += [
-            "",
             "+ (instancetype)successWithResolved%s:(%s)resolvedValue NS_SWIFT_NAME(success(with:));" % (enum.name, c),
             "",
+        ]
+        header += comment(CONFIRMATION_COMMENT)
+        header += [
             "+ (instancetype)confirmationRequiredWith%sToConfirm:(%s)valueToConfirm NS_SWIFT_NAME(confirmationRequired(with:));" % (enum.name, c),
             "",
             "+ (instancetype)successWithResolvedValue:(NSInteger)resolvedValue NS_UNAVAILABLE;",
@@ -816,15 +939,23 @@ class ObjC(Generator):
         header += ["NS_ASSUME_NONNULL_BEGIN", ""]
         header += self.interface(objc_availability(IOS12, tvos=True), "@interface %s : INObject" % c)
         header.append("")
-        header += self.properties(t.properties, in_type=True)
-        header += ["", "@end", ""]
+        if t.properties:
+            header += self.properties(t.properties, in_type=True) + [""]
+        header += ["@end", ""]
         header += self.interface(objc_availability(IOS13, tvos=True), "@interface %sResolutionResult : INObjectResolutionResult" % c)
+        header.append("")
+        header += comment(SUCCESS_COMMENT, c=c, not_required="+notRequired")
         header += [
-            "",
             "+ (instancetype)successWithResolved%s:(%s *)resolvedObject NS_SWIFT_NAME(success(with:));" % (t.name, c),
             "",
+        ]
+        header += comment(DISAMBIGUATION_COMMENT, c=c)
+        header += [
             "+ (instancetype)disambiguationWith%ssToDisambiguate:(NSArray<%s *> *)objectsToDisambiguate NS_SWIFT_NAME(disambiguation(with:));" % (t.name, c),
             "",
+        ]
+        header += comment(CONFIRMATION_COMMENT)
+        header += [
             "+ (instancetype)confirmationRequiredWith%sToConfirm:(%s *)objectToConfirm NS_SWIFT_NAME(confirmationRequired(with:));" % (t.name, c),
             "",
             "+ (instancetype)successWithResolvedObject:(__kindof INObject *)resolvedObject NS_UNAVAILABLE;",
@@ -869,7 +1000,7 @@ class ObjC(Generator):
 
     def handle_method(self, intent):
         c = intent.class_name
-        return ["- (void)handle%s:(%s *)intent completion:(void (^)(%sResponse *response))completion NS_SWIFT_NAME(handle(intent:completion:));" % (intent.name, c, c), ""]
+        return doc("handle", c=c) + ["- (void)handle%s:(%s *)intent completion:(void (^)(%sResponse *response))completion NS_SWIFT_NAME(handle(intent:completion:));" % (intent.name, c, c), ""]
 
     def options_method(self, intent, prop):
         c = intent.class_name
@@ -889,9 +1020,10 @@ class ObjC(Generator):
         required = []
         if not intent.widgets:
             required += self.handle_method(intent)
-        for prop in intent.parameters:
-            if not prop.resolution:
-                continue
+        resolved = [prop for prop in intent.parameters if prop.resolution]
+        if resolved:
+            required += [line.lstrip() for line in doc("resolve")]
+        for prop in resolved:
             p = upper_first(prop.name)
             if prop.multiple:
                 argument = "NSArray<%s *> *resolutionResults" % self.result(prop)
@@ -899,20 +1031,23 @@ class ObjC(Generator):
                 argument = "%s *resolutionResult" % self.result(prop)
             required += ["- (void)resolve%sFor%s:(%s *)intent withCompletion:(void (^)(%s))completion NS_SWIFT_NAME(resolve%s(for:with:)) %s;" % (p, n, c, argument, p, objc_availability(IOS13)), ""]
         options = [prop for prop in intent.parameters if prop.provides_options]
-        for prop in [prop for prop in options if prop.search] + [prop for prop in options if not prop.search]:
+        ordered = [prop for prop in options if prop.search] + [prop for prop in options if not prop.search]
+        if ordered:
+            required += doc("options search options_completion" if ordered[0].search else "options options_completion")
+        for prop in ordered:
             required += [self.options_method(intent, prop), ""]
-        lines = self.interface(objc_availability(IOS12, tvos=True), "@protocol %sHandling <NSObject>" % c)
+        lines = doc("protocol", c=c) + self.interface(objc_availability(IOS12, tvos=True), "@protocol %sHandling <NSObject>" % c)
         lines.append("")
         if required:
             lines += ["@required", ""] + required
-        lines += [
-            "@optional",
-            "",
+        lines += ["@optional", ""] + doc("confirm", c=c) + [
             "- (void)confirm%s:(%s *)intent completion:(void (^)(%sResponse *response))completion NS_SWIFT_NAME(confirm(intent:completion:));" % (n, c, c),
             "",
         ]
         if intent.widgets:
             lines += self.handle_method(intent)
+        if options:
+            lines += doc("default")
         for prop in options:
             p = upper_first(prop.name)
             value = self.value_type(prop)
@@ -920,6 +1055,8 @@ class ObjC(Generator):
                 value += " "
             lines += ["- (nullable %s)default%sFor%s:(%s *)intent NS_SWIFT_NAME(default%s(for:)) %s;" % (value, p, n, c, p, objc_availability(IOS14)), ""]
         if not self.model.legacy:
+            if options:
+                lines += doc("deprecated")
             for prop in options:
                 p = upper_first(prop.name)
                 lines += ['- (void)provide%sOptionsFor%s:(%s *)intent withCompletion:(void (^)(NSArray<%s> * _Nullable %sOptions, NSError * _Nullable error))completion NS_SWIFT_NAME(provide%sOptions(for:with:)) API_DEPRECATED("", ios(13.0, 14.0), watchos(6.0, 7.0));' % (p, n, c, self.pointer_type(prop), prop.name, p), ""]
@@ -928,7 +1065,7 @@ class ObjC(Generator):
 
     def response_code_enum(self, intent):
         c = intent.class_name
-        lines = ["typedef NS_ENUM(NSInteger, %sResponseCode) {" % c]
+        lines = doc("response_code") + ["typedef NS_ENUM(NSInteger, %sResponseCode) {" % c]
         for index, code in enumerate(intent.codes):
             availability = " " + objc_availability(IOS13) if code.key_path else ""
             value = "" if code.value is None else " = %d" % code.value
@@ -951,13 +1088,16 @@ class ObjC(Generator):
             swift_name = "%s(%s)" % (code.name, "".join("%s:" % p.name for p in code.parameters))
             availability = code.availability(self.type_availability)
             suffix = " " + objc_availability(availability) if availability else ""
-            declarations += ["+ (instancetype)%s NS_SWIFT_NAME(%s)%s;" % (selector, swift_name, suffix), ""]
+            declarations += doc("code_init", code=code.name)
+            declarations.append("+ (instancetype)%s NS_SWIFT_NAME(%s)%s;" % (selector, swift_name, suffix))
             implementations += [
                 "+ (instancetype)%s {" % selector,
                 "    %sResponse *intentResponse = [[%sResponse alloc] initWithCode:%sResponseCode%s userActivity:nil];" % (c, c, c, upper_first(code.name)),
             ]
             implementations += ["    intentResponse.%s = %s;" % (a, a) for a in code.assignments]
             implementations += ["    return intentResponse;", "}", ""]
+        if declarations:
+            declarations.append("")
         return declarations, implementations
 
     def resolution_results(self, intent):
@@ -1010,6 +1150,9 @@ class ObjC(Generator):
             "",
             "- (instancetype)init NS_UNAVAILABLE;",
             "",
+        ]
+        header += doc("init")
+        header += [
             "- (instancetype)initWithCode:(%sResponseCode)code userActivity:(nullable NSUserActivity *)userActivity NS_DESIGNATED_INITIALIZER;" % c,
             "",
         ]
@@ -1018,6 +1161,7 @@ class ObjC(Generator):
         header += self.properties(intent.response_parameters)
         if intent.response_parameters:
             header.append("")
+        header += doc("code")
         header += ["@property (readonly, NS_NONATOMIC_IOSONLY) %sResponseCode code;" % c, "", "@end", ""]
         result_declarations, result_implementations = self.resolution_results(intent)
         header += result_declarations
