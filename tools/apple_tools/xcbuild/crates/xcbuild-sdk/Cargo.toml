@@ -1,0 +1,10 @@
+[package]
+name = "xcbuild-sdk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcbuild-plist = { path = "../xcbuild-plist" }
+plist.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true

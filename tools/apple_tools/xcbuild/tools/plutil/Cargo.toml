@@ -1,0 +1,9 @@
+[package]
+name = "plutil"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcbuild-plist = { path = "../../crates/xcbuild-plist" }
+plist.workspace = true
+anyhow.workspace = true

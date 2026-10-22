@@ -1,5 +1,5 @@
 //! Clean-room `actool` for Linux; see docs/clean-room/actool.md. Unsupported
-//! inputs are refused.
+//! inputs go to xcbuild's actool.
 
 mod bom;
 mod car;
@@ -476,12 +476,9 @@ fn main() -> ExitCode {
             ("bundle-version", Value::string("24303")), ("short-bundle-version", Value::string("27.0"))]))])));
         return ExitCode::SUCCESS;
     }
-    let o = match parse(args) {
+    let o = match parse(args.clone()) {
         Ok(o) => o,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return xcbuild_actool(&args, &e),
     };
     match run(&o) {
         Ok(outputs) => {
@@ -494,13 +491,11 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Err(e) => {
-            if o.output_format == "human-readable-text" {
-                println!("/* com.apple.actool.errors */");
-                println!("{}: error: {e}", o.inputs.first().map(|p| p.display().to_string()).unwrap_or_default());
-            }
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
+        Err(e) => xcbuild_actool(&args, &e),
     }
+}
+
+fn xcbuild_actool(args: &[String], reason: &str) -> ExitCode {
+    eprintln!("note: {reason}; compiling with xcbuild's actool instead");
+    ExitCode::from(xcbuild_acdriver::run(args).clamp(0, 255) as u8)
 }

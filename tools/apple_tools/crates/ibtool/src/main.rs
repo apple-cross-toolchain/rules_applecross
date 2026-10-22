@@ -75,15 +75,22 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let dir = compilation_dir.ok_or("--compilation-directory or --link is required")?;
     for input in &inputs {
         if input.extension().and_then(|e| e.to_str()) != Some("storyboard") {
-            return Err(format!("{}: only storyboards are supported by this ibtool", input.display()));
+            eprintln!("note: {}: only storyboards are supported by this ibtool; not compiled", input.display());
+            continue;
         }
         let xml = std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
-        let files = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
+        let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml)
         } else {
             storyboard::compile(&xml).map(|c| c.files)
-        }
-        .map_err(|e| format!("{}: {e}", input.display()))?;
+        };
+        let files = match compiled {
+            Ok(files) => files,
+            Err(e) => {
+                eprintln!("note: {}: {e}; not compiled", input.display());
+                continue;
+            }
+        };
         let stem = input.file_stem().unwrap().to_string_lossy();
         let out = dir.join(format!("{stem}.storyboardc"));
         if out.exists() {

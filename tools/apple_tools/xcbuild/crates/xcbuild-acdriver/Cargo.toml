@@ -1,0 +1,10 @@
+[package]
+name = "xcbuild-acdriver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcbuild-plist = { path = "../xcbuild-plist" }
+xcbuild-car = { path = "../xcbuild-car" }
+xcbuild-xcassets = { path = "../xcbuild-xcassets" }
+plist.workspace = true

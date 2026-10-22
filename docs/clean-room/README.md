@@ -1,7 +1,7 @@
 # Clean-room Apple build tools
 
-`tools/apple_tools` reimplements, for Linux, Apple tools that rules_apple runs
-while bundling. They ship in the ported tools archive
+`tools/apple_tools/crates` reimplements, for Linux, Apple tools that
+rules_apple runs while bundling. They ship in the ported tools archive
 (`tools/linux_vm/build-ported-tools.sh`).
 
 No Apple binary was disassembled, decompiled or patched, and no Apple code
@@ -15,8 +15,9 @@ that Mac, reading that Xcode through a read-only mount. Sources:
 - published sources: the reference LZFSE encoder, CoreFoundation's string
   hash and hash tables, the former open-source `swift-stdlib-tool`.
 
-Inputs outside what each page describes are refused rather than
-approximated.
+Inputs outside what each page describes are not approximated: `actool`
+hands them to xcbuild's actool (`tools/apple_tools/xcbuild`), `ibtool` leaves
+them uncompiled as the stub it replaced did, and the other tools refuse them.
 
 | Page | Tool |
 | --- | --- |

@@ -1,0 +1,13 @@
+[package]
+name = "xcrun"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xcbuild-sdk = { path = "../../crates/xcbuild-sdk" }
+xcbuild-pbxsetting = { path = "../../crates/xcbuild-pbxsetting" }
+clap.workspace = true
+anyhow.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["process"] }
