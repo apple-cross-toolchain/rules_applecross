@@ -56,7 +56,6 @@ jobs:
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
     permissions:
-      actions: read
       contents: read
     steps:
       - uses: actions/checkout@v7
@@ -69,23 +68,18 @@ jobs:
           skip-decompress: true
       - name: Extract Apple SDKs
         run: unzip -q apple-sdks-artifact/* -d . && rm -rf apple-sdks-artifact
-      - name: Start Bazel cache adapter
-        id: bazel-cache
-        uses: thii/bazel-gha-remote-cache@ec0d6c63ffb5b90c35b5306ce4fdce621a724306 # v0.0.5
-        with:
-          storage-mode: pack
-          github-token: ${{ github.token }}
-          expected-writers: ${{ strategy.job-total }}
-          mode: >-
-            ${{ github.event_name == 'push' &&
-                github.ref == format(
-                  'refs/heads/{0}',
-                  github.event.repository.default_branch
-                ) &&
-                'read-write' || 'read-only' }}
+      # Fork pull requests receive no secrets, so they build without the cache.
+      - name: Configure BuildBuddy cache
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          [ -n "$BUILDBUDDY_API_KEY" ] || exit 0
+          {
+            echo 'common --config=remote_cache'
+            echo "common --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+          } > ~/.bazelrc
       - run: >-
           bazel
-          --bazelrc="${{ steps.bazel-cache.outputs.bazelrc }}"
           build
           --ios_multi_cpus=sim_arm64
           --macos_cpus=arm64
@@ -94,17 +88,15 @@ jobs:
           //examples/...
       - run: cp -rL bazel-out/k8-fastbuild/bin/examples/ios/HelloWorldSwiftUI/Tests.runfiles . && tar -cJvf Tests.tar.xz Tests.runfiles && rm -rf Tests.runfiles
       - name: Package macOS command-line examples
-        env:
-          BAZELRC: ${{ steps.bazel-cache.outputs.bazelrc }}
         run: |
           command_line=$(
-            bazel --bazelrc="$BAZELRC" cquery \
+            bazel cquery \
               --macos_cpus=arm64 \
               --output=files \
               //examples/macos/CommandLine:CommandLine
           )
           command_line_swift=$(
-            bazel --bazelrc="$BAZELRC" cquery \
+            bazel cquery \
               --macos_cpus=arm64 \
               --output=files \
               //examples/macos/CommandLineSwift:CommandLineSwift

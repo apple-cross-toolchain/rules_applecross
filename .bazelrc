@@ -22,14 +22,18 @@ build:linux --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolch
 build:remote --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
 build:remote --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
 
+# BuildBuddy's cache without remote execution.
+build:remote_cache --bes_results_url=https://app.buildbuddy.io/invocation/
+build:remote_cache --bes_backend=grpcs://app.buildbuddy.io
+common:remote_cache --remote_cache=grpcs://app.buildbuddy.io
+common:remote_cache --remote_cache_compression
+
 # Shared by the two remote modes below. Never select this config directly.
+common:remote_base --config=remote_cache
 build:remote_base --jobs=100
 build:remote_base --@rules_python//python/config_settings:bootstrap_impl=script
 build:remote_base --experimental_propagate_custom_flag=@rules_python//python/config_settings:bootstrap_impl
 build:remote_base --strategy=SwiftCompile=remote,sandboxed,worker,local
-build:remote_base --bes_results_url=https://app.buildbuddy.io/invocation/
-build:remote_base --bes_backend=grpcs://app.buildbuddy.io
-common:remote_base --remote_cache_compression
 common:remote_base --remote_executor=grpcs://app.buildbuddy.io
 
 # Everything on the executors, including linking, bundling and signing.
