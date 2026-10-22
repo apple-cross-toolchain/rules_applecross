@@ -235,11 +235,6 @@ class Linker(object):
         """Directories the repository rule's SDK fixups write into."""
         for p in PLATFORMS:
             sdk = "Platforms/{0}.platform/Developer/SDKs/{0}.sdk".format(p)
-            # normalize_sdk_tbds.py rewrites text stubs naming architectures
-            # LLVM's linker does not know.
-            for dirpath, dirnames, filenames in os.walk(os.path.join(self.source, sdk), followlinks=False):
-                if any(n.endswith(".tbd") and _names_unknown_arch(os.path.join(dirpath, n)) for n in filenames):
-                    self._mark(os.path.relpath(dirpath, self.source))
             # normalize_sdk_modulemaps.py deletes a duplicate module map here.
             self._mark(os.path.join(sdk, "usr/include/libxml2"))
             # patch_swiftinterfaces.py writes an arm64 interface beside an
@@ -300,17 +295,6 @@ class Linker(object):
                 if os.path.isfile(stub) and not os.path.lexists(link + ".tbd"):
                     os.symlink(target + ".tbd", link + ".tbd")
                 os.unlink(link)
-
-
-def _names_unknown_arch(path):
-    """Whether a text stub lists an architecture normalize_sdk_tbds.py drops."""
-    if os.path.islink(path):
-        return False
-    try:
-        with open(path, "rb") as f:
-            return b"arm64e.x1" in f.read(4096)
-    except OSError:
-        return False
 
 
 def _is_macho(path):
