@@ -231,3 +231,21 @@ download URL (`.../releases/download/<tag>/<name>` or
 `.../releases/latest/download/<name>`); the script resolves it through the
 GitHub API, which is the only endpoint that honors token auth there. CI runs
 the same script, so neither path requires editing a checked-in file to build.
+
+### Ported tools
+
+`tools/build-ported-tools.sh` builds, for the host's CPU, the Linux tools the
+toolchain stages that LLVM doesn't provide:
+
+- `tools/apple_tools`, built with Bazel and rules_rs: the clean-room tools in
+  `crates` (see `docs/clean-room`) and, in `xcbuild`, the Rust port of the
+  xcbuild tools rules_apple runs (`xcrun`, `plutil`, `PlistBuddy`, `sw_vers`);
+- `tools/apple_tools/swiftui_macros`, built with SwiftPM;
+- pngcrush, built from source.
+
+It runs in the Linux container `tools/linux_vm/Containerfile` describes and
+writes each tool as `ported-tools/<tool>-linux-<arch>.tar.zst`. The
+`ported-tools` workflow builds them for x86_64 and aarch64 and, on `main`,
+publishes them with a `SHA256.txt` as the release `ported-tools-<VERSION>`
+unless it exists, so bump `VERSION` in `.github/workflows/ported-tools.yml` to
+release changes.
