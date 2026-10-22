@@ -16,7 +16,10 @@ apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     # ...
     ported_tools_archives = {"aarch64": "ported-tools-linux-aarch64.tar.xz"},
-    swift_tools_linux_aarch64 = "@applecross_swift_ubuntu24.04-aarch64//:tools",
+    swift_tools = {
+        "aarch64": "@applecross_swift_ubuntu24.04-aarch64//:tools",
+        "x86_64": "@applecross_swift_ubuntu24.04//:tools",
+    },
 )
 ```
 
@@ -101,7 +104,7 @@ apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     apple_sdk_urls = ["<url-to-apple-sdk-archive>"],
     local_xcode = True,
-    swift_tools = "...",
+    swift_tools = {"x86_64": "..."},
 )
 ```
 

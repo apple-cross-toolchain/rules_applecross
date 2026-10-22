@@ -118,8 +118,10 @@ apple_cross_toolchain.configure(
     local_xcode = True,
     # From tools/build-ported-tools.sh.
     ported_tools_archives = {"aarch64": "ported-tools-linux-aarch64.tar.xz"},
-    swift_tools = "@applecross_swift_ubuntu24.04//:tools",
-    swift_tools_linux_aarch64 = "@applecross_swift_ubuntu24.04-aarch64//:tools",
+    swift_tools = {
+        "aarch64": "@applecross_swift_ubuntu24.04-aarch64//:tools",
+        "x86_64": "@applecross_swift_ubuntu24.04//:tools",
+    },
     swift_tools_macos = "@applecross_swift_xcode//:tools",
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")

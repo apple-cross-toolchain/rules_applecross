@@ -38,7 +38,6 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "local_xcode": config.local_xcode,
                 "ported_tools_archives": config.ported_tools_archives,
                 "swift_tools": config.swift_tools,
-                "swift_tools_linux_aarch64": config.swift_tools_linux_aarch64,
                 "swift_tools_macos": config.swift_tools_macos,
             }
 
@@ -63,10 +62,10 @@ _configure_tag = tag_class(
                   "Linux CPU (\"x86_64\", \"aarch64\"). CPUs without one " +
                   "download apple-cross-toolchain/ci's, published for x86_64 only.",
         ),
-        "swift_tools": attr.string(mandatory = True),
-        "swift_tools_linux_aarch64": attr.string(
-            doc = "Label of a rules_swift swift_tools target for aarch64 " +
-                  "Linux hosts, matching swift_tools' version.",
+        "swift_tools": attr.string_dict(
+            mandatory = True,
+            doc = "Labels of rules_swift swift_tools targets keyed by Linux " +
+                  "CPU (\"x86_64\", \"aarch64\").",
         ),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's " +

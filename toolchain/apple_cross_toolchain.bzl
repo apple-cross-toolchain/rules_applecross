@@ -412,11 +412,9 @@ def _apple_cross_toolchain_impl(rctx):
     developer_dir = "Xcode.app/Contents/Developer"
     xcode_toolchain_bindir = "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/"
 
-    swift_tools = rctx.attr.swift_tools
-    if cpu == "aarch64":
-        swift_tools = rctx.attr.swift_tools_linux_aarch64
-        if not swift_tools:
-            fail("This Linux host is aarch64: set swift_tools_linux_aarch64 on apple_cross_toolchain.configure().")
+    swift_tools = rctx.attr.swift_tools.get(cpu)
+    if not swift_tools:
+        fail("No swift_tools for linux-{0}: add \"{0}\" to apple_cross_toolchain.configure()'s swift_tools.".format(cpu))
 
     substitutions = {
         "%{linux_exec_cpu}": cpu,
@@ -621,12 +619,9 @@ one uses the archive apple-cross-toolchain/ci publishes, which exists for
 x86_64 only.
 """,
         ),
-        "swift_tools": attr.string(
-            doc = "Label of a rules_swift swift_tools target used as the x86_64 Linux-host Swift compiler payload.",
+        "swift_tools": attr.string_dict(
+            doc = "Labels of rules_swift swift_tools targets used as the Linux-host Swift compiler payload, keyed by Linux CPU (\"x86_64\", \"aarch64\").",
             mandatory = True,
-        ),
-        "swift_tools_linux_aarch64": attr.string(
-            doc = "Label of a rules_swift swift_tools target used as the aarch64 Linux-host Swift compiler payload.",
         ),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's macOS Swift, used by Swift toolchains for macOS execution platforms.",
