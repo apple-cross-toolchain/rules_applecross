@@ -1,0 +1,7 @@
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+rust_library(
+    name = "macho",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//visibility:public"],
+)

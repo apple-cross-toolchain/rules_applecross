@@ -1,0 +1,32 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+cc_library(
+    name = "deflate_parts",
+    srcs = ["csrc/deflate_parts.c"],
+    deps = ["@zlib"],
+)
+
+rust_binary(
+    name = "actool",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":deflate_parts",
+        "//crates/cf",
+        "//crates/lzfse",
+        "//xcbuild/crates/xcbuild-acdriver",
+        "@crates//:libz-sys",
+        "@crates//:png",
+        "@crates//:resvg",
+        "@crates//:serde_json",
+        "@crates//:tiny-skia",
+        "@crates//:usvg",
+    ],
+)
+
+rust_test(
+    name = "test",
+    crate = ":actool",
+)

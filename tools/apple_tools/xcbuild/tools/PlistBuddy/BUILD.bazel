@@ -1,0 +1,13 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+
+rust_binary(
+    name = "PlistBuddy",
+    srcs = ["src/main.rs"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xcbuild/crates/xcbuild-plist",
+        "@crates//:anyhow",
+        "@crates//:plist",
+        "@crates//:rustyline",
+    ],
+)

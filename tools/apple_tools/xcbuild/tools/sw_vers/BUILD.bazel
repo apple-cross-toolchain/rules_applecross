@@ -1,0 +1,12 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+
+rust_binary(
+    name = "sw_vers",
+    srcs = ["src/main.rs"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//xcbuild/crates/xcbuild-sdk",
+        "@crates//:anyhow",
+        "@crates//:clap",
+    ],
+)

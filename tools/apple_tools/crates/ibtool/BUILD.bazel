@@ -1,0 +1,11 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+
+rust_binary(
+    name = "ibtool",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//crates/cf",
+        "@crates//:roxmltree",
+    ],
+)
