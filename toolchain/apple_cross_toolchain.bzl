@@ -104,11 +104,14 @@ _MULTIARCH = {
     "x86_64": "x86_64-linux-gnu",
 }
 
-# Other CPUs need ported_tools_archives (tools/build-ported-tools.sh).
 _PORTED_TOOLS = {
+    "aarch64": (
+        "https://github.com/apple-cross-toolchain/ci/releases/download/0.0.23/ported-tools-linux-aarch64.tar.xz",
+        "0e9de81f2ba7104996e7e65a456f4b69057c254ff352e10b515a4bcff28423f3",
+    ),
     "x86_64": (
-        "https://github.com/apple-cross-toolchain/ci/releases/download/0.0.22/ported-tools-linux-x86_64.tar.xz",
-        "a41beff504746258ffd62d012b4ab8f09ab38136696472252dbc623f92a09a01",
+        "https://github.com/apple-cross-toolchain/ci/releases/download/0.0.23/ported-tools-linux-x86_64.tar.xz",
+        "a1665d58c21ff9401c194e1925ab8a9963c35558ab1b3949b1e686025b65dfc1",
     ),
 }
 
@@ -388,10 +391,8 @@ def _install_ported_tools(rctx, cpu, destination):
         return
     if cpu not in _PORTED_TOOLS:
         fail(
-            ("No ported Apple tools are published for linux-{0}. Build them with " +
-             "tools/build-ported-tools.sh and set ported_tools_archives = " +
-             "{{\"{0}\": \"ported-tools-linux-{0}.tar.xz\"}} on " +
-             "apple_cross_toolchain.configure().").format(cpu),
+            ("No ported Apple tools are published for linux-{0}; set " +
+             "ported_tools_archives on apple_cross_toolchain.configure().").format(cpu),
         )
     url, sha256 = _PORTED_TOOLS[cpu]
     rctx.download_and_extract(url = [url], sha256 = sha256, output = destination)
@@ -614,9 +615,7 @@ hard error rather than a silent fallback.
         "ported_tools_archives": attr.string_dict(
             doc = """\
 Workspace-relative ported Apple tools archives keyed by Linux CPU ("x86_64",
-"aarch64"), as tools/build-ported-tools.sh writes them. A CPU without
-one uses the archive apple-cross-toolchain/ci publishes, which exists for
-x86_64 only.
+"aarch64"), used instead of the ones apple-cross-toolchain/ci publishes.
 """,
         ),
         "swift_tools": attr.string_dict(

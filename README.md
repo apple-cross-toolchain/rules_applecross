@@ -8,14 +8,12 @@ Builds execute on x86_64 Linux, either locally or through remote execution, or
 locally on arm64 Linux. The host driving them can be Linux or macOS; see
 [Building on macOS](#building-on-macos) for what a macOS host does differently.
 
-On arm64 Linux, build the ported tools with `tools/build-ported-tools.sh` (only
-x86_64 ones are published) and configure:
+On arm64 Linux, configure the aarch64 Swift too:
 
 ```starlark
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     # ...
-    ported_tools_archives = {"aarch64": "ported-tools-linux-aarch64.tar.xz"},
     swift_tools = {
         "aarch64": "@applecross_swift_ubuntu24.04-aarch64//:tools",
         "x86_64": "@applecross_swift_ubuntu24.04//:tools",
