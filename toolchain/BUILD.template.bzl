@@ -514,16 +514,8 @@ filegroup(
 
 [
     builtin_include_directory(
-        name = "sdk_usr_include_directory_" + sdk_platform.lower(),
-        path = _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + ".sdk/usr/include",
-    )
-    for sdk_platform in _APPLE_SDK_PLATFORMS
-]
-
-[
-    builtin_include_directory(
-        name = "sdk_frameworks_directory_" + sdk_platform.lower(),
-        path = _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + ".sdk/System/Library/Frameworks",
+        name = "sdk_directory_" + sdk_platform.lower(),
+        path = _XCODE_DEVELOPER_DIR + "/Platforms/" + sdk_platform + ".platform/Developer/SDKs/" + sdk_platform + ".sdk",
     )
     for sdk_platform in _APPLE_SDK_PLATFORMS
 ]
@@ -552,8 +544,7 @@ filegroup(
         ],
         allowlist_include_directories = [
             ":clang_resource_include_directory",
-            ":sdk_usr_include_directory_" + sdk_platform.lower(),
-            ":sdk_frameworks_directory_" + sdk_platform.lower(),
+            ":sdk_directory_" + sdk_platform.lower(),
             ":platform_frameworks_directory_" + sdk_platform.lower(),
         ],
         data = [
@@ -900,8 +891,7 @@ cc_args(
         ],
         allowlist_include_directories = [
             ":macos_clang_resource_include_directory",
-            ":sdk_usr_include_directory_" + sdk_platform.lower(),
-            ":sdk_frameworks_directory_" + sdk_platform.lower(),
+            ":sdk_directory_" + sdk_platform.lower(),
             ":platform_frameworks_directory_" + sdk_platform.lower(),
         ],
         data = [
