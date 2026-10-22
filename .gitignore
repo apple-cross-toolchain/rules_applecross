@@ -4,5 +4,5 @@
 /apple-sdks*.tar.*
 /Xcode.app
 __pycache__/
-ported-tools-linux-*.tar.xz
+/ported-tools/
 /.compare/

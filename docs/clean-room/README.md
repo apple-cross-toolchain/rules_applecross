@@ -1,8 +1,8 @@
 # Clean-room Apple build tools
 
 `tools/apple_tools/crates` reimplements, for Linux, Apple tools that
-rules_apple runs while bundling. They ship in the ported tools archive
-(`tools/linux_vm/build-ported-tools.sh`).
+rules_apple runs while bundling. They ship with the ported tools
+(`tools/build-ported-tools.sh`).
 
 No Apple binary was disassembled, decompiled or patched, and no Apple code
 was copied. All observations were made on an Apple silicon Mac with an

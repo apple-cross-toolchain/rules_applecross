@@ -1,0 +1,81 @@
+name: ported-tools
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ported-tools.yml
+      - tools/apple_tools/**
+      - tools/build-ported-tools.sh
+      - tools/linux_vm/Containerfile
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ported-tools.yml
+      - tools/apple_tools/**
+      - tools/build-ported-tools.sh
+      - tools/linux_vm/Containerfile
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  VERSION: 0.0.25
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t ported-tools -f tools/linux_vm/Containerfile tools/linux_vm
+      - name: Build and test the ported tools
+        run: >-
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" ported-tools bash -c
+          'git config --global --add safe.directory "$PWD" &&
+          tools/build-ported-tools.sh dist &&
+          cd tools/apple_tools &&
+          bazel test -c opt //...'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ported-tools-linux-${{ matrix.arch }}
+          path: dist/*.tar.zst
+          retention-days: 7
+  release:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ported-tools-linux-*
+          merge-multiple: true
+      - run: sha256sum -- *.tar.zst > SHA256.txt
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="ported-tools-$VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is already released"
+            exit 0
+          fi
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes "Built from $GITHUB_SHA." \
+            --latest=false \
+            -- *.tar.zst SHA256.txt
