@@ -39,9 +39,8 @@ common:remote_base --remote_executor=grpcs://app.buildbuddy.io
 # Everything on the executors, including linking, bundling and signing.
 common:remote --config=remote_base
 build:remote --extra_execution_platforms=//platforms:linux_x86_64
-# The toolchain's codesign is a no-op stub, so bundle signing never produces
-# a signature anyway. Disabling it turns ProcessAndSign into a plain copy,
-# avoiding tools (zip, python3) that the remote executor image lacks.
+# Disabling bundle signing turns ProcessAndSign into a plain copy, avoiding
+# tools (zip, python3) that the remote executor image lacks.
 build:remote --features=disable_legacy_signing
 
 # Compiling and archiving on the executors, everything downstream on this Mac

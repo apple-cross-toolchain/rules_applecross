@@ -207,10 +207,10 @@ not import the libraries compiled on Linux. Configure it with
 
 `@rules_applecross//toolchain:apple_bundling_on_linux` registers the same type
 for the Linux platform, which is what an all-remote build uses. It is
-incomplete: the ported `ibtool` writes an empty `.storyboardc` and `codesign`
-is a no-op stub, so bundles come out unsigned and missing their storyboards,
-and `-c opt` needs a `zip` the executor image does not have. Register it only
-if you are building everything remotely and can live with that.
+incomplete: the ported `ibtool` compiles only the storyboards
+`docs/clean-room/ibtool.md` describes, `codesign` signs ad hoc only, and
+`-c opt` needs a `zip` the executor image does not have. Register it only if
+you are building everything remotely and can live with that.
 
 ## Developing rules_applecross
 
@@ -249,3 +249,8 @@ writes each tool as `ported-tools/<tool>-linux-<arch>.tar.zst`. The
 publishes them with a `SHA256.txt` as the release `ported-tools-<VERSION>`
 unless it exists, so bump `VERSION` in `.github/workflows/ported-tools.yml` to
 release changes.
+
+The toolchain downloads the archives `toolchain/ported_tools.sha256` lists, a
+copy of a release's `SHA256.txt`, from the release `_PORTED_TOOLS_URL` in
+`toolchain/apple_cross_toolchain.bzl` names; update the two together. To try
+local builds, name the `ported-tools` directory in `ported_tools_archives`.

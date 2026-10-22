@@ -58,9 +58,10 @@ _configure_tag = tag_class(
                   "can name both this and an archive source.",
         ),
         "ported_tools_archives": attr.string_dict(
-            doc = "Workspace-relative ported Apple tools archives keyed by " +
-                  "Linux CPU (\"x86_64\", \"aarch64\"). CPUs without one " +
-                  "download apple-cross-toolchain/ci's, published for x86_64 only.",
+            doc = "Workspace-relative ported Apple tools keyed by Linux " +
+                  "CPU (\"x86_64\", \"aarch64\"): a directory of " +
+                  "<tool>-linux-<cpu>.tar.zst archives or a single archive. " +
+                  "CPUs without one download the ones this repository releases.",
         ),
         "swift_tools": attr.string_dict(
             mandatory = True,
