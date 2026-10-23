@@ -1,0 +1,28 @@
+Run the interpreter without env(1), which an executor may lack: actiond's
+/usr/bin/env runs nothing but bash. The command is redefined after the
+original rather than edited in place so that the patch applies to the
+rules_python of every supported Bazel; their command arrays begin
+differently.
+
+diff --git a/python/private/stage1_bootstrap_template.sh b/python/private/stage1_bootstrap_template.sh
+index a984344..5c06f10 100644
+--- a/python/private/stage1_bootstrap_template.sh
++++ b/python/private/stage1_bootstrap_template.sh
+@@ -295,6 +295,17 @@ command=(
+   "$@"
+ )
+ 
++for interpreter_env_var in "${interpreter_env[@]}"; do
++  export "$interpreter_env_var"
++done
++command=(
++  "$python_exe"
++  "${interpreter_args[@]}"
++  "${INTERPRETER_ARGS_FROM_TARGET[@]}"
++  "$stage2_bootstrap"
++  "$@"
++)
++
+ # We use `exec` instead of a child process so that signals sent directly (e.g.
+ # using `kill`) to this process (the PID seen by the calling process) are
+ # received by the Python process. Otherwise, this process receives the signal

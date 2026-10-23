@@ -330,6 +330,8 @@ filegroup(
             _XCODE_TOOLCHAIN_DIR + "/usr/libexec/python3/**",
             # Back-deployment runtimes for swift-stdlib-tool.
             _XCODE_TOOLCHAIN_LIB + "/swift-*/*/*.dylib",
+            _XCODE_TOOLCHAIN_LIB + "/*.so*",
+            "userland/bin/*",
             # xcrun refuses to run without a toolchain descriptor.
             _XCODE_TOOLCHAIN_DIR + "/ToolchainInfo.plist",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Info.plist",

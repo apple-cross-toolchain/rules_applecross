@@ -29,6 +29,7 @@ single_version_override(
         "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
         "//patches:rules_apple_alticonstool_missing_icons.patch",
         "//patches:rules_apple_xctoolrunner_sorted_listdir.patch",
+        "//patches:rules_apple_no_userland.patch",
     ],
     version = "5.3.1",
 )
@@ -36,6 +37,12 @@ single_version_override(
 bazel_dep(name = "rules_swift", version = "4.2.2")
 bazel_dep(name = "rules_cc", version = "0.2.26")
 bazel_dep(name = "rules_python", version = "1.8.0")
+single_version_override(
+    module_name = "rules_python",
+    patch_strip = 1,
+    patches = ["//patches:rules_python_bootstrap_without_env.patch"],
+)
+
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "llvm", version = "0.8.25")
 bazel_dep(name = "platforms", version = "1.1.0")
