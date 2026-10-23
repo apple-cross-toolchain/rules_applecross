@@ -407,6 +407,18 @@ def _swift_toolchain_impl(ctx):
         # DEVELOPER_DIR Bazel sets, i.e. the installed Xcode.
         xcode_link = "__bazel_developer_dir_" + apple_common.apple_host_system_env(xcode_config)["XCODE_VERSION_OVERRIDE"].replace(".", "_")
         plugin_platform_dir = "{}/Platforms/{}.platform/Developer".format(xcode_link, info.sdk_platform_device)
+        # There __BAZEL_XCODE_DEVELOPER_DIR__ is the installed Xcode, not the
+        # staged tree the SDKs come from.
+        action_configs.append(ActionConfigInfo(
+            actions = [
+                _SWIFT_ACTION_COMPILE,
+                _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
+                _SWIFT_ACTION_DERIVE_FILES,
+                _SWIFT_ACTION_DUMP_AST,
+                _SWIFT_ACTION_PRECOMPILE_C_MODULE,
+            ],
+            configurators = [add_arg("-debug-prefix-map", developer_dir + "=/PLACEHOLDER_DEVELOPER_DIR")],
+        ))
         action_configs.append(ActionConfigInfo(
             actions = [
                 _SWIFT_ACTION_COMPILE,

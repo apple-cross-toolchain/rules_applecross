@@ -1,0 +1,16 @@
+Concatenate intentbuilderc's Swift outputs in name order rather than
+directory order, which differs between filesystems (APFS and ext4), so the
+generated source and the classes compiled from it are the same on every host.
+
+diff --git a/tools/xctoolrunner/xctoolrunner.py b/tools/xctoolrunner/xctoolrunner.py
+--- a/tools/xctoolrunner/xctoolrunner.py
++++ b/tools/xctoolrunner/xctoolrunner.py
+@@ -105,7 +105,7 @@ def _ensure_clean_dir(path):
+ def _listdir_full(path):
+   """List a directory but output the full path to the files instead of only the
+   file names."""
+-  for f in os.listdir(path):
++  for f in sorted(os.listdir(path)):
+     yield os.path.join(path, f)
+ 
+ def ibtool_filtering(tool_exit_status, raw_stdout, raw_stderr):
