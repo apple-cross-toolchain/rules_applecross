@@ -241,6 +241,10 @@ toolchain stages that LLVM doesn't provide:
   `crates` (see `docs/clean-room`) and, in `xcbuild`, the Rust port of the
   xcbuild tools rules_apple runs (`xcrun`, `plutil`, `PlistBuddy`, `sw_vers`);
 - `tools/apple_tools/swiftui_macros`, built with SwiftPM;
+- `tools/system_tools`, built with Bazel and statically linked against musl,
+  as executor images may lack them: Info-ZIP `zip` and `unzip` with Debian's
+  patches, and CPython `python3` through rules_foreign_cc, whose archive also
+  carries the standard library;
 - pngcrush, built from source.
 
 It runs in the Linux container `tools/linux_vm/Containerfile` describes and

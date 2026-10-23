@@ -1,0 +1,42 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+filegroup(
+    name = "tools",
+    srcs = [
+        ":python3",
+        "@unzip",
+        "@zip",
+    ],
+    target_compatible_with = ["@llvm//constraints/libc:musl"],
+)
+
+configure_make(
+    name = "python3",
+    args = ["'CFLAGS_NODIST=-Dredacted=\\\"redacted\\\"'"],
+    configure_options = [
+        "--disable-test-modules",
+        "--without-ensurepip",
+        "--without-system-libmpdec",
+    ],
+    env = {
+        "LINKFORSHARED": " ",
+        "MODULE_BUILDTYPE": "static",
+        "PKG_CONFIG_LIBDIR": "$$EXT_BUILD_DEPS$$/pkgconfig",
+        "SOURCE_DATE_EPOCH": "1672560000",
+        "ac_cv_working_openssl_hashlib": "no",
+        "ac_cv_working_openssl_ssl": "no",
+    },
+    install_prefix = "py_install",
+    lib_source = "@cpython//:srcs",
+    out_binaries = ["python3.14"],
+    out_data_dirs = ["lib/python3.14"],
+    out_include_dir = "",
+    postfix_script = "rm -rf $$INSTALLDIR/lib/python3.14/config-3.14-* && find $$INSTALLDIR/lib/python3.14 -name '*.opt-[12].pyc' -delete",
+    resource_size = "medium",
+    deps = [
+        "@bzip2//:bz2",
+        "@xz//:lzma",
+        "@zlib",
+        "@zstd",
+    ],
+)

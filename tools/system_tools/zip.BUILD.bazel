@@ -1,0 +1,36 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+cc_binary(
+    name = "zip",
+    srcs = glob([
+        "*.h",
+        "unix/*.h",
+    ]) + [
+        "crc32.c",
+        "crypt.c",
+        "deflate.c",
+        "fileio.c",
+        "globals.c",
+        "trees.c",
+        "ttyio.c",
+        "unix/unix.c",
+        "util.c",
+        "zbz2err.c",
+        "zip.c",
+        "zipfile.c",
+        "zipup.c",
+    ],
+    copts = [
+        "-DBZIP2_SUPPORT",
+        "-DHAVE_DIRENT_H",
+        "-DHAVE_TERMIOS_H",
+        "-DLARGE_FILE_SUPPORT",
+        "-DUIDGID_NOT_16BIT",
+        "-DUNICODE_SUPPORT",
+        "-DUNIX",
+        "-std=gnu17",
+        "-w",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@bzip2//:bz2"],
+)
