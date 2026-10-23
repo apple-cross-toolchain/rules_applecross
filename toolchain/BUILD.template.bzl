@@ -330,6 +330,8 @@ filegroup(
             _XCODE_TOOLCHAIN_DIR + "/usr/libexec/python3/**",
             # Back-deployment runtimes for swift-stdlib-tool.
             _XCODE_TOOLCHAIN_LIB + "/swift-*/*/*.dylib",
+            _XCODE_TOOLCHAIN_LIB + "/*.so*",
+            "userland/bin/*",
             # xcrun refuses to run without a toolchain descriptor.
             _XCODE_TOOLCHAIN_DIR + "/ToolchainInfo.plist",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Info.plist",
@@ -424,7 +426,7 @@ _SWIFT_COMMON_TOOLCHAIN_INPUTS = [
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include",
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
-]
+] + glob([_XCODE_TOOLCHAIN_BIN + "/*.so*"], allow_empty = True)
 
 # Listed by part, not the whole platform directory: Bazel 8's darwin sandbox
 # can't stage the C toolchain's SDK directory nested inside it.

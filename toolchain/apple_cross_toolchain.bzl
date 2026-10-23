@@ -73,9 +73,50 @@ def _python3(rctx):
 def _install_executable(rctx, source, destination):
     rctx.template(destination, _toolchain_path(rctx, source), {}, executable = True)
 
-# Ubuntu packages providing shared libraries that the swift.org toolchain's
-# driver binaries need at runtime but minimal executor images do not ship.
-_SWIFT_HOST_DEPS_DEBS = [
+# Ubuntu packages providing the shared libraries beyond glibc that swift.org's
+# Swift and the ported tools need at runtime, so that an executor needs no more
+# than glibc and bash of its own. actiond's sandbox has exactly that.
+_HOST_LIBRARY_DEBS = [
+    (
+        "libgcc-s1.deb",
+        "g/gcc-14/libgcc-s1_14.2.0-4ubuntu2~24.04.1_{arch}.deb",
+        {
+            "amd64": "aa7fadbe33b78bcf99885318040601c550c208929565b179891d9a3cc2aa68cd",
+            "arm64": "5b191f79ad985a9a653dbba45214619f729f9178a9bdf92f7c68db06c50d070b",
+        },
+    ),
+    (
+        "libstdc++6.deb",
+        "g/gcc-14/libstdc++6_14.2.0-4ubuntu2~24.04.1_{arch}.deb",
+        {
+            "amd64": "a51f8de7829211db961a31f02158058ad1a95f92ac6d0a5dff6350e2821c54c0",
+            "arm64": "f84a05ac45a6884109b6527e911081a38263b89e042fc94a338cf975f61a330c",
+        },
+    ),
+    (
+        "libtinfo6.deb",
+        "n/ncurses/libtinfo6_6.4+20240113-1ubuntu2.1_{arch}.deb",
+        {
+            "amd64": "768e43c268e1e49b8dae7a50ed4778d6db88688abf72fdf779641e124c8a9a0b",
+            "arm64": "bb907b0a9735c08ebc94b3c7a9f725e501cb515ea8b08611566b17135ce3722b",
+        },
+    ),
+    (
+        "libuuid1.deb",
+        "u/util-linux/libuuid1_2.39.3-9ubuntu6.5_{arch}.deb",
+        {
+            "amd64": "2f801582b5f0e7cb0c2d3d3651193e69f4540ee3b7dcb6079a3562f0880b9edf",
+            "arm64": "4456b14c7573a8f3fd3b068d08edd7459d16968bfcc0cb39e154ac8afe431c7b",
+        },
+    ),
+    (
+        "zlib1g.deb",
+        "z/zlib/zlib1g_1.3.dfsg-3.1ubuntu2.1_{arch}.deb",
+        {
+            "amd64": "7074b6a2f6367a10d280c00a1cb02e74277709180bab4f2491a2f355ab2d6c20",
+            "arm64": "cbe3d39ec32d3cc27c021ae4af11e7c67bdf9d700d573207e0941d4038056278",
+        },
+    ),
     (
         "libncurses6.deb",
         "n/ncurses/libncurses6_6.4+20240113-1ubuntu2.1_{arch}.deb",
@@ -107,35 +148,90 @@ _MULTIARCH = {
 _PORTED_TOOLS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/ported-tools-0.0.26/"
 
 def _linux_exec_cpu(rctx):
-    """The host's CPU on Linux; x86_64 (remote executors) elsewhere."""
-    if rctx.os.name.startswith("linux"):
-        arch = rctx.os.arch
-        if arch in ("aarch64", "arm64"):
-            return "aarch64"
-        if arch in ("amd64", "x86_64"):
-            return "x86_64"
-        fail("Unsupported Linux host CPU: " + arch)
-    return "x86_64"
+    """The CPU Linux actions run on.
 
-def _install_swift_host_deps(rctx, toolchain_dir, cpu):
-    """Stage Ubuntu shared libraries needed by the Swift driver at runtime."""
+    RULES_APPLECROSS_LINUX_EXEC_CPU if set; otherwise the host's CPU on Linux
+    and x86_64 (remote executors) elsewhere.
+    """
+    cpu = rctx.os.environ.get("RULES_APPLECROSS_LINUX_EXEC_CPU", "").strip()
+    if not cpu:
+        cpu = "host" if rctx.os.name.startswith("linux") else "x86_64"
+    if cpu == "host":
+        cpu = rctx.os.arch
+    if cpu in ("aarch64", "arm64"):
+        return "aarch64"
+    if cpu in ("amd64", "x86_64"):
+        return "x86_64"
+    fail("Unsupported Linux execution CPU: " + cpu)
+
+_COREUTILS_VERSION = "0.12.0"
+
+_COREUTILS_SHA256 = {
+    "aarch64": "614a0224ea49f85020cfc30ca980599965fa8501131f9588db4fa41c125a7805",
+    "x86_64": "9b555b01457279bcc3e46753f0ef324fd3d02a0535111200a4632d1297263b54",
+}
+
+_FINDUTILS_VERSION = "0.10.0"
+
+_FINDUTILS_SHA256 = {
+    "aarch64": "c2dad7fbf0cd6b108f833b0a42651f3ad796b6dfa71d303ca1ab51eed3ce3afe",
+    "x86_64": "e7c10ea19e1dce2549aaf6f35e15bf42a5e8141d6100c499b6d6fc9b25ea9209",
+}
+
+_USERLAND_COMMANDS = [
+    "basename",
+    "chmod",
+    "cp",
+    "mkdir",
+    "mktemp",
+    "mv",
+    "rm",
+    "sort",
+    "touch",
+]
+
+def _extract_deb(rctx, deb, cpu, output):
+    name, pool_path, sha256 = deb
     arch = _DEB_ARCH[cpu]
-    for name, pool_path, sha256 in _SWIFT_HOST_DEPS_DEBS:
-        path = pool_path.format(arch = arch)
-        rctx.download(
-            url = [
-                "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/" + path,
-                "https://launchpad.net/ubuntu/+archive/primary/+files/" + path.rpartition("/")[2],
-            ],
-            output = "_debs/" + name,
-            sha256 = sha256[arch],
-        )
+    path = pool_path.format(arch = arch)
+    rctx.download(
+        url = [
+            "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/" + path,
+            "https://launchpad.net/ubuntu/+archive/primary/+files/" + path.rpartition("/")[2],
+        ],
+        output = "_debs/" + name,
+        sha256 = sha256[arch],
+    )
 
-        # A .deb is an ar archive whose payload is data.tar.zst.
-        result = rctx.execute(["ar", "x", name], working_directory = "_debs")
-        if result.return_code != 0:
-            fail("Failed to unpack {}: {}".format(name, result.stderr))
-        rctx.extract(archive = "_debs/data.tar.zst", output = "_debs/root")
+    # A .deb is an ar archive whose payload is data.tar.zst.
+    result = rctx.execute(["ar", "x", name], working_directory = "_debs")
+    if result.return_code != 0:
+        fail("Failed to unpack {}: {}".format(name, result.stderr))
+    rctx.extract(archive = "_debs/data.tar.zst", output = output)
+
+def _install_userland(rctx, cpu):
+    coreutils = "coreutils-{}-{}-unknown-linux-musl".format(_COREUTILS_VERSION, cpu)
+    rctx.download_and_extract(
+        url = "https://github.com/uutils/coreutils/releases/download/{}/{}.tar.gz".format(_COREUTILS_VERSION, coreutils),
+        output = "userland/coreutils",
+        sha256 = _COREUTILS_SHA256[cpu],
+        stripPrefix = coreutils,
+    )
+    findutils = "findutils-{}-unknown-linux-musl".format(cpu)
+    rctx.download_and_extract(
+        url = "https://github.com/uutils/findutils/releases/download/{}/{}.tar.xz".format(_FINDUTILS_VERSION, findutils),
+        output = "userland/findutils",
+        sha256 = _FINDUTILS_SHA256[cpu],
+        stripPrefix = findutils,
+    )
+    for command in _USERLAND_COMMANDS:
+        rctx.symlink("userland/coreutils/coreutils", "userland/bin/" + command)
+    rctx.symlink("userland/findutils/find", "userland/bin/find")
+
+def _install_host_libraries(rctx, toolchain_dir, cpu):
+    """Stage the Ubuntu shared libraries that Linux-hosted tools need."""
+    for deb in _HOST_LIBRARY_DEBS:
+        _extract_deb(rctx, deb, cpu, "_debs/root")
 
     result = rctx.execute([
         "bash",
@@ -143,7 +239,7 @@ def _install_swift_host_deps(rctx, toolchain_dir, cpu):
         "cp -a _debs/root/usr/lib/" + _MULTIARCH[cpu] + "/*.so* " + toolchain_dir + "lib/",
     ])
     if result.return_code != 0:
-        fail("Failed to stage Swift host dependencies: " + result.stderr)
+        fail("Failed to stage host libraries: " + result.stderr)
     rctx.delete("_debs")
 
 # The SDK whose version apple_support reports for each Apple OS. Device and
@@ -524,7 +620,11 @@ def _apple_cross_toolchain_impl(rctx):
             "cp -a " + llvm_prebuilt_lib + "/* " + xcode_toolchain_dir + "lib/",
         ])
 
-    _install_swift_host_deps(rctx, xcode_toolchain_dir, cpu)
+    _install_host_libraries(rctx, xcode_toolchain_dir, cpu)
+    _install_userland(rctx, cpu)
+    if rctx.path(xcode_toolchain_bindir + "SwiftUIMacros").exists:
+        for lib in ["libgcc_s.so.1", "libstdc++.so.6"]:
+            rctx.symlink(xcode_toolchain_dir + "lib/" + lib, xcode_toolchain_bindir + lib)
 
     # Create lib/swift/ symlinks so Swift binaries can find their runtime
     # libraries.  Swift binaries have RUNPATH $ORIGIN/../lib/swift/linux
@@ -686,6 +786,7 @@ them, or a single archive.
         "HOME",
         "PATH",
         "RULES_APPLECROSS_BUILD_MACHINE_OS_BUILD",
+        "RULES_APPLECROSS_LINUX_EXEC_CPU",
         "RULES_APPLECROSS_LOCAL_XCODE",
     ],
     implementation = _apple_cross_toolchain_impl,
