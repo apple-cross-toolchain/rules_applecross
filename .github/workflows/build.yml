@@ -97,7 +97,16 @@ jobs:
       - name: Build the examples with the runner's Xcode
         env:
           DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
-        run: tools/real-sdk-tests.sh macos
+        run: >-
+          bazel
+          build
+          --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
+          --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=0
+          --ios_multi_cpus=sim_arm64
+          --macos_cpus=arm64
+          --tvos_cpus=sim_arm64
+          --watchos_cpus=arm64
+          //examples/...
   build_status:
     name: build
     if: always()
