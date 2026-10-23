@@ -7,6 +7,12 @@ declare the cross-toolchain's xcrun/codesign/zip binaries as inputs.
 Local no-sandbox execution resolves them from the execroot either way,
 but strict remote execution only stages declared inputs.
 
+processor.process also appends sdk_tool_files to the codesign_inputs it
+forwards, for the bundle rules that pass none (watchOS applications among
+them). ProcessAndSign's compress-only branch, which -c opt takes for
+unsigned bundles, declares them too and uses the default shell environment
+as the signing branch does, so its PATH reaches the toolchain's zip.
+
 Also resolve relative PATH entries in the process-and-sign script before
 it changes directories: the toolchain bin directory is provided as an
 execroot-relative PATH entry, which stops resolving once the script
@@ -14,9 +20,7 @@ pushd's into the archive root to zip the bundle.
 
 Also feed sdk_tool_files to every xcrun-based resource action (actool,
 ibtool, momc, coremlc, copypng, TextureAtlas, metal and metallib,
-xcstringstool) via resources_support and to IntentGenerate, and export
-the calling tool's hermetic Python as PYTHON3 so interpreter-less
-executor images can run python stub tools.
+xcstringstool) via resources_support and to IntentGenerate.
 
 Also expose sdk_tool_files on AppleMacToolsToolchainInfo and feed them to
 the SwiftStdlibCopy action, replacing its no-remote/no-sandbox opt-out:
@@ -61,6 +65,24 @@ index 35f1640c..ed3bccbb 100644
          "alticonstool": attr.label(
              cfg = "exec",
              executable = True,
+diff --git a/apple/internal/codesigning_support.bzl b/apple/internal/codesigning_support.bzl
+index 8f76654..f129d0c 100644
+--- a/apple/internal/codesigning_support.bzl
++++ b/apple/internal/codesigning_support.bzl
+@@ -748,11 +748,12 @@ def _post_process_and_sign_archive_action(
+             arguments = arguments,
+             env = shared_environment.default_env,
+             executable = process_and_sign_expanded_template,
+-            inputs = input_files,
++            inputs = input_files + codesign_inputs,
+             mnemonic = mnemonic,
+             outputs = [output_archive],
+             progress_message = progress_message,
+             toolchain = None,
++            use_default_shell_env = True,
+         )
+ 
+ def _sign_binary_action(
 diff --git a/apple/internal/entitlements_support.bzl b/apple/internal/entitlements_support.bzl
 index b95f8133..d9ca3613 100644
 --- a/apple/internal/entitlements_support.bzl
@@ -312,6 +334,19 @@ index 05258764..cc205763 100644
                      strip_bitcode = False,
                      swift_stdlib_tool = apple_mac_toolchain_info.swift_stdlib_tool,
                  )
+diff --git a/apple/internal/processor.bzl b/apple/internal/processor.bzl
+index 261fcf0..b3a0bb9 100644
+--- a/apple/internal/processor.bzl
++++ b/apple/internal/processor.bzl
+@@ -848,7 +848,7 @@ def _process(
+             xplat_exec_group = xplat_exec_group,
+             bundle_extension = bundle_extension,
+             bundle_name = bundle_name,
+-            codesign_inputs = codesign_inputs,
++            codesign_inputs = codesign_inputs + apple_mac_toolchain_info.sdk_tool_files,
+             codesignopts = codesignopts,
+             entitlements = entitlements,
+             features = features,
 diff --git a/apple/internal/resource_actions/actool.bzl b/apple/internal/resource_actions/actool.bzl
 index 365819b6..8f6122da 100644
 --- a/apple/internal/resource_actions/actool.bzl

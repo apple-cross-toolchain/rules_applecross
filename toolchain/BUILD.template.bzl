@@ -327,6 +327,7 @@ filegroup(
     srcs = glob(
         include = [
             _XCODE_TOOLCHAIN_BIN + "/*",
+            _XCODE_TOOLCHAIN_DIR + "/usr/libexec/python3/**",
             # Back-deployment runtimes for swift-stdlib-tool.
             _XCODE_TOOLCHAIN_LIB + "/swift-*/*/*.dylib",
             # xcrun refuses to run without a toolchain descriptor.

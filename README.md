@@ -208,9 +208,9 @@ not import the libraries compiled on Linux. Configure it with
 `@rules_applecross//toolchain:apple_bundling_on_linux` registers the same type
 for the Linux platform, which is what an all-remote build uses. It is
 incomplete: the ported `ibtool` compiles only the storyboards
-`docs/clean-room/ibtool.md` describes, `codesign` signs ad hoc only, and
-`-c opt` needs a `zip` the executor image does not have. Register it only if
-you are building everything remotely and can live with that.
+`docs/clean-room/ibtool.md` describes, and `codesign` signs ad hoc only.
+Register it only if you are building everything remotely and can live with
+that.
 
 ## Developing rules_applecross
 
