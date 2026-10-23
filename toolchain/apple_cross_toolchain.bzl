@@ -104,7 +104,7 @@ _MULTIARCH = {
     "x86_64": "x86_64-linux-gnu",
 }
 
-_PORTED_TOOLS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/ported-tools-0.0.25/"
+_PORTED_TOOLS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/ported-tools-0.0.26/"
 
 def _linux_exec_cpu(rctx):
     """The host's CPU on Linux; x86_64 (remote executors) elsewhere."""
@@ -310,8 +310,6 @@ _RULE_INPUT_FILES = [
     "stubs/sw_vers.sh",
     "stubs/xcstringstool.py",
     "stubs/xcstringstool.sh",
-    "stubs/zip.py",
-    "stubs/zip.sh",
 ]
 
 _LLVM_PREBUILT = {
@@ -414,6 +412,11 @@ def _materialize_apple_sdks(rctx, cpu):
             "to read the SDKs from an Xcode install (macOS hosts only).",
         )
 
+def _ported_tool_destination(name, destination):
+    if name.startswith("python3-"):
+        return destination + "libexec/python3"
+    return destination
+
 def _install_ported_tools(rctx, cpu, destination):
     suffix = "-linux-{}.tar.zst".format(cpu)
     local = rctx.attr.ported_tools_archives.get(cpu)
@@ -426,7 +429,7 @@ def _install_ported_tools(rctx, cpu, destination):
             rctx.watch(path)
             archives = [path]
         for archive in archives:
-            rctx.extract(archive = archive, output = destination)
+            rctx.extract(archive = archive, output = _ported_tool_destination(archive.basename, destination))
         return
 
     archives = {}
@@ -451,7 +454,7 @@ def _install_ported_tools(rctx, cpu, destination):
     for download in downloads:
         download.wait()
     for name in archives:
-        rctx.extract(archive = "_ported_tools/" + name, output = destination)
+        rctx.extract(archive = "_ported_tools/" + name, output = _ported_tool_destination(name, destination))
     rctx.delete("_ported_tools")
 
 def _apple_cross_toolchain_impl(rctx):
@@ -589,22 +592,11 @@ def _apple_cross_toolchain_impl(rctx):
         _install_executable(rctx, "stubs/intentbuilderc.py", _intentbuilderc_path + ".py")
 
     # Create xcstringstool stub for Linux (compiles .xcstrings to .strings).
-    # Installed as a shell trampoline so it can run under the calling tool's
-    # hermetic Python on executor images without a system python3.
     _xcstringstool_path = xcode_toolchain_bindir + "xcstringstool"
     result = rctx.execute(["test", "-e", _xcstringstool_path])
     if result.return_code != 0:
         _install_executable(rctx, "stubs/xcstringstool.sh", _xcstringstool_path)
         _install_executable(rctx, "stubs/xcstringstool.py", _xcstringstool_path + ".py")
-
-    # Provide `zip` for executor images that lack Info-ZIP (e.g. the
-    # swift:*-noble container); rules_apple's process-and-sign script
-    # archives bundles with it.
-    _zip_path = xcode_toolchain_bindir + "zip"
-    result = rctx.execute(["test", "-e", _zip_path])
-    if result.return_code != 0:
-        _install_executable(rctx, "stubs/zip.sh", _zip_path)
-        _install_executable(rctx, "stubs/zip.py", _zip_path + ".py")
 
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
     # Stub codesign unless the ported tools carry one.
