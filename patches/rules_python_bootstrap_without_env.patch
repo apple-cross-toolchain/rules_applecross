@@ -4,14 +4,21 @@ original rather than edited in place so that the patch applies to the
 rules_python of every supported Bazel; their command arrays begin
 differently.
 
+Pin the hash seed where /dev/urandom is missing, as in actiond's sandbox:
+the x86_64 python-build-standalone interpreter reads its seed from there
+alone and cannot start otherwise.
+
 diff --git a/python/private/stage1_bootstrap_template.sh b/python/private/stage1_bootstrap_template.sh
-index a984344..5c06f10 100644
+index a984344..87c9362 100644
 --- a/python/private/stage1_bootstrap_template.sh
 +++ b/python/private/stage1_bootstrap_template.sh
-@@ -295,6 +295,17 @@ command=(
+@@ -295,6 +295,20 @@ command=(
    "$@"
  )
  
++if [[ ! -e /dev/urandom && -z "${PYTHONHASHSEED+x}" ]]; then
++  export PYTHONHASHSEED=0
++fi
 +for interpreter_env_var in "${interpreter_env[@]}"; do
 +  export "$interpreter_env_var"
 +done
