@@ -15,9 +15,15 @@ that Mac, reading that Xcode through a read-only mount. Sources:
 - published sources: the reference LZFSE encoder, CoreFoundation's string
   hash and hash tables, the former open-source `swift-stdlib-tool`.
 
-Inputs outside what each page describes are not approximated: `actool`
-hands them to xcbuild's actool (`tools/apple_tools/xcbuild`), `ibtool` leaves
-them uncompiled as the stub it replaced did, and the other tools refuse them.
+The tools are strict by default: their output is byte-identical to Xcode's,
+or the build fails on the input. Known gaps are on each page; the largest is
+tvOS's radiosity image ([actool.md](actool.md)), which fails tvOS app icons.
+Relaxed, `--config=relaxed` (in `.bazelrc`: `--action_env` of
+`RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`), accepts a near match
+instead: `actool` writes its closest output, or hands what it doesn't
+support to xcbuild's actool (`tools/apple_tools/xcbuild`), and `ibtool`
+leaves what it can't compile uncompiled, as the stub it replaced did. The
+other tools refuse such inputs either way.
 
 | Page | Tool |
 | --- | --- |

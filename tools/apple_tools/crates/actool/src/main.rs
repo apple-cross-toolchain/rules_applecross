@@ -1,5 +1,8 @@
-//! Clean-room `actool` for Linux; see docs/clean-room/actool.md. Unsupported
-//! inputs go to xcbuild's actool.
+//! Clean-room `actool` for Linux; see docs/clean-room/actool.md. Strict by
+//! default: its output is Xcode's byte for byte, or the build fails.
+//! Relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed,
+//! `--config=relaxed`), it writes a near match or hands what it doesn't
+//! support to xcbuild's actool.
 
 mod bom;
 mod car;
@@ -25,10 +28,19 @@ struct Options {
     target_devices: Vec<String>,
     partial_info_plist: Option<PathBuf>,
     inputs: Vec<PathBuf>,
+    /// Whether output must be Xcode's byte for byte; see [`strict`].
+    strict: bool,
+}
+
+/// Strict output, the default: byte-identical to Xcode's, or the build fails.
+/// RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed (`--config=relaxed`)
+/// accepts a near match.
+fn strict() -> bool {
+    std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").map_or(true, |v| v != "relaxed")
 }
 
 fn parse(args: Vec<String>) -> Result<Options, String> {
-    let mut o = Options { output_format: "xml1".into(), ..Default::default() };
+    let mut o = Options { output_format: "xml1".into(), strict: strict(), ..Default::default() };
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
@@ -228,6 +240,11 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             if scan.icon_sets.iter().any(|(n, _)| n == name) {
                 return Err(format!("{name}: both an Icon Composer document and an app icon set; this actool compiles one"));
             }
+            if o.strict {
+                // Xcode's own output names renditions with a fresh UUID each
+                // run, and this one is a flat rendering: never Xcode's.
+                return Err(format!("{}: Icon Composer documents are rendered flat by this actool, not as Xcode compiles them (docs/clean-room/actool.md)", doc.display()));
+            }
             Some((name.clone(), IconSource::Single(format!("{name}1024x1024.png"), icon::render(doc)?)))
         }
         (Some(name), None) => {
@@ -323,7 +340,7 @@ fn stack_icon(o: &Options, out_dir: &Path, platform: &str, scan: &Scan, outputs:
         let size = asset["size"].as_str().unwrap_or("");
         let (w, h) = size.split_once('x').and_then(|(w, h)| Some((w.parse::<usize>().ok()?, h.parse::<usize>().ok()?))).ok_or_else(|| format!("{}: size {size:?}", dir.display()))?;
         let stack = stack::read(&dir.join(file), "imagestacklayer", "tv", "1x")?;
-        let renditions = stack::tv(&stack, w, h)?;
+        let renditions = stack::tv(&stack, w, h, o.strict)?;
         (stack, renditions, true)
     } else if let Some(dir) = wanted(&scan.solid_stacks) {
         if platform != "vision" || !devices("vision") {
@@ -478,7 +495,7 @@ fn main() -> ExitCode {
     }
     let o = match parse(args.clone()) {
         Ok(o) => o,
-        Err(e) => return xcbuild_actool(&args, &e),
+        Err(e) => return refuse(&args, &e),
     };
     match run(&o) {
         Ok(outputs) => {
@@ -491,11 +508,18 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Err(e) => xcbuild_actool(&args, &e),
+        Err(e) => refuse(&args, &e),
     }
 }
 
-fn xcbuild_actool(args: &[String], reason: &str) -> ExitCode {
+/// An input this actool can't compile as Xcode would: an error when strict,
+/// xcbuild's actool when relaxed.
+fn refuse(args: &[String], reason: &str) -> ExitCode {
+    if strict() {
+        eprintln!("error: {reason}");
+        eprintln!("note: strict output must be byte-identical to Xcode's; build with --config=relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to accept a near match");
+        return ExitCode::FAILURE;
+    }
     eprintln!("note: {reason}; compiling with xcbuild's actool instead");
     ExitCode::from(xcbuild_acdriver::run(args).clamp(0, 255) as u8)
 }
