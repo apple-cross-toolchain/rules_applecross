@@ -28,6 +28,9 @@ tar -C "$OUT" -xf "$archive"
 for tool in actool codesign ibtool swift-stdlib-tool; do
   install -m 755 "$WORK/apple_tools/release/$tool" "$OUT/bin/$tool"
 done
+swift build -q -c release --static-swift-stdlib \
+  --package-path "$ROOT/tools/apple_tools/swiftui_macros" --scratch-path "$WORK/swiftui_macros"
+install -m 755 "$WORK/swiftui_macros/release/SwiftUIMacros" "$OUT/bin/SwiftUIMacros"
 # The marker tells the toolchain repository to keep this codesign.
 git -C "$ROOT" rev-parse HEAD > "$OUT/bin/.apple-tools-revision" 2>/dev/null || echo unknown > "$OUT/bin/.apple-tools-revision"
 
