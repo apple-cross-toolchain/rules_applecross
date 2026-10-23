@@ -42,6 +42,7 @@ jobs:
             echo "macos=[$(cut -d. -f1 .bazelversion)]" >> "$GITHUB_OUTPUT"
           fi
   stub_sdk_tests:
+    name: stub_sdk_tests (bazel_${{ matrix.bazel }})
     needs: setup
     strategy:
       fail-fast: false
@@ -78,7 +79,8 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
-  real_sdk_tests:
+  local_smoke_tests:
+    name: local_smoke_tests (bazel_${{ matrix.bazel }})
     needs: setup
     strategy:
       fail-fast: false
@@ -101,17 +103,18 @@ jobs:
     if: always()
     needs:
       - stub_sdk_tests
-      - real_sdk_tests
+      - local_smoke_tests
     runs-on: ubuntu-24.04
     permissions: {}
     steps:
       - env:
           STUB_SDK_TESTS: ${{ needs.stub_sdk_tests.result }}
-          REAL_SDK_TESTS: ${{ needs.real_sdk_tests.result }}
+          LOCAL_SMOKE_TESTS: ${{ needs.local_smoke_tests.result }}
         run: |
           test "$STUB_SDK_TESTS" = success
-          test "$REAL_SDK_TESTS" = success
-  remote_build_local_xcode:
+          test "$LOCAL_SMOKE_TESTS" = success
+  rbe_smoke_tests:
+    name: rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # The all-remote build, reading the runner's own Xcode.
     if: false
     needs: setup
@@ -143,7 +146,8 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
-  remote_compile:
+  multi-platform_rbe_smoke_tests:
+    name: multi-platform_rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # A smoke test of the split build: compiling on the executors, everything
     # rules_apple produces on the runner's own Xcode. watchOS and visionOS are
     # left out because a real actool needs those simulator runtimes installed
