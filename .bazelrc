@@ -63,5 +63,6 @@ build:actiond --action_env=LD_LIBRARY_PATH=external/+apple_cross_toolchain+apple
 build:actiond --@rules_python//python/config_settings:bootstrap_impl=script
 build:actiond --experimental_propagate_custom_flag=@rules_python//python/config_settings:bootstrap_impl
 build:actiond --strategy=SwiftCompile=remote
+build:actiond --strategy=PyWriteBuildData=local
 
 common --remote_timeout=10m
