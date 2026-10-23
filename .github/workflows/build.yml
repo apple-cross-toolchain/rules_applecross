@@ -114,7 +114,25 @@ jobs:
           --macos_cpus=arm64
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
+          --
           //examples/...
+          -//examples/tvos/...
+      # The clean-room tools are strict: Xcode's output byte for byte, or the
+      # build fails. The tvOS example's radiosity image can't be guaranteed
+      # yet (docs/clean-room/actool.md), so it is built relaxed.
+      - name: Build the tvOS example with remote execution
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: >-
+          bazel
+          build
+          --config=remote
+          --config=relaxed
+          --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
+          --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
+          --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
+          --tvos_cpus=sim_arm64
+          //examples/tvos/...
   multi-platform_rbe_smoke_tests:
     name: multi-platform_rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # A smoke test of the split build: compiling on the executors, everything

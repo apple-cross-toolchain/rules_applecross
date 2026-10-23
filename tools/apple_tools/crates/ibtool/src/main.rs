@@ -75,7 +75,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let dir = compilation_dir.ok_or("--compilation-directory or --link is required")?;
     for input in &inputs {
         if input.extension().and_then(|e| e.to_str()) != Some("storyboard") {
-            eprintln!("note: {}: only storyboards are supported by this ibtool; not compiled", input.display());
+            skip(format!("{}: only storyboards are supported by this ibtool", input.display()))?;
             continue;
         }
         let xml = std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
@@ -87,7 +87,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         let files = match compiled {
             Ok(files) => files,
             Err(e) => {
-                eprintln!("note: {}: {e}; not compiled", input.display());
+                skip(format!("{}: {e}", input.display()))?;
                 continue;
             }
         };
@@ -101,6 +101,17 @@ fn run(args: Vec<String>) -> Result<(), String> {
             std::fs::write(out.join(name), data).map_err(|e| e.to_string())?;
         }
     }
+    Ok(())
+}
+
+/// An input this ibtool can't compile as Xcode would: an error when strict
+/// (the default), left uncompiled when relaxed
+/// (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, `--config=relaxed`).
+fn skip(reason: String) -> Result<(), String> {
+    if std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").map_or(true, |v| v != "relaxed") {
+        return Err(format!("{reason}; build with --config=relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to leave it uncompiled"));
+    }
+    eprintln!("note: {reason}; not compiled");
     Ok(())
 }
 

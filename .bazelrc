@@ -22,6 +22,13 @@ build:linux --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolch
 build:remote --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer
 build:remote --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
 
+# The clean-room Apple tools (actool, ibtool, ...) are strict by default: their
+# output is byte-identical to Xcode's, or the build fails. Relaxed accepts a
+# near match: actool writes its closest output (tvOS radiosity images) or hands
+# the catalog to xcbuild's actool, and ibtool leaves what it can't compile
+# uncompiled. See docs/clean-room/README.md.
+build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
+
 # BuildBuddy's cache without remote execution.
 build:remote_cache --bes_results_url=https://app.buildbuddy.io/invocation/
 build:remote_cache --bes_backend=grpcs://app.buildbuddy.io

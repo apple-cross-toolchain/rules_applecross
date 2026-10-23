@@ -8,9 +8,10 @@ iphone|ipad --output-partial-info-plist P CATALOG` for a catalog holding one
 Also reproduced, for every catalog in the examples except tvOS's and
 visionOS's: `--platform iphonesimulator`, `watchsimulator` and `macosx`,
 app icon sets with an image per size (below), and catalogs that compile to
-nothing. visionOS's and tvOS's (`xrsimulator`, `appletvsimulator`: image
-stacks, below) are byte-identical too (tvOS's radiosity image but for
-rare rounding, below).
+nothing. visionOS's (`xrsimulator`: image stacks, below) is byte-identical
+too. tvOS's (`appletvsimulator`) is refused when strict, the default: its
+radiosity image can't be guaranteed to be Xcode's (below). Relaxed
+(`--config=relaxed`), the output is byte-identical to Xcode's.
 
 Outputs, all byte-identical to Xcode 27.0's for `examples/ios/CleanRoom`:
 `NAME60x60@2x.png` (iPhone), `NAME76x76@2x~ipad.png` (iPad), `Assets.car`
@@ -132,7 +133,8 @@ actool on the same document differ: the Icon Image renditions are named
 with a fresh UUID each time
 (`Visor1024x1024_UIAppearanceAny_<UUID>-<pid>-<time>.png`).
 
-Not reproducible, then, and this actool approximates: it renders the
+Not reproducible, then. Strict (the default), this actool refuses Icon
+Composer documents. Relaxed (`--config=relaxed`), it approximates: it renders the
 document's default appearance flat (the fill, then each group's layers back
 to front with a blurred, downward-offset shadow of the group's opacity, no
 glass, specular or translucency; SVG layers through resvg, PNG layers
@@ -310,16 +312,33 @@ at most 255: what `vImageConvolve_Planar8` does with a divisor of 16384).
 Then each 32 px cell is 4x4 sums of its 8 px blocks weighed -1331, 1843,
 1843, -1331 (1/1024: the half floats of -1.3 and 1.8) each way, divided
 by 2^20 and truncated. Xcode 27.0 on an M4 Max and 27.1 on an M6 write
-the same radiosity image, so it doesn't depend on the GPU. That is exact
-but for Xcode's arithmetic, which is not established: a flat cell (16
-equal blocks, of a level u) comes out 64u - 1 for 36 of the 255 levels
-(a set closed under doubling, so it depends on the level's mantissa;
-actool has the measured set), and otherwise about one value in 1,700, one
-within single-precision rounding of the terms' magnitudes of a whole
-number, comes out one more or one less. Single- and half-precision sums
-over blocks or pixels in the usual orders, with or without fused
-multiply-adds, reproduce neither. The examples' icon is byte-identical; of
-20 random three-layer stacks 13 were, the others one value off.
+the same radiosity image, and the same bytes on every run, so it depends
+neither on the GPU nor on timing.
+
+That is exact but for Xcode's arithmetic, which is not established. A flat
+cell (16 equal blocks, of a level u) comes out 64u - 1 for 36 of the 255
+levels (a set closed under doubling, so it depends on the level's
+mantissa); actool has the set, measured for every level. Other values come
+out one more or one less when they are close to a whole number: of 256,000
+measured from about 550 stacks, 6,660 did, none further from it than 0.56 *
+2^-24 of the terms' magnitudes (the sum of the absolute weighed blocks)
+plus 0.002. Which ones do depends on the blocks, not only on the value:
+about half of 12,600 cells constructed to be whole numbers came out one
+less, and a pattern and its transpose almost always agree. No model tried
+reproduces that: single- and half-precision sums over blocks or pixels in
+every order (all 63 million for flat cells), separable passes, fused
+multiply-adds, products rounded before an exact sum, separate positive and
+negative sums, offsets, vImage's convolutions, Core Image's bicubic scaling,
+and Metal shaders with and without fast math.
+
+So when strict (the default), actool refuses a tvOS icon with any value
+within 2 * 2^-24 of its terms' magnitude plus 0.005 of a whole number
+(values in (-1, 1) excepted, which truncate to 0 either way). That refuses
+most icons, including the examples'. Relaxed, `--config=relaxed`
+(`RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`), it writes them anyway:
+the examples' icon is then byte-identical, and of 20 random three-layer
+stacks 13 were, the others one value off. What remains to find is how Xcode computes the
+cells; the measured cells and probes are described above.
 Grey layers (Xcode keeps them GA8), translucent visionOS layers,
 other brand asset roles and sizes, and layers small enough to pack into an
 atlas are refused.

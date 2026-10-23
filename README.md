@@ -172,6 +172,18 @@ incomplete: the ported `ibtool` compiles only the storyboards
 Register it only if you are building everything remotely and can live with
 that.
 
+## Byte-identical output
+
+The clean-room tools that bundle on Linux are strict by default: their
+output is byte-identical to Xcode's, or the build fails on the input, as
+tvOS app icons do for now (`docs/clean-room`). To accept a near match
+instead, relax them with `RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed` for
+actions, as this repository's `--config=relaxed` does:
+
+```
+build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
+```
+
 ## Developing rules_applecross
 
 ### Ported tools

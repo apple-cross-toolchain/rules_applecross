@@ -132,8 +132,10 @@ fn stack_rendition(stack: &Stack, width: u32, height: u32, layout: u16, layers: 
 /// in 14-bit weights rounded down, across then down, rounding to 8 bits
 /// after each), then per 32 px cell its 8 px blocks' sums weighed
 /// -1331, 1843, 1843, -1331 (in 1/1024) each way: 16-bit
-/// signed BGRA, 64 to a level.
-fn radiosity(flat: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String> {
+/// signed BGRA, 64 to a level. Xcode's rounding of values close to a whole
+/// number is not established; when `strict`, a stack with any such
+/// value is refused.
+fn radiosity(flat: &[u8], width: usize, height: usize, strict: bool) -> Result<Vec<u8>, String> {
     const MARGIN: usize = 40;
     const CELL: usize = 32;
     const R: isize = 40;
@@ -162,6 +164,7 @@ fn radiosity(flat: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String
     // Levels of flat cells Xcode stores as 64 * level - 1 (measured).
     const FLAT_ONE_LESS: [i64; 36] = [3, 6, 12, 24, 37, 47, 48, 71, 74, 77, 93, 94, 95, 96, 103, 105, 129, 142, 143, 147, 148, 149, 154, 155, 185, 186, 187, 188, 189, 190, 192, 193, 206, 209, 210, 249];
     let mut cells = vec![[0i16; 4]; (cw / CELL) * (ch / CELL)];
+    let mut at_risk = 0;
     for c in 0..4 {
         let mut canvas = vec![0u8; cw * ch];
         for y in top..height {
@@ -186,18 +189,31 @@ fn radiosity(flat: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String
                         sum += W[by] * W[bx] * block;
                     }
                 }
-                // Divided, truncating towards zero. Xcode's arithmetic is
-                // not established: flat cells of some levels come out one
-                // less (measured), and about one other value in 1,700, within
-                // single-precision rounding of a whole number, can differ by
-                // one.
+                // Divided, truncating towards zero. Xcode computes this in
+                // floating point, in a way not established: flat cells of
+                // some levels come out one less (measured for every level),
+                // and a value close to a whole number can come out one more
+                // or less. Of 6,660 such values in 256,000 measured, none was
+                // further from it than 0.56 * 2^-24 of the terms' magnitude
+                // plus 0.002; values within 2 * 2^-24 of it plus 0.005 are
+                // refused. Values in (-1, 1) truncate to 0 either way.
                 let mut v = sum / (1 << 20);
-                if blocks.iter().all(|b| *b == blocks[0]) && blocks[0] % 64 == 0 && FLAT_ONE_LESS.contains(&(blocks[0] / 64)) {
+                let flat_level = blocks.iter().all(|b| *b == blocks[0]) && blocks[0] % 64 == 0;
+                if flat_level && FLAT_ONE_LESS.contains(&(blocks[0] / 64)) {
                     v -= 1;
+                } else if !flat_level && strict && sum.abs() >= 1 << 19 {
+                    let magnitude: i64 = (0..16).map(|i| (W[i / 4] * W[i % 4]).abs() * blocks[i]).sum();
+                    let r = sum.rem_euclid(1 << 20);
+                    if std::cmp::min(r, (1 << 20) - r) << 23 <= magnitude + (5243 << 23) {
+                        at_risk += 1;
+                    }
                 }
                 cells[gy * (cw / CELL) + gx][c] = v as i16;
             }
         }
+    }
+    if at_risk > 0 {
+        return Err(format!("{at_risk} of this tvOS app icon's radiosity values are close enough to a whole number that Xcode's rounding of them, which this actool doesn't reproduce, could differ (docs/clean-room/actool.md)"));
     }
     let mut body = Vec::new();
     body.extend((cw as u16).to_le_bytes());
@@ -218,8 +234,8 @@ fn radiosity(flat: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String
 }
 
 /// A tvOS layered app icon (brand assets' primary app icon), `width` x
-/// `height` points at 1x.
-pub fn tv(stack: &Stack, width: usize, height: usize) -> Result<Vec<Rendition>, String> {
+/// `height` points at 1x; `strict` as for [`radiosity`].
+pub fn tv(stack: &Stack, width: usize, height: usize, strict: bool) -> Result<Vec<Rendition>, String> {
     if (width, height) != (400, 240) {
         return Err(format!("{}: tvOS app icons other than 400x240 are not supported by this actool", stack.name));
     }
@@ -236,7 +252,7 @@ pub fn tv(stack: &Stack, width: usize, height: usize) -> Result<Vec<Rendition>, 
     renditions.push(flattened(stack, &flat, width, height, 1, car::IDIOM_TV));
     renditions.push(Rendition {
         attrs: vec![(car::ATTR_SCALE, 1), (car::ATTR_IDIOM, car::IDIOM_TV), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_RADIOSITY_IMAGE)],
-        csi: car::stack_image_csi("ZZZZRadiosityImage-1.0.0", width as u32 + 80, height as u32 + 80, 1, &radiosity(&flat, width, height)?),
+        csi: car::stack_image_csi("ZZZZRadiosityImage-1.0.0", width as u32 + 80, height as u32 + 80, 1, &radiosity(&flat, width, height, strict)?),
     });
     Ok(renditions)
 }
