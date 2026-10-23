@@ -20,6 +20,7 @@ approximated.
 
 | Page | Tool |
 | --- | --- |
+| [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
 | [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |

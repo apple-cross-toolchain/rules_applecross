@@ -55,6 +55,22 @@ const TABLE_CAPACITIES: [usize; 22] = [0, 3, 6, 11, 19, 32, 52, 85, 118, 155, 23
 /// filled in `keys` order.
 pub fn table_order(keys: &[&str]) -> Vec<usize> {
     let hashes: Vec<u64> = keys.iter().map(|k| string_hash(k)).collect();
+    hashed_table_order(&hashes)
+}
+
+/// CoreFoundation's hash of an integer CFNumber: its magnitude times
+/// 2654435761, in 64 bits (the published CFNumber and CFInternal sources).
+pub fn number_hash(v: i64) -> u64 {
+    v.unsigned_abs().wrapping_mul(2_654_435_761)
+}
+
+/// The same for a table of integer CFNumbers, filled in `values` order.
+pub fn number_table_order(values: &[i64]) -> Vec<usize> {
+    let hashes: Vec<u64> = values.iter().map(|&v| number_hash(v)).collect();
+    hashed_table_order(&hashes)
+}
+
+fn hashed_table_order(hashes: &[u64]) -> Vec<usize> {
     let mut level = 0;
     let mut table: Vec<Option<usize>> = Vec::new();
     for (n, &h) in hashes.iter().enumerate() {
