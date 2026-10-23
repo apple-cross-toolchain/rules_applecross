@@ -116,7 +116,9 @@ jobs:
   rbe_smoke_tests:
     name: rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # The all-remote build, reading the runner's own Xcode.
-    if: false
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     needs: setup
     strategy:
       fail-fast: false
