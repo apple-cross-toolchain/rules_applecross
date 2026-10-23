@@ -6,6 +6,7 @@
 #   tools/linux_vm/run.sh bazel build //examples/ios/HelloWorldSwiftUI:HelloWorld
 set -euo pipefail
 
+ENGINE="${RULES_APPLECROSS_ENGINE:-podman}"
 IMAGE="${RULES_APPLECROSS_IMAGE:-localhost/rules-applecross-linux}"
 VM_XCODE="${RULES_APPLECROSS_VM_XCODE:-/var/xcode/Xcode.app}"
 CACHE_VOLUME="${RULES_APPLECROSS_CACHE_VOLUME:-rules-applecross-cache}"
@@ -13,6 +14,7 @@ WORKDIR="${RULES_APPLECROSS_WORKDIR:-$PWD}"
 
 volumes=()
 for v in ${RULES_APPLECROSS_VOLUMES:-}; do volumes+=(-v "$v"); done
+engine_args=(${RULES_APPLECROSS_ENGINE_ARGS:-})
 
 # Record this Mac's macOS build as BuildMachineOSBuild.
 build_machine=()
@@ -23,10 +25,11 @@ fi
 tty=()
 if [ -t 0 ] && [ -t 1 ]; then tty=(-it); fi
 
-exec podman run --rm ${tty[@]+"${tty[@]}"} \
+exec "$ENGINE" run --rm ${tty[@]+"${tty[@]}"} ${engine_args[@]+"${engine_args[@]}"} \
   --security-opt label=disable \
+  -e USE_BAZEL_VERSION \
   -v "$VM_XCODE:/Applications/Xcode.app:ro" \
-  -v "/Users:/Users" \
+  -v "$WORKDIR:$WORKDIR" \
   -v "$CACHE_VOLUME:/root/.cache" \
   ${volumes[@]+"${volumes[@]}"} \
   ${build_machine[@]+"${build_machine[@]}"} \
