@@ -1,9 +1,18 @@
 load("@rules_swift//swift:swift_compiler_plugin.bzl", "swift_compiler_plugin")
 load("@rules_swift//swift:swift_test.bzl", "swift_test")
 
+_TOOLCHAIN_LIB_RPATH = select({
+    "@bazel_tools//src/conditions:darwin": [],
+    "//conditions:default": [
+        "-Wl,--disable-new-dtags",
+        "-Wl,-rpath,$ORIGIN/../lib",
+    ],
+})
+
 swift_compiler_plugin(
     name = "SwiftUIMacros",
     srcs = glob(["Sources/SwiftUIMacros/*.swift"]),
+    linkopts = _TOOLCHAIN_LIB_RPATH,
     deps = [
         "@swift-syntax//:SwiftCompilerPlugin",
         "@swift-syntax//:SwiftDiagnostics",
@@ -15,6 +24,7 @@ swift_compiler_plugin(
 swift_compiler_plugin(
     name = "AppIntentsMacros",
     srcs = glob(["Sources/AppIntentsMacros/*.swift"]),
+    linkopts = _TOOLCHAIN_LIB_RPATH,
     deps = [
         "@swift-syntax//:SwiftCompilerPlugin",
         "@swift-syntax//:SwiftSyntax",
@@ -25,6 +35,7 @@ swift_compiler_plugin(
 swift_compiler_plugin(
     name = "PreviewsMacros",
     srcs = glob(["Sources/PreviewsMacros/*.swift"]),
+    linkopts = _TOOLCHAIN_LIB_RPATH,
     deps = [
         "@swift-syntax//:SwiftCompilerPlugin",
         "@swift-syntax//:SwiftSyntax",
