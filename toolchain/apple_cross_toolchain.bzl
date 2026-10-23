@@ -622,6 +622,9 @@ def _apple_cross_toolchain_impl(rctx):
 
     _install_host_libraries(rctx, xcode_toolchain_dir, cpu)
     _install_userland(rctx, cpu)
+    if rctx.path(xcode_toolchain_bindir + "SwiftUIMacros").exists:
+        for lib in ["libgcc_s.so.1", "libstdc++.so.6"]:
+            rctx.symlink(xcode_toolchain_dir + "lib/" + lib, xcode_toolchain_bindir + lib)
 
     # Create lib/swift/ symlinks so Swift binaries can find their runtime
     # libraries.  Swift binaries have RUNPATH $ORIGIN/../lib/swift/linux

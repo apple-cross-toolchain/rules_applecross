@@ -426,7 +426,7 @@ _SWIFT_COMMON_TOOLCHAIN_INPUTS = [
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include",
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
-]
+] + glob([_XCODE_TOOLCHAIN_BIN + "/*.so*"], allow_empty = True)
 
 # Listed by part, not the whole platform directory: Bazel 8's darwin sandbox
 # can't stage the C toolchain's SDK directory nested inside it.
