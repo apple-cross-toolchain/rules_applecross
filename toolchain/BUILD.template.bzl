@@ -321,6 +321,8 @@ filegroup(
     srcs = glob(
         include = [
             _XCODE_TOOLCHAIN_BIN + "/*",
+            # Back-deployment runtimes for swift-stdlib-tool.
+            _XCODE_TOOLCHAIN_LIB + "/swift-*/*/*.dylib",
             # xcrun refuses to run without a toolchain descriptor.
             _XCODE_TOOLCHAIN_DIR + "/ToolchainInfo.plist",
             _XCODE_DEVELOPER_DIR + "/Platforms/*.platform/Info.plist",
@@ -386,6 +388,11 @@ _SWIFT_TOOLCHAIN_LINK_STUBS = glob(
     exclude = [_XCODE_TOOLCHAIN_LIB + "/swift/host/*.tbd"],
 )
 
+_SWIFT_BACK_DEPLOYMENT_LIBS = glob(
+    [_XCODE_TOOLCHAIN_LIB + "/swift-6.2/*/*.dylib"],
+    allow_empty = True,
+)
+
 filegroup(
     name = "link_tool_files",
     srcs = [
@@ -398,7 +405,7 @@ filegroup(
         _XCODE_TOOLCHAIN_BIN + "/strip",
         _XCODE_TOOLCHAIN_LIB + "/libtapi.so",
         _XCODE_TOOLCHAIN_LIB + "/libtapi.so.8svn",
-    ] + _SWIFT_COMPATIBILITY_ARCHIVES + _SWIFT_TOOLCHAIN_LINK_STUBS,
+    ] + _SWIFT_COMPATIBILITY_ARCHIVES + _SWIFT_TOOLCHAIN_LINK_STUBS + _SWIFT_BACK_DEPLOYMENT_LIBS,
 )
 
 filegroup(

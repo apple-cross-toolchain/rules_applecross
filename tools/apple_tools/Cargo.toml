@@ -8,6 +8,7 @@ members = [
     "crates/ibtool",
     "crates/lzfse",
     "crates/macho",
+    "crates/swift-stdlib-tool",
 ]
 
 [workspace.package]
