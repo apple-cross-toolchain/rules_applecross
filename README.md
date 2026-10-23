@@ -229,8 +229,8 @@ Add `SDKS_TOKEN=<token>` when the host needs credentials. For a GitHub
 release on a private repository, `SDKS_URL` can be the ordinary release
 download URL (`.../releases/download/<tag>/<name>` or
 `.../releases/latest/download/<name>`); the script resolves it through the
-GitHub API, which is the only endpoint that honors token auth there. CI runs
-the same script, so neither path requires editing a checked-in file to build.
+GitHub API, which is the only endpoint that honors token auth there. Neither
+path requires editing a checked-in file to build.
 
 ### Ported tools
 
@@ -254,3 +254,40 @@ The toolchain downloads the archives `toolchain/ported_tools.sha256` lists, a
 copy of a release's `SHA256.txt`, from the release `_PORTED_TOOLS_URL` in
 `toolchain/apple_cross_toolchain.bzl` names; update the two together. To try
 local builds, name the `ported-tools` directory in `ported_tools_archives`.
+
+### Tests
+
+Stub SDK tests run on GitHub's Linux runners, which never see an Apple SDK.
+They build against stub SDKs: generated trees holding swift.org's Darwin Swift
+runtime and placeholders for everything Apple ships. `tools/stub-sdks.py` writes
+them as the `apple-sdks.tar.zst` that a Linux host without Xcode reads:
+
+```
+tools/stub-sdks.py
+bazel test //tests/stub_sdks/...
+```
+
+Stub SDKs compile, link and bundle code that imports no Apple framework, and
+every example analyzes against them.
+
+Real SDK tests build the examples against a real Xcode, so they run only on
+Apple hardware. CI runs them natively on GitHub's macOS runners:
+
+```
+tools/real-sdk-tests.sh macos
+```
+
+The Mac leg skips platforms without a simulator runtime installed, because
+Xcode's `actool` needs one.
+
+CI doesn't run them on Linux, so run the Linux leg on a Mac before sending a
+change. It builds the examples in a Linux VM on that Mac, reading its Xcode
+through a read-only mount:
+
+```
+tools/real-sdk-tests.sh linux-vm
+```
+
+It needs podman, or Docker whose VM can see the Xcode. For Docker Desktop,
+share `/Applications`, or point `RULES_APPLECROSS_VM_XCODE` at a copy under a
+shared path.
