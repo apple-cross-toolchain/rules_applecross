@@ -7,6 +7,7 @@ on:
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
       - tools/linux_vm/Containerfile
+      - tools/system_tools/**
   push:
     branches:
       - main
@@ -15,6 +16,7 @@ on:
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
       - tools/linux_vm/Containerfile
+      - tools/system_tools/**
   workflow_dispatch:
 
 concurrency:
@@ -22,7 +24,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  VERSION: 0.0.25
+  VERSION: 0.0.26
 
 jobs:
   build:
