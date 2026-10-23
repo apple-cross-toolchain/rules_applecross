@@ -326,6 +326,28 @@ it differs between Macs even with Xcode. On Linux it is the macOS SDK's build
 `DTSDKBuild` and `DTPlatformBuild` are the SDK's own build, as Xcode writes
 them.
 
+## Building with actiond
+
+[actiond](https://github.com/hermeticbuild/actiond) runs every action in a
+Linux VM on the host, in a sandbox holding nothing but glibc and bash. Start it
+and build with `--config=actiond`:
+
+```
+darwin-actiond_macos_arm64 serve-vm --memory-mib=4096 --cpus=4
+bazel build --config=actiond //examples/ios/HelloWorldSwiftUI:HelloWorld
+```
+
+The VM has the host's CPU, which the config passes on as
+`--repo_env=RULES_APPLECROSS_LINUX_EXEC_CPU=host` (`x86_64` and `aarch64`
+also work), so on an Apple silicon Mac `swift_tools` needs its `aarch64` entry.
+The toolchain brings the libraries and the static [uutils](https://github.com/uutils)
+coreutils and findutils its own actions need, but other actions get neither:
+skylib's `build_test` genrules fail on `touch`.
+
+A module depending on this one also needs the `actiond` lines of `.bazelrc`,
+naming `@rules_applecross//platforms:actiond` and the `external/` paths as in
+[Setup](#setup), and the `rules_python` override from `MODULE.bazel`.
+
 ## Developing rules_applecross
 
 ### Ported tools

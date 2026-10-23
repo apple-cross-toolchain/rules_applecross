@@ -1,3 +1,5 @@
+load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
+
 package(default_visibility = ["//visibility:public"])
 
 # The developer's own Mac, used by --config=remote_compile for everything that
@@ -44,4 +46,18 @@ platform(
         "@platforms//cpu:aarch64",
         "@platforms//os:linux",
     ],
+)
+
+platform(
+    name = "actiond",
+    constraint_values = [
+        "@llvm//constraints/libc:gnu.2.28",
+        "@platforms//os:linux",
+    ] + [c for c in HOST_CONSTRAINTS if c.startswith("@platforms//cpu:")],
+    exec_properties = {
+        "OSFamily": "Linux",
+        "libc": "glibc2.39",
+        "mutates_inputs": "1",
+        "requires-bash": "",
+    },
 )
