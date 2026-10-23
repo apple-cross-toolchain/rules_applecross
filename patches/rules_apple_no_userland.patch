@@ -1,0 +1,65 @@
+Run with no userland on the executor, as in actiond's sandbox, which holds
+only glibc and bash: link an archive that needs no processing instead of
+copying it with cp, write the empty DER entitlements file instead of
+running touch, and list the bundles to archive without sed, which the
+toolchain doesn't stage.
+
+diff --git a/apple/internal/codesigning_support.bzl b/apple/internal/codesigning_support.bzl
+index 8f76654..7dc3080 100644
+--- a/apple/internal/codesigning_support.bzl
++++ b/apple/internal/codesigning_support.bzl
+@@ -683,14 +683,12 @@ def _post_process_and_sign_archive_action(
+     progress_message = "Processing and signing %s" % label_name
+ 
+     # If there is no work to be done, skip the processing/signing action, just
+-    # copy the file over.
++    # link the file over.
+     has_work = any([signing_command_lines, ipa_post_processor_path, should_compress])
+     if not has_work:
+-        actions.run_shell(
+-            command = "cp -p '%s' '%s'" % (input_archive.path, output_archive.path),
+-            inputs = [input_archive],
+-            mnemonic = mnemonic,
+-            outputs = [output_archive],
++        actions.symlink(
++            output = output_archive,
++            target_file = input_archive,
+             progress_message = progress_message,
+         )
+         return
+diff --git a/apple/internal/entitlements_support.bzl b/apple/internal/entitlements_support.bzl
+index d9ca361..dff2e99 100644
+--- a/apple/internal/entitlements_support.bzl
++++ b/apple/internal/entitlements_support.bzl
+@@ -409,16 +409,9 @@ def _generate_der_entitlements(
+     der_entitlements = actions.declare_file(
+         "entitlements/%s.der" % label_name,
+     )
+-    apple_support.run_shell(
+-        actions = actions,
+-        apple_fragment = apple_fragment,
+-        command = "touch " + der_entitlements.path,
+-        env = shared_environment.default_env,
+-        exec_group = mac_exec_group,
+-        inputs = [entitlements],
+-        mnemonic = "ProcessDEREntitlements",
+-        outputs = [der_entitlements],
+-        xcode_config = xcode_version_config,
++    actions.write(
++        output = der_entitlements,
++        content = "",
+     )
+     return der_entitlements
+ 
+diff --git a/tools/bundletool/process_and_sign.sh.template b/tools/bundletool/process_and_sign.sh.template
+--- a/tools/bundletool/process_and_sign.sh.template
++++ b/tools/bundletool/process_and_sign.sh.template
+@@ -84,7 +84,7 @@
+ # frameworks (which contain relative symbolic links).
+ (
+   find . -type f -or -type l && \
+-  find . -path "*/Info.plist" | sed -E 's|(/Contents)?/Info.plist$||g' \
++  find . -path "*/Info.plist" | while IFS= read -r p; do p="${p%/Info.plist}"; echo "${p%/Contents}"; done \
+ ) \
+   | sort \
+   | zip -qX \

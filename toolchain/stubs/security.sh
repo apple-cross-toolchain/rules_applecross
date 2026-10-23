@@ -17,8 +17,14 @@ if [[ "$1" == "cms" ]]; then
     exit 0
   fi
   extract() {
-    LC_ALL=C sed -n '/<?xml/,/<\/plist>/p' "$input" |
-      LC_ALL=C sed -e '1s/^.*<?xml/<?xml/' -e '$s/<\/plist>.*$/<\/plist>/'
+    local LC_ALL=C chunk
+    while IFS= read -r -d '' chunk || [[ -n "$chunk" ]]; do
+      if [[ "$chunk" == *"<?xml"*"</plist>"* ]]; then
+        chunk="<?xml${chunk#*"<?xml"}"
+        printf '%s\n' "${chunk%%"</plist>"*}</plist>"
+        return
+      fi
+    done < "$input"
   }
   if [[ -n "$output" ]]; then
     extract > "$output"
