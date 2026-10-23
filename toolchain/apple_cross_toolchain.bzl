@@ -325,6 +325,7 @@ _RULE_INPUT_FILES = [
     "stubs/noop_tool.sh",
     "stubs/security.sh",
     "stubs/strip.sh",
+    "stubs/sw_vers.sh",
     "stubs/xcstringstool.py",
     "stubs/xcstringstool.sh",
     "stubs/zip.py",
@@ -607,6 +608,17 @@ def _apple_cross_toolchain_impl(rctx):
     _codesign_allocate_path = xcode_toolchain_bindir + "codesign_allocate"
     _install_executable(rctx, "stubs/noop_tool.sh", _codesign_allocate_path)
 
+    # BuildMachineOSBuild to report, to match a build on that Mac.
+    _build_machine = rctx.os.environ.get("RULES_APPLECROSS_BUILD_MACHINE_OS_BUILD", "").strip()
+    if _build_machine and not rctx.os.name.startswith("mac"):
+        rctx.execute(["mv", xcode_toolchain_bindir + "sw_vers", xcode_toolchain_bindir + "sw_vers.ported"])
+        rctx.template(
+            xcode_toolchain_bindir + "sw_vers",
+            _toolchain_path(rctx, "stubs/sw_vers.sh"),
+            {"%{build_machine_os_build}": _build_machine},
+            executable = True,
+        )
+
     # Create security stub for Linux (handles mobileprovision parsing).
     _security_path = xcode_toolchain_bindir + "security"
     result = rctx.execute(["test", "-e", _security_path])
@@ -672,6 +684,7 @@ Workspace-relative ported Apple tools archives keyed by Linux CPU ("x86_64",
         "DEVELOPER_DIR",
         "HOME",
         "PATH",
+        "RULES_APPLECROSS_BUILD_MACHINE_OS_BUILD",
         "RULES_APPLECROSS_LOCAL_XCODE",
     ],
     implementation = _apple_cross_toolchain_impl,

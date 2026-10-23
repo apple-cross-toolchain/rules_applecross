@@ -5,3 +5,4 @@
 /Xcode.app
 __pycache__/
 ported-tools-linux-*.tar.xz
+/.compare/
