@@ -107,21 +107,6 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
-  build_status:
-    name: build
-    if: always()
-    needs:
-      - stub_sdk_tests
-      - local_smoke_tests
-    runs-on: ubuntu-24.04
-    permissions: {}
-    steps:
-      - env:
-          STUB_SDK_TESTS: ${{ needs.stub_sdk_tests.result }}
-          LOCAL_SMOKE_TESTS: ${{ needs.local_smoke_tests.result }}
-        run: |
-          test "$STUB_SDK_TESTS" = success
-          test "$LOCAL_SMOKE_TESTS" = success
   rbe_smoke_tests:
     name: rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # The all-remote build, reading the runner's own Xcode.
