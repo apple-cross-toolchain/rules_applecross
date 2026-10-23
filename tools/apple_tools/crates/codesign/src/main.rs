@@ -198,11 +198,22 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
         sign::sign(image, &inputs).map_err(|e| format!("{}: {e}", exe_path.display()))?;
     }
     let out = universal.into_bytes();
-    std::fs::write(&exe_path, out).map_err(|e| format!("{}: {e}", exe_path.display()))?;
+    replace(&exe_path, &out).map_err(|e| format!("{}: {e}", exe_path.display()))?;
     if o.verbose {
         eprintln!("{}: signed", path.display());
     }
     Ok(())
+}
+
+/// Writes `data` over `path` as a new file renamed into place, keeping its
+/// permissions: Bazel's outputs are read-only, and codesign signs them.
+fn replace(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let permissions = std::fs::metadata(path)?.permissions();
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let temp = path.with_file_name(format!(".{name}.codesign"));
+    std::fs::write(&temp, data)?;
+    std::fs::set_permissions(&temp, permissions)?;
+    std::fs::rename(&temp, path)
 }
 
 fn verify_path(path: &Path) -> Result<(), String> {
