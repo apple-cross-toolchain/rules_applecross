@@ -18,35 +18,14 @@ env:
   # Pinned rather than left to the runner default because MODULE.bazel pins the
   # Swift toolchain that has to match the Swift these SDKs were built with.
   XCODE_DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-  BAZEL_VERSIONS: "[8, 9, 10]"
 
 jobs:
-  setup:
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    outputs:
-      bazel: ${{ steps.bazel.outputs.all }}
-      macos-bazel: ${{ steps.bazel.outputs.macos }}
-    steps:
-      - uses: actions/checkout@v7
-      - name: Pick Bazel versions
-        id: bazel
-        env:
-          FULL_MACOS_MATRIX: ${{ github.event_name == 'push' }}
-        run: |
-          echo "all=$BAZEL_VERSIONS" >> "$GITHUB_OUTPUT"
-          if [ "$FULL_MACOS_MATRIX" = true ]; then
-            echo "macos=$BAZEL_VERSIONS" >> "$GITHUB_OUTPUT"
-          else
-            echo "macos=[$(cut -d. -f1 .bazelversion)]" >> "$GITHUB_OUTPUT"
-          fi
   stub_sdk_tests:
-    needs: setup
+    name: stub_sdk_tests (bazel_${{ matrix.bazel }})
     strategy:
       fail-fast: false
       matrix:
-        bazel: ${{ fromJSON(needs.setup.outputs.bazel) }}
+        bazel: [8, 9, 10]
     runs-on: ubuntu-24.04
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
@@ -78,12 +57,12 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
-  real_sdk_tests:
-    needs: setup
-    strategy:
+  local_smoke_tests:
+    name: local_smoke_tests (bazel_${{ matrix.bazel }})
+    strategy: &macos_strategy
       fail-fast: false
       matrix:
-        bazel: ${{ fromJSON(needs.setup.outputs.macos-bazel) }}
+        bazel: ${{ fromJSON(github.event_name == 'push' && '[8, 9, 10]' || '[9]') }}
     runs-on: macos-26
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
@@ -95,30 +74,23 @@ jobs:
       - name: Build the examples with the runner's Xcode
         env:
           DEVELOPER_DIR: ${{ env.XCODE_DEVELOPER_DIR }}
-        run: tools/real-sdk-tests.sh macos
-  build_status:
-    name: build
-    if: always()
-    needs:
-      - stub_sdk_tests
-      - real_sdk_tests
-    runs-on: ubuntu-24.04
-    permissions: {}
-    steps:
-      - env:
-          STUB_SDK_TESTS: ${{ needs.stub_sdk_tests.result }}
-          REAL_SDK_TESTS: ${{ needs.real_sdk_tests.result }}
-        run: |
-          test "$STUB_SDK_TESTS" = success
-          test "$REAL_SDK_TESTS" = success
-  remote_build_local_xcode:
+        run: >-
+          bazel
+          build
+          --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
+          --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=0
+          --ios_multi_cpus=sim_arm64
+          --macos_cpus=arm64
+          --tvos_cpus=sim_arm64
+          --watchos_cpus=arm64
+          //examples/...
+  rbe_smoke_tests:
+    name: rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # The all-remote build, reading the runner's own Xcode.
-    if: false
-    needs: setup
-    strategy:
-      fail-fast: false
-      matrix:
-        bazel: ${{ fromJSON(needs.setup.outputs.macos-bazel) }}
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    strategy: *macos_strategy
     runs-on: macos-26
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
@@ -143,7 +115,8 @@ jobs:
           --tvos_cpus=sim_arm64
           --watchos_cpus=arm64
           //examples/...
-  remote_compile:
+  multi-platform_rbe_smoke_tests:
+    name: multi-platform_rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # A smoke test of the split build: compiling on the executors, everything
     # rules_apple produces on the runner's own Xcode. watchOS and visionOS are
     # left out because a real actool needs those simulator runtimes installed
@@ -153,11 +126,7 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: setup
-    strategy:
-      fail-fast: false
-      matrix:
-        bazel: ${{ fromJSON(needs.setup.outputs.macos-bazel) }}
+    strategy: *macos_strategy
     runs-on: macos-26
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*

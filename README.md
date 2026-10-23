@@ -274,24 +274,31 @@ bazel test //tests/stub_sdks/...
 Stub SDKs compile, link and bundle code that imports no Apple framework, and
 every example analyzes against them.
 
-Real SDK tests build the examples against a real Xcode, so they run only on
-Apple hardware. CI runs them natively on GitHub's macOS runners:
+Smoke tests build the examples against a real Xcode, so they run only on
+Apple hardware. CI runs them on GitHub's macOS runners:
 
 ```
-tools/real-sdk-tests.sh macos
+bazel build \
+  --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1 \
+  --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=0 \
+  --ios_multi_cpus=sim_arm64 \
+  --macos_cpus=arm64 \
+  --tvos_cpus=sim_arm64 \
+  --watchos_cpus=arm64 \
+  //examples/...
 ```
 
-The Mac leg skips platforms without a simulator runtime installed, because
-Xcode's `actool` needs one.
+Xcode's `actool` needs the simulator runtime of each platform it builds for.
 
-CI doesn't run them on Linux, so run the Linux leg on a Mac before sending a
-change. It builds the examples in a Linux VM on that Mac, reading its Xcode
-through a read-only mount:
+CI doesn't run them on a Linux host, so before sending a change, run the same
+command on a Mac prefixed with `tools/linux_vm/run.sh`. It builds in a Linux VM
+that reads the Mac's Xcode through a read-only mount. Build its image first:
 
 ```
-tools/real-sdk-tests.sh linux-vm
+podman build -t localhost/rules-applecross-linux tools/linux_vm
 ```
 
-It needs podman, or Docker whose VM can see the Xcode. For Docker Desktop,
-share `/Applications`, or point `RULES_APPLECROSS_VM_XCODE` at a copy under a
-shared path.
+With Docker, build the image with `docker build`, set
+`RULES_APPLECROSS_ENGINE=docker`, and point `RULES_APPLECROSS_VM_XCODE` at an
+Xcode its VM can see; for Docker Desktop, share `/Applications` or use a copy
+under a shared path.
