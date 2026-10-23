@@ -5,6 +5,7 @@ members = [
     "crates/cf",
     "crates/codesign",
     "crates/ibtool",
+    "crates/lzfse",
     "crates/macho",
 ]
 
@@ -15,6 +16,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 cf = { path = "crates/cf" }
+lzfse = { path = "crates/lzfse" }
 macho = { path = "crates/macho" }
 
 [profile.release]
