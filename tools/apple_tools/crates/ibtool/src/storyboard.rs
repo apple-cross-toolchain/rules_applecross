@@ -1298,12 +1298,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         let safe_area = children(view, "viewLayoutGuide").find(|g| g.attribute("key") == Some("safeArea"));
         let has_safe_area = safe_area.is_some();
-        let has_subviews = children(view, "subviews").next().is_some();
         if has_safe_area == !scene.guides.is_empty() {
             return fail("a view needs either a safe-area layout guide or legacy top and bottom layout guides for this ibtool");
-        }
-        if !has_device && has_subviews {
-            return fail("subviews in a storyboard without a device are not supported by this ibtool");
         }
 
         // Outlets from the view controller into its view.
@@ -1332,6 +1328,24 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
             (false, _, _, _) => frame(view)?,
         };
+        // Laid out at another size than its frame's, the root view resizes
+        // its autoresizing subviews: only those whose masks keep their frames
+        // (fixed left and top margins, size) are established.
+        let document = frame(view)?;
+        if (f.w, f.h) != (document.w, document.h) {
+            for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
+                if s.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+                    continue;
+                }
+                let mask = match children(s, "autoresizingMask").next() {
+                    Some(m) => autoresizing_mask(m)?,
+                    None => 36,
+                };
+                if mask & (1 | 2 | 8 | 16) != 0 {
+                    return fail("an autoresizing subview of a view laid out at another size than its frame is not supported by this ibtool");
+                }
+            }
+        }
         let mask = match children(view, "autoresizingMask").next() {
             Some(m) => autoresizing_mask(m)?,
             None => 0,

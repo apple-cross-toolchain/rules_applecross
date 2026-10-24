@@ -200,6 +200,13 @@ other values of the attributes these use, is refused. Observed:
   393x852 either way; `appleTV` is 1920x1080). Ids Xcode doesn't know
   (`retina5_4`, `ipad10_5`, `ipad12_9`, `ipad8_3rounded`,
   `ipad13_0rounded`, `appleTV4K`) take the frame; other ids are refused.
+- Subviews keep their frames whatever size the root view is laid out at,
+  except autoresizing ones (not `translatesAutoresizingMaskIntoConstraints="NO"`),
+  which the root resizes by their masks (sizable width and height grow
+  with it: 100x80 under a 375x667 frame laid out at 600x600 is 325x13).
+  Where the root's size isn't its frame's, a subview whose mask has a
+  flexible left or top margin or a sizable width or height is refused; the
+  rest are compiled, with or without a device (eight probes).
 - An image view (`userInteractionEnabled="NO"`; scale to fill, aspect fit,
   aspect fill or centre) archives as a label's geometry and flags, then
   `UIContentMode` unless scale to fill, `UIClipsToBounds`, `UITintColor`,
