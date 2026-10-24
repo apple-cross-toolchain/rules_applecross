@@ -45,7 +45,8 @@ trailer. Observed from Xcode's nibs:
 - objects are numbered depth first in encoding order; shared values (one
   empty array, a class name string) are one object;
 - each object's values are contiguous, in encoding order; integers take the
-  smallest signed width; rects and points are data: 7 then doubles;
+  smallest signed width, negative ones 8 bytes (a presentation style of
+  -2); rects and points are data: 7 then doubles;
   booleans are type 4 (false) and 5 (true);
 - one object per distinct string or number, encoded where first used (the
   hugging priority `{251, 251}`, a font name, `labelColor` are shared);
@@ -431,6 +432,62 @@ probes:
 Refused for now: static tables, cells with a style (Basic, Subtitle and
 the rest), actions in cells, tables as subviews, header and footer views,
 refresh controls, and other table and cell settings.
+
+## Segues
+
+A segue (other than a relationship) makes its destination loadable: Xcode
+compiles a nib for every controller a segue leads to from a loaded scene
+(initial or identified, reached by a segue, or a loaded navigation
+controller's root), and lists it in the Info.plist as it does identified
+ones; a scene nothing loads takes its segues' destinations with it. A
+controller, navigation controller or root is swapped in for its class
+(`UIClassSwapper`) only when it is initial, identified or of a custom
+class: one only segues load is a plain `UIViewController`,
+`UITableViewController` or `UINavigationController`, its other values
+the same. Observed with 55 probes:
+
+- A segue's template: `UIStoryboardShowSegueTemplate` (show, and
+  showDetail with `UIActionName` `showDetailViewController:sender:`
+  instead of `showViewController:sender:`),
+  `UIStoryboardPresentationSegueTemplate` or
+  `UIStoryboardPushSegueTemplate`. Its values: `UIIdentifier` (the
+  segue's identifier, if any), `UIDestinationViewControllerIdentifier`
+  (the destination's nib's name), then for show `UIAnimates` false when it
+  doesn't animate and `UIActionName`; for presentation
+  `UIModalPresentationStyle` (fullScreen 0, pageSheet 1, formSheet 2,
+  currentContext 3, overFullScreen 5, overCurrentContext 6, popover 7,
+  automatic -2), `UIModalTransitionStyle` (crossDissolve 2) or
+  `UIAnimates` false; for push `UIDestinationContainmentContext` and
+  `UISplitViewControllerIndex`, both 0.
+- A control's segue (a button's, or a prototype cell's) is triggered from
+  its view nib through a placeholder of its own: the view nib has
+  `UpstreamPlaceholder-<n>` proxies, the controller's first if the view
+  refers to it (an outlet or an action), then one per segue in document
+  order, and a button's segue is a `perform:` action (touch up inside,
+  64) on its placeholder, sorted with the other actions. The controller's
+  external objects table maps each placeholder to the controller or the
+  segue's template. Xcode keeps only a control's last segue (refused).
+- The controller's nib (or, for a navigation controller's root, the
+  navigation controller's) holds `UIStoryboardSegueTemplates`: the
+  controller's own segues (each with an identifier), then its controls',
+  each in document order. In a controller's nib the key follows the
+  identifiers and precedes `UIKeyAutomaticallyAdjustsScrollViewInsets`;
+  in a root's, it follows `UIParentViewController`. The objects list the
+  templates in that order after the controller (and its navigation item,
+  or after the root's), and each has a `viewController` outlet to the
+  controller after the others: in the reverse of the array's order, then
+  stably by class name (Presentation, Push, Show), as 18 probes of up to
+  eight templates of mixed kinds show.
+- A prototype cell's segue: the table's nib has the segue's placeholder,
+  and the cell's external objects map the cell nib's
+  `UpstreamPlaceholder-1` to it; the cell nib has that placeholder after
+  the first responder (also in the objects) and a
+  `selectionSegueTemplate` outlet from the cell to it, sorted with the
+  cell's outlets.
+
+Refused for now: unwind, embed, custom and popover segues, segues from
+other elements (bar button items, gesture recognizers, a cell's
+accessory), and to other controllers.
 
 ## WatchKit storyboards
 
