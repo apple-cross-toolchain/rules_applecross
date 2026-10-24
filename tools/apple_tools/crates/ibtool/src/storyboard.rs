@@ -788,14 +788,16 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", Some("roundedRect")),
                 ("textAlignment", Some("natural")), ("minimumFontSize", None), ("placeholder", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "nil", "fontDescription", "textInputTraits"])?;
+            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits"])?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
             if traits.attributes().len() != 1 || traits.has_children() {
                 return fail("text input traits are not supported by this ibtool");
             }
-            if child(n, "nil", "textColor").is_none() {
-                return fail("text fields with a text colour are not supported by this ibtool");
-            }
+            let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
+                (Some(c), None) => Some(c),
+                (None, Some(_)) => None,
+                _ => return fail("a text field needs one text colour or nil"),
+            };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
@@ -811,7 +813,11 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 values.push(("UIPlaceholder", nib.string(placeholder)));
             }
             values.push(("UITextAlignment", Value::Int(4)));
-            values.push(("UITextColor", nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0]))));
+            let text_color = match text_color {
+                Some(c) => color(nib, c)?,
+                None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
+            };
+            values.push(("UITextColor", text_color));
             values.push(("UIBorderStyle", Value::Int(3)));
             values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
             values.push(("UIMinimumFontSize", Value::Float(number(attr(n, "minimumFontSize")?)? as f32)));

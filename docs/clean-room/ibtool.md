@@ -224,7 +224,9 @@ other values of the attributes these use, is refused. Observed:
   `UILargeTitleDisplayMode` (automatic 0, always 1, never 2), listed last
   in the controller nib's objects (six probes). A label's
   `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`; a text
-  field's `placeholder` is `UIPlaceholder` after `UIFont`.
+  field's `placeholder` is `UIPlaceholder` after `UIFont`, and its declared
+  text colour its `UITextColor` (`UIDisableTextColorUpdateOnTraitCollectionChange`
+  is set either way; three probes).
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an
   empty identifier. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
