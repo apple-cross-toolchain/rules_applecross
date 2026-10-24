@@ -69,8 +69,9 @@ guides. Subviews: labels (system font, a font Xcode finds for iOS, or the
 Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
 rounded-rect buttons with a normal-state title and touch-up-inside actions
-on the controller, vertical stack views. Constraints between those, with
-constants; outlets from the controller into its view. Everything else, and
+on the controller, vertical stack views, image views of named images.
+Constraints between those, with constants, and labels' and image views' own
+width and height; outlets from the controller into its view. Everything else, and
 other values of the attributes these use, is refused. Observed:
 
 - Without a `<device>`, an iOS root view is laid out at 600x600 whatever its
@@ -110,7 +111,10 @@ other values of the attributes these use, is refused. Observed:
   `labelColor` without it.
 - A view gets `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints` only
   when its element says `translatesAutoresizingMaskIntoConstraints="NO"`
-  (labels, a text field, a button and a stack view, with it removed).
+  (labels, a text field, a button and a stack view, with it removed) and a
+  constraint is on it: as an item, by its own constraints, or as a stack
+  view's arranged subview. A label that says so but has no constraint
+  doesn't get it.
 - A font named in `<fontDescription name=...>` is resolved from a set of iOS
   fonts that is neither the Mac's nor the simulator's: of the 1,182
   PostScript names macOS 27 lists (CoreText) and the 304 the iOS 27
@@ -130,12 +134,58 @@ other values of the attributes these use, is refused. Observed:
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:
   leading, top, height; bottom: leading, height, view bottom to guide
   bottom), which the root view's constraints list first.
-- The document's constraints follow, by first attribute: centerX, centerY,
-  trailing, leading, width, bottom, top, height, whatever their order or
-  ids in the document (measured with all eight on one view, in either
-  document order and with the items swapped).
-- The nib's objects: the placeholders, the root view, its document
-  constraints, the guides, the subviews depth first. Its connections: the
+- The document's constraints follow, whatever their order or ids in the
+  document. They are grouped by item: a constraint with the root view by
+  its other item, one between siblings (subviews, the safe-area guide) by
+  its first item. Groups go by where their item is: its frame's origin by
+  distance from the root view's origin, then by x, then by id (byte
+  order), the safe-area guide counting as at the origin on every iPhone
+  (seven devices, by bisection), so a subview at (0, 0) whose id sorts
+  before the guide's comes first (two image views at different heights,
+  labels at one frame told apart by id, and probes that tell the distance
+  from x + y, the centre and y then x). In a group, the constraints with the
+  root view come first, ordered by their two attributes as a pair (the
+  lower rank, then the higher) in centerX, centerY, trailing, leading,
+  width, bottom, top, height; then those between siblings, by first and
+  then second attribute in centerX, trailing, leading, centerY, bottom,
+  top, width, height. Measured with 176 constraints on two labels, the
+  root view and the safe-area guide at once, in three document orders,
+  eight random subsets and some 30 smaller probes; legacy guides as the
+  second item of a sibling constraint fit too. Constraints with equal keys
+  (the same items and the same pair of attributes either way round) come
+  in an order that changes with the rest of the set, so they are refused,
+  as are constraints from a legacy guide or between one and the root view
+  (their frames aren't in the document), constraints between the root
+  view and a nested view, between axes, and between a width and a
+  height (Xcode drops some of those).
+- The nib's objects: the placeholders, the root view, the safe-area guide,
+  its document constraints, the legacy guides, the subviews depth first,
+  then the subviews' own constraints, in the same order.
+- A subview's own constraints (a width or height constant, no second item)
+  are its `UIViewAutolayoutConstraints`, width before height whatever the
+  document's order, after `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`.
+- With a `<device>`, the root view is laid out at the device's size,
+  whatever its frame says: 26 device ids measured in both orientations
+  (landscape swaps width and height; `retina3_5` and `retina6_72` are
+  393x852 either way; `appleTV` is 1920x1080). Ids Xcode doesn't know
+  (`retina5_4`, `ipad10_5`, `ipad12_9`, `ipad8_3rounded`,
+  `ipad13_0rounded`, `appleTV4K`) take the frame; other ids are refused.
+- An image view (`userInteractionEnabled="NO"`; scale to fill, aspect fit,
+  aspect fill or centre) archives as a label's geometry and flags, then
+  `UIContentMode` unless scale to fill, `UIClipsToBounds`, `UITintColor`,
+  the autoresizing key, its own constraints, its hugging, and `UIImage`:
+  a `UIImageNibPlaceholder` per image name (width and height 1, the name,
+  nil symbol, configuration and catalog), shared by the views using it;
+  no image, no key. snag's launch screen is byte-identical.
+- The safe-area guide in the objects is an unowned `UILayoutGuide` with an
+  empty identifier. When a constraint uses the guide, the root view also
+  owns a second one, archived where a constraint first refers to it (in
+  the order above): identifier `UIViewSafeAreaLayoutGuide`, locked,
+  archived and allowing negative dimensions, with four system constraints
+  pinning its top, left, bottom and right to the view's
+  (`UIViewSafeAreaLayoutGuide-top`, ... as `NSLayoutIdentifier`, not
+  archived), listed in the view's `UIViewLayoutGuides` after its
+  constraints. Its connections: the
   controller's outlets, `view`, then control actions.
 - A view nib that refers to its controller (an outlet into it, an action
   to it) has an `UpstreamPlaceholder-1` proxy, which the controller's nib
