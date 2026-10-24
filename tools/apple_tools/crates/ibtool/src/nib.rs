@@ -143,17 +143,16 @@ pub fn archive(root: Object) -> Vec<u8> {
             }
         }
     }
-    // Fallback classes follow, in a set's order (NSColor before NSFont, for
-    // UIColor and UIFont used in that order or the other).
+    // Fallback classes follow in byte order (NSColor, NSFont, UIView, for
+    // UIColor, UIFont and a cell's content view used in any order).
     let mut missing: Vec<&'static str> = Vec::new();
     for (_, f) in &fallbacks {
         if !classes.contains(f) && !missing.contains(f) {
             missing.push(f);
         }
     }
-    for i in cf::hash::set_order(&missing) {
-        classes.push(missing[i]);
-    }
+    missing.sort();
+    classes.extend(missing);
 
     let order = cf::hash::set_order(&e.keys);
     let mut key_position = vec![0usize; e.keys.len()];
