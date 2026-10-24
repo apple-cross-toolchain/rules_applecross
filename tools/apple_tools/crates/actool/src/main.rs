@@ -11,6 +11,7 @@ mod dmp2;
 mod icon;
 mod iconset;
 mod image;
+mod imageset;
 mod qsort;
 mod stack;
 
@@ -28,6 +29,8 @@ struct Options {
     target_devices: Vec<String>,
     partial_info_plist: Option<PathBuf>,
     inputs: Vec<PathBuf>,
+    /// `--compress-pngs`: a device build's bundle icons as CgBI PNGs.
+    compress_pngs: bool,
     /// Whether output must be Xcode's byte for byte; see [`strict`].
     strict: bool,
 }
@@ -52,7 +55,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--app-icon" => o.app_icon = Some(value(&a)?),
             "--target-device" => o.target_devices.push(value(&a)?),
             "--output-partial-info-plist" => o.partial_info_plist = Some(PathBuf::from(value(&a)?)),
-            "--errors" | "--warnings" | "--notices" | "--compress-pngs" => {}
+            "--compress-pngs" => o.compress_pngs = true,
+            "--errors" | "--warnings" | "--notices" => {}
             "--alternate-app-icon" | "--launch-image" | "--accent-color" | "--widget-background-color" | "--sticker-pack-identifier-prefix"
             | "--stickers-icon-role" | "--filter-for-device-model" | "--filter-for-device-os-version" | "--product-type" | "--development-region" => {
                 let v = value(&a)?;
@@ -101,6 +105,8 @@ struct Scan {
     /// tvOS brand assets and visionOS solid image stacks, by name.
     brand_assets: Vec<(String, PathBuf)>,
     solid_stacks: Vec<(String, PathBuf)>,
+    /// Image sets by name.
+    image_sets: Vec<(String, PathBuf)>,
 }
 
 fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
@@ -126,6 +132,7 @@ fn scan(catalogs: &[PathBuf]) -> Result<Scan, String> {
                 Some((stem, "appiconset")) => found.icon_sets.push((stem.to_string(), p)),
                 Some((stem, "brandassets")) => found.brand_assets.push((stem.to_string(), p)),
                 Some((stem, "solidimagestack")) => found.solid_stacks.push((stem.to_string(), p)),
+                Some((stem, "imageset")) => found.image_sets.push((stem.to_string(), p)),
                 Some((_, "colorset")) if !has_entries(&read_json(&p.join("Contents.json"))?, "colors", "color") => {}
                 _ => return Err(format!("{}: this kind of asset is not supported by this actool yet", p.display())),
             }
@@ -227,6 +234,13 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     if let Some(p) = o.inputs.iter().find(|p| is_document(p) && Some(*p) != document) {
         return Err(format!("{}: only the app icon's own Icon Composer document is supported by this actool", p.display()));
     }
+    let images = imageset::compile(&scan.image_sets, name_identifier)?;
+    if !images.is_empty() && platform != "ios" {
+        return Err("image sets are supported by this actool for iOS only".into());
+    }
+    if !images.is_empty() && (!scan.brand_assets.is_empty() || !scan.solid_stacks.is_empty()) {
+        return Err("image sets alongside image stacks are not supported by this actool".into());
+    }
     if let Some(outputs) = stack_icon(o, &out_dir, platform, &scan, &mut outputs)? {
         return Ok(outputs);
     }
@@ -254,20 +268,25 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         (None, _) => None,
     };
     let Some((icon_name, source)) = icon else {
+        if !images.is_empty() {
+            return finish(o, &out_dir, platform, None, false, Vec::new(), images, Kind::Ios { phone_files: &[], pad_files: &[] }, outputs);
+        }
         // Nothing to compile: no Assets.car, an empty partial Info.plist.
         write_partial_info_plist(o, Vec::new(), &mut outputs)?;
         return Ok(outputs);
     };
     let (filename, src) = match source {
         IconSource::Single(filename, src) => (filename, src),
-        IconSource::PerSize(slots) => return per_size_icon(o, &out_dir, platform, &icon_name, &slots, phone, pad, outputs),
+        IconSource::PerSize(slots) => return per_size_icon(o, &out_dir, platform, &icon_name, &slots, phone, pad, outputs, images),
     };
 
     let bgra = src.to_bgra();
-    let simulator = o.platform.ends_with("simulator");
+    // CgBI for a device build with --compress-pngs (as rules_apple passes);
+    // otherwise the PNG a simulator build gets.
+    let cgbi = !o.platform.ends_with("simulator") && o.compress_pngs;
     let bundle_png = |size: usize| -> Result<Vec<u8>, String> {
         let resized = image::resize(&bgra, size, size);
-        if !simulator {
+        if cgbi {
             return Ok(image::cgbi_png(&resized));
         }
         let rgba = resized.opaque_rgba().ok_or("a translucent app icon is not supported by this actool for simulators")?;
@@ -311,7 +330,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     if renditions.is_empty() {
         return Err("--target-device iphone and/or ipad is required".into());
     }
-    finish(o, &out_dir, platform, &icon_name, false, renditions, Kind::Ios { phone_files: &phone_files, pad_files: &pad_files }, outputs)
+    finish(o, &out_dir, platform, Some(&icon_name), false, renditions, images, Kind::Ios { phone_files: &phone_files, pad_files: &pad_files }, outputs)
 }
 
 /// A tvOS or visionOS app icon from an image stack, when --app-icon names
@@ -400,12 +419,17 @@ enum Kind<'a> {
 
 /// Writes Assets.car and the partial Info.plist of an app icon.
 #[allow(clippy::too_many_arguments)]
-fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, has_dimension1: bool, renditions: Vec<car::Rendition>, kind: Kind, mut outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
-    let id = name_identifier(icon_name);
+#[allow(clippy::too_many_arguments)]
+fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, has_dimension1: bool, mut renditions: Vec<car::Rendition>, images: imageset::Compiled, kind: Kind, mut outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+    renditions.extend(images.renditions);
+    let has_dimension2 = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION2));
     let key_format = if matches!(kind, Kind::Mac) {
         vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_ELEMENT, car::ATTR_PART, car::ATTR_SIZE, car::ATTR_IDENTIFIER, car::ATTR_DIMENSION2, car::ATTR_LAYER, car::ATTR_SCALE]
     } else {
-        let mut k = vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_SCALE, car::ATTR_IDIOM, car::ATTR_SUBTYPE, car::ATTR_DIMENSION2];
+        let mut k = vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_SCALE, car::ATTR_IDIOM, car::ATTR_SUBTYPE];
+        if has_dimension2 {
+            k.push(car::ATTR_DIMENSION2);
+        }
         if has_dimension1 {
             k.push(car::ATTR_DIMENSION1);
         }
@@ -415,7 +439,11 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, has_dime
     let mac = matches!(kind, Kind::Mac);
     let catalog = car::Catalog {
         key_format,
-        facets: vec![car::Facet { name: icon_name.to_string(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_ICON_IMAGE), (car::ATTR_IDENTIFIER, id)] }],
+        facets: icon_name
+            .map(|n| car::Facet { name: n.to_string(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_ICON_IMAGE), (car::ATTR_IDENTIFIER, name_identifier(n))] })
+            .into_iter()
+            .chain(images.facets)
+            .collect(),
         appearances: if mac { Vec::new() } else { vec![("UIAppearanceAny".into(), 0)] },
         schema_version: 2,
         key_semantics: if mac { 1 } else { 2 },
@@ -429,6 +457,10 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, has_dime
     outputs.push(car_path);
     outputs.sort();
 
+    let Some(icon_name) = icon_name else {
+        write_partial_info_plist(o, Vec::new(), &mut outputs)?;
+        return Ok(outputs);
+    };
     let primary = |files: &[String]| {
         Value::dict([("CFBundlePrimaryIcon", Value::dict([
             ("CFBundleIconFiles", Value::Array(files.iter().map(|f| Value::string(f.clone())).collect())),
@@ -458,7 +490,8 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, has_dime
 /// icons copied as given (simulators and macOS only: devices' CgBI
 /// conversion of them is not established).
 #[allow(clippy::too_many_arguments)]
-fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, slots: &[iconset::Slot], phone: bool, pad: bool, mut outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+#[allow(clippy::too_many_arguments)]
+fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, slots: &[iconset::Slot], phone: bool, pad: bool, mut outputs: Vec<PathBuf>, images: imageset::Compiled) -> Result<Vec<PathBuf>, String> {
     let watch = o.target_devices.iter().any(|d| d == "watch");
     let mac = o.target_devices.iter().any(|d| d == "mac");
     match (o.platform.as_str(), phone || pad, watch, mac) {
@@ -483,7 +516,7 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
     } else {
         Kind::Ios { phone_files: &compiled.phone_files, pad_files: &compiled.pad_files }
     };
-    finish(o, out_dir, platform, icon_name, compiled.has_dimension1, compiled.renditions, kind, outputs)
+    finish(o, out_dir, platform, Some(icon_name), compiled.has_dimension1, compiled.renditions, images, kind, outputs)
 }
 
 fn main() -> ExitCode {

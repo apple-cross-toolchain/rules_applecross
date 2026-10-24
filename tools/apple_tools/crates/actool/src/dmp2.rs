@@ -16,8 +16,11 @@ fn header(mode: u8, width: usize, height: usize) -> Vec<u8> {
     s
 }
 
+/// Data compressed as dmp2 stores it: LZFSE from 4096 bytes on, and below
+/// that raw LZVN, without the `bvxn` block LZFSE would wrap it in.
 fn compressed(out: &mut Vec<u8>, data: &[u8]) {
     let z = lzfse::encode(data);
+    let z = if data.len() < 4096 && z.starts_with(b"bvxn") && z.ends_with(b"bvx$") { z[12..z.len() - 4].to_vec() } else { z };
     le32(out, z.len() as u32);
     out.extend(z);
 }
@@ -159,12 +162,11 @@ fn transform(width: usize, height: usize, bgra: &[u8]) -> (Vec<u8>, bool) {
     (raw, ambiguous)
 }
 
-/// The `MLEC` payload of an image of premultiplied BGRA rows (tightly
-/// packed), stored as Xcode stores it; `opaque` as Xcode flags it (see
-/// stack.rs).
-pub fn encode(width: usize, height: usize, bgra: &[u8], opaque: bool) -> Result<Vec<u8>, String> {
-    if width > 0xffff || height > 0xffff {
-        return Err(format!("a {width}x{height} image is too large for this actool"));
+/// The `dmp2` stream of rows of an image: whichever mode is smallest.
+fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
+    if width * height < 8 {
+        // Under 8 bytes, LZFSE stores data raw; dmp2's form of that isn't established.
+        return Err("images of fewer than 8 pixels are not supported by this actool".into());
     }
     let row = 4 * width;
     let lzfse_only = striped(3, width, height, row, |y, h| bgra[y * row..(y + h) * row].to_vec());
@@ -194,16 +196,52 @@ pub fn encode(width: usize, height: usize, bgra: &[u8], opaque: bool) -> Result<
     if candidates.iter().filter(|c| c.len() == min).count() > 1 {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
-    let stream = candidates.into_iter().find(|c| c.len() == min).unwrap();
-    let mut out = b"MLEC".to_vec();
-    le32(&mut out, if opaque { 2 } else { 0 });
-    le32(&mut out, 11);
-    le32(&mut out, 16 + stream.len() as u32);
-    le32(&mut out, 1);
-    le32(&mut out, 4);
-    le32(&mut out, stream.len() as u32);
-    le32(&mut out, 0);
+    Ok(candidates.into_iter().find(|c| c.len() == min).unwrap())
+}
+
+/// A dmp2 stream as an `MLEC` body holds it.
+fn body(out: &mut Vec<u8>, stream: &[u8]) {
+    le32(out, 1);
+    le32(out, 4);
+    le32(out, stream.len() as u32);
+    le32(out, 0);
     out.extend(stream);
+}
+
+/// The `MLEC` payload of an image of premultiplied BGRA rows (tightly
+/// packed), stored as Xcode stores it; `opaque` as Xcode flags it (see
+/// stack.rs). An image of more than 4 MiB is stored in `KCBC` chunks of
+/// as many rows as fit 4 MiB, each a dmp2 stream of its own.
+pub fn encode(width: usize, height: usize, bgra: &[u8], opaque: bool) -> Result<Vec<u8>, String> {
+    if width > 0xffff || height > 0xffff {
+        return Err(format!("a {width}x{height} image is too large for this actool"));
+    }
+    let row = 4 * width;
+    let chunk_rows = (1 << 22) / row;
+    let mut out = b"MLEC".to_vec();
+    if height <= chunk_rows {
+        let stream = stream(width, height, bgra)?;
+        le32(&mut out, if opaque { 2 } else { 0 });
+        le32(&mut out, 11);
+        le32(&mut out, 16 + stream.len() as u32);
+        body(&mut out, &stream);
+        return Ok(out);
+    }
+    let chunks: Vec<(usize, usize)> = (0..height).step_by(chunk_rows).map(|y| (y, chunk_rows.min(height - y))).collect();
+    le32(&mut out, if opaque { 3 } else { 1 });
+    le32(&mut out, 11);
+    le32(&mut out, chunks.len() as u32);
+    for (y, h) in chunks {
+        let stream = stream(width, h, &bgra[y * row..(y + h) * row])?;
+        let mut data = Vec::new();
+        body(&mut data, &stream);
+        out.extend(b"KCBC");
+        le32(&mut out, 0);
+        le32(&mut out, 0);
+        le32(&mut out, h as u32);
+        le32(&mut out, data.len() as u32);
+        out.extend(data);
+    }
     Ok(out)
 }
 

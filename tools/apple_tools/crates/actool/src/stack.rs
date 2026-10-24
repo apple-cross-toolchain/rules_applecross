@@ -88,7 +88,7 @@ fn flatten(stack: &Stack, width: usize, height: usize) -> Result<Vec<u8>, String
 }
 
 /// The smallest image CoreUI keeps unpacked at 1x (iconset.rs).
-const PACKING_AREA: usize = 18050;
+pub(crate) const PACKING_AREA: usize = 18050;
 
 fn layer_images(stack: &Stack, scale: u32, idiom: u16, renditions: &mut Vec<Rendition>) -> Result<(), String> {
     for (i, l) in stack.layers.iter().enumerate() {

@@ -487,6 +487,12 @@ fn composition(t: &mut Vec<u8>) {
 /// An image stored as `dmp2` (layout 12): an image set's or an image stack
 /// layer's. `payload` is from dmp2::encode.
 pub fn dmp2_image_csi(name: &str, width: u32, height: u32, scale: u32, payload: &[u8]) -> Vec<u8> {
+    dmp2_image_csi_flags(name, width, height, scale, 16, payload)
+}
+
+/// A `dmp2` image with CSI flags given: an image set's rendering intent
+/// (16 automatic, 8 template, 0 original).
+pub fn dmp2_image_csi_flags(name: &str, width: u32, height: u32, scale: u32, flags: u32, payload: &[u8]) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, width, height] {
@@ -500,9 +506,13 @@ pub fn dmp2_image_csi(name: &str, width: u32, height: u32, scale: u32, payload: 
     tlv(&mut t, 0x3eb, &metrics);
     composition(&mut t);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    tlv(&mut t, 0x3ef, &(width * 4).to_le_bytes());
-    csi(&CsiHeader { flags: 16, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
+    // Bytes per row, rounded up to 32.
+    tlv(&mut t, 0x3ef, &(stride(width as usize) as u32).to_le_bytes());
+    csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
 }
+
+/// An image set's images (part 181, as image stacks').
+pub const PART_IMAGE: u16 = 181;
 
 /// An image stack's flattened or radiosity image (layout 0), its payload
 /// given.
