@@ -37,7 +37,8 @@ A lone Mach-O file (a dylib in `Frameworks`) is identified, without `-i`, by
 the `CFBundleIdentifier` of the Info.plist embedded in its
 `__TEXT,__info_plist`, which is also bound in slot -1. Without one: the
 file name without its extension, and when that has no dot, `-`, the hex of
-`UUID` and of the image's `LC_UUID` appended (`libFoo.dylib` with UUID
+`UUID` and of the image's `LC_UUID` (a universal file's preferred slice's,
+below) appended (`libFoo.dylib` with UUID
 1A12DDC6-... is `libFoo-555549441a12ddc6...`; `some.name.v2` is
 `some.name`). A file without `LC_UUID` gets some other suffix, not
 established, and is refused.
@@ -66,5 +67,49 @@ goes in `Contents`. Its rule sets differ: v1 seals `^Resources/` (with the
 same `.lproj` rules under it) and `^version.plist$`; v2 adds `^Resources/`
 at weight 20 and two `nested` rules at weight 10,
 `^(Frameworks|SharedFrameworks|PlugIns|Plug-ins|XPCServices|Helpers|MacOS|Library/(Automator|Spotlight|LoginItems))/`
-and `^[^/]+$`. Files those match are nested code, sealed differently;
-not reproduced, so refused.
+and `^[^/]+$`.
+
+What those rules match is nested code, which must already be signed (rules_apple
+signs it first). Apple's published code-signing sources (`libsecurity_codesigning`
+in the Security project, APSL 2.0) describe the scan, and Xcode 27.0's codesign
+confirms it on a constructed app:
+
+- a file there is sealed as `{cdhash, requirement}`;
+- a directory there whose name has a dot is a nested bundle, sealed the same
+  way as one entry, its contents not listed; one without a dot is entered;
+- a symlink stays a symlink entry;
+- unsigned code, or a file there that isn't code, fails with "code object is
+  not signed at all", naming it as the subcomponent.
+
+`cdhash` is the code directory's digest by its own hash type (SHA-256, or
+SHA-1), its first 20 bytes. `requirement` is the ad hoc designated
+requirement: `cdhash H"<hex>"` for each architecture, joined with ` or `,
+the preferred architecture's first (and its hash is `cdhash`), then the
+others in file order. A nested bundle's code is its main executable: in
+`Contents/MacOS`, beside a framework version's `Resources/Info.plist`, or
+beside `Info.plist`. Nested code with alternate code directories, or a
+universal file without an arm64 slice, is refused.
+
+The preferred architecture is the one the signing Mac runs: arm64e, else
+arm64. Xcode 27 runs on macOS 27, which Apple silicon Macs alone run, so
+that is the same for every Xcode 27. It also names a lone universal file
+(its `LC_UUID`, above).
+
+A versioned framework (`Versions/Current/Resources/Info.plist`) is sealed
+from its current version with the macOS rules: its executable is at the
+version's root, its Info.plist is bound and also sealed as
+`Resources/Info.plist`, and `_CodeSignature` goes in the version.
+
+## Universal files and `__LINKEDIT`
+
+`__LINKEDIT`'s size in memory is rounded up to 16 KiB, whatever the
+architecture or the page size code is hashed in (x86_64 for macOS and the
+iOS simulator included). A universal file is laid out again with every
+slice aligned to at least 16 KiB (2^14), from the first offset after the
+fat header.
+
+A constructed macOS app (a dylib, a two- and a three-architecture dylib, a
+helper, a versioned framework with symlinks, a symlink and a resource),
+signed inner code first as rules_apple does, is byte-identical to Xcode
+27.0's codesign, and `codesign --verify --deep --strict` accepts it; an iOS
+app with a nested dylib and app extension still is.
