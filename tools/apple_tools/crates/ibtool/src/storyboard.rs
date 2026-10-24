@@ -256,6 +256,22 @@ impl Nib {
         self.shared(format!("d:{d}"), || Object::new("NSNumber", vec![("NS.dblval", Value::Double(d))]))
     }
 
+    /// A named image, as the nib refers to it: one placeholder per name.
+    fn image(&mut self, name: &str) -> Value {
+        if let Some(v) = self.existing(&format!("image:{name}")) {
+            return v;
+        }
+        let resource = self.string(name);
+        self.shared(format!("image:{name}"), || Object::new("UIImageNibPlaceholder", vec![
+            ("UIImageWidth", Value::Float(1.0)),
+            ("UIImageHeight", Value::Float(1.0)),
+            ("UIResourceName", resource),
+            ("UISystemSymbolResourceName", Value::Nil),
+            ("UISymbolImageConfiguration", Value::Nil),
+            ("UIResourceCatalogName", Value::Nil),
+        ]))
+    }
+
     fn int_number(&mut self, i: i64) -> Value {
         self.shared(format!("i:{i}"), || Object::new("NSNumber", vec![("NS.intval", Value::Int(i))]))
     }
@@ -487,6 +503,8 @@ struct Scene<'a> {
     subviews: Vec<String>,
     /// Control actions: (selector, source, event mask), in depth-first order.
     actions: Vec<(String, String, i64)>,
+    /// A subview's own constraints, for the nib's objects after the subviews.
+    own_constraints: Vec<String>,
     /// Ids of the views some constraint is on.
     constrained: Vec<&'a str>,
     /// Ids of the legacy top and bottom layout guides.
@@ -531,6 +549,38 @@ fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
     ids
 }
 
+/// A subview's own constraints on its size, width before height whatever
+/// the document's order.
+fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Result<Option<Value>, String> {
+    let Some(cs) = children(n, "constraints").next() else { return Ok(None) };
+    only_children(cs, &["constraint"])?;
+    let mut found = Vec::new();
+    for c in children(cs, "constraint") {
+        only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("constant", None), ("id", None)])?;
+        if c.attribute("firstItem").is_some_and(|f| Some(f) != n.attribute("id")) {
+            return fail("a subview's constraints on other views are not supported by this ibtool");
+        }
+        let a = attr(c, "firstAttribute")?;
+        let rank = ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
+        if found.iter().any(|(r, _)| *r == rank) {
+            return fail("two constraints on a subview's same dimension are not supported by this ibtool");
+        }
+        found.push((rank, c));
+    }
+    found.sort_by_key(|f| f.0);
+    let mut values = Vec::new();
+    for (_, c) in found {
+        let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+        let constraint_name = nib.fresh();
+        scene.own_constraints.push(constraint_name.clone());
+        match constraint(reference(name.to_string()), layout_attribute(attr(c, "firstAttribute")?)?, None, constant, None) {
+            Value::New(o) => values.push(Value::New(o.named(constraint_name))),
+            _ => unreachable!(),
+        }
+    }
+    Ok(Some(nib.array("NSMutableArray", values)))
+}
+
 fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
     let id = attr(n, "id")?;
     let name = view_name(id);
@@ -546,7 +596,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 ("lineBreakMode", Some("tailTruncation")), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "fontDescription", "nil", "color"])?;
+            only_children(n, &["rect", "fontDescription", "nil", "color", "constraints"])?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
             }
@@ -562,6 +612,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIContentMode", Value::Int(7)));
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
             }
             values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -691,6 +744,54 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIStackViewLayoutMarginsRelative", Value::Bool(false)));
             Object::new("UIStackView", values)
         }
+        "imageView" => {
+            only_attributes(n, &[
+                ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
+                ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("image", None),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "color", "constraints"])?;
+            if n.attribute("userInteractionEnabled").is_none() {
+                return fail("image views with user interaction are not supported by this ibtool");
+            }
+            let content_mode = match attr(n, "contentMode")? {
+                "scaleToFill" => 0,
+                "scaleAspectFit" => 1,
+                "scaleAspectFill" => 2,
+                "center" => 4,
+                other => return fail(format!("contentMode {other} on <imageView> is not supported by this ibtool")),
+            };
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIOpaque", Value::Bool(true)));
+            values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            if content_mode != 0 {
+                values.push(("UIContentMode", Value::Int(content_mode)));
+            }
+            if n.attribute("clipsSubviews").is_some() {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
+            for c in children(n, "color") {
+                if c.attribute("key") != Some("tintColor") {
+                    return fail("image view colours other than a tint colour are not supported by this ibtool");
+                }
+                values.push(("UITintColor", color(nib, c, scene.colors)?));
+            }
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            if let Some(image) = n.attribute("image") {
+                values.push(("UIImage", nib.image(image)));
+            }
+            Object::new("UIImageView", values)
+        }
         other => return fail(format!("<{other}> is not supported by this ibtool")),
     };
     Ok(Value::New(object.named(name)))
@@ -707,15 +808,49 @@ fn arranged_names(views: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// Where a view's constraints go in the nib, by first attribute: observed
-/// for these attributes, whatever the document's order or ids.
+/// The size Xcode lays a root view out at for a `<device>`, whatever the
+/// view's frame says, or None for ids it doesn't know, where the frame is
+/// used: measured per id and orientation (docs/clean-room/ibtool.md). Ids
+/// not measured are refused.
+fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option<(f64, f64)>, String> {
+    const PORTRAIT: [(&str, f64, f64); 17] = [
+        ("retina4_0", 320.0, 568.0), ("retina4_7", 375.0, 667.0), ("retina5_5", 414.0, 736.0), ("retina5_9", 375.0, 812.0),
+        ("retina6_0", 390.0, 844.0), ("retina6_1", 414.0, 896.0), ("retina6_12", 393.0, 852.0), ("retina6_3", 402.0, 874.0),
+        ("retina6_5", 414.0, 896.0), ("retina6_7", 430.0, 932.0), ("retina6_9", 440.0, 956.0), ("ipad7_9", 744.0, 1133.0),
+        ("ipad9_7", 768.0, 1024.0), ("ipad10_2", 810.0, 1080.0), ("ipad10_9rounded", 820.0, 1180.0),
+        ("ipad11_0rounded", 834.0, 1210.0), ("ipad12_9rounded", 1024.0, 1366.0),
+    ];
+    // Laid out the same whichever the orientation.
+    const FIXED: [&str; 2] = ["retina3_5", "retina6_72"];
+    // Not known to Xcode's ibtool: the view's frame is used.
+    const UNKNOWN: [&str; 5] = ["retina5_4", "ipad10_5", "ipad12_9", "ipad8_3rounded", "ipad13_0rounded"];
+    if orientation != "portrait" && orientation != "landscape" {
+        return fail(format!("device orientation {orientation} is not supported by this ibtool"));
+    }
+    if platform == Platform::Tvos {
+        return match (id, orientation) {
+            ("appleTV", "landscape") => Ok(Some((1920.0, 1080.0))),
+            ("appleTV4K", _) => Ok(None),
+            _ => fail(format!("device {id} ({orientation}) is not supported by this ibtool")),
+        };
+    }
+    if FIXED.contains(&id) {
+        return Ok(Some((393.0, 852.0)));
+    }
+    if UNKNOWN.contains(&id) {
+        return Ok(None);
+    }
+    let &(_, w, h) = PORTRAIT.iter().find(|(d, ..)| *d == id).ok_or_else(|| format!("device {id} is not supported by this ibtool"))?;
+    Ok(Some(if orientation == "landscape" { (h, w) } else { (w, h) }))
+}
+
 /// Where Xcode puts a root view's constraint (docs/clean-room/ibtool.md):
 /// grouped by the item other than the root view, or the first item between
-/// siblings, the safe-area guide's group first and then by id; in a group,
+/// siblings, the groups by where their item is (below); in a group,
 /// constraints with the root view first, by their two attributes in one
 /// order, then those between siblings, by first and second attribute in
 /// another. Equal keys are refused: Xcode's order for them isn't stable.
-fn constraint_key<'a>(root: &str, safe_area: Option<&str>, first: &'a str, a1: &str, second: &'a str, a2: &str) -> Result<(u8, &'a str, u8, (usize, usize)), String> {
+fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str) -> Result<(&'a str, u8, (usize, usize)), String> {
     const WITH_ROOT: [&str; 8] = ["centerX", "centerY", "trailing", "leading", "width", "bottom", "top", "height"];
     const SIBLINGS: [&str; 8] = ["centerX", "trailing", "leading", "centerY", "bottom", "top", "width", "height"];
     let rank = |order: &[&str; 8], a: &str| order.iter().position(|o| *o == a).ok_or_else(|| format!("constraints on {a} are not supported by this ibtool"));
@@ -733,8 +868,7 @@ fn constraint_key<'a>(root: &str, safe_area: Option<&str>, first: &'a str, a1: &
     } else {
         (first, 1, (rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?))
     };
-    let guide_first = if Some(group) == safe_area { 0 } else { 1 };
-    Ok((guide_first, group, kind, attributes))
+    Ok((group, kind, attributes))
 }
 
 fn constraint(first: Value, first_attr: i64, second: Option<(Value, i64)>, constant: f64, priority: Option<i64>) -> Value {
@@ -873,7 +1007,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     // Without a <device>, Interface Builder lays an iOS scene out on its
     // generic 600x600 canvas below iOS 17, and at the view's frame from
     // iOS 17 on; Xcode's ibtool fails on a tvOS one.
-    let has_device = children(root, "device").next().is_some();
+    let device = children(root, "device").next();
+    let has_device = device.is_some();
+    let device_size = match device {
+        Some(d) => device_size(platform, attr(d, "id")?, attr(d, "orientation")?)?,
+        None => None,
+    };
     let generic_canvas = if has_device {
         false
     } else if platform == Platform::Tvos {
@@ -906,7 +1045,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, colors: &colors, constrained: constrained_views(view), subviews: Vec::new(), actions: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, colors: &colors, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), actions: Vec::new(), guides: Vec::new() };
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -942,7 +1081,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
 
         let mut nib = Nib::new(platform);
-        let f = if generic_canvas { Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 } } else { frame(view)? };
+        let f = match (generic_canvas, device_size) {
+            (true, _) => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
+            (false, Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
+            (false, None) => frame(view)?,
+        };
         let mask = match children(view, "autoresizingMask").next() {
             Some(m) => autoresizing_mask(m)?,
             None => 0,
@@ -998,7 +1141,18 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             Ok(reference(view_name(id)))
         };
-        let mut xml_constraints: Vec<((u8, &str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
+        // A group's place: its item's frame origin by distance from the
+        // root view's, then x, then id; the safe-area guide's is the origin.
+        let direct: Vec<Node> = children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
+        let place = |id: &str| -> Result<(f64, f64), String> {
+            if Some(id) == safe_area_id {
+                return Ok((0.0, 0.0));
+            }
+            let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("constraints between the root view and a nested view ({id}) are not supported by this ibtool"))?;
+            let f = frame(*v)?;
+            Ok((f.x * f.x + f.y * f.y, f.x))
+        };
+        let mut xml_constraints: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
         for cs in children(view, "constraints") {
             for c in children(cs, "constraint") {
                 only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("constant", None), ("id", None)])?;
@@ -1021,14 +1175,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                         return fail(format!("constraints on {id} are not supported by this ibtool"));
                     }
                 }
-                let key = constraint_key(view_id, safe_area_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?)?;
-                if xml_constraints.iter().any(|(k, ..)| *k == key) {
+                let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?)?;
+                if xml_constraints.iter().any(|(_, k, ..)| *k == key) {
                     return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
                 }
-                xml_constraints.push((key, c, first, Some(second)));
+                xml_constraints.push((place(key.0)?, key, c, first, Some(second)));
             }
         }
-        xml_constraints.sort_by(|a, b| a.0.cmp(&b.0));
+        xml_constraints.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
         let mut constraint_values: Vec<Value> = guide_constraints.iter().map(|n| reference(n.clone())).collect();
         let mut constraint_names = Vec::new();
         // The safe-area guide is archived where a constraint first uses it.
@@ -1043,7 +1197,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             safe_area_used = true;
             Ok(safe_area_guide(nib, &root_name))
         };
-        for (_, c, first, second) in &xml_constraints {
+        for (_, _, c, first, second) in &xml_constraints {
             let first = resolve(&mut nib, first)?;
             let second = match second {
                 Some(s) => Some((resolve(&mut nib, s)?, layout_attribute(attr(*c, "secondAttribute")?)?)),
@@ -1082,6 +1236,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         objects.extend(constraint_names.iter().map(|n| reference(n.clone())));
         objects.extend(scene.guides.iter().map(|g| reference(format!("guide {}", g.1))));
         objects.extend(scene.subviews.iter().map(|n| reference(n.clone())));
+        objects.extend(scene.own_constraints.iter().map(|n| reference(n.clone())));
 
         let mut connections = Vec::new();
         for (label, destination) in &vc_outlets {
