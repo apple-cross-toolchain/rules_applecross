@@ -142,7 +142,7 @@ fn item(n: Node, outlets: &[(String, String)]) -> Result<Value, String> {
 
 /// Strings Xcode writes once for each use; it shares every other equal
 /// string and number.
-fn shared(v: &Value) -> bool {
+fn shared(v: &Value, _: &cf::binary::Position) -> bool {
     !matches!(v, Value::String(s) if s.starts_with("controller-"))
 }
 
