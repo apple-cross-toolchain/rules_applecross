@@ -18,6 +18,24 @@ controller (`UIViewController-<id>.nib`: the scene's placeholders and a
 placeholder and from the owner) and one per view (`<vc>-view-<view>.nib`:
 the view, its colour and safe-area guide, the owner's `view` outlet).
 
+- A controller with a `storyboardIdentifier` has that name instead of
+  `UIViewController-<id>`, as its nib, its key and value in Info.plist and
+  the entry point; its class swapper records it as `UIStoryboardIdentifier`
+  (after `UINibName`). The entry point is then the same plist object as
+  the identifier's key (a generated name is written twice). A scene that
+  is neither initial nor identified is left out, nibs and all; without an
+  `initialViewController` there is no entry point (12 probes of one to
+  twelve scenes). Identifiers equal ignoring case, which Xcode renames
+  (`1__#$!@%!#__B.nib`) or merges, are refused, as are ones with a slash
+  (Xcode fails) or non-ASCII ones (written decomposed).
+- A custom class in a module is named as the Swift runtime names it:
+  `_TtC`, the module and the class, each after its length in UTF-8 bytes
+  (`_TtC3Bär3Foo`), with `s` for the module `Swift`; a dotted class name
+  is taken whole (`_TtC3Bar11Outer.Inner`). With
+  `customModuleProvider="target"`, `--module` is the module when given,
+  the document's `customModule` otherwise (an empty provider is none); an
+  empty or missing module leaves the class name as written (17 probes).
+
 ## NIB archives
 
 `NIBArchive`, format 1, coder 10; four tables (objects, keys, values,
@@ -105,7 +123,8 @@ other values of the attributes these use, is refused. Observed:
   bold); fonts.rs has them all, measured from one storyboard labelling
   each. A name it doesn't find is archived without the scaling keys and
   with options 0; since whether it finds a name can't be told from the name,
-  names outside the table are refused.
+  names outside the table are refused. `--auto-activate-custom-fonts`
+  doesn't find a font file beside the storyboard (Rubik-Bold).
 - Legacy layout guides become hidden `_UILayoutGuide` subviews, after the
   others, each with a `_UILayoutSupportConstraint` (width, priority 999),
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:

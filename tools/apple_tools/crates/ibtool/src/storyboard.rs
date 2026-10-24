@@ -356,6 +356,30 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
     })
 }
 
+/// The class a custom class names at run time: a Swift class in a module is
+/// named as the Swift runtime names it (`_TtC`, then the module and class,
+/// each after its length in bytes; the standard library is `s`). A module
+/// the target provides is ibtool's `--module`, when there is one.
+fn runtime_class_name(n: Node, module: Option<&str>) -> Result<String, String> {
+    let Some(class) = n.attribute("customClass") else {
+        if n.attribute("customModule").is_some() || n.attribute("customModuleProvider").is_some_and(|p| !p.is_empty()) {
+            return fail("a custom module without a custom class is not supported by this ibtool");
+        }
+        return Ok("UIViewController".into());
+    };
+    let module = match (n.attribute("customModuleProvider"), module) {
+        (Some("target"), Some(m)) => Some(m),
+        (None | Some("" | "target"), _) => n.attribute("customModule"),
+        (Some(p), _) => return fail(format!("customModuleProvider={p:?} is not supported by this ibtool")),
+    };
+    Ok(match module {
+        None | Some("") => class.to_string(),
+        Some("Swift") => format!("_TtCs{}{class}", class.len()),
+        Some(m) if m.starts_with("__") => return fail(format!("custom module {m} is not supported by this ibtool")),
+        Some(m) => format!("_TtC{}{m}{}{class}", m.len(), class.len()),
+    })
+}
+
 /// A font: `<fontDescription>`, or a control's default system font. Equal
 /// fonts are one object.
 fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Value, String> {
@@ -755,7 +779,7 @@ fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections:
     ])
 }
 
-pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Compiled, String> {
+pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>) -> Result<Compiled, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let platform = match root.attribute("type") {
@@ -777,7 +801,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Com
         major < 17
     };
     let colors = system_colors(&doc, platform)?;
-    let initial = attr(root, "initialViewController")?;
+    let initial = root.attribute("initialViewController");
     let mut files = Vec::new();
     let mut identifiers = Vec::new();
     let scenes = children(root, "scenes").next().ok_or("storyboard has no scenes")?;
@@ -786,7 +810,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Com
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
         only_children(objects_node, &["viewController", "placeholder"])?;
         let vc = children(objects_node, "viewController").next().ok_or("scene without a view controller")?;
-        only_attributes(vc, &[("id", None), ("customClass", None), ("sceneMemberID", Some("viewController"))])?;
+        only_attributes(vc, &[
+            ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+            ("storyboardIdentifier", None), ("sceneMemberID", Some("viewController")),
+        ])?;
+        let class_name = runtime_class_name(vc, module)?;
         only_children(vc, &["view", "layoutGuides", "connections"])?;
         let vc_id = attr(vc, "id")?;
         let view = children(vc, "view").next().ok_or("view controller without a view")?;
@@ -951,7 +979,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Com
 
         // The view controller's nib: the scene's placeholders and a class
         // swapper standing in for the controller, which loads the view nib.
-        let vc_nib_name = format!("UIViewController-{vc_id}");
+        if let Some(identifier) = vc.attribute("storyboardIdentifier") {
+            // Xcode can't write a name with a slash, and writes a non-ASCII
+            // one decomposed.
+            if identifier.is_empty() || identifier.contains('/') || !identifier.is_ascii() {
+                return fail(format!("storyboard identifier {identifier:?} is not supported by this ibtool"));
+            }
+        }
+        // A controller with a storyboard identifier is loaded by it.
+        let vc_nib_name = vc.attribute("storyboardIdentifier").map_or_else(|| format!("UIViewController-{vc_id}"), str::to_string);
         let view_nib_name = format!("{vc_id}-view-{view_id}");
         let mut vnib = Nib::new(platform);
         let owner = proxy(&mut vnib, "IBFilesOwner", "owner");
@@ -960,14 +996,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Com
         let external = if upstream_used { vec![vnib.string("UpstreamPlaceholder-1"), reference("controller")] } else { Vec::new() };
         let external = vnib.array("NSDictionary", external);
         let nib_name = vnib.string(&view_nib_name);
-        let class_name = vnib.string(vc.attribute("customClass").unwrap_or("UIViewController"));
-        let original = vnib.string("UIViewController");
-        let swapper = Value::New(Object::new("UIClassSwapper", vec![
-            ("UIExternalObjectsTableForViewLoading", external),
-            ("UINibName", nib_name),
-            ("UIClassName", class_name),
-            ("UIOriginalClassName", original),
-        ]).named("controller"));
+        let mut swapper = vec![("UIExternalObjectsTableForViewLoading", external), ("UINibName", nib_name)];
+        if let Some(identifier) = vc.attribute("storyboardIdentifier") {
+            swapper.push(("UIStoryboardIdentifier", vnib.string(identifier)));
+        }
+        swapper.push(("UIClassName", vnib.string(&class_name)));
+        swapper.push(("UIOriginalClassName", vnib.string("UIViewController")));
+        let swapper = Value::New(Object::new("UIClassSwapper", swapper).named("controller"));
         let connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard"), outlet(&mut vnib, "sceneViewController", "owner", "controller")];
         let vc_root = root_object(
             &mut vnib,
@@ -975,16 +1010,46 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Com
             vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")],
             connections,
         );
+        // A scene neither initial nor identified can't be loaded, and
+        // Xcode leaves it out.
+        let is_initial = initial == Some(vc_id);
+        if !is_initial && vc.attribute("storyboardIdentifier").is_none() {
+            continue;
+        }
         files.push((format!("{vc_nib_name}.nib"), nib::archive(vc_root)));
         files.push((format!("{view_nib_name}.nib"), nib::archive(view_root)));
-        identifiers.push((vc_nib_name.clone(), vc_id == initial));
+        identifiers.push((vc_nib_name.clone(), is_initial, vc.attribute("storyboardIdentifier").is_some()));
     }
-    let entry = identifiers.iter().find(|i| i.1).ok_or("the initial view controller is not in a supported scene")?;
-    let info = cf::Value::dict([
-        ("UIStoryboardDesignatedEntryPointIdentifier", cf::Value::string(entry.0.clone())),
-        ("UIStoryboardVersion", cf::Value::Integer(1)),
-        ("UIViewControllerIdentifiersToNibNames", cf::Value::dict(identifiers.iter().map(|(n, _)| (n.clone(), cf::Value::string(n.clone()))))),
-    ]);
-    files.push(("Info.plist".into(), cf::binary::to_bytes(&info)));
+    // Xcode renames nibs whose names differ only in case and keeps one of
+    // equal identifiers.
+    let mut names: Vec<String> = files.iter().map(|(n, _)| n.to_lowercase()).collect();
+    names.sort();
+    if names.windows(2).any(|w| w[0] == w[1]) {
+        return fail("storyboard identifiers that are equal ignoring case are not supported by this ibtool");
+    }
+    let mut info = Vec::new();
+    // The entry point is the same object as its identifier's key when the
+    // document names it; a generated name is made twice.
+    let mut shared_entry = None;
+    if initial.is_some() {
+        let entry = identifiers.iter().find(|i| i.1).ok_or("the initial view controller is not in a supported scene")?;
+        info.push(("UIStoryboardDesignatedEntryPointIdentifier", cf::Value::string(entry.0.clone())));
+        if entry.2 {
+            shared_entry = Some(entry.0.clone());
+        }
+    }
+    info.push(("UIStoryboardVersion", cf::Value::Integer(1)));
+    info.push(("UIViewControllerIdentifiersToNibNames", cf::Value::dict(identifiers.iter().map(|(n, ..)| (n.clone(), cf::Value::string(n.clone()))))));
+    let info = cf::Value::dict(info);
+    let share = |_: &cf::Value, at: &cf::binary::Position| {
+        use cf::binary::Step;
+        let Some(entry) = &shared_entry else { return false };
+        match at {
+            [Step::Value(k)] => k == "UIStoryboardDesignatedEntryPointIdentifier",
+            [Step::Value(k), Step::Key(id)] => k == "UIViewControllerIdentifiersToNibNames" && id == entry,
+            _ => false,
+        }
+    };
+    files.push(("Info.plist".into(), cf::binary::to_bytes_with(&info, &share, cf::binary::Dictionaries::Grown)));
     Ok(Compiled { files })
 }
