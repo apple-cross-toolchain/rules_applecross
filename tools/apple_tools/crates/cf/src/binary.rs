@@ -8,11 +8,25 @@ struct Writer<'a> {
     ref_size: usize,
     /// Whether an equal string or number already written is written again
     /// or shared: Apple's writer shares by identity, so only the values a
-    /// producer reuses (constants, small numbers) are shared.
-    share: &'a dyn Fn(&Value) -> bool,
+    /// producer reuses (constants, small numbers, one object in two places)
+    /// are shared.
+    share: &'a dyn Fn(&Value, &Position) -> bool,
     written: Vec<(Value, usize)>,
     dictionaries: Dictionaries,
 }
+
+/// One step from a container to an object in it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Step {
+    Index(usize),
+    /// The value of this key.
+    Value(String),
+    /// This key itself.
+    Key(String),
+}
+
+/// Where an object is written: the steps to it from the top.
+pub type Position = [Step];
 
 /// How the writer's dictionaries were filled, which decides their keys'
 /// order: one insertion at a time, or created whole.
@@ -59,8 +73,8 @@ impl Writer<'_> {
     }
 
     /// Writes `v` and everything below it; returns its object number.
-    fn add(&mut self, v: &Value) -> usize {
-        let shareable = matches!(v, Value::String(_) | Value::Integer(_) | Value::Real(_)) && (self.share)(v);
+    fn add(&mut self, v: &Value, at: &mut Vec<Step>) -> usize {
+        let shareable = matches!(v, Value::String(_) | Value::Integer(_) | Value::Real(_)) && (self.share)(v, at);
         if shareable {
             if let Some((_, n)) = self.written.iter().find(|(w, _)| w == v) {
                 return *n;
@@ -104,7 +118,12 @@ impl Writer<'_> {
             }
             Value::Array(items) => {
                 marker(&mut out, 0xa, items.len());
-                let children: Vec<usize> = items.iter().map(|i| self.add(i)).collect();
+                let mut children = Vec::with_capacity(items.len());
+                for (n, i) in items.iter().enumerate() {
+                    at.push(Step::Index(n));
+                    children.push(self.add(i, at));
+                    at.pop();
+                }
                 for c in children {
                     self.refs(&mut out, c);
                 }
@@ -116,8 +135,18 @@ impl Writer<'_> {
                     Dictionaries::Grown => table_order(&keys),
                     Dictionaries::Created => sized_table_order(&keys),
                 };
-                let key_refs: Vec<usize> = order.iter().map(|&i| self.add(&Value::String(entries[i].0.clone()))).collect();
-                let value_refs: Vec<usize> = order.iter().map(|&i| self.add(&entries[i].1)).collect();
+                let mut key_refs = Vec::with_capacity(order.len());
+                for &i in &order {
+                    at.push(Step::Key(entries[i].0.clone()));
+                    key_refs.push(self.add(&Value::String(entries[i].0.clone()), at));
+                    at.pop();
+                }
+                let mut value_refs = Vec::with_capacity(order.len());
+                for &i in &order {
+                    at.push(Step::Value(entries[i].0.clone()));
+                    value_refs.push(self.add(&entries[i].1, at));
+                    at.pop();
+                }
                 for r in key_refs.into_iter().chain(value_refs) {
                     self.refs(&mut out, r);
                 }
@@ -141,19 +170,19 @@ fn width(n: usize) -> usize {
 }
 
 pub fn to_bytes(v: &Value) -> Vec<u8> {
-    to_bytes_with(v, &|_| false, Dictionaries::Grown)
+    to_bytes_with(v, &|_, _| false, Dictionaries::Grown)
 }
 
 /// As `to_bytes`, sharing the equal strings and numbers `share` accepts,
 /// with dictionaries filled as `dictionaries` says.
-pub fn to_bytes_with(v: &Value, share: &dyn Fn(&Value) -> bool, dictionaries: Dictionaries) -> Vec<u8> {
+pub fn to_bytes_with(v: &Value, share: &dyn Fn(&Value, &Position) -> bool, dictionaries: Dictionaries) -> Vec<u8> {
     // References are sized for the objects written; count those first.
     let mut probe = Writer { objects: Vec::new(), ref_size: 8, share, written: Vec::new(), dictionaries };
-    probe.add(v);
+    probe.add(v, &mut Vec::new());
     let n = probe.objects.len();
     debug_assert!(n <= count(v));
     let mut w = Writer { objects: Vec::with_capacity(n), ref_size: width(n), share, written: Vec::new(), dictionaries };
-    w.add(v);
+    w.add(v, &mut Vec::new());
     let mut out = b"bplist00".to_vec();
     let mut offsets = Vec::with_capacity(n);
     for o in &w.objects {
