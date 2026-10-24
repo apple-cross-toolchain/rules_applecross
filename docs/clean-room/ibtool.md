@@ -247,12 +247,37 @@ other values of the attributes these use, is refused. Observed:
   (so the nib's visible windows and the rest reuse it) and
   `UILargeTitleDisplayMode` (automatic 0, always 1, never 2), listed last
   in the controller nib's objects (six probes). A label's
-  `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`; a text
+  `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`, and a text
+  field's after `UIAutoresizingMask` (only when it says YES); a text
   field's `placeholder` is `UIPlaceholder` after `UIFont`, and its declared
   text colour its `UITextColor` (`UIDisableTextColorUpdateOnTraitCollectionChange`
   is set either way; three probes). A text field with no text colour
   element is as with a nil one; a label with none is as with a declared
   `labelColor` (two probes).
+- A label adjusts its font size to fit unless `adjustsFontSizeToFit="NO"`:
+  without that attribute it has `UIAdjustsFontSizeToFit` after
+  `UINumberOfLines`, then `UIMinimumFontSize` (a 32-bit float) before
+  `UITextAlignment` and `UIMinimumScaleFactor` (also 32-bit) after it.
+  With `minimumScaleFactor` (which wins over `minimumFontSize`) the factor
+  is kept and the size is factor times the font's point size rounded to
+  the nearest quarter point, halves up (0.33 of 17 is 5.5, 0.375 of 17 is
+  6.5); with only `minimumFontSize` the size is kept and the factor is the
+  size over the font's (10.5 of 17 is 0.6176470518112183), even above 1. A
+  zero `minimumFontSize`, and both attributes when the label doesn't
+  adjust, are left out. `adjustsLetterSpacingToFitWidth` is
+  `UIAdjustsLetterSpacingToFit` after the scale factor (32 probes, at 9,
+  13, 17, 23 and 32 points). A text field's `clearButtonMode` is
+  `UIClearButtonMode` after `UIMinimumFontSize`: whileEditing 1,
+  unlessEditing 2, always 3 (three probes).
+- Nothing in the output comes from a label's `fixedFrame`, from a label's
+  or button's `<autoresizingMask>` when it doesn't translate it into
+  constraints (constrained or not), or from a scene's `<exit>` when
+  nothing unwinds to it (ten probes). An exit something refers to is
+  refused.
+- A view controller's `automaticallyAdjustsScrollViewInsets="NO"` is
+  `UIKeyAutomaticallyAdjustsScrollViewInsets` 0 after its identifiers in
+  its controller nib, and after `UIParentViewController` as a navigation
+  controller's root (seven probes).
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an
   empty identifier. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
@@ -261,8 +286,11 @@ other values of the attributes these use, is refused. Observed:
   pinning its top, left, bottom and right to the view's
   (`UIViewSafeAreaLayoutGuide-top`, ... as `NSLayoutIdentifier`, not
   archived), listed in the view's `UIViewLayoutGuides` after its
-  constraints. Its connections: the
-  controller's outlets, `view`, then control actions.
+  constraints. Its connections: the controller's outlets with `view`
+  among them, then control actions, each in byte order of their names
+  (`aButton`, `view`, `zButton`; `B:`, `a:`; `tap1:`, `tap:`, `tap_:`),
+  whatever the document order, ids or positions; actions with the same
+  selector stay in document order (19 probes).
 - A view nib that refers to its controller (an outlet into it, an action
   to it) has an `UpstreamPlaceholder-1` proxy, which the controller's nib
   maps to its class swapper in `UIExternalObjectsTableForViewLoading`.
@@ -291,7 +319,8 @@ when it is initial or identified. Observed with 25 probes:
   navigation item (as in its own nib, or one with only
   `UILargeTitleDisplayMode` when the document has none), the external
   objects table (`UpstreamPlaceholder-1` for outlets into its view), its
-  view nib's name, its identifiers, `UIParentViewController`. The item
+  view nib's name, its identifiers, `UIParentViewController`,
+  `UIKeyAutomaticallyAdjustsScrollViewInsets` when it says NO. The item
   ends with `UINavigationBar`, a reference to the bar archived later.
 - The bar is laid out by Xcode, not the document: bounds 0x54 centred 27
   below its frame's top, mask 2, hugging `{250, 250}`, zero layout margins

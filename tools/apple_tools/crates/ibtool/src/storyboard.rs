@@ -526,6 +526,35 @@ fn runtime_class_name(n: Node, module: Option<&str>, default: &str) -> Result<St
     })
 }
 
+/// A label's minimum font size and scale factor, when it adjusts its font
+/// size to fit (the default) and has either. A scale factor's size is
+/// rounded to the nearest quarter point, halves up; a size's factor is the
+/// size over the font's.
+fn minimum_font_size(n: Node) -> Result<Option<(f32, f32)>, String> {
+    if n.attribute("adjustsFontSizeToFit").is_some() {
+        return Ok(None);
+    }
+    let (factor, size) = (n.attribute("minimumScaleFactor"), n.attribute("minimumFontSize"));
+    if factor.is_none() && size.map_or(true, |s| number(s) == Ok(0.0)) {
+        return Ok(None);
+    }
+    let font_size = child(n, "fontDescription", "fontDescription")
+        .and_then(|f| f.attribute("pointSize"))
+        .ok_or("a minimum font size without the font's point size is not supported by this ibtool")?;
+    let font_size = number(font_size)?;
+    Ok(Some(match (factor, size) {
+        (Some(factor), _) => {
+            let factor = number(factor)? as f32;
+            (((factor as f64 * font_size * 4.0).round() / 4.0) as f32, factor)
+        }
+        (None, Some(size)) => {
+            let size = number(size)? as f32;
+            (size, (size as f64 / font_size) as f32)
+        }
+        (None, None) => unreachable!(),
+    }))
+}
+
 /// A font: `<fontDescription>`, or a control's default system font. Equal
 /// fonts are one object.
 fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Value, String> {
@@ -661,6 +690,15 @@ fn text_alignment(s: &str) -> Result<i64, String> {
 
 /// Whether a view is archived as not translating its autoresizing mask:
 /// when the document says so and a constraint is on it.
+/// A label's or button's autoresizing mask, which Xcode leaves out when
+/// the view doesn't translate it into constraints.
+fn ignored_autoresizing_mask(n: Node) -> Result<(), String> {
+    if children(n, "autoresizingMask").next().is_some() && n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
+        return fail(format!("<autoresizingMask> inside a <{}> that translates it is not supported by this ibtool", n.tag_name().name()));
+    }
+    Ok(())
+}
+
 fn does_not_translate(scene: &Scene, n: Node) -> bool {
     n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| scene.constrained.contains(&id))
 }
@@ -759,11 +797,13 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
         "label" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", Some("left")),
-                ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
+                ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", Some("tailTruncation")), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
-                ("adjustsFontSizeToFit", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
+                ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "fontDescription", "nil", "color", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints"])?;
+            ignored_autoresizing_mask(n)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
             }
@@ -805,7 +845,20 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if let Some(lines) = n.attribute("numberOfLines") {
                 values.push(("UINumberOfLines", Value::Int(lines.parse().map_err(|_| format!("not a number: {lines}"))?)));
             }
+            let minimum = minimum_font_size(n)?;
+            if n.attribute("adjustsFontSizeToFit").is_none() {
+                values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
+            }
+            if let Some((size, _)) = minimum {
+                values.push(("UIMinimumFontSize", Value::Float(size)));
+            }
             values.push(("UITextAlignment", Value::Int(text_alignment(attr(n, "textAlignment")?)?)));
+            if let Some((_, scale)) = minimum {
+                values.push(("UIMinimumScaleFactor", Value::Float(scale)));
+            }
+            if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
+                values.push(("UIAdjustsLetterSpacingToFit", Value::Bool(true)));
+            }
             values.push(("UIDisableUpdateTextColorOnTraitCollectionChange", Value::Bool(declared_color)));
             Object::new("UILabel", values)
         }
@@ -813,8 +866,16 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
                 ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", Some("roundedRect")),
-                ("textAlignment", Some("natural")), ("minimumFontSize", None), ("placeholder", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("textAlignment", Some("natural")), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                ("id", None),
             ])?;
+            let clear_button_mode = match n.attribute("clearButtonMode") {
+                None => None,
+                Some("whileEditing") => Some(1),
+                Some("unlessEditing") => Some(2),
+                Some("always") => Some(3),
+                Some(other) => return fail(format!("clearButtonMode=\"{other}\" on <textField> is not supported by this ibtool")),
+            };
             only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits"])?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
             if traits.attributes().len() != 1 || traits.has_children() {
@@ -829,7 +890,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
-            values.push(("UIClipsToBounds", Value::Bool(true)));
+            if n.attribute("clipsSubviews").is_some() {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -849,6 +912,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIBorderStyle", Value::Int(3)));
             values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
             values.push(("UIMinimumFontSize", Value::Float(number(attr(n, "minimumFontSize")?)? as f32)));
+            if let Some(mode) = clear_button_mode {
+                values.push(("UIClearButtonMode", Value::Int(mode)));
+            }
             values.push(("UIClearButtonOffset", doubles(&[3.0, 1.0])));
             values.push(("UIDisableTextColorUpdateOnTraitCollectionChange", Value::Bool(true)));
             values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
@@ -867,7 +933,8 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 None => None,
                 Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "state", "connections", "fontDescription", "color", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints"])?;
+            ignored_autoresizing_mask(n)?;
             let states: Vec<Node> = children(n, "state").collect();
             if states.len() != 1 || states[0].attribute("key") != Some("normal") {
                 return fail("buttons other than one with a normal state are not supported by this ibtool");
@@ -1409,6 +1476,9 @@ fn navigation_controller_nib(
         }
     }
     root_values.push(("UIParentViewController", reference("controller")));
+    if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+        root_values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
+    }
     // One with its own nib too is swapped in, as it is there.
     let root_controller = if vc.attribute("customClass").is_some() || root.loadable {
         root_values.push(("UIClassName", nib.string(&root.class_name)));
@@ -1526,7 +1596,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
-        only_children(objects_node, &["viewController", "navigationController", "placeholder"])?;
+        only_children(objects_node, &["viewController", "navigationController", "placeholder", "exit"])?;
+        // An exit nothing unwinds to is Interface Builder's alone.
+        for exit in children(objects_node, "exit") {
+            only_attributes(exit, &[("id", None), ("userLabel", Some("Exit")), ("sceneMemberID", Some("exit"))])?;
+            let id = attr(exit, "id")?;
+            if scene_node.document().descendants().any(|d| d != exit && d.attributes().any(|a| a.value() == id)) {
+                return fail("an exit something unwinds to is not supported by this ibtool");
+            }
+        }
         if children(objects_node, "navigationController").next().is_some() {
             continue;
         }
@@ -1534,7 +1612,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         only_attributes(vc, &[
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
-            ("userLabel", None), ("sceneMemberID", Some("viewController")),
+            ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("userLabel", None), ("sceneMemberID", Some("viewController")),
         ])?;
         let class_name = runtime_class_name(vc, module, "UIViewController")?;
         only_children(vc, &["view", "layoutGuides", "connections", "navigationItem", "size"])?;
@@ -1780,11 +1858,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         }
 
+        // Outlets, `view` among them, then actions, each in byte order of
+        // their names; actions with the same selector in document order.
         let mut connections = Vec::new();
-        for (label, destination) in &vc_outlets {
-            connections.push(outlet(&mut nib, label, "upstream", destination));
+        let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
+        outlets.push(("view", "owner", &root_name));
+        outlets.sort_by(|a, b| a.0.cmp(b.0));
+        for (label, source, destination) in outlets {
+            connections.push(outlet(&mut nib, label, source, destination));
         }
-        connections.push(outlet(&mut nib, "view", "owner", &root_name));
+        scene.actions.sort_by(|a, b| a.0.cmp(&b.0));
         for (selector, source, mask) in &scene.actions {
             let label = nib.string(selector);
             connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
@@ -1831,6 +1914,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         } else if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
             return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
+        }
+        if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+            swapper.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
         }
         swapper.push(("UIClassName", vnib.string(&class_name)));
         swapper.push(("UIOriginalClassName", vnib.string("UIViewController")));
