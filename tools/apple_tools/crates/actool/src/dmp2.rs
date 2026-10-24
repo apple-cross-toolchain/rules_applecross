@@ -9,15 +9,23 @@ fn le32(out: &mut Vec<u8>, v: u32) {
 }
 
 fn header(mode: u8, width: usize, height: usize) -> Vec<u8> {
+    header_bpp(mode, width, height, 4)
+}
+
+/// A stream's header, for pixels of `bpp` bytes (4 BGRA, 2 grey and alpha).
+fn header_bpp(mode: u8, width: usize, height: usize, bpp: u8) -> Vec<u8> {
     let mut s = b"dmp2".to_vec();
-    s.extend([mode, 1, 0x0a, 4]);
+    s.extend([mode, 1, 0x0a, bpp]);
     s.extend((width as u16).to_le_bytes());
     s.extend((height as u16).to_le_bytes());
     s
 }
 
+/// Data compressed as dmp2 stores it: LZFSE from 4096 bytes on, and below
+/// that raw LZVN, without the `bvxn` block LZFSE would wrap it in.
 fn compressed(out: &mut Vec<u8>, data: &[u8]) {
     let z = lzfse::encode(data);
+    let z = if data.len() < 4096 && z.starts_with(b"bvxn") && z.ends_with(b"bvx$") { z[12..z.len() - 4].to_vec() } else { z };
     le32(out, z.len() as u32);
     out.extend(z);
 }
@@ -30,9 +38,13 @@ fn strip_rows(row_bytes: usize, height: usize) -> usize {
 
 /// A mode's stream: the header, with the rows per strip as its height, and
 /// each strip's data compressed on its own.
-fn striped(mode: u8, width: usize, height: usize, row_bytes: usize, mut strip: impl FnMut(usize, usize) -> Vec<u8>) -> Vec<u8> {
+fn striped(mode: u8, width: usize, height: usize, row_bytes: usize, strip: impl FnMut(usize, usize) -> Vec<u8>) -> Vec<u8> {
+    striped_bpp(mode, width, height, row_bytes, 4, strip)
+}
+
+fn striped_bpp(mode: u8, width: usize, height: usize, row_bytes: usize, bpp: u8, mut strip: impl FnMut(usize, usize) -> Vec<u8>) -> Vec<u8> {
     let rows = strip_rows(row_bytes, height);
-    let mut s = header(mode, width, rows);
+    let mut s = header_bpp(mode, width, rows, bpp);
     let mut y = 0;
     while y < height {
         let h = std::cmp::min(rows, height - y);
@@ -116,8 +128,14 @@ fn predict(code: u8, v: &[[i32; 3]], width: usize, i: usize, x: usize, y: usize,
 /// not established: costs that tie, or as good as, other than between rows
 /// predicted exactly.
 fn transform(width: usize, height: usize, bgra: &[u8]) -> (Vec<u8>, bool) {
-    let n = width * height;
     let v: Vec<[i32; 3]> = bgra.chunks_exact(4).map(|p| ycocg(p[0], p[1], p[2])).collect();
+    transform_values(width, height, bgra.chunks_exact(4).map(|p| p[3]).collect(), v, 3)
+}
+
+/// Mode 2's data for values per pixel: YCoCg (3 channels), or grey (1,
+/// the first) for GA8.
+fn transform_values(width: usize, height: usize, alpha: Vec<u8>, v: Vec<[i32; 3]>, channels: usize) -> (Vec<u8>, bool) {
+    let n = width * height;
     let mut codes = Vec::with_capacity(height);
     let mut ambiguous = false;
     let mut residuals = vec![[0i32; 3]; n];
@@ -125,7 +143,7 @@ fn transform(width: usize, height: usize, bgra: &[u8]) -> (Vec<u8>, bool) {
         (0..width)
             .map(|x| {
                 let i = y * width + x;
-                [0, 1, 2].map(|k| v[i][k] - predict(code, &v, width, i, x, y, k))
+                [0, 1, 2].map(|k| if k < channels { v[i][k] - predict(code, &v, width, i, x, y, k) } else { 0 })
             })
             .collect()
     };
@@ -135,36 +153,39 @@ fn transform(width: usize, height: usize, bgra: &[u8]) -> (Vec<u8>, bool) {
             .iter()
             .map(|&c| {
                 let r = row(c, y);
-                let cost = r.iter().flatten().map(|d| (1.0 + d.unsigned_abs() as f64).log2()).sum();
+                let cost = r.iter().flat_map(|p| &p[..channels]).map(|d| (1.0 + d.unsigned_abs() as f64).log2()).sum();
                 (c, r, cost)
             })
             .collect();
         let best = rows.iter().map(|r| r.2).fold(f64::INFINITY, f64::min);
         let mut tied: Vec<&(u8, Vec<[i32; 3]>, f64)> = rows.iter().filter(|r| r.2 - best < 1e-3).collect();
-        // Rows every candidate in the tie predicts exactly go by TIE_ORDER;
-        // other ties are not established.
-        ambiguous |= tied.len() > 1 && best != 0.0;
+        // Rows every candidate in the tie predicts exactly go by TIE_ORDER,
+        // as do a grey row's ties between 1 and 3, 3 and 4 or 1 and 2 (all
+        // of 4,018 such rows in 29 probes); other ties are not established
+        // (in colour, 1 and 2 with the same residuals go either way).
+        let pair: Vec<u8> = tied.iter().map(|r| r.0).collect();
+        let grey_known = channels == 1 && [[1, 3], [3, 4], [1, 2]].iter().any(|k| pair == k);
+        ambiguous |= tied.len() > 1 && best != 0.0 && !grey_known;
         tied.sort_by_key(|r| TIE_ORDER.iter().position(|&c| c == r.0));
         let (code, r, _) = tied[0];
         codes.push(*code);
         residuals[y * width..(y + 1) * width].copy_from_slice(r);
     }
-    let mut raw = Vec::with_capacity(7 * n + height + 16);
-    raw.extend(bgra.chunks_exact(4).map(|p| p[3]));
+    let mut raw = Vec::with_capacity((1 + 2 * channels) * n + height + 16);
+    raw.extend(alpha);
     raw.extend(&codes);
-    let coded: Vec<u16> = residuals.iter().flatten().map(|&d| (2 * d.unsigned_abs() + (d < 0) as u32) as u16).collect();
+    let coded: Vec<u16> = residuals.iter().flat_map(|p| p[..channels].to_vec()).map(|d| (2 * d.unsigned_abs() + (d < 0) as u32) as u16).collect();
     raw.extend(coded.iter().map(|c| (c >> 8) as u8));
     raw.extend(coded.iter().map(|c| *c as u8));
     raw.resize(raw.len().div_ceil(16) * 16, 0);
     (raw, ambiguous)
 }
 
-/// The `MLEC` payload of an image of premultiplied BGRA rows (tightly
-/// packed), stored as Xcode stores it; `opaque` as Xcode flags it (see
-/// stack.rs).
-pub fn encode(width: usize, height: usize, bgra: &[u8], opaque: bool) -> Result<Vec<u8>, String> {
-    if width > 0xffff || height > 0xffff {
-        return Err(format!("a {width}x{height} image is too large for this actool"));
+/// The `dmp2` stream of rows of an image: whichever mode is smallest.
+fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
+    if width * height < 8 {
+        // Under 8 bytes, LZFSE stores data raw; dmp2's form of that isn't established.
+        return Err("images of fewer than 8 pixels are not supported by this actool".into());
     }
     let row = 4 * width;
     let lzfse_only = striped(3, width, height, row, |y, h| bgra[y * row..(y + h) * row].to_vec());
@@ -194,16 +215,101 @@ pub fn encode(width: usize, height: usize, bgra: &[u8], opaque: bool) -> Result<
     if candidates.iter().filter(|c| c.len() == min).count() > 1 {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
-    let stream = candidates.into_iter().find(|c| c.len() == min).unwrap();
+    Ok(candidates.into_iter().find(|c| c.len() == min).unwrap())
+}
+
+/// The `dmp2` stream of a GA8 image (premultiplied grey and alpha per
+/// pixel): mode 3 or mode 2 on the grey, whichever is smaller (no palette
+/// was ever seen for one).
+fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String> {
+    if width * height < 8 {
+        return Err("images of fewer than 8 pixels are not supported by this actool".into());
+    }
+    let row = 2 * width;
+    let lzfse_only = striped_bpp(3, width, height, row, 2, |y, h| ga[y * row..(y + h) * row].to_vec());
+    let mut ambiguous = false;
+    let predictive = striped_bpp(2, width, height, 3 * width + 1, 2, |y, h| {
+        let rows = &ga[y * row..(y + h) * row];
+        let v: Vec<[i32; 3]> = rows.chunks_exact(2).map(|p| [p[0] as i32, 0, 0]).collect();
+        let (raw, a) = transform_values(width, h, rows.chunks_exact(2).map(|p| p[1]).collect(), v, 1);
+        ambiguous |= a;
+        raw
+    });
+    if ambiguous && predictive.len() <= lzfse_only.len() + lzfse_only.len() / 100 + 64 {
+        return Err("this image's dmp2 encoding (its row predictors) is not established for this actool".into());
+    }
+    if !ambiguous && predictive.len() == lzfse_only.len() {
+        return Err("this image's dmp2 modes tie, which is not established for this actool".into());
+    }
+    let chosen = if !ambiguous && predictive.len() < lzfse_only.len() { predictive } else { lzfse_only };
+    if 12 + ga.len() <= chosen.len() {
+        return Err("this image would be stored uncompressed, which is not established for this actool".into());
+    }
+    Ok(chosen)
+}
+
+/// The `MLEC` payload of a GA8 image: pixels of premultiplied grey and
+/// alpha, at most 4 MiB as BGRA (larger ones' chunks aren't established).
+pub fn encode_gray(width: usize, height: usize, ga: &[u8], opaque: bool) -> Result<Vec<u8>, String> {
+    if width * height * 4 > 1 << 22 {
+        return Err(format!("a {width}x{height} greyscale image is too large for this actool"));
+    }
+    let stream = stream_gray(width, height, ga)?;
     let mut out = b"MLEC".to_vec();
     le32(&mut out, if opaque { 2 } else { 0 });
     le32(&mut out, 11);
     le32(&mut out, 16 + stream.len() as u32);
-    le32(&mut out, 1);
-    le32(&mut out, 4);
-    le32(&mut out, stream.len() as u32);
-    le32(&mut out, 0);
+    body_bpp(&mut out, &stream, 2);
+    Ok(out)
+}
+
+/// A dmp2 stream as an `MLEC` body holds it.
+fn body(out: &mut Vec<u8>, stream: &[u8]) {
+    body_bpp(out, stream, 4)
+}
+
+fn body_bpp(out: &mut Vec<u8>, stream: &[u8], bpp: u32) {
+    le32(out, 1);
+    le32(out, bpp);
+    le32(out, stream.len() as u32);
+    le32(out, 0);
     out.extend(stream);
+}
+
+/// The `MLEC` payload of an image of premultiplied BGRA rows (tightly
+/// packed), stored as Xcode stores it; `opaque` as Xcode flags it (see
+/// stack.rs). An image of more than 4 MiB is stored in `KCBC` chunks of
+/// as many rows as fit 4 MiB, each a dmp2 stream of its own.
+pub fn encode(width: usize, height: usize, bgra: &[u8], opaque: bool) -> Result<Vec<u8>, String> {
+    if width > 0xffff || height > 0xffff {
+        return Err(format!("a {width}x{height} image is too large for this actool"));
+    }
+    let row = 4 * width;
+    let chunk_rows = (1 << 22) / row;
+    let mut out = b"MLEC".to_vec();
+    if height <= chunk_rows {
+        let stream = stream(width, height, bgra)?;
+        le32(&mut out, if opaque { 2 } else { 0 });
+        le32(&mut out, 11);
+        le32(&mut out, 16 + stream.len() as u32);
+        body(&mut out, &stream);
+        return Ok(out);
+    }
+    let chunks: Vec<(usize, usize)> = (0..height).step_by(chunk_rows).map(|y| (y, chunk_rows.min(height - y))).collect();
+    le32(&mut out, if opaque { 3 } else { 1 });
+    le32(&mut out, 11);
+    le32(&mut out, chunks.len() as u32);
+    for (y, h) in chunks {
+        let stream = stream(width, h, &bgra[y * row..(y + h) * row])?;
+        let mut data = Vec::new();
+        body(&mut data, &stream);
+        out.extend(b"KCBC");
+        le32(&mut out, 0);
+        le32(&mut out, 0);
+        le32(&mut out, h as u32);
+        le32(&mut out, data.len() as u32);
+        out.extend(data);
+    }
     Ok(out)
 }
 

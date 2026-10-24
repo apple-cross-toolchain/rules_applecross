@@ -7,8 +7,8 @@ iphone|ipad --output-partial-info-plist P CATALOG` for a catalog holding one
 
 Also reproduced, for every catalog in the examples except tvOS's and
 visionOS's: `--platform iphonesimulator`, `watchsimulator` and `macosx`,
-app icon sets with an image per size (below), and catalogs that compile to
-nothing. visionOS's (`xrsimulator`: image stacks, below) is byte-identical
+app icon sets with an image per size (below), iOS image sets of PNG images
+(below), and catalogs that compile to nothing. visionOS's (`xrsimulator`: image stacks, below) is byte-identical
 too. tvOS's (`appletvsimulator`) is refused when strict, the default: its
 radiosity image can't be guaranteed to be Xcode's (below). Relaxed
 (`--config=relaxed`), the output is byte-identical to Xcode's.
@@ -39,7 +39,10 @@ This reproduces both icons with no differing sample.
 
 ## CgBI PNGs
 
-Observed chunk sequence: `CgBI` (0x50002006), `IHDR` (8-bit RGBA),
+A device build's bundle icons are CgBI PNGs with `--compress-pngs` (which
+rules_apple always passes); without it they are the simulator's PNGs
+(below), byte for byte, and Assets.car is the same either way. Observed
+chunk sequence: `CgBI` (0x50002006), `IHDR` (8-bit RGBA),
 `gAMA` 45455, `sRGB` 0, `cHRM` (sRGB primaries), `eXIf` (ColorSpace 1 and
 the pixel dimensions), `iDOT`, two `IDAT`, `IEND`. Pixels are premultiplied
 BGRA, every row filter 0. The two IDATs are one raw deflate stream with a
@@ -82,9 +85,11 @@ copies (FACETKEYS with names of different lengths). `BITMAPKEYS` stores
 its keys (name identifiers) inline in a 1024-byte page; their value blocks
 are allocated in the order a CoreFoundation hash table enumerates the
 identifiers (the integer CFNumber hash: the value times 2654435761, 64
-bits) when filled with any image stacks' identifiers first and then the
-rest, largest first, an atlas's 0 among them. That reproduces all 13
-catalogs examined with more than one identifier.
+bits) when filled with the identifiers in the order their renditions are
+first allocated (atlases, which have no identifier, not among them). That
+reproduces every catalog examined, including image set catalogs whose
+identifiers collide in a three-entry table, which an atlas's 0 would have
+grown.
 
 For an app icon: per idiom, an Icon Image rendition (part 220, dimension2
 1: the 1024 px image as LZFSE-compressed premultiplied BGRA, named after
@@ -204,8 +209,11 @@ up to 16 bytes), each on its own: a 1024 px image is four strips in mode
 image of its own. Modes:
 
 - 1: the premultiplied BGRA pixels as they are;
-- 3: a 32-bit length and those pixels as the reference LZFSE encoder
-  compresses them (`lzfse_encode_buffer`, LZVN for small inputs);
+- 3: a 32-bit length and those pixels compressed: from 4096 bytes on as the
+  reference LZFSE encoder compresses them (`lzfse_encode_buffer`), and below
+  that as raw LZVN, the `bvxn` block LZFSE would write without its header
+  and end marker (libcompression's `COMPRESSION_LZVN`; a single-colour
+  100x100 image's indices are LZFSE although raw LZVN would be smaller);
 - 4: a palette (count, at most 256, and entry size 4, 16 bits each;
   premultiplied BGRA entries), then a 32-bit length and the 8-bit indices
   compressed the same way;
@@ -238,11 +246,75 @@ ties broken the other way, two between different residuals with equal
 integer costs and one between identical residuals, so the tie rule is not
 fully established.
 
+A greyscale image (GA8, below) is the same with 2-byte pixels: the stream
+header's last byte and the body header's second word are 2, mode 3 holds
+premultiplied grey and alpha per pixel, and mode 2 the alpha plane, the
+row codes and one 16-bit residual per pixel (high bytes, then low), the
+predictors working on the grey alone. No palette was seen for one, even
+of 16 grey-alpha pairs. In grey rows Xcode breaks ties between 1 and 3, 3
+and 4, and 1 and 2 by the order above (4,018 rows of 29 probes; 40 more
+probes were byte-identical).
+
+An image of more than 4 MiB (4 bytes a pixel) is `MLEC` with flags 1 (3
+when opaque), method 11 and a count of `KCBC` chunks: each `KCBC`, two zero
+words, its rows and its length, then the `01`, `04`, length, zero header and
+a `dmp2` stream of those rows alone (mode chosen per chunk). A chunk is as
+many rows as fit 4 MiB: 1441 px wide, 727, 727 and 706 rows. Images of
+fewer than 8 pixels are refused.
+
 Pixels are premultiplied as `(c * a + 127) / 255`. A palette that would
 need strips (over 2 MiB of indices) is not established and is refused. Every layer in the
 examples uses mode 4. Where a row's predictor isn't established and mode 2
 could be the smallest, the image is refused; so are images that would be
 stored uncompressed (mode 1, never seen) and ties between modes.
+
+## Image sets
+
+For iOS, an image set's PNG images (universal idiom, at 1x, 2x or 3x, or no
+scale meaning 1x) are each a rendition keyed by scale, the set's identifier
+(the name hashed as for app icons), element 85 and part 181, with a facet of
+the same element, part and identifier. Each is a `dmp2` image (above),
+layout 12, named after its file: TLVs 0x3e9 (1, 0, 0, width, height), 0x3eb
+(1, 0, 0, 0, 0, width, height), the composition, 0x3ee 1 and 0x3ef the
+bytes per row rounded up to 32 (240 is 256). Its CSI flags are the
+rendering intent: 16 automatic (no property), 8 template, 0 original. The
+key format is the app icons' without `dimension2` when nothing uses it.
+
+An image whose every pixel is grey (R = G = B, whatever its PNG's colour
+type) is stored as GA8: pixel format ` 8AG`, colour space 2, a greyscale
+`dmp2` payload, and bytes per row of one a pixel when opaque and four
+otherwise, rounded up to 32.
+
+Images small enough to pack (18,050 px² per scale factor, as for icons)
+are packed per scale, translucent colour, translucent grey, opaque colour
+and opaque grey images each in atlases of their own, as icons are packed (largest area first, equal areas by identifier,
+twelve probes of equal-area shapes): an atlas is a `dmp2` image (layout
+1004, flags 0, keyed element 9, part 181, scale and, from the second at a
+scale on, dimension1 its index) named `ZZZZPackedAsset-{scale}.{opaque}.{grey}-gamut0`
+and flagged opaque as its group is, whatever its padding (an opaque grey
+atlas's padding is opaque too: alpha 255, grey 0); each image is a
+layout 1003 link to it flagged with its rendering intent. A group's only
+packable image is stored on its own. Atlases are filled next-fit, one
+closed once its area reaches the cap and the next taking the following
+dimension1 (and the same name), even for a single image. The key format
+has dimension1 only when an atlas uses it.
+
+Folders are scanned for image sets: a folder's assets are named as at the
+top, or with its name and a slash before theirs when its `Contents.json`
+says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
+identifier is the hash of that full name. Other assets in folders, and
+other folder properties, are refused.
+
+Refused: atlases whose `dmp2` row
+predictors aren't established (common: the row under an atlas's empty top
+row ties between predictors 1 and 2, which Xcode breaks neither by cost,
+summation order, nor compressed size),
+vector images (SVG, PDF), other idioms, appearances and other properties,
+and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
+translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
+without an app icon, simulator and device, deployment targets 13 to 18,
+with and without `--compress-pngs`) and six images of over 4 MiB were
+byte-identical.
 
 ## Image stacks
 
