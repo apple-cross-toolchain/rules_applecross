@@ -133,18 +133,21 @@ fn decide<'a>(rules: &'a [Compiled], path: &str) -> Option<&'a Rule> {
 pub enum Entry {
     File(PathBuf),
     Symlink(String),
+    /// A bundle where the rules expect nested code (a directory whose name
+    /// has a dot), sealed as one entry.
+    Bundle(PathBuf),
 }
 
 /// Collects the bundle's files, relative to `root`, in path order, leaving out
 /// the main executable (a path relative to `root`).
-pub fn collect(root: &Path, executable: Option<&str>) -> std::io::Result<Vec<(String, Entry)>> {
+pub fn collect(root: &Path, executable: Option<&str>, layout: Layout) -> std::io::Result<Vec<(String, Entry)>> {
     let mut out = Vec::new();
-    walk(root, root, executable, &mut out)?;
+    walk(root, root, executable, &compile(rules_v2(layout)), &mut out)?;
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(out)
 }
 
-fn walk(root: &Path, dir: &Path, executable: Option<&str>, out: &mut Vec<(String, Entry)>) -> std::io::Result<()> {
+fn walk(root: &Path, dir: &Path, executable: Option<&str>, v2: &[Compiled], out: &mut Vec<(String, Entry)>) -> std::io::Result<()> {
     let mut names: Vec<_> = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
     names.sort_by_key(|e| e.file_name());
     for entry in names {
@@ -157,7 +160,12 @@ fn walk(root: &Path, dir: &Path, executable: Option<&str>, out: &mut Vec<(String
         if meta.file_type().is_symlink() {
             out.push((rel, Entry::Symlink(std::fs::read_link(&path)?.to_string_lossy().into_owned())));
         } else if meta.is_dir() {
-            walk(root, &path, executable, out)?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.contains('.') && decide(v2, &rel).is_some_and(|r| r.nested) {
+                out.push((rel, Entry::Bundle(path)));
+            } else {
+                walk(root, &path, executable, v2, out)?;
+            }
         } else {
             out.push((rel, Entry::File(path)));
         }
@@ -184,13 +192,13 @@ pub fn build(entries: &[(String, Entry)], layout: Layout) -> Result<Value, Strin
             }
         }
         if let Some(r) = decide(&v2, rel) {
-            if r.nested {
-                return Err(format!("{rel}: sealing nested code is not supported by this codesign"));
-            }
             if !r.omit {
                 let mut d: Vec<(String, Value)> = match entry {
-                    Entry::File(_) => vec![("hash2".into(), Value::Data(Sha256::digest(contents.as_ref().unwrap()).to_vec()))],
+                    // Symlinks are never nested code.
                     Entry::Symlink(target) => vec![("symlink".into(), Value::string(target.clone()))],
+                    Entry::File(path) | Entry::Bundle(path) if r.nested => nested_seal(path).map_err(|e| format!("{e}\nIn subcomponent: {rel}"))?,
+                    Entry::File(_) => vec![("hash2".into(), Value::Data(Sha256::digest(contents.as_ref().unwrap()).to_vec()))],
+                    Entry::Bundle(_) => unreachable!("only nested rules make bundle entries"),
                 };
                 if r.optional {
                     d.push(("optional".into(), Value::Boolean(true)));
@@ -205,4 +213,54 @@ pub fn build(entries: &[(String, Entry)], layout: Layout) -> Result<Value, Strin
         ("rules", rules_value(&rules_v1(layout))),
         ("rules2", rules_value(&rules_v2(layout))),
     ]))
+}
+
+/// The seal of nested code, which must already be signed: the cdhash of its
+/// preferred architecture and, as its designated requirement, the cdhash of
+/// each architecture. Ad hoc signatures have no other requirement.
+fn nested_seal(path: &Path) -> Result<Vec<(String, Value)>, String> {
+    let executable = if path.is_dir() { bundle_executable(path)? } else { path.to_path_buf() };
+    let data = std::fs::read(&executable).map_err(|e| format!("{}: {e}", executable.display()))?;
+    let universal = macho::Universal::parse(data).map_err(|_| "code object is not signed at all".to_string())?;
+    let images = universal.images();
+    let mut hashes = Vec::new();
+    for image in &images {
+        let cds = crate::sign::code_directories(image);
+        let [(0, cd)] = &cds[..] else {
+            return Err(if cds.is_empty() {
+                "code object is not signed at all".into()
+            } else {
+                "nested code with more than one code directory is not supported by this codesign".into()
+            });
+        };
+        hashes.push(crate::sign::cdhash(cd).ok_or("nested code's hash type is not supported by this codesign")?);
+    }
+    // The preferred architecture's first, then the others in file order.
+    let first = crate::sign::preferred_slice(&images).ok_or("nested universal code without an arm64 slice is not supported by this codesign")?;
+    let order: Vec<usize> = std::iter::once(first).chain((0..images.len()).filter(|&i| i != first)).collect();
+    let hex = |h: &[u8]| h.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let requirement = order.iter().map(|&i| format!("cdhash H\"{}\"", hex(&hashes[i]))).collect::<Vec<_>>().join(" or ");
+    Ok(vec![("cdhash".into(), Value::Data(hashes[first].clone())), ("requirement".into(), Value::string(requirement))])
+}
+
+/// A nested bundle's main executable: a macOS bundle's in Contents/MacOS,
+/// a framework's beside Resources/Info.plist in its current version, or
+/// beside Info.plist at its root.
+fn bundle_executable(dir: &Path) -> Result<PathBuf, String> {
+    let candidates = [
+        (dir.join("Contents/Info.plist"), dir.join("Contents/MacOS")),
+        (dir.join("Versions/Current/Resources/Info.plist"), dir.join("Versions/Current")),
+        (dir.join("Resources/Info.plist"), dir.to_path_buf()),
+        (dir.join("Info.plist"), dir.to_path_buf()),
+    ];
+    for (info, base) in candidates {
+        if let Ok(bytes) = std::fs::read(&info) {
+            let plist = Value::parse(&bytes).map_err(|e| format!("{}: {e}", info.display()))?;
+            if let Some(exe) = plist.get("CFBundleExecutable").and_then(|v| v.as_str()) {
+                return Ok(base.join(exe));
+            }
+            break;
+        }
+    }
+    Err("code object is not signed at all".into())
 }

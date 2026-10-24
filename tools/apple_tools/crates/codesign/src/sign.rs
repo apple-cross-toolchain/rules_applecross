@@ -2,6 +2,7 @@
 //! docs/clean-room/codesign.md.
 
 use macho::{Image, MH_EXECUTE};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 const CSMAGIC_EMBEDDED_SIGNATURE: u32 = 0xfade_0cc0;
@@ -226,8 +227,9 @@ pub fn sign(image: &mut Image, inputs: &Inputs) -> Result<Vec<u8>, macho::Error>
     let super_len = 12 + 8 * lengths.len() + lengths.iter().sum::<usize>();
     let reserved = ((super_len + 8 + 15) & !15) as u32;
 
-    let linkedit_page = if image.cputype == macho::CPU_TYPE_ARM64 { 0x4000 } else { 0x1000 };
-    let dataoff = image.allocate_signature(reserved, linkedit_page)? as usize;
+    // __LINKEDIT's size in memory is rounded up to 16 KiB whatever the
+    // architecture or the page size code is hashed in.
+    let dataoff = image.allocate_signature(reserved, 0x4000)? as usize;
     let cd = code_directory(image, dataoff, inputs, &requirements);
     debug_assert_eq!(cd.len(), cd_len);
 
@@ -261,4 +263,51 @@ pub fn existing_code_directory(image: &Image) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+/// The code directories of an already signed image: the primary (slot 0)
+/// and any alternates (slots 0x1000 on), in slot order.
+pub fn code_directories(image: &Image) -> Vec<(u32, Vec<u8>)> {
+    let Some((_, dataoff, datasize)) = image.code_signature else { return Vec::new() };
+    let Some(sig) = image.data.get(dataoff as usize..(dataoff + datasize) as usize) else { return Vec::new() };
+    let be = |o: usize| sig.get(o..o + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()));
+    if be(0) != Some(CSMAGIC_EMBEDDED_SIGNATURE) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for i in 0..be(8).unwrap_or(0) as usize {
+        let (Some(slot), Some(offset)) = (be(12 + 8 * i), be(16 + 8 * i)) else { break };
+        if slot == 0 || (0x1000..0x1005).contains(&slot) {
+            let offset = offset as usize;
+            if let Some(len) = be(offset + 4) {
+                if let Some(cd) = sig.get(offset..offset + len as usize) {
+                    out.push((slot, cd.to_vec()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A code directory's cdhash: its digest by its own hash type, the first 20
+/// bytes of it.
+pub fn cdhash(cd: &[u8]) -> Option<Vec<u8>> {
+    let digest = match *cd.get(37)? {
+        1 => Sha1::digest(cd).to_vec(),
+        CS_HASHTYPE_SHA256 => Sha256::digest(cd).to_vec(),
+        _ => return None,
+    };
+    Some(digest[..20].to_vec())
+}
+
+/// The slice of a universal file codesign reads first: the one the signing
+/// Mac would run. Xcode 27's Macs are all Apple silicon, preferring arm64e
+/// to arm64; a file without either is not supported.
+pub fn preferred_slice(images: &[&Image]) -> Option<usize> {
+    const CPU_TYPE_ARM64: u32 = 0x0100_000c;
+    if images.len() == 1 {
+        return Some(0);
+    }
+    let arm64e = images.iter().position(|i| i.cputype == CPU_TYPE_ARM64 && i.cpusubtype & 0xff == 2);
+    arm64e.or_else(|| images.iter().position(|i| i.cputype == CPU_TYPE_ARM64))
 }
