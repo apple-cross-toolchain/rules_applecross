@@ -34,13 +34,15 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let mut compilation_dir: Option<PathBuf> = None;
     let mut link_dir: Option<PathBuf> = None;
     let mut inputs = Vec::new();
+    let mut minimum_deployment_target: Option<String> = None;
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
         match a.as_str() {
             "--compilation-directory" => compilation_dir = Some(PathBuf::from(value(&a)?)),
             "--link" => link_dir = Some(PathBuf::from(value(&a)?)),
-            "--output-format" | "--minimum-deployment-target" | "--target-device" | "--module" => {
+            "--minimum-deployment-target" => minimum_deployment_target = Some(value(&a)?),
+            "--output-format" | "--target-device" | "--module" => {
                 value(&a)?;
             }
             "--errors" | "--warnings" | "--notices" | "--auto-activate-custom-fonts" => {}
@@ -82,7 +84,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml)
         } else {
-            storyboard::compile(&xml).map(|c| c.files)
+            storyboard::compile(&xml, minimum_deployment_target.as_deref()).map(|c| c.files)
         };
         let files = match compiled {
             Ok(files) => files,
