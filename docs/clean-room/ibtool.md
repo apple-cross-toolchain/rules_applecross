@@ -189,6 +189,9 @@ other values of the attributes these use, is refused. Observed:
   `placeholder` and a controller's or navigation item's `title` (whose
   attributed title holds the same object). Elsewhere, `en.lproj`
   included, they are plain strings (five probes, two corpus storyboards).
+  An empty string is never localizable: it is the nib's shared empty
+  string, and an empty navigation item title is left out with its
+  attributed title (ten probes, one corpus storyboard).
 - A button: a system button is archived as a rounded-rect one
   (`UIButtonType` 1), a custom one has no `UIButtonType` and an 18-point
   default font (15 otherwise); `fixedFrame` changes nothing. A background
@@ -202,10 +205,14 @@ other values of the attributes these use, is refused. Observed:
   as 2/3), three probes.
 - A subview's constraints are its `UIViewAutolayoutConstraints`, after
   `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`: its own width
-  and height constants (no second item), width before height whatever the
-  document's order, then, for a container view, those between it and its
-  subviews or among them, ordered as a root view's are, by its subviews'
-  frames in it.
+  and height constants (no second item) and aspect ratios (the view
+  itself as the second item, width to height or height to width): width,
+  width ratio, height, height ratio, whatever the document's order. Then,
+  for a container view, those between it and its subviews or among them,
+  ordered as a root view's are, by its subviews' frames in it. A ratio is
+  a two-item constraint with its multiplier and constant as any other
+  (17 probes, on labels and containers). A text field's are in the same
+  place as a label's (five probes).
 - A plain `<view>` subview archives its subviews, background colour, the
   flags, its autoresizing mask (36 without one), the autoresizing key and
   its constraints. With a custom class it is a `UIClassSwapper` with the
@@ -254,6 +261,14 @@ other values of the attributes these use, is refused. Observed:
   is set either way; three probes). A text field with no text colour
   element is as with a nil one; a label with none is as with a declared
   `labelColor` (two probes).
+- A view's `UIBounds` is left out when its size is zero, and its
+  `UICenter` when the centre is the origin. A label or plain view without
+  a frame, or with an all-zero one, is 1000x1000 at the origin; a button
+  has no size (12 probes, one corpus storyboard).
+- A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
+  (or where it would be): wordWrap 0, characterWrap 1, clip 2,
+  headTruncation 3, middleTruncation 5; tailTruncation, the default, is
+  left out (eight probes).
 - A label adjusts its font size to fit unless `adjustsFontSizeToFit="NO"`:
   without that attribute it has `UIAdjustsFontSizeToFit` after
   `UINumberOfLines`, then `UIMinimumFontSize` (a 32-bit float) before
