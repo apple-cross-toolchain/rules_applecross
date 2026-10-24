@@ -70,7 +70,10 @@ other values of the attributes these use, is refused. Observed:
   (`labelColor`, `systemBackgroundColor`, `lightTextColor`, ...), sRGB (2)
   otherwise, after its `UISystemColorName`. The 40 colours of the system
   colour list measured on iOS are those this ibtool knows; others, and
-  system colours on tvOS, are refused.
+  system colours on tvOS, are refused. Documents from older Xcodes name
+  them with `xcode11CocoaTouchSystemColor` or `cocoaTouchSystemColor`
+  instead of `systemColor`; those archive the same (five probes, and
+  covid_tracker's and MixTag's launch screens).
 - Legacy layout guides become hidden `_UILayoutGuide` subviews, after the
   others, each with a `_UILayoutSupportConstraint` (width, priority 999),
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:

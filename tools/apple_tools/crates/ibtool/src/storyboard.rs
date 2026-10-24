@@ -284,6 +284,14 @@ impl Nib {
 }
 
 fn color(nib: &mut Nib, n: Node, colors: &[String]) -> Result<Value, String> {
+    // Xcode 11's form names the system colour (and an older fallback), the
+    // older form only a UIKit class colour; neither is declared in the
+    // document. Both are archived as that system colour.
+    if let Some(name) = n.attribute("xcode11CocoaTouchSystemColor").or_else(|| n.attribute("cocoaTouchSystemColor")) {
+        only_attributes(n, &[("key", None), ("xcode11CocoaTouchSystemColor", None), ("cocoaTouchSystemColor", None)])?;
+        let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
+        return Ok(nib.system_color(name, sc));
+    }
     if let Some(name) = n.attribute("systemColor") {
         only_attributes(n, &[("key", None), ("systemColor", None)])?;
         if !colors.iter().any(|c| c == name) {
