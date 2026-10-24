@@ -1,6 +1,7 @@
 //! The supported subset of iOS and tvOS storyboards and the nibs it compiles
 //! to; see docs/clean-room/ibtool.md.
 
+use crate::fonts;
 use crate::nib::{self, reference, Object, Value};
 use roxmltree::{Document, Node};
 use std::collections::HashMap;
@@ -242,6 +243,11 @@ impl Nib {
         Value::New(make().named(name))
     }
 
+    /// The object shared under `key`, if there is one yet.
+    fn existing(&self, key: &str) -> Option<Value> {
+        self.shared.get(key).map(|name| reference(name.clone()))
+    }
+
     fn string(&mut self, s: &str) -> Value {
         self.shared(format!("s:{s}"), || Object::new("NSString", vec![("NS.bytes", Value::Data(s.as_bytes().to_vec()))]))
     }
@@ -300,15 +306,43 @@ fn color(nib: &mut Nib, n: Node, colors: &[String]) -> Result<Value, String> {
         let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).unwrap().1;
         return Ok(nib.system_color(name, sc));
     }
+    // Equal colours are one object, compared at 10 significant digits. A
+    // grey is archived as given (no conversion), named when it's exactly
+    // black, white or clear.
+    if n.attribute("customColorSpace") == Some("genericGamma22GrayColorSpace") {
+        only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
+        let c = [number(attr(n, "white")?)?, number(attr(n, "alpha")?)?].map(significant_10);
+        let name = match c {
+            [0.0, 1.0] => Some("blackColor"),
+            [1.0, 1.0] => Some("whiteColor"),
+            [0.0, 0.0] => Some("clearColor"),
+            _ => None,
+        };
+        if let Some(name) = name {
+            return Ok(nib.system_color(name, &SystemColor::Gray(c)));
+        }
+        if let Some(v) = nib.existing(&format!("color:gray:{c:?}")) {
+            return Ok(v);
+        }
+        let (components, text) = color_components(&GRAY_KEYS, &c);
+        let mut keys = vec![("UIColorComponentCount", Value::Int(2))];
+        keys.extend(components);
+        keys.push(("NSWhite", Value::Data(text)));
+        keys.push(("NSColorSpace", Value::Int(4)));
+        return Ok(nib.shared(format!("color:gray:{c:?}"), || Object::new("UIColor", keys).with_fallback("NSColor")));
+    }
     only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", Some("sRGB"))])?;
-    let c = [attr(n, "red")?, attr(n, "green")?, attr(n, "blue")?, attr(n, "alpha")?].map(number);
-    let c = [c[0].clone()?, c[1].clone()?, c[2].clone()?, c[3].clone()?];
+    let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?].map(significant_10);
+    let key = format!("color:rgb:{c:?}");
+    if let Some(v) = nib.existing(&key) {
+        return Ok(v);
+    }
     let (components, text) = color_components(&RGB_KEYS, &c);
     let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
     keys.extend(components);
     keys.push(("NSRGB", Value::Data(text)));
     keys.push(("NSColorSpace", Value::Int(2)));
-    Ok(Value::New(Object::new("UIColor", keys).with_fallback("NSColor")))
+    Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")))
 }
 
 /// A text style's font as Xcode archives it: name, traits and the size
@@ -322,30 +356,58 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
     })
 }
 
-/// A font: `<fontDescription>`, or a control's default system font.
+/// A font: `<fontDescription>`, or a control's default system font. Equal
+/// fonts are one object.
 fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Value, String> {
-    let (style, size) = match n {
+    let (style, name, size) = match n {
         Some(n) => {
             if let Some(style) = n.attribute("style") {
                 only_attributes(n, &[("key", None), ("style", None)])?;
-                (Some(style), 0.0)
+                (Some(style), None, 0.0)
+            } else if let Some(name) = n.attribute("name") {
+                only_attributes(n, &[("key", None), ("name", None), ("family", None), ("pointSize", None)])?;
+                (None, Some(name), number(attr(n, "pointSize")?)?)
             } else {
                 only_attributes(n, &[("key", None), ("type", Some("system")), ("pointSize", None)])?;
-                (None, number(attr(n, "pointSize")?)?)
+                (None, None, number(attr(n, "pointSize")?)?)
             }
         }
-        None => (None, default_size.ok_or("a font is required")?),
+        None => (None, None, default_size.ok_or("a font is required")?),
     };
+    // Xcode archives a font it finds under its own name.
+    let name = name.map(|name| fonts::ALIASES.iter().find(|(a, _)| *a == name).map_or(name, |(_, to)| to));
+    let key = format!("font:{style:?}:{name:?}:{size}");
+    if let Some(v) = nib.existing(&key) {
+        return Ok(v);
+    }
     let mut values = Vec::new();
-    let (font_name, traits, ns_size) = match style {
-        Some(style) => {
+    let (font_name, traits, ns_size, system) = match (style, name) {
+        (Some(style), _) => {
             let (name, traits, ns_size) = text_style(nib.platform, style)?;
             let name_value = nib.string(name);
             values.push(("UIFontName", name_value));
             values.push(("UIIBTextStyle", nib.string(style)));
-            (name, traits, ns_size)
+            (name, traits, ns_size, true)
         }
-        None => {
+        (None, Some(name)) => {
+            // One Xcode doesn't find is archived differently (see ibtool.md).
+            let traits = match fonts::FONTS.binary_search_by(|(n, _)| n.cmp(&name)) {
+                Ok(i) => fonts::FONTS[i].1,
+                Err(_) => return fail(format!("font {name} is not one Xcode's ibtool finds for iOS, which is not supported by this ibtool")),
+            };
+            values.push(("UIFontName", nib.string(name)));
+            let name_key = nib.string("NSFontNameAttribute");
+            let name_value = nib.string(name);
+            let size_key = nib.string("NSFontSizeAttribute");
+            let size_value = nib.double_number(size);
+            let attributes = nib.array("NSDictionary", vec![name_key, name_value, size_key, size_value]);
+            values.push(("UIFontDescriptor", Value::New(Object::new("UIFontDescriptor", vec![
+                ("UIFontDescriptorAttributes", attributes),
+                ("UIFontDescriptorOptions", Value::Int(0x8000_0000)),
+            ]))));
+            (name, traits, size, false)
+        }
+        (None, None) => {
             let name = ".SFUI-Regular";
             values.push(("UIFontName", nib.string(name)));
             let usage_key = nib.string("NSCTFontUIUsageAttribute");
@@ -357,7 +419,7 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
                 ("UIFontDescriptorAttributes", attributes),
                 ("UIFontDescriptorOptions", Value::Int(2147517444)),
             ]))));
-            (name, 0, size)
+            (name, 0, size, true)
         }
     };
     values.push(("UIFontPointSize", Value::Double(size)));
@@ -365,10 +427,10 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
     values.push(("UIFontPointSizeForScaling", Value::Double(0.0)));
     values.push(("UIFontMaximumPointSizeAfterScaling", Value::Double(0.0)));
     values.push(("UIFontTraits", Value::Int(traits)));
-    values.push(("UISystemFont", Value::Bool(true)));
+    values.push(("UISystemFont", Value::Bool(system)));
     values.push(("NSName", nib.string(font_name)));
     values.push(("NSSize", Value::Double(ns_size)));
-    Ok(Value::New(Object::new("UIFont", values).with_fallback("NSFont")))
+    Ok(nib.shared(key, || Object::new("UIFont", values).with_fallback("NSFont")))
 }
 
 struct Frame {
@@ -395,6 +457,8 @@ fn view_name(id: &str) -> String {
 /// What compiling a scene's view collects besides the view itself.
 struct Scene<'a> {
     vc_id: &'a str,
+    /// The document's system colours.
+    colors: &'a [String],
     /// Subviews in depth-first preorder, for the nib's objects.
     subviews: Vec<String>,
     /// Control actions: (selector, source, event mask), in depth-first order.
@@ -432,28 +496,42 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 ("lineBreakMode", Some("tailTruncation")), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "fontDescription", "nil"])?;
-            if child(n, "nil", "textColor").is_none() || child(n, "nil", "highlightedColor").is_none() {
-                return fail("labels with a text or highlighted colour are not supported by this ibtool");
+            only_children(n, &["rect", "fontDescription", "nil", "color"])?;
+            if child(n, "nil", "highlightedColor").is_none() {
+                return fail("labels with a highlighted colour are not supported by this ibtool");
             }
+            let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
+                (Some(c), None) => Some(c),
+                (None, Some(_)) => None,
+                _ => return fail("a label needs one text colour or nil"),
+            };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             values.push(("UIContentMode", Value::Int(7)));
-            values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
             values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIText", nib.string(attr(n, "text")?)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
-            values.push(("UITextColor", nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0]))));
+            // A declared text colour, even labelColor, stays as it is when
+            // the trait collection changes.
+            let declared_color = text_color.is_some();
+            let text_color = match text_color {
+                Some(c) => color(nib, c, scene.colors)?,
+                None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
+            };
+            values.push(("UITextColor", text_color));
             values.push(("UIShadowOffset", doubles(&[0.0, -1.0])));
             if let Some(lines) = n.attribute("numberOfLines") {
                 values.push(("UINumberOfLines", Value::Int(lines.parse().map_err(|_| format!("not a number: {lines}"))?)));
             }
             values.push(("UITextAlignment", Value::Int(text_alignment(attr(n, "textAlignment")?)?)));
-            values.push(("UIDisableUpdateTextColorOnTraitCollectionChange", Value::Bool(false)));
+            values.push(("UIDisableUpdateTextColorOnTraitCollectionChange", Value::Bool(declared_color)));
             Object::new("UILabel", values)
         }
         "textField" => {
@@ -474,7 +552,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             values.push(("UIClipsToBounds", Value::Bool(true)));
-            values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIContentHorizontalAlignment", Value::Int(1)));
@@ -513,7 +593,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
-            values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             let state = nib.int_number(0);
@@ -544,7 +626,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
-            values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
             values.push(("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -711,7 +795,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Com
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, subviews: Vec::new(), actions: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, colors: &colors, subviews: Vec::new(), actions: Vec::new(), guides: Vec::new() };
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
