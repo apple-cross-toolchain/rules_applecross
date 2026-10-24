@@ -69,7 +69,8 @@ guides. Subviews: labels (system font, a font Xcode finds for iOS, or the
 Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
 rounded-rect buttons with a normal-state title and touch-up-inside actions
-on the controller, vertical stack views, image views of named images.
+on the controller, vertical stack views, image views of named images,
+plain views containing any of these.
 Constraints between those, with constants, and labels' and image views' own
 width and height; outlets from the controller into its view. Everything else, and
 other values of the attributes these use, is refused. Observed:
@@ -100,7 +101,11 @@ other values of the attributes these use, is refused. Observed:
   with alpha 1, 1 or 0; other greys, including 0.5, 1/3, 2/3 and white
   with alpha 0, have no name (17 probes, as text and background colours).
   Calibrated and device spaces and Display P3 are converted (calibrated
-  white 0.5 is archived as 0.572), so they are refused.
+  white 0.5 is archived as 0.572), so they are refused, except calibrated
+  white 0 and 1 (most of the corpus's): 0 is archived as 0; 1 as
+  `whiteColor` when opaque and otherwise as the float after 1
+  (1.0000001192092896, no `-Double`, text `1`), named as the grey would
+  be (eight probes).
 - Equal colours are one object, compared after rounding to 10 digits
   (0.18039215686 and 0.1803921568627451 share), sRGB and grey alike; a
   named colour is shared only by name (`whiteColor` and a white
@@ -159,11 +164,22 @@ other values of the attributes these use, is refused. Observed:
   view and a nested view, between axes, and between a width and a
   height (Xcode drops some of those).
 - The nib's objects: the placeholders, the root view, the safe-area guide,
-  its document constraints, the legacy guides, the subviews depth first,
-  then the subviews' own constraints, in the same order.
-- A subview's own constraints (a width or height constant, no second item)
-  are its `UIViewAutolayoutConstraints`, width before height whatever the
-  document's order, after `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`.
+  its document constraints, the legacy guides, then breadth first: each
+  view in turn from a queue lists the constraints it holds, then its
+  subviews, which join the queue (six probes nesting views two deep beside
+  image views with their own constraints; depth first and level by level
+  each fail one).
+- A subview's constraints are its `UIViewAutolayoutConstraints`, after
+  `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`: its own width
+  and height constants (no second item), width before height whatever the
+  document's order, then, for a container view, those between it and its
+  subviews or among them, ordered as a root view's are, by its subviews'
+  frames in it.
+- A plain `<view>` subview archives its subviews, background colour, the
+  flags, its autoresizing mask (36 without one), the autoresizing key and
+  its constraints. With a custom class it is a `UIClassSwapper` with the
+  same values, then `UIClassName` (the runtime name, as a controller's)
+  and `UIOriginalClassName` `UIView`.
 - With a `<device>`, the root view is laid out at the device's size,
   whatever its frame says: 26 device ids measured in both orientations
   (landscape swaps width and height; `retina3_5` and `retina6_72` are
