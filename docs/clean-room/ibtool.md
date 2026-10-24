@@ -91,7 +91,10 @@ other values of the attributes these use, is refused. Observed:
   (`labelColor`, `systemBackgroundColor`, `lightTextColor`, ...), sRGB (2)
   otherwise, after its `UISystemColorName`. The 40 colours of the system
   colour list measured on iOS are those this ibtool knows; others, and
-  system colours on tvOS, are refused. Documents from older Xcodes name
+  system colours on tvOS, are refused. A system colour needn't be defined
+  in the document's resources, and Xcode 11's forms with a fallback name or
+  components beside `systemColor` archive the same (four probes). Documents
+  from older Xcodes name
   them with `xcode11CocoaTouchSystemColor` or `cocoaTouchSystemColor`
   instead of `systemColor`; those archive the same (five probes, and
   covid_tracker's and MixTag's launch screens).
@@ -177,6 +180,9 @@ other values of the attributes these use, is refused. Observed:
   subviews, which join the queue (six probes nesting views two deep beside
   image views with their own constraints; depth first and level by level
   each fail one).
+- A multiplier other than 1 is `NSMultiplier` after `NSFirstAttribute`: a
+  double holding the float nearest it (`1.2` as 1.2000000476837158, `2:3`
+  as 2/3), three probes.
 - A subview's constraints are its `UIViewAutolayoutConstraints`, after
   `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`: its own width
   and height constants (no second item), width before height whatever the
@@ -204,7 +210,16 @@ other values of the attributes these use, is refused. Observed:
 - A controller's `title` is its swapper's `UITitle`, first;
   `useStoryboardIdentifierAsRestorationIdentifier` adds
   `UIRestorationIdentifier` (the identifier's string) after
-  `UIStoryboardIdentifier`; `userLabel` changes nothing. A label's
+  `UIStoryboardIdentifier`. `userLabel` (on any element) and a
+  controller's simulated metrics (`simulatedMetricsContainer`,
+  `simulatedNavigationBarMetrics`, `<nil key="simulated...">`, ...) change
+  nothing (five probes). A
+  `<navigationItem>` without items is the swapper's `UINavigationItem`,
+  after `UITitle`: its title, the same string as an `NSAttributedString`
+  with no attributes, the nib's one empty array as `UICenterItemGroups`
+  (so the nib's visible windows and the rest reuse it) and
+  `UILargeTitleDisplayMode` (automatic 0, always 1, never 2), listed last
+  in the controller nib's objects (six probes). A label's
   `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`; a text
   field's `placeholder` is `UIPlaceholder` after `UIFont`.
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an

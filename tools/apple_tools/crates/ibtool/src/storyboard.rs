@@ -27,9 +27,19 @@ fn child<'a, 'i>(n: Node<'a, 'i>, tag: &'a str, key: &str) -> Option<Node<'a, 'i
     children(n, tag).find(|c| c.attribute("key") == Some(key))
 }
 
+/// Interface Builder's own settings for how a controller is drawn while
+/// editing, which compiled storyboards don't record (four probes).
+const EDITOR_ONLY: [&str; 9] = [
+    "simulatedMetricsContainer", "simulatedNavigationBarMetrics", "simulatedStatusBarMetrics", "simulatedTabBarMetrics",
+    "simulatedToolbarMetrics", "simulatedOrientationMetrics", "simulatedScreenMetrics", "freeformSimulatedSizeMetrics", "size",
+];
+
 fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
-        if !allowed.contains(&c.tag_name().name()) {
+        let editor_only = n.has_tag_name("viewController")
+            && (EDITOR_ONLY.contains(&c.tag_name().name()) && (!c.has_tag_name("size") || c.attribute("key") == Some("freeformSize"))
+                || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
+        if !allowed.contains(&c.tag_name().name()) && !editor_only {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
         }
     }
@@ -39,7 +49,8 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
 /// Refuses attributes other than `allowed`, and values other than those
 /// given (a `None` value accepts any).
 fn only_attributes(n: Node, allowed: &[(&str, Option<&str>)]) -> Result<(), String> {
-    for a in n.attributes() {
+    // An object's name in Interface Builder's outline; not compiled.
+    for a in n.attributes().filter(|a| a.name() != "userLabel") {
         match allowed.iter().find(|(name, _)| *name == a.name()) {
             Some((_, Some(v))) if *v != a.value() => {
                 return fail(format!("{}=\"{}\" on <{}> is not supported by this ibtool", a.name(), a.value(), n.tag_name().name()))
@@ -145,25 +156,6 @@ const SYSTEM_COLORS: &[(&str, SystemColor)] = &[
     ("tertiarySystemGroupedBackgroundColor", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
     ("tintColor", SystemColor::Rgb([0.0, 0.5333333333, 1.0, 1.0])),
 ];
-
-/// The system colours a document declares, which must be iOS ones this
-/// ibtool knows; their values are Xcode's, not the document's.
-fn system_colors(doc: &Document, platform: Platform) -> Result<Vec<String>, String> {
-    let mut out = Vec::new();
-    for r in doc.root_element().children().filter(|c| c.has_tag_name("resources")) {
-        for sc in children(r, "systemColor") {
-            let name = attr(sc, "name")?.to_string();
-            if platform != Platform::Ios {
-                return fail(format!("system color {name}: system colors outside iOS are not supported by this ibtool"));
-            }
-            if !SYSTEM_COLORS.iter().any(|(n, _)| *n == name) {
-                return fail(format!("system color {name} is not supported by this ibtool"));
-            }
-            out.push(name);
-        }
-    }
-    Ok(out)
-}
 
 /// Colour components as Interface Builder archives them: each rounded to 10
 /// significant digits, as a float followed by the double when the float
@@ -275,6 +267,11 @@ impl Nib {
         ]))
     }
 
+    /// The nib's one empty array, encoded where first used.
+    fn empty_array(&mut self) -> Value {
+        self.shared("empty array".into(), || Object::new("NSArray", vec![("NSInlinedValue", Value::Bool(true))]))
+    }
+
     fn int_number(&mut self, i: i64) -> Value {
         self.shared(format!("i:{i}"), || Object::new("NSNumber", vec![("NS.intval", Value::Int(i))]))
     }
@@ -308,21 +305,30 @@ impl Nib {
     }
 }
 
-fn color(nib: &mut Nib, n: Node, colors: &[String]) -> Result<Value, String> {
+fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    // A system colour is Xcode's own whatever the document says: its
+    // definition in the resources, or Xcode 11's fallback name and
+    // components beside it.
+    if let Some(name) = n.attribute("systemColor") {
+        only_attributes(n, &[
+            ("key", None), ("systemColor", None), ("cocoaTouchSystemColor", None), ("red", None), ("green", None),
+            ("blue", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None),
+        ])?;
+        if nib.platform != Platform::Ios {
+            return fail(format!("system color {name}: system colors outside iOS are not supported by this ibtool"));
+        }
+        let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
+        return Ok(nib.system_color(name, sc));
+    }
     // Xcode 11's form names the system colour (and an older fallback), the
     // older form only a UIKit class colour; neither is declared in the
     // document. Both are archived as that system colour.
     if let Some(name) = n.attribute("xcode11CocoaTouchSystemColor").or_else(|| n.attribute("cocoaTouchSystemColor")) {
         only_attributes(n, &[("key", None), ("xcode11CocoaTouchSystemColor", None), ("cocoaTouchSystemColor", None)])?;
-        let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
-        return Ok(nib.system_color(name, sc));
-    }
-    if let Some(name) = n.attribute("systemColor") {
-        only_attributes(n, &[("key", None), ("systemColor", None)])?;
-        if !colors.iter().any(|c| c == name) {
-            return fail(format!("system color {name} is not defined in the document"));
+        if nib.platform != Platform::Ios {
+            return fail(format!("system color {name}: system colors outside iOS are not supported by this ibtool"));
         }
-        let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).unwrap().1;
+        let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
         return Ok(nib.system_color(name, sc));
     }
     if !nib.color_matched {
@@ -433,6 +439,31 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     keys.push(("NSRGB", Value::Data(text)));
     keys.push(("NSColorSpace", Value::Int(2)));
     Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")))
+}
+
+/// A view controller's navigation item: its title, also as an attributed
+/// string without attributes, no items, and the large title mode.
+fn navigation_item(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    only_attributes(n, &[("key", Some("navigationItem")), ("title", None), ("largeTitleDisplayMode", None), ("id", None)])?;
+    if n.has_children() {
+        return fail("navigation items with bar button items or other children are not supported by this ibtool");
+    }
+    let mut values = Vec::new();
+    if let Some(title) = n.attribute("title") {
+        values.push(("UITitle", nib.string(title)));
+        let string = nib.string(title);
+        let attributes = nib.array("NSDictionary", Vec::new());
+        values.push(("UIAttributedTitle", Value::New(Object::new("NSAttributedString", vec![("NSString", string), ("NSAttributes", attributes)]))));
+    }
+    values.push(("UICenterItemGroups", nib.empty_array()));
+    let mode = match n.attribute("largeTitleDisplayMode") {
+        None | Some("automatic") => 0,
+        Some("always") => 1,
+        Some("never") => 2,
+        Some(other) => return fail(format!("largeTitleDisplayMode {other} is not supported by this ibtool")),
+    };
+    values.push(("UILargeTitleDisplayMode", Value::Int(mode)));
+    Ok(Value::New(Object::new("UINavigationItem", values).named("navigation item")))
 }
 
 /// A text style's font as Xcode archives it: name, traits and the size
@@ -571,8 +602,6 @@ fn view_name(id: &str) -> String {
 /// What compiling a scene's view collects besides the view itself.
 struct Scene<'a> {
     vc_id: &'a str,
-    /// The document's system colours.
-    colors: &'a [String],
     /// ibtool's `--module`.
     module: Option<&'a str>,
     /// Subviews in depth-first preorder, with their superview's name (None
@@ -640,11 +669,11 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     let mut sizes = Vec::new();
     let mut others: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, &str)> = Vec::new();
     for c in children(cs, "constraint") {
-        only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("constant", None), ("id", None)])?;
+        only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None), ("constant", None), ("id", None)])?;
         let first = c.attribute("firstItem").unwrap_or(id);
         let a = attr(c, "firstAttribute")?;
         let Some(second) = c.attribute("secondItem") else {
-            if first != id || c.attribute("secondAttribute").is_some() {
+            if first != id || c.attribute("secondAttribute").is_some() || c.attribute("multiplier").is_some() {
                 return fail("a subview's constraint without a second item on another view is not supported by this ibtool");
             }
             let rank = ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
@@ -681,7 +710,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     }
     for (_, _, c, first, second) in others {
         let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
-        made.push(constraint(item(first), layout_attribute(attr(c, "firstAttribute")?)?, Some((item(second), layout_attribute(attr(c, "secondAttribute")?)?)), constant, None));
+        made.push(multiplied(constraint(item(first), layout_attribute(attr(c, "firstAttribute")?)?, Some((item(second), layout_attribute(attr(c, "secondAttribute")?)?)), constant, None), multiplier(c)?));
     }
     for m in made {
         let constraint_name = nib.fresh();
@@ -741,7 +770,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             // the trait collection changes.
             let declared_color = text_color.is_some();
             let text_color = match text_color {
-                Some(c) => color(nib, c, scene.colors)?,
+                Some(c) => color(nib, c)?,
                 None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
             };
             values.push(("UITextColor", text_color));
@@ -888,7 +917,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 if c.attribute("key") != Some("backgroundColor") {
                     return fail("view colours other than a background colour are not supported by this ibtool");
                 }
-                values.push(("UIBackgroundColor", color(nib, c, scene.colors)?));
+                values.push(("UIBackgroundColor", color(nib, c)?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIOpaque", Value::Bool(true)));
@@ -951,7 +980,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 if c.attribute("key") != Some("tintColor") {
                     return fail("image view colours other than a tint colour are not supported by this ibtool");
                 }
-                values.push(("UITintColor", color(nib, c, scene.colors)?));
+                values.push(("UITintColor", color(nib, c)?));
             }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -1100,6 +1129,29 @@ fn safe_area_guide(nib: &mut Nib, root: &str) -> Value {
     ]).named("safe area guide"))
 }
 
+/// A constraint's multiplier, as Xcode archives it: a float's value (a
+/// ratio `a:b` divided), or None for 1.
+fn multiplier(c: Node) -> Result<Option<f64>, String> {
+    let Some(m) = c.attribute("multiplier") else { return Ok(None) };
+    let value = match m.split_once(':') {
+        Some((a, b)) => number(a)? / number(b)?,
+        None => number(m)?,
+    };
+    Ok(if value == 1.0 { None } else { Some(value as f32 as f64) })
+}
+
+/// `constraint` with `NSMultiplier`, after the first attribute.
+fn multiplied(c: Value, m: Option<f64>) -> Value {
+    match (c, m) {
+        (Value::New(mut o), Some(m)) => {
+            let at = o.values.iter().position(|(k, _)| *k == "NSFirstAttribute").unwrap() + 1;
+            o.values.insert(at, ("NSMultiplier", Value::Double(m)));
+            Value::New(o)
+        }
+        (c, _) => c,
+    }
+}
+
 /// A view controller's legacy top or bottom layout guide: a hidden view with
 /// a width constraint UIKit replaces, and the constraints that pin it.
 fn legacy_guide(nib: &mut Nib, root: &str, kind: &'static str) -> (Value, Vec<String>) {
@@ -1158,15 +1210,14 @@ fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections:
     let top = nib.array("NSArray", top);
     let objects = nib.array("NSArray", objects);
     let connections = nib.array("NSArray", connections);
-    let empty = Value::New(Object::new("NSArray", vec![("NSInlinedValue", Value::Bool(true))]).named("empty"));
     Object::new("NSObject", vec![
         ("UINibTopLevelObjectsKey", top),
         ("UINibObjectsKey", objects),
         ("UINibConnectionsKey", connections),
-        ("UINibVisibleWindowsKey", empty),
-        ("UINibAccessibilityConfigurationsKey", reference("empty")),
-        ("UINibTraitStorageListsKey", reference("empty")),
-        ("UINibKeyValuePairsKey", reference("empty")),
+        ("UINibVisibleWindowsKey", nib.empty_array()),
+        ("UINibAccessibilityConfigurationsKey", nib.empty_array()),
+        ("UINibTraitStorageListsKey", nib.empty_array()),
+        ("UINibKeyValuePairsKey", nib.empty_array()),
         ("IBUINibLNEVersionKey", Value::Int(1)),
     ])
 }
@@ -1197,7 +1248,6 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let major: u32 = target.split('.').next().and_then(|m| m.parse().ok()).ok_or_else(|| format!("not a deployment target: {target}"))?;
         major < 17
     };
-    let colors = system_colors(&doc, platform)?;
     let color_matched = root.attribute("colorMatched") == Some("YES");
     let initial = root.attribute("initialViewController");
     let mut files = Vec::new();
@@ -1214,7 +1264,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("userLabel", None), ("sceneMemberID", Some("viewController")),
         ])?;
         let class_name = runtime_class_name(vc, module, "UIViewController")?;
-        only_children(vc, &["view", "layoutGuides", "connections"])?;
+        only_children(vc, &["view", "layoutGuides", "connections", "navigationItem"])?;
         let vc_id = attr(vc, "id")?;
         let view = children(vc, "view").next().ok_or("view controller without a view")?;
         only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints"])?;
@@ -1222,7 +1272,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, colors: &colors, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), guides: Vec::new() };
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -1298,7 +1348,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if !subview_values.is_empty() {
             values.push(("UISubviews", nib.array("NSMutableArray", subview_values)));
         }
-        values.push(("UIBackgroundColor", color(&mut nib, background, &colors)?));
+        values.push(("UIBackgroundColor", color(&mut nib, background)?));
         values.push(("UIDeepDrawRect", Value::Bool(true)));
         values.push(("UIOpaque", Value::Bool(true)));
         values.push(("UIAutoresizeSubviews", Value::Bool(true)));
@@ -1332,7 +1382,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut xml_constraints: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
         for cs in children(view, "constraints") {
             for c in children(cs, "constraint") {
-                only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("constant", None), ("id", None)])?;
+                only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None), ("constant", None), ("id", None)])?;
                 let first = c.attribute("firstItem").unwrap_or(view_id);
                 let second = c.attribute("secondItem").unwrap_or(view_id);
                 if c.attribute("secondItem").is_none() && c.attribute("secondAttribute").is_none() {
@@ -1383,7 +1433,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
             let name = nib.fresh();
             constraint_names.push(name.clone());
-            match constraint(first, layout_attribute(attr(*c, "firstAttribute")?)?, second, constant, None) {
+            match multiplied(constraint(first, layout_attribute(attr(*c, "firstAttribute")?)?, second, constant, None), multiplier(*c)?) {
                 Value::New(o) => constraint_values.push(Value::New(o.named(name))),
                 _ => unreachable!(),
             }
@@ -1464,6 +1514,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if let Some(title) = vc.attribute("title") {
             swapper.push(("UITitle", vnib.string(title)));
         }
+        if let Some(item) = child(vc, "navigationItem", "navigationItem") {
+            swapper.push(("UINavigationItem", navigation_item(&mut vnib, item)?));
+        }
         swapper.push(("UIExternalObjectsTableForViewLoading", external));
         swapper.push(("UINibName", nib_name));
         if let Some(identifier) = vc.attribute("storyboardIdentifier") {
@@ -1481,7 +1534,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let vc_root = root_object(
             &mut vnib,
             vec![owner, responder, storyboard, swapper],
-            vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")],
+            {
+                let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+                if child(vc, "navigationItem", "navigationItem").is_some() {
+                    objects.push(reference("navigation item"));
+                }
+                objects
+            },
             connections,
         );
         // A scene neither initial nor identified can't be loaded, and
