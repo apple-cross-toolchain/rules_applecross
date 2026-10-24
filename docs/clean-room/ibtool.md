@@ -110,7 +110,10 @@ other values of the attributes these use, is refused. Observed:
   `labelColor` without it.
 - A view gets `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints` only
   when its element says `translatesAutoresizingMaskIntoConstraints="NO"`
-  (labels, a text field, a button and a stack view, with it removed).
+  (labels, a text field, a button and a stack view, with it removed) and a
+  constraint is on it: as an item, by its own constraints, or as a stack
+  view's arranged subview. A label that says so but has no constraint
+  doesn't get it.
 - A font named in `<fontDescription name=...>` is resolved from a set of iOS
   fonts that is neither the Mac's nor the simulator's: of the 1,182
   PostScript names macOS 27 lists (CoreText) and the 304 the iOS 27
@@ -130,12 +133,36 @@ other values of the attributes these use, is refused. Observed:
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:
   leading, top, height; bottom: leading, height, view bottom to guide
   bottom), which the root view's constraints list first.
-- The document's constraints follow, by first attribute: centerX, centerY,
-  trailing, leading, width, bottom, top, height, whatever their order or
-  ids in the document (measured with all eight on one view, in either
-  document order and with the items swapped).
-- The nib's objects: the placeholders, the root view, its document
-  constraints, the guides, the subviews depth first. Its connections: the
+- The document's constraints follow, whatever their order or ids in the
+  document. They are grouped by item: a constraint with the root view by
+  its other item, one between siblings (subviews, the safe-area guide) by
+  its first item; the safe-area guide's group first, whatever its id, then
+  the subviews' by id (byte order). In a group, the constraints with the
+  root view come first, ordered by their two attributes as a pair (the
+  lower rank, then the higher) in centerX, centerY, trailing, leading,
+  width, bottom, top, height; then those between siblings, by first and
+  then second attribute in centerX, trailing, leading, centerY, bottom,
+  top, width, height. Measured with 176 constraints on two labels, the
+  root view and the safe-area guide at once, in three document orders,
+  eight random subsets and some 30 smaller probes; legacy guides as the
+  second item of a sibling constraint fit too. Constraints with equal keys
+  (the same items and the same pair of attributes either way round) come
+  in an order that changes with the rest of the set, so they are refused,
+  as are constraints from a legacy guide or between one and the root view
+  (the top guide's group comes first and the bottom's last, whatever
+  their ids: not established), between axes, and between a width and a
+  height (Xcode drops some of those).
+- The nib's objects: the placeholders, the root view, the safe-area guide,
+  its document constraints, the legacy guides, the subviews depth first.
+- The safe-area guide in the objects is an unowned `UILayoutGuide` with an
+  empty identifier. When a constraint uses the guide, the root view also
+  owns a second one, archived where a constraint first refers to it (in
+  the order above): identifier `UIViewSafeAreaLayoutGuide`, locked,
+  archived and allowing negative dimensions, with four system constraints
+  pinning its top, left, bottom and right to the view's
+  (`UIViewSafeAreaLayoutGuide-top`, ... as `NSLayoutIdentifier`, not
+  archived), listed in the view's `UIViewLayoutGuides` after its
+  constraints. Its connections: the
   controller's outlets, `view`, then control actions.
 - A view nib that refers to its controller (an outlet into it, an action
   to it) has an `UpstreamPlaceholder-1` proxy, which the controller's nib
