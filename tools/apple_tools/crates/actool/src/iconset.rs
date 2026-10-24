@@ -48,7 +48,7 @@ fn idiom_value(idiom: &str) -> u16 {
 
 /// The growing binary-tree packer (Jake Gordon's), with 2 px gutters:
 /// blocks of (w + 2, h + 2), placed 2 px in.
-mod pack {
+pub(crate) mod pack {
     struct Node {
         x: u32,
         y: u32,
@@ -128,7 +128,8 @@ mod pack {
 
 /// Copies `img` into an atlas of `aw` x `ah` (rows bottom-up, as Core
 /// Graphics draws them) at `x`, `y`, repeating its edge pixels one pixel out.
-fn place(atlas: &mut [u8], stride: usize, ah: u32, img: &[u8], x: u32, y: u32, w: u32, h: u32) {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn place(atlas: &mut [u8], stride: usize, ah: u32, img: &[u8], x: u32, y: u32, w: u32, h: u32) {
     let top = (ah - y - h) as i64;
     for r in -1..=h as i64 {
         let sr = r.clamp(0, h as i64 - 1) as usize;
@@ -146,7 +147,7 @@ fn place(atlas: &mut [u8], stride: usize, ah: u32, img: &[u8], x: u32, y: u32, w
 /// whose renditions have no idiom or subtype.
 pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool) -> Result<Compiled, String> {
     let wanted = |s: &&Slot| (s.idiom == "iphone" && phone) || (s.idiom == "ipad" && pad) || (s.idiom == "watch" && watch) || (s.idiom == "mac" && mac);
-    let version = if mac { car::chunked_version("macosx") } else { car::chunked_version("") };
+    let version = car::MlecVersions::for_platform(if mac { "macosx" } else { "" });
     // Rendition keys: macOS catalogs have no idiom or subtype attribute.
     let group_attrs = |idiom: u16, subtype: u16| if mac { Vec::new() } else { vec![(car::ATTR_IDIOM, idiom), (car::ATTR_SUBTYPE, subtype)] };
     let slots: Vec<&Slot> = slots.iter().filter(wanted).collect();
@@ -260,8 +261,21 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             if mac && stride * (ah as usize) < 16384 {
                 return Err(format!("{name}: small atlases are not supported by this actool for macOS"));
             }
-            let atlas_name = format!("ZZZZPackedAsset-{scale}.{}.0-gamut0", if mac { 0 } else { 1 });
-            renditions.push(Rendition { attrs: key.clone(), csi: car::packed_csi(&atlas_name, aw, ah, scale, &pixels, version) });
+            // An iOS atlas's name and MLEC version say whether its icons
+            // are opaque; one mixing opaque and translucent icons is not
+            // established.
+            let opaque = if mac {
+                false
+            } else {
+                let o: Vec<bool> = atlas.iter().map(|i| opaque_image(&i.image)).collect();
+                if o.iter().any(|&x| x != o[0]) {
+                    return Err(format!("{name}: an atlas of opaque and translucent icons is not supported by this actool"));
+                }
+                o[0]
+            };
+            let atlas_name = format!("ZZZZPackedAsset-{scale}.{}.0-gamut0", opaque as u8);
+            let atlas_version = if mac { version } else { car::MlecVersions::opacity(opaque) };
+            renditions.push(Rendition { attrs: key.clone(), csi: car::packed_csi(&atlas_name, aw, ah, scale, &pixels, atlas_version) });
         }
         standalone.sort_by_key(|i| i.dimension2);
         for i in standalone {
@@ -269,7 +283,13 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             if mac && car::stride(w as usize) * (h as usize) < 16384 {
                 return Err(format!("{}: small standalone images are not supported by this actool for macOS", i.filename));
             }
-            renditions.push(Rendition { attrs: image_attrs(i), csi: car::icon_image_csi(&i.filename, w, h, scale, &i.image.premultiplied_bgra(), version) });
+            // Below 40 pixels wide Xcode run-length encodes an iOS icon
+            // (method 1), which this actool doesn't.
+            if !mac && w < 40 {
+                return Err(format!("{}: an icon image narrower than 40 pixels is run-length encoded by Xcode, which is not supported by this actool", i.filename));
+            }
+            let image_version = if mac { version } else { car::MlecVersions::opacity(opaque_image(&i.image)) };
+            renditions.push(Rendition { attrs: image_attrs(i), csi: car::icon_image_csi(&i.filename, w, h, scale, &i.image.premultiplied_bgra(), image_version) });
         }
     }
 
@@ -296,10 +316,10 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             items.iter().find(|i| i.scale == scale && i.dimension2 == rank(size) && sizes.contains(&size)).map(|i| &i.image).ok_or_else(|| format!("{name}: a macOS icon set needs a {size}pt @{scale}x image for this actool"))
         };
         Some(image::icns(&[
-            (b"ic13", image::plain_png(image(128.0, 2)?, false)),
-            (b"ic11", image::plain_png(image(16.0, 2)?, false)),
-            (b"ic04", image::icns_argb(image(16.0, 1)?)),
-            (b"ic07", image::plain_png(image(128.0, 1)?, false)),
+            (b"ic13", image::plain_png(&image(128.0, 2)?.premultiplied_round_trip(), false)),
+            (b"ic11", image::plain_png(&image(16.0, 2)?.premultiplied_round_trip(), false)),
+            (b"ic04", image::icns_argb(&image(16.0, 1)?.premultiplied_round_trip())),
+            (b"ic07", image::plain_png(&image(128.0, 1)?.premultiplied_round_trip(), false)),
         ]))
     } else {
         None
@@ -324,6 +344,20 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         if i.as_object().is_some_and(|o| o.keys().any(|k| !allowed.contains(&k.as_str()))) {
             return Err(format!("{filename}: icon set entries with other properties are not supported by this actool"));
         }
+        // Xcode ignores entries that aren't iOS icon slots (Flutter's icon
+        // sets have iPhone 40 and 60 pt at 1x and iPad 76 pt at 3x); which
+        // it ignores isn't established beyond those, so only the current
+        // slots are compiled.
+        const PHONE: [(f64, u32); 9] = [(20.0, 2), (20.0, 3), (29.0, 1), (29.0, 2), (29.0, 3), (40.0, 2), (40.0, 3), (60.0, 2), (60.0, 3)];
+        const PAD: [(f64, u32); 9] = [(20.0, 1), (20.0, 2), (29.0, 1), (29.0, 2), (40.0, 1), (40.0, 2), (76.0, 1), (76.0, 2), (83.5, 2)];
+        let known = match idiom {
+            "iphone" => PHONE.contains(&(size, scale)),
+            "ipad" => PAD.contains(&(size, scale)),
+            _ => true,
+        };
+        if !known {
+            return Err(format!("{filename}: {idiom} {size}pt @{scale}x is not an icon slot this actool supports"));
+        }
         // Watch icons by role and size: the app launcher's is stored for all
         // sizes, as companion settings' are.
         let subtype = match (idiom, i["role"].as_str(), i["subtype"].as_str()) {
@@ -337,4 +371,8 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         out.push(Slot { idiom, subtype, size, scale, file: icon_dir.join(filename), filename: filename.to_string() });
     }
     Ok(out)
+}
+
+fn opaque_image(image: &image::Rgba) -> bool {
+    image.data.chunks_exact(4).all(|p| p[3] == 255)
 }

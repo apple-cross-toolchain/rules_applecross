@@ -94,6 +94,32 @@ impl Catalog {
         k
     }
 
+    /// Whether BITMAPKEYS' order is established for this catalog. Its
+    /// blocks follow a CoreFoundation table of the identifiers, filled in
+    /// the order their renditions were first allocated. That reproduces
+    /// Xcode's whenever the order can't depend on how collisions resolve,
+    /// and in catalogs without atlases; with atlases and identifiers that
+    /// share a bucket, Xcode's order sometimes differs in a way not
+    /// established (23 of 570 catalogs examined).
+    pub fn bitmap_key_order_established(&self) -> bool {
+        let mut ids: Vec<u16> = Vec::new();
+        let mut atlases = false;
+        for r in &self.renditions {
+            match r.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map_or(0, |a| a.1) {
+                0 => atlases = true,
+                id if !ids.contains(&id) => ids.push(id),
+                _ => {}
+            }
+        }
+        if !atlases {
+            return true;
+        }
+        let size = cf::hash::table_size_for(ids.len()) as u64;
+        let mut buckets: Vec<u64> = ids.iter().map(|&i| cf::hash::number_hash(i as i64) % size).collect();
+        buckets.sort_unstable();
+        buckets.windows(2).all(|w| w[0] != w[1])
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bom = Bom::new();
         let header = bom.alloc(Vec::new());
@@ -182,7 +208,7 @@ impl Catalog {
         // the identifiers enumerates, filled in the order their renditions
         // were first allocated (an atlas's 0 among them); the tree lists
         // them in order.
-        let filled: Vec<i64> = allocated_ids.iter().map(|&i| i as i64).collect();
+        let filled: Vec<i64> = allocated_ids.iter().filter(|&&i| i != 0).map(|&i| i as i64).collect();
         let order: Vec<u16> = cf::hash::number_table_order(&filled).into_iter().map(|i| filled[i] as u16).filter(|&i| i != 0).collect();
         for id in order {
             let mut v = Vec::new();
@@ -316,18 +342,18 @@ pub fn subtype_bit(subtype: u16) -> u32 {
 /// The payload of an LZFSE-compressed ARGB rendition: an MLEC header and
 /// one LZFSE stream, or for larger bitmaps one KCBC chunk per group of rows,
 /// each its own LZFSE stream. `bgra` rows are `stride` bytes.
-fn lzfse_bitmap(bgra: &[u8], stride: usize, height: usize, chunked_version: u32) -> Vec<u8> {
+fn lzfse_bitmap(bgra: &[u8], stride: usize, height: usize, versions: MlecVersions) -> Vec<u8> {
     let mut out = b"MLEC".to_vec();
     if stride * height < CHUNKED_FROM {
         let data = lzfse::encode_stream(&bgra[..stride * height]);
-        le32(&mut out, 2);
+        le32(&mut out, versions.single);
         le32(&mut out, 4); // LZFSE
         le32(&mut out, data.len() as u32);
         out.extend_from_slice(&data);
         return out;
     }
     let per = rows_per_chunk(stride, height);
-    let version = chunked_version;
+    let version = versions.chunked;
     let mut chunks = Vec::new();
     let mut y = 0;
     while y < height {
@@ -360,12 +386,26 @@ pub fn padded(bgra: &[u8], width: usize, height: usize) -> Vec<u8> {
 }
 
 /// An app icon's image at one size (part 220), at `scale`.
-/// MLEC's version for chunked bitmaps: 3, or 1 in macOS catalogs.
-pub fn chunked_version(platform: &str) -> u32 {
-    if platform == "macosx" { 1 } else { 3 }
+/// MLEC's versions for a bitmap in one stream and in chunks. An iOS icon's
+/// say whether it is opaque (2 and 3) or not (0 and 1); a macOS catalog's
+/// chunks are 1 (docs/clean-room/actool.md).
+#[derive(Clone, Copy)]
+pub struct MlecVersions {
+    pub single: u32,
+    pub chunked: u32,
 }
 
-pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], chunked_version: u32) -> Vec<u8> {
+impl MlecVersions {
+    pub fn for_platform(platform: &str) -> MlecVersions {
+        MlecVersions { single: 2, chunked: if platform == "macosx" { 1 } else { 3 } }
+    }
+
+    pub fn opacity(opaque: bool) -> MlecVersions {
+        if opaque { MlecVersions { single: 2, chunked: 3 } } else { MlecVersions { single: 0, chunked: 1 } }
+    }
+}
+
+pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], versions: MlecVersions) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, width, height] {
@@ -384,13 +424,13 @@ pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     let s = stride(width as usize);
     tlv(&mut t, 0x3ef, &(s as u32).to_le_bytes());
-    let payload = lzfse_bitmap(&padded(bgra, width as usize, height as usize), s, height as usize, chunked_version);
+    let payload = lzfse_bitmap(&padded(bgra, width as usize, height as usize), s, height as usize, versions);
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
 }
 
 /// A packed atlas (element 9, part 181): `bgra` is already flipped and
 /// padded to the stride.
-pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], chunked_version: u32) -> Vec<u8> {
+pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], versions: MlecVersions) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, 0, 0] {
@@ -404,13 +444,40 @@ pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], 
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     let s = stride(width as usize);
     tlv(&mut t, 0x3ef, &(s as u32).to_le_bytes());
-    let payload = lzfse_bitmap(bgra, s, height as usize, chunked_version);
+    let payload = lzfse_bitmap(bgra, s, height as usize, versions);
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_PACKED_IMAGE, name }, &t, &payload)
+}
+
+/// An image set's atlas (layout 1004), its `dmp2` payload given: BGRA, or
+/// for greyscale images GA8 (rows a byte a pixel when `opaque`).
+pub fn packed_dmp2_csi(name: &str, width: u32, height: u32, scale: u32, gray: bool, opaque: bool, payload: &[u8]) -> Vec<u8> {
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, 0, 0] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let row = if gray && opaque { (width as usize).div_ceil(32) * 32 } else { stride(width as usize) };
+    tlv(&mut t, 0x3ef, &(row as u32).to_le_bytes());
+    let (pixel_format, color_space) = if gray { (b" 8AG", 2) } else { (b"BGRA", 1) };
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_PACKED_IMAGE, name }, &t, payload)
 }
 
 /// An image stored in an atlas (layout 1003): its rectangle there and the
 /// atlas's key (attribute, value) in attribute order.
 pub fn link_csi(name: &str, rect: (u32, u32, u32, u32), scale: u32, atlas: &[(u16, u16)]) -> Vec<u8> {
+    link_csi_flags(name, rect, scale, 0, atlas)
+}
+
+/// A link with CSI flags given: an image set's rendering intent.
+pub fn link_csi_flags(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, atlas: &[(u16, u16)]) -> Vec<u8> {
+    link_csi_format(name, rect, scale, flags, false, atlas)
+}
+
+/// The same for a greyscale image (GA8, colour space 2) when `gray`.
+pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, gray: bool, atlas: &[(u16, u16)]) -> Vec<u8> {
     let (x, y, w, h) = rect;
     let mut t = Vec::new();
     let mut slices = Vec::new();
@@ -442,7 +509,8 @@ pub fn link_csi(name: &str, rect: (u32, u32, u32, u32), scale: u32, atlas: &[(u1
     composition.extend_from_slice(&1.0f32.to_le_bytes());
     tlv(&mut t, 0x3ec, &composition);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    csi(&CsiHeader { flags: 0, width: w, height: h, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_INTERNAL_LINK, name }, &t, &[])
+    let (pixel_format, color_space) = if gray { (b" 8AG", 2) } else { (b"BGRA", 1) };
+    csi(&CsiHeader { flags, width: w, height: h, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_INTERNAL_LINK, name }, &t, &[])
 }
 
 /// An app icon's index of its sizes (part 218).
@@ -487,6 +555,12 @@ fn composition(t: &mut Vec<u8>) {
 /// An image stored as `dmp2` (layout 12): an image set's or an image stack
 /// layer's. `payload` is from dmp2::encode.
 pub fn dmp2_image_csi(name: &str, width: u32, height: u32, scale: u32, payload: &[u8]) -> Vec<u8> {
+    dmp2_image_csi_flags(name, width, height, scale, 16, payload)
+}
+
+/// A `dmp2` image with CSI flags given: an image set's rendering intent
+/// (16 automatic, 8 template, 0 original).
+pub fn dmp2_image_csi_flags(name: &str, width: u32, height: u32, scale: u32, flags: u32, payload: &[u8]) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, width, height] {
@@ -500,9 +574,35 @@ pub fn dmp2_image_csi(name: &str, width: u32, height: u32, scale: u32, payload: 
     tlv(&mut t, 0x3eb, &metrics);
     composition(&mut t);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    tlv(&mut t, 0x3ef, &(width * 4).to_le_bytes());
-    csi(&CsiHeader { flags: 16, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
+    // Bytes per row, rounded up to 32.
+    tlv(&mut t, 0x3ef, &(stride(width as usize) as u32).to_le_bytes());
+    csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
 }
+
+/// A greyscale `dmp2` image (GA8, colour space 2), flags as for
+/// [`dmp2_image_csi_flags`]: bytes per row are a byte a pixel when opaque
+/// and four otherwise, rounded up to 32.
+pub fn dmp2_gray_image_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, opaque: bool, payload: &[u8]) -> Vec<u8> {
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, width, height] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    let mut metrics = Vec::new();
+    for v in [1u32, 0, 0, 0, 0, width, height] {
+        le32(&mut metrics, v);
+    }
+    tlv(&mut t, 0x3eb, &metrics);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let row = if opaque { (width as usize).div_ceil(32) * 32 } else { stride(width as usize) };
+    tlv(&mut t, 0x3ef, &(row as u32).to_le_bytes());
+    csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format: b" 8AG", color_space: 2, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
+}
+
+/// An image set's images (part 181, as image stacks').
+pub const PART_IMAGE: u16 = 181;
 
 /// An image stack's flattened or radiosity image (layout 0), its payload
 /// given.
@@ -521,7 +621,7 @@ pub fn stack_image_csi(name: &str, width: u32, height: u32, scale: u32, payload:
 
 /// An LZFSE-compressed bitmap payload of rows `stride` bytes apart.
 pub fn bitmap_payload(data: &[u8], stride: usize, height: usize, chunked_version: u32) -> Vec<u8> {
-    lzfse_bitmap(data, stride, height, chunked_version)
+    lzfse_bitmap(data, stride, height, MlecVersions { single: 2, chunked: chunked_version })
 }
 
 /// A layer of an image stack as its stack rendition lists it.
@@ -615,6 +715,6 @@ pub fn texture_image_csi(name: &str, width: u32, height: u32, scale: u32, row_by
     composition(&mut t);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     tlv(&mut t, 0x3ef, &row_bytes.to_le_bytes());
-    let payload = lzfse_bitmap(data, row_bytes as usize, height as usize, 1);
+    let payload = lzfse_bitmap(data, row_bytes as usize, height as usize, MlecVersions { single: 2, chunked: 1 });
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 0, layout: LAYOUT_TEXTURE_IMAGE, name }, &t, &payload)
 }

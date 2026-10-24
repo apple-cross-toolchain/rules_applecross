@@ -21,6 +21,19 @@ impl Rgba {
         }
         out
     }
+
+    /// The image premultiplied and back, both rounding to nearest: how
+    /// Xcode writes a macOS icon family's PNGs (a fully transparent pixel's
+    /// colour is lost; Flutter's macOS icons, all 81,920 pixels).
+    pub fn premultiplied_round_trip(&self) -> Rgba {
+        let mut data = Vec::with_capacity(self.data.len());
+        for p in self.data.chunks_exact(4) {
+            let a = p[3] as u32;
+            let c = |c: u8| if a == 0 { 0 } else { (((c as u32 * a + 127) / 255 * 255 + a / 2) / a).min(255) as u8 };
+            data.extend_from_slice(&[c(p[0]), c(p[1]), c(p[2]), p[3]]);
+        }
+        Rgba { width: self.width, height: self.height, data }
+    }
 }
 
 /// Whether a PNG carries alpha: a colour type with it, or transparency.
@@ -34,6 +47,38 @@ pub fn png_has_alpha(bytes: &[u8]) -> bool {
         p += 12 + n;
     }
     color_type & 4 != 0 || trns
+}
+
+/// ICC profiles Xcode's actool leaves image set pixels unchanged under, by
+/// the FNV-1a hash of the profile: sRGB IEC61966-2.1 and GIMP's built-in
+/// sRGB, as found in the corpus (two and three variants), each compiled
+/// with an opaque gradient against the same image without it.
+const IDENTITY_PROFILES: [u64; 5] = [0x15f0_d93d_5a6c_822f, 0x56d2_cbfc_a6b5_4318, 0x18f3_1643_b67c_381c, 0xb90f_aac3_c5f1_db88, 0xbe36_3e25_afda_ca4a];
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
+}
+
+/// Refuses an image set PNG Xcode colour-manages: an ICC profile other
+/// than the sRGB ones above, or a gamma or chromaticities other than
+/// sRGB's (as ImageIO writes them). Xcode converts those to sRGB before
+/// encoding image sets (Display, Display P3, Generic RGB, opRGB and HD 709
+/// profiles, gamma 1.0, P3 primaries), which isn't established; app icons
+/// it leaves as they are (docs/clean-room/actool.md).
+pub fn check_color_management(bytes: &[u8]) -> Result<(), String> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let reader = decoder.read_info().map_err(|e| e.to_string())?;
+    let info = reader.info();
+    let managed = info.icc_profile.as_ref().is_some_and(|p| !IDENTITY_PROFILES.contains(&fnv1a(p)))
+        || info.source_gamma.is_some_and(|g| g.into_scaled() != 45455)
+        || info.source_chromaticities.is_some_and(|c| {
+            let v = [c.white.0, c.white.1, c.red.0, c.red.1, c.green.0, c.green.1, c.blue.0, c.blue.1].map(|x| x.into_scaled());
+            v != [31270, 32900, 64000, 33000, 30000, 60000, 15000, 6000]
+        });
+    if managed {
+        return Err("this PNG is colour-managed (an ICC profile, or a gamma or chromaticities, other than sRGB's), which Xcode converts in a way not established for this actool".into());
+    }
+    Ok(())
 }
 
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba, String> {
