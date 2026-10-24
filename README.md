@@ -49,6 +49,15 @@ Supports:
     register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_x86_64")
     register_toolchains("@apple_cross_toolchain//:swift-toolchain-ios_arm64")
     # ... add more platforms as needed (darwin, tvos, watchos)
+
+    # Where Apple products may be bundled: on Linux with the clean-room
+    # tools, and on a Mac with its Xcode. Without the macOS one, a build on
+    # a Mac fails with "No matching toolchains found for
+    # ...apple_bundling_toolchain_type".
+    register_toolchains(
+        "@rules_applecross//toolchain:apple_bundling_on_linux",
+        "@rules_applecross//toolchain:apple_bundling_on_macos",
+    )
     ```
 
 3. Add the following to your `.bazelrc`:
@@ -61,6 +70,9 @@ Supports:
     build --action_env=PATH=external/rules_applecross++apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
     build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
     ```
+
+    [docs/consumers.md](docs/consumers.md) covers the rest of a project's
+    setup: SDKs from a mounted Xcode, the Linux host, Swift packages.
 
 4. Build an example:
 
