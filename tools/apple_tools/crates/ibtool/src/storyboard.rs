@@ -1237,8 +1237,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         _ => return fail("not an iOS or tvOS storyboard"),
     };
     // Without a <device>, Interface Builder lays an iOS scene out on its
-    // generic 600x600 canvas below iOS 17, and at the view's frame from
-    // iOS 17 on; Xcode's ibtool fails on a tvOS one.
+    // generic canvas below iOS 17, and at the view's frame from iOS 17 on;
+    // Xcode's ibtool fails on a tvOS one.
     let device = children(root, "device").next();
     let has_device = device.is_some();
     let device_size = match device {
@@ -1320,9 +1320,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             Some(s) => Some((number(attr(s, "width")?)?, number(attr(s, "height")?)?)),
             None => None,
         };
+        // The generic canvas is size classes' 600x600; without them, the
+        // default device's 393x852.
+        let traits = root.attribute("useTraitCollections") == Some("YES");
         let f = match (generic_canvas, has_device, device_size, freeform) {
-            (true, _, _, None) => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
-            (true, _, _, Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
+            (true, _, _, None) if traits => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
+            (true, _, _, None) => Frame { x: 0.0, y: 0.0, w: 393.0, h: 852.0 },
+            (true, _, _, Some((w, h))) if traits => Frame { x: 0.0, y: 0.0, w, h },
+            (true, _, _, Some(_)) => return fail("a freeform size without trait collections is not supported by this ibtool"),
             (false, true, Some(_), Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
             (false, true, Some((w, h)), None) => Frame { x: 0.0, y: 0.0, w, h },
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
