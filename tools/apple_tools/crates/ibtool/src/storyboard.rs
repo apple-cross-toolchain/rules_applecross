@@ -325,8 +325,36 @@ fn color(nib: &mut Nib, n: Node, colors: &[String]) -> Result<Value, String> {
     // Equal colours are one object, compared at 10 significant digits. A
     // grey is archived as given (no conversion), named when it's exactly
     // black, white or clear.
-    if n.attribute("customColorSpace") == Some("genericGamma22GrayColorSpace") {
-        only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
+    // Calibrated white is converted to the gamma 2.2 grey: only black and
+    // white are established, white coming out a float's step above 1
+    // unless it's opaque (and so `whiteColor`).
+    let calibrated = n.attribute("colorSpace") == Some("calibratedWhite") || n.attribute("customColorSpace") == Some("calibratedWhite");
+    if calibrated {
+        only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", Some("calibratedWhite"))])?;
+        let white = number(attr(n, "white")?)?;
+        let alpha = significant_10(number(attr(n, "alpha")?)?);
+        if white != 0.0 && white != 1.0 {
+            return fail(format!("calibrated white {white} is converted by Xcode in a way not established for this ibtool"));
+        }
+        if white == 1.0 && alpha != 1.0 {
+            let key = format!("color:calibrated-white:{alpha:?}");
+            if let Some(v) = nib.existing(&key) {
+                return Ok(v);
+            }
+            let (alpha_keys, alpha_text) = color_components(&GRAY_KEYS[1..], &[alpha]);
+            let mut keys = vec![("UIColorComponentCount", Value::Int(2)), ("UIWhite", Value::Float(1.0000001))];
+            keys.extend(alpha_keys);
+            let mut text = b"1 ".to_vec();
+            text.extend(alpha_text);
+            keys.push(("NSWhite", Value::Data(text)));
+            keys.push(("NSColorSpace", Value::Int(4)));
+            return Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")));
+        }
+    }
+    if calibrated || n.attribute("customColorSpace") == Some("genericGamma22GrayColorSpace") {
+        if !calibrated {
+            only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
+        }
         let c = [number(attr(n, "white")?)?, number(attr(n, "alpha")?)?].map(significant_10);
         let name = match c {
             [0.0, 1.0] => Some("blackColor"),
@@ -376,12 +404,12 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
 /// named as the Swift runtime names it (`_TtC`, then the module and class,
 /// each after its length in bytes; the standard library is `s`). A module
 /// the target provides is ibtool's `--module`, when there is one.
-fn runtime_class_name(n: Node, module: Option<&str>) -> Result<String, String> {
+fn runtime_class_name(n: Node, module: Option<&str>, default: &str) -> Result<String, String> {
     let Some(class) = n.attribute("customClass") else {
         if n.attribute("customModule").is_some() || n.attribute("customModuleProvider").is_some_and(|p| !p.is_empty()) {
             return fail("a custom module without a custom class is not supported by this ibtool");
         }
-        return Ok("UIViewController".into());
+        return Ok(default.into());
     };
     let module = match (n.attribute("customModuleProvider"), module) {
         (Some("target"), Some(m)) => Some(m),
@@ -499,12 +527,18 @@ struct Scene<'a> {
     vc_id: &'a str,
     /// The document's system colours.
     colors: &'a [String],
-    /// Subviews in depth-first preorder, for the nib's objects.
-    subviews: Vec<String>,
+    /// ibtool's `--module`.
+    module: Option<&'a str>,
+    /// Subviews in depth-first preorder, with their superview's name (None
+    /// for the root view's), for the nib's objects.
+    subviews: Vec<(Option<String>, String)>,
+    /// The superview of the subviews being compiled.
+    parent: Option<String>,
     /// Control actions: (selector, source, event mask), in depth-first order.
     actions: Vec<(String, String, i64)>,
-    /// A subview's own constraints, for the nib's objects after the subviews.
-    own_constraints: Vec<String>,
+    /// The constraints subviews hold, with the holder's name, for the nib's
+    /// objects.
+    own_constraints: Vec<(String, String)>,
     /// Ids of the views some constraint is on.
     constrained: Vec<&'a str>,
     /// Ids of the legacy top and bottom layout guides.
@@ -549,31 +583,64 @@ fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
     ids
 }
 
-/// A subview's own constraints on its size, width before height whatever
-/// the document's order.
+/// The constraints a subview holds: on its own size, width before height
+/// whatever the document's order; then, for a container, those between it
+/// and its subviews or among them, ordered as a root view's are.
 fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Result<Option<Value>, String> {
     let Some(cs) = children(n, "constraints").next() else { return Ok(None) };
     only_children(cs, &["constraint"])?;
-    let mut found = Vec::new();
+    let id = attr(n, "id")?;
+    let direct: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
+    let mut sizes = Vec::new();
+    let mut others: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, &str)> = Vec::new();
     for c in children(cs, "constraint") {
-        only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("constant", None), ("id", None)])?;
-        if c.attribute("firstItem").is_some_and(|f| Some(f) != n.attribute("id")) {
-            return fail("a subview's constraints on other views are not supported by this ibtool");
-        }
+        only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("constant", None), ("id", None)])?;
+        let first = c.attribute("firstItem").unwrap_or(id);
         let a = attr(c, "firstAttribute")?;
-        let rank = ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
-        if found.iter().any(|(r, _)| *r == rank) {
-            return fail("two constraints on a subview's same dimension are not supported by this ibtool");
+        let Some(second) = c.attribute("secondItem") else {
+            if first != id || c.attribute("secondAttribute").is_some() {
+                return fail("a subview's constraint without a second item on another view is not supported by this ibtool");
+            }
+            let rank = ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
+            if sizes.iter().any(|(r, _)| *r == rank) {
+                return fail("two constraints on a subview's same dimension are not supported by this ibtool");
+            }
+            sizes.push((rank, c));
+            continue;
+        };
+        if first == second {
+            return fail("a constraint between an item and itself is not supported by this ibtool");
         }
-        found.push((rank, c));
+        let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?)?;
+        if others.iter().any(|(_, k, ..)| *k == key) {
+            return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
+        }
+        let v = direct.iter().find(|v| v.attribute("id") == Some(key.0)).ok_or_else(|| format!("a subview's constraints on {} are not supported by this ibtool", key.0))?;
+        for item in [first, second] {
+            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) {
+                return fail(format!("a subview's constraints on {item} are not supported by this ibtool"));
+            }
+        }
+        let f = frame(*v)?;
+        others.push(((f.x * f.x + f.y * f.y, f.x), key, c, first, second));
     }
-    found.sort_by_key(|f| f.0);
+    sizes.sort_by_key(|f| f.0);
+    others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
     let mut values = Vec::new();
-    for (_, c) in found {
+    let item = |i: &str| reference(view_name(i));
+    let mut made = Vec::new();
+    for (_, c) in sizes {
         let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+        made.push(constraint(reference(name.to_string()), layout_attribute(attr(c, "firstAttribute")?)?, None, constant, None));
+    }
+    for (_, _, c, first, second) in others {
+        let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+        made.push(constraint(item(first), layout_attribute(attr(c, "firstAttribute")?)?, Some((item(second), layout_attribute(attr(c, "secondAttribute")?)?)), constant, None));
+    }
+    for m in made {
         let constraint_name = nib.fresh();
-        scene.own_constraints.push(constraint_name.clone());
-        match constraint(reference(name.to_string()), layout_attribute(attr(c, "firstAttribute")?)?, None, constant, None) {
+        scene.own_constraints.push((name.to_string(), constraint_name.clone()));
+        match m {
             Value::New(o) => values.push(Value::New(o.named(constraint_name))),
             _ => unreachable!(),
         }
@@ -584,7 +651,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
 fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
     let id = attr(n, "id")?;
     let name = view_name(id);
-    scene.subviews.push(name.clone());
+    scene.subviews.push((scene.parent.clone(), name.clone()));
     let f = frame(n)?;
     let mut values = Vec::new();
     geometry(&mut values, &f);
@@ -721,7 +788,10 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             let mut arranged = Vec::new();
             for s in children(n, "subviews") {
                 for c in s.children().filter(|c| c.is_element()) {
-                    arranged.push(subview(nib, scene, c)?);
+                    let outer = scene.parent.replace(name.clone());
+                    let v = subview(nib, scene, c);
+                    scene.parent = outer;
+                    arranged.push(v?);
                 }
             }
             let refs = arranged_names(&arranged);
@@ -743,6 +813,59 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIStackViewBaselineRelative", Value::Bool(false)));
             values.push(("UIStackViewLayoutMarginsRelative", Value::Bool(false)));
             Object::new("UIStackView", values)
+        }
+        "view" => {
+            only_attributes(n, &[
+                ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+            ])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "subviews", "constraints"])?;
+            let mut inner = Vec::new();
+            for s in children(n, "subviews") {
+                for c in s.children().filter(|c| c.is_element()) {
+                    let outer = scene.parent.replace(name.clone());
+                    let v = subview(nib, scene, c);
+                    scene.parent = outer;
+                    inner.push(v?);
+                }
+            }
+            if !inner.is_empty() {
+                values.push(("UISubviews", nib.array("NSMutableArray", inner)));
+            }
+            for c in children(n, "color") {
+                if c.attribute("key") != Some("backgroundColor") {
+                    return fail("view colours other than a background colour are not supported by this ibtool");
+                }
+                values.push(("UIBackgroundColor", color(nib, c, scene.colors)?));
+            }
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIOpaque", Value::Bool(true)));
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) => autoresizing_mask(m)?,
+                None => 36,
+            };
+            values.push(("UIAutoresizingMask", Value::Int(mask)));
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            // A custom class is swapped in for the view when it loads.
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UIView")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UIView")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                if n.attribute("customModule").is_some() || n.attribute("customModuleProvider").is_some_and(|p| !p.is_empty()) {
+                    return fail("a custom module without a custom class is not supported by this ibtool");
+                }
+                Object::new("UIView", values)
+            }
         }
         "imageView" => {
             only_attributes(n, &[
@@ -1036,7 +1159,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("sceneMemberID", Some("viewController")),
         ])?;
-        let class_name = runtime_class_name(vc, module)?;
+        let class_name = runtime_class_name(vc, module, "UIViewController")?;
         only_children(vc, &["view", "layoutGuides", "connections"])?;
         let vc_id = attr(vc, "id")?;
         let view = children(vc, "view").next().ok_or("view controller without a view")?;
@@ -1045,7 +1168,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, colors: &colors, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), actions: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, colors: &colors, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), guides: Vec::new() };
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -1235,8 +1358,18 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         objects.extend(constraint_names.iter().map(|n| reference(n.clone())));
         objects.extend(scene.guides.iter().map(|g| reference(format!("guide {}", g.1))));
-        objects.extend(scene.subviews.iter().map(|n| reference(n.clone())));
-        objects.extend(scene.own_constraints.iter().map(|n| reference(n.clone())));
+        // Then breadth first: each view in turn, from a queue, lists the
+        // constraints it holds and then its subviews, which join the queue.
+        let mut queue: std::collections::VecDeque<Option<&String>> = [None].into();
+        while let Some(v) = queue.pop_front() {
+            if let Some(v) = v {
+                objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
+            }
+            for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v) {
+                objects.push(reference(s.clone()));
+                queue.push_back(Some(s));
+            }
+        }
 
         let mut connections = Vec::new();
         for (label, destination) in &vc_outlets {
