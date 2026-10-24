@@ -182,7 +182,7 @@ impl Catalog {
         // the identifiers enumerates, filled in the order their renditions
         // were first allocated (an atlas's 0 among them); the tree lists
         // them in order.
-        let filled: Vec<i64> = allocated_ids.iter().map(|&i| i as i64).collect();
+        let filled: Vec<i64> = allocated_ids.iter().filter(|&&i| i != 0).map(|&i| i as i64).collect();
         let order: Vec<u16> = cf::hash::number_table_order(&filled).into_iter().map(|i| filled[i] as u16).filter(|&i| i != 0).collect();
         for id in order {
             let mut v = Vec::new();
@@ -408,9 +408,28 @@ pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], 
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_PACKED_IMAGE, name }, &t, &payload)
 }
 
+/// An image set's atlas (layout 1004), its `dmp2` payload given.
+pub fn packed_dmp2_csi(name: &str, width: u32, height: u32, scale: u32, payload: &[u8]) -> Vec<u8> {
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, 0, 0] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    tlv(&mut t, 0x3ef, &(stride(width as usize) as u32).to_le_bytes());
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_PACKED_IMAGE, name }, &t, payload)
+}
+
 /// An image stored in an atlas (layout 1003): its rectangle there and the
 /// atlas's key (attribute, value) in attribute order.
 pub fn link_csi(name: &str, rect: (u32, u32, u32, u32), scale: u32, atlas: &[(u16, u16)]) -> Vec<u8> {
+    link_csi_flags(name, rect, scale, 0, atlas)
+}
+
+/// A link with CSI flags given: an image set's rendering intent.
+pub fn link_csi_flags(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, atlas: &[(u16, u16)]) -> Vec<u8> {
     let (x, y, w, h) = rect;
     let mut t = Vec::new();
     let mut slices = Vec::new();
@@ -442,7 +461,7 @@ pub fn link_csi(name: &str, rect: (u32, u32, u32, u32), scale: u32, atlas: &[(u1
     composition.extend_from_slice(&1.0f32.to_le_bytes());
     tlv(&mut t, 0x3ec, &composition);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    csi(&CsiHeader { flags: 0, width: w, height: h, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_INTERNAL_LINK, name }, &t, &[])
+    csi(&CsiHeader { flags, width: w, height: h, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_INTERNAL_LINK, name }, &t, &[])
 }
 
 /// An app icon's index of its sizes (part 218).

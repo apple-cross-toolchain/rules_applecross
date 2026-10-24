@@ -48,7 +48,7 @@ fn idiom_value(idiom: &str) -> u16 {
 
 /// The growing binary-tree packer (Jake Gordon's), with 2 px gutters:
 /// blocks of (w + 2, h + 2), placed 2 px in.
-mod pack {
+pub(crate) mod pack {
     struct Node {
         x: u32,
         y: u32,
@@ -128,7 +128,8 @@ mod pack {
 
 /// Copies `img` into an atlas of `aw` x `ah` (rows bottom-up, as Core
 /// Graphics draws them) at `x`, `y`, repeating its edge pixels one pixel out.
-fn place(atlas: &mut [u8], stride: usize, ah: u32, img: &[u8], x: u32, y: u32, w: u32, h: u32) {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn place(atlas: &mut [u8], stride: usize, ah: u32, img: &[u8], x: u32, y: u32, w: u32, h: u32) {
     let top = (ah - y - h) as i64;
     for r in -1..=h as i64 {
         let sr = r.clamp(0, h as i64 - 1) as usize;

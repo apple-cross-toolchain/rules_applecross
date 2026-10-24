@@ -423,6 +423,7 @@ enum Kind<'a> {
 fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, has_dimension1: bool, mut renditions: Vec<car::Rendition>, images: imageset::Compiled, kind: Kind, mut outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
     renditions.extend(images.renditions);
     let has_dimension2 = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION2));
+    let has_dimension1 = has_dimension1 || renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION1 && a.1 != 0));
     let key_format = if matches!(kind, Kind::Mac) {
         vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_ELEMENT, car::ATTR_PART, car::ATTR_SIZE, car::ATTR_IDENTIFIER, car::ATTR_DIMENSION2, car::ATTR_LAYER, car::ATTR_SCALE]
     } else {

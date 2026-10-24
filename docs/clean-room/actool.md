@@ -85,9 +85,11 @@ copies (FACETKEYS with names of different lengths). `BITMAPKEYS` stores
 its keys (name identifiers) inline in a 1024-byte page; their value blocks
 are allocated in the order a CoreFoundation hash table enumerates the
 identifiers (the integer CFNumber hash: the value times 2654435761, 64
-bits) when filled with any image stacks' identifiers first and then the
-rest, largest first, an atlas's 0 among them. That reproduces all 13
-catalogs examined with more than one identifier.
+bits) when filled with the identifiers in the order their renditions are
+first allocated (atlases, which have no identifier, not among them). That
+reproduces every catalog examined, including image set catalogs whose
+identifiers collide in a three-entry table, which an atlas's 0 would have
+grown.
 
 For an app icon: per idiom, an Icon Image rendition (part 220, dimension2
 1: the 1024 px image as LZFSE-compressed premultiplied BGRA, named after
@@ -269,13 +271,24 @@ bytes per row rounded up to 32 (240 is 256). Its CSI flags are the
 rendering intent: 16 automatic (no property), 8 template, 0 original. The
 key format is the app icons' without `dimension2` when nothing uses it.
 
-Several images of one scale small enough to pack (18,050 px² per scale
-factor, as for icons) are packed into an atlas of their own format (layout
-1004, `dmp2`, the images as layout 1003 links), which this actool doesn't
-reproduce, so those catalogs are refused; one such image per scale is
-stored on its own. So are vector images (SVG, PDF), other idioms,
-appearances and other properties, folders, and image sets on other
-platforms. 90 random catalogs of one to four image sets (opaque,
+Images small enough to pack (18,050 px² per scale factor, as for icons)
+are packed per scale, translucent ones and opaque ones in atlases of their
+own, as icons are packed (largest area first, equal areas by identifier,
+twelve probes of equal-area shapes): an atlas is a `dmp2` image (layout
+1004, flags 0, keyed element 9, part 181, scale and, from the second at a
+scale on, dimension1 its index) named `ZZZZPackedAsset-{scale}.{opaque}.0-gamut0`
+and flagged opaque as its group is, whatever its padding; each image is a
+layout 1003 link to it flagged with its rendering intent. A group's only
+packable image is stored on its own. The key format has dimension1 only
+when an atlas uses it.
+
+Refused: a group needing more than one atlas, atlases whose `dmp2` row
+predictors aren't established (common: the row under an atlas's empty top
+row ties between predictors 1 and 2, which Xcode breaks neither by cost,
+summation order, nor compressed size), images whose every pixel is grey
+(Xcode stores those as GA8, colour space 2, their atlas named `.1` last),
+vector images (SVG, PDF), other idioms, appearances and other properties,
+folders, and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were
