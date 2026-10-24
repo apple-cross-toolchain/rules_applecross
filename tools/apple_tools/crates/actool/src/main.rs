@@ -343,7 +343,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
 
     // Assets.car: per idiom, the 1024 px image and the index of its sizes.
     let id = name_identifier(&icon_name);
-    let image_csi = car::icon_image_csi(&filename, 1024, 1024, 1, &bgra.data, car::chunked_version(platform));
+    let image_csi = car::icon_image_csi(&filename, 1024, 1024, 1, &bgra.data, car::MlecVersions::for_platform(platform));
     let multi_csi = car::multisized_csi(&icon_name, &[(1024, 1024, 1)]);
     let rendition = |idiom: u16, part: u16, dim2: u16, csi: &Vec<u8>| car::Rendition {
         attrs: vec![(car::ATTR_SCALE, 1), (car::ATTR_IDIOM, idiom), (car::ATTR_DIMENSION2, dim2), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, part)],
@@ -484,6 +484,9 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         deployment_target: o.minimum_deployment_target.clone(),
         platform: platform.into(),
     };
+    if !catalog.bitmap_key_order_established() {
+        return Err("this catalog's bitmap keys, with atlases and identifiers that collide, are in an order not established for this actool".into());
+    }
     let car_path = out_dir.join("Assets.car");
     std::fs::write(&car_path, catalog.to_bytes()).map_err(|e| e.to_string())?;
     outputs.push(car_path);

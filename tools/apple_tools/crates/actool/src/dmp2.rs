@@ -84,6 +84,39 @@ fn palette(width: usize, height: usize, bgra: &[u8]) -> Option<Vec<u8>> {
     Some(s)
 }
 
+/// Mode 4 with alpha apart: at most 256 premultiplied colours as a palette
+/// of three channels (each entry's fourth byte 0), then the alpha and index
+/// planes compressed together (the WebRTC incognito banner: 152 colours
+/// where its colours with alpha number 204).
+fn palette_alpha(width: usize, height: usize, bgra: &[u8]) -> Option<Vec<u8>> {
+    let pixels: Vec<u32> = bgra.chunks_exact(4).map(|p| u32::from_le_bytes([p[0], p[1], p[2], 0])).collect();
+    let mut colours = pixels.clone();
+    colours.sort_unstable();
+    colours.dedup();
+    if colours.len() > 256 {
+        return None;
+    }
+    if strip_rows(2 * width, height) < height {
+        return Some(Vec::new());
+    }
+    let xor = |c: &u32| c.to_le_bytes().iter().fold(0u8, |a, b| a ^ b);
+    qsort(&mut colours, |a, b| xor(a).cmp(&xor(b)));
+    let mut index = std::collections::HashMap::new();
+    for (i, c) in colours.iter().enumerate() {
+        index.insert(*c, i as u8);
+    }
+    let mut s = header(4, width, height);
+    s.extend((colours.len() as u16).to_le_bytes());
+    s.extend(3u16.to_le_bytes());
+    for c in &colours {
+        s.extend(c.to_le_bytes());
+    }
+    let mut data: Vec<u8> = bgra.chunks_exact(4).map(|p| p[3]).collect();
+    data.extend(pixels.iter().map(|p| index[p]));
+    compressed(&mut s, &data);
+    Some(s)
+}
+
 /// C's truncating division by 2.
 fn half(v: i32) -> i32 {
     v / 2
@@ -190,9 +223,11 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
     let row = 4 * width;
     let lzfse_only = striped(3, width, height, row, |y, h| bgra[y * row..(y + h) * row].to_vec());
     let mut candidates = vec![lzfse_only];
-    match palette(width, height, bgra) {
-        Some(p) if p.is_empty() => return Err("this image's dmp2 palette would be in strips, which is not established for this actool".into()),
-        p => candidates.extend(p),
+    for p in [palette(width, height, bgra), palette_alpha(width, height, bgra)] {
+        match p {
+            Some(p) if p.is_empty() => return Err("this image's dmp2 palette would be in strips, which is not established for this actool".into()),
+            p => candidates.extend(p),
+        }
     }
     let mut ambiguous = false;
     let predictive = striped(2, width, height, 7 * width + 1, |y, h| {

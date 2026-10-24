@@ -169,7 +169,22 @@ layer, scale) and no idiom or subtype; `NAME.icns` holds the 16pt and
 128pt images (`ic13`, `ic11`, `ic04`, `ic07`, in that order): PNGs as
 ImageIO writes them (as for simulators, but EXIF without ColorSpace, and
 libpng's smaller window for data of 16 KiB or less) and, for `ic04`, ARGB
-planes run-length coded greedily (runs of 3 to 130).
+planes run-length coded greedily (runs of 3 to 130), each from the image
+premultiplied and back, rounding to nearest both ways (a fully transparent
+pixel's colour is lost: Flutter's macOS icons, every pixel of all four).
+
+An iOS icon's `MLEC` version says whether it is opaque: 2 (one stream) or
+3 (chunks) when it is, 0 or 1 when it isn't, per standalone image and per
+atlas, whose name's middle number is 1 when opaque and 0 when not
+(Google Maps' and Firebase's example icon sets, and probes at 20 to 167
+pixels). An atlas of opaque and translucent icons, which those don't have,
+is refused. An image under 40 pixels wide is stored with method 1, a
+run-length coding (per-row offsets, then runs), opaque or not; this actool
+refuses those. Xcode ignores entries that aren't iOS icon slots (Flutter's
+iPhone 40 and 60 pt at 1x, iPad 76 pt at 3x); this actool compiles the
+current slots only (iPhone 20, 40 and 60 pt at 2x and 3x, 29 pt at 1x to
+3x; iPad 20, 29, 40 and 76 pt at 1x and 2x, 83.5 pt at 2x) and refuses the
+rest.
 
 ## Packed images
 
@@ -181,6 +196,14 @@ Small images are packed into atlases
 attribute order, ending with four zero bytes. Measured over 70 random sets
 and every icon set in the examples:
 
+- BITMAPKEYS' blocks follow a CoreFoundation table of the identifiers,
+  filled in the order their renditions were first allocated (linear
+  probing, as CFBasicHash.c publishes). That reproduces 547 of 570 catalogs
+  examined; all 23 others have atlases and identifiers that share a
+  bucket, where Xcode's order differs in a way not established (rendition
+  key, facet, name and identifier orders, NSMutableSet growth, pre-sized
+  tables and hidden atlas entries all fit fewer). Catalogs with atlases
+  and colliding identifiers are refused.
 - Per (scale, idiom, subtype), images are taken largest area first, equal
   areas by name identifier. One of more than 18,050 px² × scale is not
   packed; neither is the only packable image of a group.
@@ -262,7 +285,21 @@ a `dmp2` stream of those rows alone (mode chosen per chunk). A chunk is as
 many rows as fit 4 MiB: 1441 px wide, 727, 727 and 706 rows. Images of
 fewer than 8 pixels are refused.
 
-Pixels are premultiplied as `(c * a + 127) / 255`. A palette that would
+Mode 4 has a second form, also a candidate in the competition for the
+smallest: at most 256 premultiplied colours without their alpha, the
+entry count's companion 3 (not 4) and each entry's fourth byte 0, then the
+alpha plane and the index plane compressed together (WebRTC's incognito
+banner, 152 such colours where its colours with alpha number 204; 63 of
+the examined streams have it).
+
+Pixels are premultiplied as `(c * a + 127) / 255`. An image set PNG Xcode
+colour-manages is converted before any of this: one with an ICC profile
+other than sRGB IEC61966-2.1's or GIMP's built-in sRGB (Display, Display P3,
+Generic RGB, opRGB and HD 709 profiles all convert; each of the corpus's 20
+profiles compiled on an opaque gradient against the gradient alone), or a
+gamma other than 1/2.2 or chromaticities other than sRGB's. Those are
+refused; an `sRGB` chunk changes nothing. App icons aren't converted. A
+palette that would
 need strips (over 2 MiB of indices) is not established and is refused. Every layer in the
 examples uses mode 4. Where a row's predictor isn't established and mode 2
 could be the smallest, the image is refused; so are images that would be

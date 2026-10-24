@@ -64,6 +64,16 @@ pub fn number_hash(v: i64) -> u64 {
     v.unsigned_abs().wrapping_mul(2_654_435_761)
 }
 
+/// The bucket count of a CoreFoundation table grown one entry at a time to
+/// hold `n` entries.
+pub fn table_size_for(n: usize) -> usize {
+    let mut level = 0;
+    while TABLE_CAPACITIES[level] < n {
+        level += 1;
+    }
+    TABLE_SIZES[level]
+}
+
 /// The same for a table of integer CFNumbers, filled in `values` order.
 pub fn number_table_order(values: &[i64]) -> Vec<usize> {
     let hashes: Vec<u64> = values.iter().map(|&v| number_hash(v)).collect();

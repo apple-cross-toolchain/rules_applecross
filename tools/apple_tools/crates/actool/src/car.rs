@@ -94,6 +94,32 @@ impl Catalog {
         k
     }
 
+    /// Whether BITMAPKEYS' order is established for this catalog. Its
+    /// blocks follow a CoreFoundation table of the identifiers, filled in
+    /// the order their renditions were first allocated. That reproduces
+    /// Xcode's whenever the order can't depend on how collisions resolve,
+    /// and in catalogs without atlases; with atlases and identifiers that
+    /// share a bucket, Xcode's order sometimes differs in a way not
+    /// established (23 of 570 catalogs examined).
+    pub fn bitmap_key_order_established(&self) -> bool {
+        let mut ids: Vec<u16> = Vec::new();
+        let mut atlases = false;
+        for r in &self.renditions {
+            match r.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map_or(0, |a| a.1) {
+                0 => atlases = true,
+                id if !ids.contains(&id) => ids.push(id),
+                _ => {}
+            }
+        }
+        if !atlases {
+            return true;
+        }
+        let size = cf::hash::table_size_for(ids.len()) as u64;
+        let mut buckets: Vec<u64> = ids.iter().map(|&i| cf::hash::number_hash(i as i64) % size).collect();
+        buckets.sort_unstable();
+        buckets.windows(2).all(|w| w[0] != w[1])
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bom = Bom::new();
         let header = bom.alloc(Vec::new());
@@ -316,18 +342,18 @@ pub fn subtype_bit(subtype: u16) -> u32 {
 /// The payload of an LZFSE-compressed ARGB rendition: an MLEC header and
 /// one LZFSE stream, or for larger bitmaps one KCBC chunk per group of rows,
 /// each its own LZFSE stream. `bgra` rows are `stride` bytes.
-fn lzfse_bitmap(bgra: &[u8], stride: usize, height: usize, chunked_version: u32) -> Vec<u8> {
+fn lzfse_bitmap(bgra: &[u8], stride: usize, height: usize, versions: MlecVersions) -> Vec<u8> {
     let mut out = b"MLEC".to_vec();
     if stride * height < CHUNKED_FROM {
         let data = lzfse::encode_stream(&bgra[..stride * height]);
-        le32(&mut out, 2);
+        le32(&mut out, versions.single);
         le32(&mut out, 4); // LZFSE
         le32(&mut out, data.len() as u32);
         out.extend_from_slice(&data);
         return out;
     }
     let per = rows_per_chunk(stride, height);
-    let version = chunked_version;
+    let version = versions.chunked;
     let mut chunks = Vec::new();
     let mut y = 0;
     while y < height {
@@ -360,12 +386,26 @@ pub fn padded(bgra: &[u8], width: usize, height: usize) -> Vec<u8> {
 }
 
 /// An app icon's image at one size (part 220), at `scale`.
-/// MLEC's version for chunked bitmaps: 3, or 1 in macOS catalogs.
-pub fn chunked_version(platform: &str) -> u32 {
-    if platform == "macosx" { 1 } else { 3 }
+/// MLEC's versions for a bitmap in one stream and in chunks. An iOS icon's
+/// say whether it is opaque (2 and 3) or not (0 and 1); a macOS catalog's
+/// chunks are 1 (docs/clean-room/actool.md).
+#[derive(Clone, Copy)]
+pub struct MlecVersions {
+    pub single: u32,
+    pub chunked: u32,
 }
 
-pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], chunked_version: u32) -> Vec<u8> {
+impl MlecVersions {
+    pub fn for_platform(platform: &str) -> MlecVersions {
+        MlecVersions { single: 2, chunked: if platform == "macosx" { 1 } else { 3 } }
+    }
+
+    pub fn opacity(opaque: bool) -> MlecVersions {
+        if opaque { MlecVersions { single: 2, chunked: 3 } } else { MlecVersions { single: 0, chunked: 1 } }
+    }
+}
+
+pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], versions: MlecVersions) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, width, height] {
@@ -384,13 +424,13 @@ pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     let s = stride(width as usize);
     tlv(&mut t, 0x3ef, &(s as u32).to_le_bytes());
-    let payload = lzfse_bitmap(&padded(bgra, width as usize, height as usize), s, height as usize, chunked_version);
+    let payload = lzfse_bitmap(&padded(bgra, width as usize, height as usize), s, height as usize, versions);
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
 }
 
 /// A packed atlas (element 9, part 181): `bgra` is already flipped and
 /// padded to the stride.
-pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], chunked_version: u32) -> Vec<u8> {
+pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], versions: MlecVersions) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, 0, 0] {
@@ -404,7 +444,7 @@ pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], 
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     let s = stride(width as usize);
     tlv(&mut t, 0x3ef, &(s as u32).to_le_bytes());
-    let payload = lzfse_bitmap(bgra, s, height as usize, chunked_version);
+    let payload = lzfse_bitmap(bgra, s, height as usize, versions);
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_PACKED_IMAGE, name }, &t, &payload)
 }
 
@@ -581,7 +621,7 @@ pub fn stack_image_csi(name: &str, width: u32, height: u32, scale: u32, payload:
 
 /// An LZFSE-compressed bitmap payload of rows `stride` bytes apart.
 pub fn bitmap_payload(data: &[u8], stride: usize, height: usize, chunked_version: u32) -> Vec<u8> {
-    lzfse_bitmap(data, stride, height, chunked_version)
+    lzfse_bitmap(data, stride, height, MlecVersions { single: 2, chunked: chunked_version })
 }
 
 /// A layer of an image stack as its stack rendition lists it.
@@ -675,6 +715,6 @@ pub fn texture_image_csi(name: &str, width: u32, height: u32, scale: u32, row_by
     composition(&mut t);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     tlv(&mut t, 0x3ef, &row_bytes.to_le_bytes());
-    let payload = lzfse_bitmap(data, row_bytes as usize, height as usize, 1);
+    let payload = lzfse_bitmap(data, row_bytes as usize, height as usize, MlecVersions { single: 2, chunked: 1 });
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 0, layout: LAYOUT_TEXTURE_IMAGE, name }, &t, &payload)
 }
