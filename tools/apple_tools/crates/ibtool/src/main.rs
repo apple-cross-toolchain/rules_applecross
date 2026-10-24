@@ -1,6 +1,7 @@
 //! Clean-room `ibtool` for Linux: `--compilation-directory` and `--link`; see
 //! docs/clean-room/ibtool.md.
 
+mod fonts;
 mod nib;
 mod storyboard;
 mod watch;

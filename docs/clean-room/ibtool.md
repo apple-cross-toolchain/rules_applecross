@@ -47,8 +47,9 @@ not. foundation-hashing.md describes that set's layout.
 Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
-guides. Subviews: labels (system font or the Headline, Callout and, on
-tvOS, Title1 text styles; default colours), rounded-rect text fields,
+guides. Subviews: labels (system font, a font Xcode finds for iOS, or the
+Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
+grey or system text colour), rounded-rect text fields,
 rounded-rect buttons with a normal-state title and touch-up-inside actions
 on the controller, vertical stack views. Constraints between those, with
 constants; outlets from the controller into its view. Everything else, and
@@ -74,6 +75,37 @@ other values of the attributes these use, is refused. Observed:
   them with `xcode11CocoaTouchSystemColor` or `cocoaTouchSystemColor`
   instead of `systemColor`; those archive the same (five probes, and
   covid_tracker's and MixTag's launch screens).
+- A grey in the generic gamma 2.2 space is archived as given, in the grey
+  colour space (4), and named `blackColor`, `whiteColor` or `clearColor`
+  (`UISystemColorName` first) when, at 10 digits, it is white 0, 1 or 0
+  with alpha 1, 1 or 0; other greys, including 0.5, 1/3, 2/3 and white
+  with alpha 0, have no name (17 probes, as text and background colours).
+  Calibrated and device spaces and Display P3 are converted (calibrated
+  white 0.5 is archived as 0.572), so they are refused.
+- Equal colours are one object, compared after rounding to 10 digits
+  (0.18039215686 and 0.1803921568627451 share), sRGB and grey alike; a
+  named colour is shared only by name (`whiteColor` and a white
+  `systemBackgroundColor` stay two). Equal fonts are one object too, system
+  fonts and text styles included.
+- A label's declared text colour, even `labelColor`, sets
+  `UIDisableUpdateTextColorOnTraitCollectionChange`; a nil one is
+  `labelColor` without it.
+- A view gets `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints` only
+  when its element says `translatesAutoresizingMaskIntoConstraints="NO"`
+  (labels, a text field, a button and a stack view, with it removed).
+- A font named in `<fontDescription name=...>` is resolved from a set of iOS
+  fonts that is neither the Mac's nor the simulator's: of the 1,182
+  PostScript names macOS 27 lists (CoreText) and the 304 the iOS 27
+  simulator's `UIFont` lists, ibtool finds 301, including Rockwell (not in
+  the simulator's list) and not NotoSerifMyanmar (in it) or AndaleMono (on
+  the Mac). `family` is ignored. A found font is archived under its own
+  name (`STHeitiSC-Light` as `PingFangSC-Light`), with the descriptor's
+  `NSFontNameAttribute` and `NSFontSizeAttribute`, options 0x80000000,
+  `UISystemFont` false, and its traits (italic 1, bold 2: `Avenir-Black` is
+  bold); fonts.rs has them all, measured from one storyboard labelling
+  each. A name it doesn't find is archived without the scaling keys and
+  with options 0; since whether it finds a name can't be told from the name,
+  names outside the table are refused.
 - Legacy layout guides become hidden `_UILayoutGuide` subviews, after the
   others, each with a `_UILayoutSupportConstraint` (width, priority 999),
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:
