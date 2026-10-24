@@ -245,6 +245,9 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
                 // run, and this one is a flat rendering: never Xcode's.
                 return Err(format!("{}: Icon Composer documents are rendered flat by this actool, not as Xcode compiles them (docs/clean-room/actool.md)", doc.display()));
             }
+            if o.target_devices.iter().any(|d| d == "mac") {
+                return document_mac_icon(o, &out_dir, platform, name, &icon::render(doc)?, outputs);
+            }
             Some((name.clone(), IconSource::Single(format!("{name}1024x1024.png"), icon::render(doc)?)))
         }
         (Some(name), None) => {
@@ -484,6 +487,29 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
         Kind::Ios { phone_files: &compiled.phone_files, pad_files: &compiled.pad_files }
     };
     finish(o, out_dir, platform, icon_name, compiled.has_dimension1, compiled.renditions, kind, outputs)
+}
+
+/// An Icon Composer document's macOS icon, relaxed: its flat rendering
+/// compiled as a macOS icon set with an image per size, giving Assets.car,
+/// the .icns and CFBundleIconFile and CFBundleIconName, as an icon set does.
+fn document_mac_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, flat: &image::Rgba, outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+    let bgra = flat.to_bgra();
+    let dir = std::env::temp_dir().join(format!("actool-icon-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut slots = Vec::new();
+    for size in [16, 32, 128, 256, 512] {
+        for scale in [1, 2] {
+            let filename = if scale == 1 { format!("icon_{size}x{size}.png") } else { format!("icon_{size}x{size}@2x.png") };
+            let px = (size * scale) as usize;
+            let rgba = image::resize(&bgra, px, px).opaque_rgba().ok_or("a translucent Icon Composer rendering is not supported by this actool for macOS")?;
+            let file = dir.join(&filename);
+            std::fs::write(&file, image::plain_png(&rgba, false)).map_err(|e| format!("{}: {e}", file.display()))?;
+            slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file, filename });
+        }
+    }
+    let result = per_size_icon(o, out_dir, platform, name, &slots, false, false, outputs);
+    let _ = std::fs::remove_dir_all(&dir);
+    result
 }
 
 fn main() -> ExitCode {

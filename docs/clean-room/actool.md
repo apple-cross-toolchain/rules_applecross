@@ -139,7 +139,12 @@ document's default appearance flat (the fill, then each group's layers back
 to front with a blurred, downward-offset shadow of the group's opacity, no
 glass, specular or translucency; SVG layers through resvg, PNG layers
 scaled about the centre) and compiles that image exactly as an icon set's
-1024 px image, named `NAME1024x1024.png`. The result has the renditions an
+1024 px image, named `NAME1024x1024.png`. For macOS (`--target-device
+mac`) it compiles that image, scaled to each size, as a macOS icon set with
+an image per size (`icon_16x16.png` to `icon_512x512@2x.png`): Assets.car,
+`NAME.icns` and a partial Info.plist naming both, `CFBundleIconFile` and
+`CFBundleIconName`, which are the outputs and keys Xcode writes for the
+document, its `.icns` with the same four entries. The result has the renditions an
 icon set gives, which iOS before 26 draws icons from; how iOS 26 draws it
 (presumably as an icon set's, without glass) has not been checked. Xcode's flattened image is square and opaque, as this
 one is.
