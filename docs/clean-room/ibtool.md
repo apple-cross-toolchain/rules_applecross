@@ -106,6 +106,14 @@ other values of the attributes these use, is refused. Observed:
   `whiteColor` when opaque and otherwise as the float after 1
   (1.0000001192092896, no `-Double`, text `1`), named as the grey would
   be (eight probes).
+- A document without `colorMatched="YES"` (older ones) takes colours'
+  components as they are instead of converting them: calibrated RGB is
+  archived as sRGB with the document's values, calibrated white as sRGB
+  grey (the grey as a float, the alpha not), gamma 2.2 grey and sRGB
+  converted (sRGB 1, 0.5, 0.25 as 0.989, 0.413, 0.195), none named.
+  Without it, calibrated colours, system colours and neutral black and
+  white in the other spaces (which convert to themselves) are compiled;
+  the rest are refused (18 probes; the corpus's 16 such storyboards).
 - Equal colours are one object, compared after rounding to 10 digits
   (0.18039215686 and 0.1803921568627451 share), sRGB and grey alike; a
   named colour is shared only by name (`whiteColor` and a white
@@ -193,6 +201,12 @@ other values of the attributes these use, is refused. Observed:
   a `UIImageNibPlaceholder` per image name (width and height 1, the name,
   nil symbol, configuration and catalog), shared by the views using it;
   no image, no key. snag's launch screen is byte-identical.
+- A controller's `title` is its swapper's `UITitle`, first;
+  `useStoryboardIdentifierAsRestorationIdentifier` adds
+  `UIRestorationIdentifier` (the identifier's string) after
+  `UIStoryboardIdentifier`; `userLabel` changes nothing. A label's
+  `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`; a text
+  field's `placeholder` is `UIPlaceholder` after `UIFont`.
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an
   empty identifier. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
