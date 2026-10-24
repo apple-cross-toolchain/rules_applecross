@@ -1,25 +1,13 @@
-# Bazel Apple toolchain for non-Apple platforms
+# Bazel Apple toolchain for Linux
 
-This repository contains toolchain configuration rules for Bazel that can be
-used to build apps and frameworks for Apple platforms from non-Apple platforms.
-Requires Bazel 8.8+ or 9+.
+This repository contains toolchains for Bazel that can be used to build apps
+and frameworks for Apple platforms from Linux.
 
-Builds execute on x86_64 Linux, either locally or through remote execution, or
-locally on arm64 Linux. The host driving them can be Linux or macOS; see
-[Building on macOS](#building-on-macos) for what a macOS host does differently.
+Supports:
 
-On arm64 Linux, configure the aarch64 Swift too:
-
-```starlark
-apple_cross_toolchain.configure(
-    name = "apple_cross_toolchain",
-    # ...
-    swift_tools = {
-        "aarch64": "@applecross_swift_ubuntu24.04-aarch64//:tools",
-        "x86_64": "@applecross_swift_ubuntu24.04//:tools",
-    },
-)
-```
+- Bazel 8.8+
+- Linux x86_64 and arm64
+- macOS x86_64 and arm64
 
 ## Setup
 
@@ -49,6 +37,10 @@ apple_cross_toolchain.configure(
         name = "apple_cross_toolchain",
         apple_sdk_urls = ["<url-to-apple-sdk-archive>"],
         apple_sdk_archive_type = "tar.xz",  # if not inferrable from URL
+        swift_tools = {
+            "aarch64": "@applecross_swift_ubuntu24.04-aarch64//:tools",
+            "x86_64": "@applecross_swift_ubuntu24.04//:tools",
+        },
     )
     use_repo(apple_cross_toolchain, "apple_cross_toolchain")
 
@@ -70,61 +62,34 @@ apple_cross_toolchain.configure(
     build --@build_bazel_rules_apple//apple:sdk_tool_files=@apple_cross_toolchain//:sdk_tool_files
     ```
 
-    The Xcode and SDK versions are read out of the SDK tree when
-    `@apple_cross_toolchain` is fetched, so there is nothing to pin by hand.
-    The startup flag lets Bazel track the SDK directories the toolchain
-    declares as inputs. `incompatible_repo_env_ignores_action_env` keeps the
-    relative `DEVELOPER_DIR` out of repository rules on Bazel 8, as Bazel 9
-    already does. Inside this repository the paths start with
-    `external/+apple_cross_toolchain+apple_cross_toolchain`.
-
 4. Build an example:
 
     ```
     bazel build @rules_applecross//examples/ios/HelloWorldSwiftUI:HelloWorld
     ```
 
-## Notes
+## Packaging the SDK
 
-- Apple SDKs archives are not publicly available. If you have access to macOS, you
-  can build one yourself by running `tools/package-sdks.sh`.
-- On a macOS host you can skip the archive entirely: set `local_xcode = True` on
-  `apple_cross_toolchain.configure()` and the toolchain repository builds the SDK
-  tree straight out of the installed Xcode. See [Building on
-  macOS](#building-on-macos).
+**[Please ensure you have read and understood the Xcode license terms before continuing.](https://www.apple.com/legal/sla/docs/xcode.pdf)**
+
+If you build on macOS, Xcode will be automatically detected and used. If you
+build on Linux, run the following command on a Mac to package an SDK tarball
+that can be used for your build:
+
+```
+tools/package-sdks.sh
+```
 
 ## Building on macOS
-
-A macOS host has an Xcode already, so there is no reason to repackage one:
 
 ```starlark
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
     apple_sdk_urls = ["<url-to-apple-sdk-archive>"],
-    local_xcode = True,
+    local_xcode = True,  # this skips staging the SDKs
     swift_tools = {"x86_64": "..."},
 )
 ```
-
-`local_xcode` reads the SDKs from the Xcode that `DEVELOPER_DIR` names, or that
-`xcode-select -p` selects. Hosts other than macOS ignore it and read the archive
-source instead, so the same `MODULE.bazel` serves a Linux CI host and a macOS
-developer machine unchanged. Set `--repo_env=RULES_APPLECROSS_LOCAL_XCODE=0` to
-force the archive on macOS, or `=1` to turn a missing Xcode into an error rather
-than a silent fallback.
-
-The tree is assembled almost entirely out of symlinks into the install: a real
-directory appears only where the toolchain has to write, which is the framework
-stubs no Xcode ships and the toolchain directory the Linux-hosted tools land in.
-It presents exactly the file set the archive contains — same names, same contents
-— so both sources produce identical action keys and share the remote cache.
-
-Upgrading Xcode in place refetches the repository, because the rule records the
-selected Xcode's `Contents/version.plist` as an input, and so does changing
-`DEVELOPER_DIR`. Pointing `xcode-select -s` at a *different* Xcode does not:
-nothing the rule records changes, so refetch it with `bazel fetch --configure
---force`. Deleting or moving the selected Xcode leaves the symlinks dangling,
-which the same command repairs.
 
 The Swift toolchain must match the Swift that built those SDKs, which is the
 Swift of the Xcode *one release behind* the SDKs' own: Xcode 26.6 ships the 26.5
@@ -152,21 +117,15 @@ framework. Set `swift_version` (and the archives' `platform_sha256`) on
     )
     ```
 
-    Exec tools link against glibc, so the image must provide glibc 2.28 or
-    newer.
-
 2. Add the following to your `.bazelrc`:
 
     ```
     build:remote --bes_backend=grpcs://app.buildbuddy.io
     build:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-    build:remote --jobs=100
-    build:remote --remote_download_toplevel
+    build:remote --jobs=1000
     build:remote --remote_executor=grpcs://app.buildbuddy.io
     build:remote --remote_timeout=3600
     build:remote --strategy=SwiftCompile=remote,sandboxed,worker,local
-    build:remote --tls_client_certificate=buildbuddy-cert.pem
-    build:remote --tls_client_key=buildbuddy-key.pem
     ```
 
 3. Build with `--config=remote`:
@@ -175,12 +134,13 @@ framework. Set `swift_version` (and the archives' `platform_sha256`) on
     bazel build --config=remote @rules_applecross//examples/ios/HelloWorldSwiftUI:HelloWorld
     ```
 
-## Splitting a build between Linux and macOS
+## Multi-platform RBE
 
-Compiling can run on the Linux executors while everything `rules_apple`
-produces — linking, `actool` and `ibtool`, plists, bundling, signing — runs on
-a Mac with a real Xcode. That allows you to build a complete app without
-relying on ported tools that may not have functional parity.
+rules_applecross supports multi-platform RBE, which means you can send source
+code compilation to the Linux executors while having everything else (e.g.
+resource handling, signing etc) runs on a Mac. That allows you to build a
+complete app without relying on ported tools that may not have functional
+parity.
 
 Register the macOS instance to keep bundling actions on a Mac:
 
@@ -214,91 +174,28 @@ that.
 
 ## Developing rules_applecross
 
-This repository's own `MODULE.bazel` sets `local_xcode = True`, so on macOS the
-examples build against the installed Xcode with nothing to fetch or unpack.
-
-Every other host reads the SDK archive from the workspace root via
-`apple_sdk_path`, so building the examples there needs that archive in place
-first. Download a packaged one:
-
-```
-SDKS_URL=<url> tools/fetch-sdks.sh
-```
-
-Add `SDKS_TOKEN=<token>` when the host needs credentials. For a GitHub
-release on a private repository, `SDKS_URL` can be the ordinary release
-download URL (`.../releases/download/<tag>/<name>` or
-`.../releases/latest/download/<name>`); the script resolves it through the
-GitHub API, which is the only endpoint that honors token auth there. Neither
-path requires editing a checked-in file to build.
-
 ### Ported tools
 
 `tools/build-ported-tools.sh` builds, for the host's CPU, the Linux tools the
 toolchain stages that LLVM doesn't provide:
 
-- `tools/apple_tools`, built with Bazel and rules_rs: the clean-room tools in
-  `crates` (see `docs/clean-room`) and, in `xcbuild`, the Rust port of the
-  xcbuild tools rules_apple runs (`xcrun`, `plutil`, `PlistBuddy`, `sw_vers`);
-- `tools/apple_tools/swiftui_macros`, built with SwiftPM;
-- `tools/system_tools`, built with Bazel and statically linked against musl,
-  as executor images may lack them: Info-ZIP `zip` and `unzip` with Debian's
-  patches, and CPython `python3` through rules_foreign_cc, whose archive also
-  carries the standard library;
-- pngcrush, built from source.
+- `tools/apple_tools`: `actool`, `ibtool`, `codesign`, `swift-stdlib-tool`,
+  `PlistBuddy`, `plutil`, `sw_vers`, and `xcrun`
+- `tools/apple_tools/swiftui_macros`: `SwiftUIMacros`
+- `tools/system_tools`: `zip`, `unzip`, and `python3`
+- `pngcrush`
 
-It runs in the Linux container `tools/linux_vm/Containerfile` describes and
-writes each tool as `ported-tools/<tool>-linux-<arch>.tar.zst`. The
-`ported-tools` workflow builds them for x86_64 and aarch64 and, on `main`,
-publishes them with a `SHA256.txt` as the release `ported-tools-<VERSION>`
-unless it exists, so bump `VERSION` in `.github/workflows/ported-tools.yml` to
-release changes.
-
-The toolchain downloads the archives `toolchain/ported_tools.sha256` lists, a
-copy of a release's `SHA256.txt`, from the release `_PORTED_TOOLS_URL` in
-`toolchain/apple_cross_toolchain.bzl` names; update the two together. To try
-local builds, name the `ported-tools` directory in `ported_tools_archives`.
+These are prebuilt and uploaded here in this repository. See
+`ported-tools-<VERSION>` releases.
 
 ### Tests
 
-Stub SDK tests run on GitHub's Linux runners, which never see an Apple SDK.
-They build against stub SDKs: generated trees holding swift.org's Darwin Swift
-runtime and placeholders for everything Apple ships. `tools/stub-sdks.py` writes
-them as the `apple-sdks.tar.zst` that a Linux host without Xcode reads:
+On Linux CI, builds are only tested against stub SDKs:
 
 ```
 tools/stub-sdks.py
 bazel test //tests/stub_sdks/...
 ```
 
-Stub SDKs compile, link and bundle code that imports no Apple framework, and
-every example analyzes against them.
-
-Smoke tests build the examples against a real Xcode, so they run only on
-Apple hardware. CI runs them on GitHub's macOS runners:
-
-```
-bazel build \
-  --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1 \
-  --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=0 \
-  --ios_multi_cpus=sim_arm64 \
-  --macos_cpus=arm64 \
-  --tvos_cpus=sim_arm64 \
-  --watchos_cpus=arm64 \
-  //examples/...
-```
-
-Xcode's `actool` needs the simulator runtime of each platform it builds for.
-
-CI doesn't run them on a Linux host, so before sending a change, run the same
-command on a Mac prefixed with `tools/linux_vm/run.sh`. It builds in a Linux VM
-that reads the Mac's Xcode through a read-only mount. Build its image first:
-
-```
-podman build -t localhost/rules-applecross-linux tools/linux_vm
-```
-
-With Docker, build the image with `docker build`, set
-`RULES_APPLECROSS_ENGINE=docker`, and point `RULES_APPLECROSS_VM_XCODE` at an
-Xcode its VM can see; for Docker Desktop, share `/Applications` or use a copy
-under a shared path.
+To test against real SDKs on Linux, you need to package an SDK tarball and
+provide it to the build yourself. See #packaging-the-sdk.
