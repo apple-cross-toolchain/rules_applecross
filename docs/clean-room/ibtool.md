@@ -213,7 +213,10 @@ other values of the attributes these use, is refused. Observed:
   `UIStoryboardIdentifier`. `userLabel` (on any element) and a
   controller's simulated metrics (`simulatedMetricsContainer`,
   `simulatedNavigationBarMetrics`, `<nil key="simulated...">`, ...) change
-  nothing (five probes). A
+  nothing (five probes), except a freeform size: `<size
+  key="freeformSize">` is the root view's size instead of the device's or
+  the generic canvas's, though a device-less view from iOS 17.0 keeps its
+  frame (seven probes and rules_apple's iMessage example). A
   `<navigationItem>` without items is the swapper's `UINavigationItem`,
   after `UITitle`: its title, the same string as an `NSAttributedString`
   with no attributes, the nib's one empty array as `UICenterItemGroups`

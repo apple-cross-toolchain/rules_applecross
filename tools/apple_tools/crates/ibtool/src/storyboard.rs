@@ -28,17 +28,17 @@ fn child<'a, 'i>(n: Node<'a, 'i>, tag: &'a str, key: &str) -> Option<Node<'a, 'i
 }
 
 /// Interface Builder's own settings for how a controller is drawn while
-/// editing, which compiled storyboards don't record (four probes).
-const EDITOR_ONLY: [&str; 9] = [
+/// editing, which compiled storyboards don't record (five probes); a
+/// freeform size is another matter (see `compile`).
+const EDITOR_ONLY: [&str; 8] = [
     "simulatedMetricsContainer", "simulatedNavigationBarMetrics", "simulatedStatusBarMetrics", "simulatedTabBarMetrics",
-    "simulatedToolbarMetrics", "simulatedOrientationMetrics", "simulatedScreenMetrics", "freeformSimulatedSizeMetrics", "size",
+    "simulatedToolbarMetrics", "simulatedOrientationMetrics", "simulatedScreenMetrics", "freeformSimulatedSizeMetrics",
 ];
 
 fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
         let editor_only = n.has_tag_name("viewController")
-            && (EDITOR_ONLY.contains(&c.tag_name().name()) && (!c.has_tag_name("size") || c.attribute("key") == Some("freeformSize"))
-                || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
+            && (EDITOR_ONLY.contains(&c.tag_name().name()) || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
         if !allowed.contains(&c.tag_name().name()) && !editor_only {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
         }
@@ -1264,7 +1264,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("userLabel", None), ("sceneMemberID", Some("viewController")),
         ])?;
         let class_name = runtime_class_name(vc, module, "UIViewController")?;
-        only_children(vc, &["view", "layoutGuides", "connections", "navigationItem"])?;
+        only_children(vc, &["view", "layoutGuides", "connections", "navigationItem", "size"])?;
+        if children(vc, "size").any(|s| s.attribute("key") != Some("freeformSize")) {
+            return fail("sizes other than a freeform size inside <viewController> are not supported by this ibtool");
+        }
         let vc_id = attr(vc, "id")?;
         let view = children(vc, "view").next().ok_or("view controller without a view")?;
         only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints"])?;
@@ -1308,10 +1311,20 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
 
         let mut nib = Nib::new(platform, color_matched);
-        let f = match (generic_canvas, device_size) {
-            (true, _) => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
-            (false, Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
-            (false, None) => frame(view)?,
+        // A controller's freeform size (`<size key="freeformSize">`, the
+        // simulated metrics' own size) replaces the device's or the generic
+        // canvas's, but not the frame a device-less view from iOS 17 keeps.
+        let freeform = match child(vc, "size", "freeformSize") {
+            Some(s) => Some((number(attr(s, "width")?)?, number(attr(s, "height")?)?)),
+            None => None,
+        };
+        let f = match (generic_canvas, has_device, device_size, freeform) {
+            (true, _, _, None) => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
+            (true, _, _, Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
+            (false, true, Some(_), Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
+            (false, true, Some((w, h)), None) => Frame { x: 0.0, y: 0.0, w, h },
+            (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
+            (false, _, _, _) => frame(view)?,
         };
         let mask = match children(view, "autoresizingMask").next() {
             Some(m) => autoresizing_mask(m)?,
