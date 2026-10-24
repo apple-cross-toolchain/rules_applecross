@@ -75,7 +75,9 @@ Constraints between those, with constants, and labels' and image views' own
 width and height; outlets from the controller into its view. Everything else, and
 other values of the attributes these use, is refused. Observed:
 
-- Without a `<device>`, an iOS root view is laid out at 600x600 whatever its
+- Without a `<device>`, an iOS root view is laid out at 600x600 (size
+  classes' canvas; 393x852 without `useTraitCollections="YES"`, eight
+  probes and RxSwift's ImagePicker) whatever its
   frame says when the deployment target is below iOS 17.0, and at its frame
   from 17.0 on (`resources/Launch`, at 12.0, 16.99, 17.0 and 26.0); Xcode's
   ibtool fails on a tvOS storyboard without one.
@@ -91,7 +93,10 @@ other values of the attributes these use, is refused. Observed:
   (`labelColor`, `systemBackgroundColor`, `lightTextColor`, ...), sRGB (2)
   otherwise, after its `UISystemColorName`. The 40 colours of the system
   colour list measured on iOS are those this ibtool knows; others, and
-  system colours on tvOS, are refused. Documents from older Xcodes name
+  system colours on tvOS, are refused. A system colour needn't be defined
+  in the document's resources, and Xcode 11's forms with a fallback name or
+  components beside `systemColor` archive the same (four probes). Documents
+  from older Xcodes name
   them with `xcode11CocoaTouchSystemColor` or `cocoaTouchSystemColor`
   instead of `systemColor`; those archive the same (five probes, and
   covid_tracker's and MixTag's launch screens).
@@ -177,6 +182,9 @@ other values of the attributes these use, is refused. Observed:
   subviews, which join the queue (six probes nesting views two deep beside
   image views with their own constraints; depth first and level by level
   each fail one).
+- A multiplier other than 1 is `NSMultiplier` after `NSFirstAttribute`: a
+  double holding the float nearest it (`1.2` as 1.2000000476837158, `2:3`
+  as 2/3), three probes.
 - A subview's constraints are its `UIViewAutolayoutConstraints`, after
   `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`: its own width
   and height constants (no second item), width before height whatever the
@@ -194,6 +202,13 @@ other values of the attributes these use, is refused. Observed:
   393x852 either way; `appleTV` is 1920x1080). Ids Xcode doesn't know
   (`retina5_4`, `ipad10_5`, `ipad12_9`, `ipad8_3rounded`,
   `ipad13_0rounded`, `appleTV4K`) take the frame; other ids are refused.
+- Subviews keep their frames whatever size the root view is laid out at,
+  except autoresizing ones (not `translatesAutoresizingMaskIntoConstraints="NO"`),
+  which the root resizes by their masks (sizable width and height grow
+  with it: 100x80 under a 375x667 frame laid out at 600x600 is 325x13).
+  Where the root's size isn't its frame's, a subview whose mask has a
+  flexible left or top margin or a sizable width or height is refused; the
+  rest are compiled, with or without a device (eight probes).
 - An image view (`userInteractionEnabled="NO"`; scale to fill, aspect fit,
   aspect fill or centre) archives as a label's geometry and flags, then
   `UIContentMode` unless scale to fill, `UIClipsToBounds`, `UITintColor`,
@@ -204,9 +219,23 @@ other values of the attributes these use, is refused. Observed:
 - A controller's `title` is its swapper's `UITitle`, first;
   `useStoryboardIdentifierAsRestorationIdentifier` adds
   `UIRestorationIdentifier` (the identifier's string) after
-  `UIStoryboardIdentifier`; `userLabel` changes nothing. A label's
+  `UIStoryboardIdentifier`. `userLabel` (on any element) and a
+  controller's simulated metrics (`simulatedMetricsContainer`,
+  `simulatedNavigationBarMetrics`, `<nil key="simulated...">`, ...) change
+  nothing (five probes), except a freeform size: `<size
+  key="freeformSize">` is the root view's size instead of the device's or
+  the generic canvas's, though a device-less view from iOS 17.0 keeps its
+  frame (seven probes and rules_apple's iMessage example). A
+  `<navigationItem>` without items is the swapper's `UINavigationItem`,
+  after `UITitle`: its title, the same string as an `NSAttributedString`
+  with no attributes, the nib's one empty array as `UICenterItemGroups`
+  (so the nib's visible windows and the rest reuse it) and
+  `UILargeTitleDisplayMode` (automatic 0, always 1, never 2), listed last
+  in the controller nib's objects (six probes). A label's
   `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`; a text
-  field's `placeholder` is `UIPlaceholder` after `UIFont`.
+  field's `placeholder` is `UIPlaceholder` after `UIFont`, and its declared
+  text colour its `UITextColor` (`UIDisableTextColorUpdateOnTraitCollectionChange`
+  is set either way; three probes).
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an
   empty identifier. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
