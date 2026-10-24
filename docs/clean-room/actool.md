@@ -294,15 +294,23 @@ scale on, dimension1 its index) named `ZZZZPackedAsset-{scale}.{opaque}.{grey}-g
 and flagged opaque as its group is, whatever its padding (an opaque grey
 atlas's padding is opaque too: alpha 255, grey 0); each image is a
 layout 1003 link to it flagged with its rendering intent. A group's only
-packable image is stored on its own. The key format has dimension1 only
-when an atlas uses it.
+packable image is stored on its own. Atlases are filled next-fit, one
+closed once its area reaches the cap and the next taking the following
+dimension1 (and the same name), even for a single image. The key format
+has dimension1 only when an atlas uses it.
 
-Refused: a group needing more than one atlas, atlases whose `dmp2` row
+Folders are scanned for image sets: a folder's assets are named as at the
+top, or with its name and a slash before theirs when its `Contents.json`
+says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
+identifier is the hash of that full name. Other assets in folders, and
+other folder properties, are refused.
+
+Refused: atlases whose `dmp2` row
 predictors aren't established (common: the row under an atlas's empty top
 row ties between predictors 1 and 2, which Xcode breaks neither by cost,
 summation order, nor compressed size),
 vector images (SVG, PDF), other idioms, appearances and other properties,
-folders, and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
+and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were

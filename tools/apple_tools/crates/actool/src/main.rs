@@ -118,27 +118,58 @@ fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
 fn scan(catalogs: &[PathBuf]) -> Result<Scan, String> {
     let mut found = Scan::default();
     for catalog in catalogs {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(catalog)
-            .map_err(|e| format!("{}: {e}", catalog.display()))?
-            .map(|e| e.map(|e| e.path()).map_err(|e| e.to_string()))
-            .collect::<Result<_, _>>()?;
-        entries.sort();
-        for p in entries {
-            let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            if name == "Contents.json" || name.starts_with('.') {
-                continue;
-            }
-            match name.rsplit_once('.') {
-                Some((stem, "appiconset")) => found.icon_sets.push((stem.to_string(), p)),
-                Some((stem, "brandassets")) => found.brand_assets.push((stem.to_string(), p)),
-                Some((stem, "solidimagestack")) => found.solid_stacks.push((stem.to_string(), p)),
-                Some((stem, "imageset")) => found.image_sets.push((stem.to_string(), p)),
-                Some((_, "colorset")) if !has_entries(&read_json(&p.join("Contents.json"))?, "colors", "color") => {}
-                _ => return Err(format!("{}: this kind of asset is not supported by this actool yet", p.display())),
-            }
-        }
+        scan_dir(catalog, "", true, &mut found)?;
     }
     Ok(found)
+}
+
+/// A catalog's directory, or a folder in it: image sets in folders are named
+/// with the folder's name and a slash when it provides a namespace.
+fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(), String> {
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .map(|e| e.map(|e| e.path()).map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+    for p in entries {
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        if name == "Contents.json" || name.starts_with('.') {
+            continue;
+        }
+        match name.rsplit_once('.') {
+            Some((stem, "imageset")) => found.image_sets.push((format!("{prefix}{stem}"), p)),
+            Some((_, "colorset")) if !has_entries(&read_json(&p.join("Contents.json"))?, "colors", "color") => {}
+            Some((stem, "appiconset")) if top => found.icon_sets.push((stem.to_string(), p)),
+            Some((stem, "brandassets")) if top => found.brand_assets.push((stem.to_string(), p)),
+            Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
+            None if p.is_dir() => {
+                // A folder: its Contents.json may say it provides a namespace.
+                let contents = p.join("Contents.json");
+                let mut namespace = false;
+                if contents.is_file() {
+                    let j = read_json(&contents)?;
+                    for (k, v) in j.as_object().into_iter().flatten() {
+                        match (k.as_str(), v) {
+                            ("info", _) => {}
+                            ("properties", serde_json::Value::Object(props)) => {
+                                for (pk, pv) in props {
+                                    match (pk.as_str(), pv.as_bool()) {
+                                        ("provides-namespace", Some(b)) => namespace = b,
+                                        _ => return Err(format!("{}: the folder property {pk} is not supported by this actool", p.display())),
+                                    }
+                                }
+                            }
+                            _ => return Err(format!("{}: the {k} key of a folder is not supported by this actool", p.display())),
+                        }
+                    }
+                }
+                let inner = if namespace { format!("{prefix}{name}/") } else { prefix.to_string() };
+                scan_dir(&p, &inner, false, found)?;
+            }
+            _ => return Err(format!("{}: this kind of asset is not supported by this actool yet", p.display())),
+        }
+    }
+    Ok(())
 }
 
 fn xcode_identity() -> String {

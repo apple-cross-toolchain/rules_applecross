@@ -95,12 +95,22 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                 if packable.windows(2).any(|w| w[0].image.width * w[0].image.height == w[1].image.width * w[1].image.height && w[0].identifier == w[1].identifier) {
                     return Err(format!("image sets with equal identifiers and areas in one {scale}x atlas are not supported by this actool"));
                 }
-                let total: usize = packable.iter().map(|i| i.image.width * i.image.height).sum();
-                if total - packable.last().unwrap().image.width * packable.last().unwrap().image.height >= cap {
-                    return Err(format!("image sets needing more than one {scale}x atlas of {} {} images are not supported by this actool", if opaque { "opaque" } else { "translucent" }, if gray { "greyscale" } else { "colour" }));
+                // Next-fit atlases: one is closed once its area reaches the
+                // cap, the next taking the following index at this scale.
+                let mut atlases: Vec<Vec<&SetImage>> = Vec::new();
+                let mut total = 0;
+                for i in packable {
+                    if atlases.is_empty() || total >= cap {
+                        atlases.push(Vec::new());
+                        total = 0;
+                    }
+                    total += i.image.width * i.image.height;
+                    atlases.last_mut().unwrap().push(i);
                 }
-                pack(scale, opaque, gray, atlas_index, &packable, &mut out.renditions)?;
-                atlas_index += 1;
+                for atlas in atlases {
+                    pack(scale, opaque, gray, atlas_index, &atlas, &mut out.renditions)?;
+                    atlas_index += 1;
+                }
             }
             for i in standalone {
                 out.renditions.push(standalone_rendition(i)?);
