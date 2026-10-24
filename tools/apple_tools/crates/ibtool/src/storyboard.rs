@@ -212,6 +212,9 @@ fn layout_attribute(name: &str) -> Result<i64, String> {
 /// where it is first used.
 struct Nib {
     platform: Platform,
+    /// Whether the storyboard is in `Base.lproj`, where Xcode makes the
+    /// strings a translation replaces localizable.
+    localizable: bool,
     /// The document's `colorMatched`: without it, colours' components are
     /// taken as they are rather than converted from their colour space.
     color_matched: bool,
@@ -220,8 +223,8 @@ struct Nib {
 }
 
 impl Nib {
-    fn new(platform: Platform, color_matched: bool) -> Nib {
-        Nib { platform, color_matched, shared: HashMap::new(), next: 0 }
+    fn new(platform: Platform, color_matched: bool, localizable: bool) -> Nib {
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0 }
     }
 
     fn fresh(&mut self) -> String {
@@ -264,6 +267,22 @@ impl Nib {
             ("UISystemSymbolResourceName", Value::Nil),
             ("UISymbolImageConfiguration", Value::Nil),
             ("UIResourceCatalogName", Value::Nil),
+        ]))
+    }
+
+    /// A string a translation replaces, the `property` of the object `id`:
+    /// in `Base.lproj` an `NSLocalizableString` keyed `<id>.<property>`
+    /// with the string as its development value.
+    fn text(&mut self, id: &str, property: &str, s: &str) -> Value {
+        if !self.localizable {
+            return self.string(s);
+        }
+        let key = self.string(&format!("{id}.{property}"));
+        let dev = self.string(s);
+        Value::New(Object::new("NSLocalizableString", vec![
+            ("NS.bytes", Value::Data(s.as_bytes().to_vec())),
+            ("NSKey", key),
+            ("NSDev", dev),
         ]))
     }
 
@@ -450,8 +469,14 @@ fn navigation_item(nib: &mut Nib, n: Node) -> Result<Value, String> {
     }
     let mut values = Vec::new();
     if let Some(title) = n.attribute("title") {
-        values.push(("UITitle", nib.string(title)));
-        let string = nib.string(title);
+        // The attributed title holds the title's own object.
+        let (first, string) = if nib.localizable {
+            let Value::New(o) = nib.text(attr(n, "id")?, "title", title) else { unreachable!() };
+            (Value::New(o.named("navigation title")), reference("navigation title"))
+        } else {
+            (nib.string(title), nib.string(title))
+        };
+        values.push(("UITitle", first));
         let attributes = nib.array("NSDictionary", Vec::new());
         values.push(("UIAttributedTitle", Value::New(Object::new("NSAttributedString", vec![("NSString", string), ("NSAttributes", attributes)]))));
     }
@@ -764,7 +789,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
-            values.push(("UIText", nib.string(attr(n, "text")?)));
+            values.push(("UIText", nib.text(id, "text", attr(n, "text")?)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             // A declared text colour, even labelColor, stays as it is when
             // the trait collection changes.
@@ -810,7 +835,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIContentHorizontalAlignment", Value::Int(1)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             if let Some(placeholder) = n.attribute("placeholder") {
-                values.push(("UIPlaceholder", nib.string(placeholder)));
+                values.push(("UIPlaceholder", nib.text(id, "placeholder", placeholder)));
             }
             values.push(("UITextAlignment", Value::Int(4)));
             let text_color = match text_color {
@@ -889,7 +914,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             let state = nib.int_number(0);
             let mut content = Vec::new();
             if let Some(title) = states[0].attribute("title") {
-                content.push(("UITitle", nib.string(title)));
+                content.push(("UITitle", nib.text(id, "normalTitle", title)));
             }
             if let Some(c) = child(states[0], "color", "titleColor") {
                 content.push(("UITitleColor", color(nib, c)?));
@@ -1272,7 +1297,7 @@ fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections:
     ])
 }
 
-pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>) -> Result<Compiled, String> {
+pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let platform = match root.attribute("type") {
@@ -1356,7 +1381,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         }
 
-        let mut nib = Nib::new(platform, color_matched);
+        let mut nib = Nib::new(platform, color_matched, localizable);
         // A controller's freeform size (`<size key="freeformSize">`, the
         // simulated metrics' own size) replaces the device's or the generic
         // canvas's, but not the frame a device-less view from iOS 17 keeps.
@@ -1585,7 +1610,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // A controller with a storyboard identifier is loaded by it.
         let vc_nib_name = vc.attribute("storyboardIdentifier").map_or_else(|| format!("UIViewController-{vc_id}"), str::to_string);
         let view_nib_name = format!("{vc_id}-view-{view_id}");
-        let mut vnib = Nib::new(platform, color_matched);
+        let mut vnib = Nib::new(platform, color_matched, localizable);
         let owner = proxy(&mut vnib, "IBFilesOwner", "owner");
         let responder = proxy(&mut vnib, "IBFirstResponder", "responder");
         let storyboard = proxy(&mut vnib, "UIStoryboardPlaceholder", "storyboard");
@@ -1594,7 +1619,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let nib_name = vnib.string(&view_nib_name);
         let mut swapper = Vec::new();
         if let Some(title) = vc.attribute("title") {
-            swapper.push(("UITitle", vnib.string(title)));
+            swapper.push(("UITitle", vnib.text(vc_id, "title", title)));
         }
         if let Some(item) = child(vc, "navigationItem", "navigationItem") {
             swapper.push(("UINavigationItem", navigation_item(&mut vnib, item)?));

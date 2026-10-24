@@ -87,7 +87,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml)
         } else {
-            storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref()).map(|c| c.files)
+            storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files)
         };
         let files = match compiled {
             Ok(files) => files,

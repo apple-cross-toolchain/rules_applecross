@@ -182,6 +182,13 @@ other values of the attributes these use, is refused. Observed:
   subviews, which join the queue (six probes nesting views two deep beside
   image views with their own constraints; depth first and level by level
   each fail one).
+- A storyboard in a `Base.lproj` directory has its translatable strings
+  archived as `NSLocalizableString`s: the string inline (`NS.bytes`),
+  `NSKey` `<id>.<property>` and `NSDev` the string (shared as strings
+  are), for a label's `text`, a button's `normalTitle`, a text field's
+  `placeholder` and a controller's or navigation item's `title` (whose
+  attributed title holds the same object). Elsewhere, `en.lproj`
+  included, they are plain strings (five probes, two corpus storyboards).
 - A button: a system button is archived as a rounded-rect one
   (`UIButtonType` 1), a custom one has no `UIButtonType` and an 18-point
   default font (15 otherwise); `fixedFrame` changes nothing. A background
