@@ -75,7 +75,9 @@ Constraints between those, with constants, and labels' and image views' own
 width and height; outlets from the controller into its view. Everything else, and
 other values of the attributes these use, is refused. Observed:
 
-- Without a `<device>`, an iOS root view is laid out at 600x600 whatever its
+- Without a `<device>`, an iOS root view is laid out at 600x600 (size
+  classes' canvas; 393x852 without `useTraitCollections="YES"`, eight
+  probes and RxSwift's ImagePicker) whatever its
   frame says when the deployment target is below iOS 17.0, and at its frame
   from 17.0 on (`resources/Launch`, at 12.0, 16.99, 17.0 and 26.0); Xcode's
   ibtool fails on a tvOS storyboard without one.
