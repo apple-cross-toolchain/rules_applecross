@@ -65,7 +65,7 @@ not. foundation-hashing.md describes that set's layout.
 Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
-guides. Subviews: labels (system font, a font Xcode finds for iOS, or the
+guides, alone or as a navigation controller's root. Subviews: labels (system font, a font Xcode finds for iOS, or the
 Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
 rounded-rect, system and custom buttons with a normal state (title, title
@@ -250,7 +250,9 @@ other values of the attributes these use, is refused. Observed:
   `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`; a text
   field's `placeholder` is `UIPlaceholder` after `UIFont`, and its declared
   text colour its `UITextColor` (`UIDisableTextColorUpdateOnTraitCollectionChange`
-  is set either way; three probes).
+  is set either way; three probes). A text field with no text colour
+  element is as with a nil one; a label with none is as with a declared
+  `labelColor` (two probes).
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an
   empty identifier. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
@@ -265,6 +267,39 @@ other values of the attributes these use, is refused. Observed:
   to it) has an `UpstreamPlaceholder-1` proxy, which the controller's nib
   maps to its class swapper in `UIExternalObjectsTableForViewLoading`.
 - tvOS views have no `UIViewLargeContentStoredProperties`.
+
+## Navigation controllers
+
+A `<navigationController>` (its bar, a root view controller by a
+relationship segue, empty toolbar items) compiles to
+`UINavigationController-<id>.nib` (or its identifier's), which embeds the
+root controller; the root's scene adds its view nib, and its own nib only
+when it is initial or identified. Observed with 25 probes:
+
+- Top-level objects: the root's scene's storyboard placeholder, the owner,
+  the first responder, the navigation controller's storyboard placeholder
+  and a class swapper for the controller (`UINavigationController`, or the
+  custom class's runtime name): `UITitle`, `UIStoryboardIdentifier`,
+  `UIRestorationIdentifier`, `UIChildViewControllers` (the root),
+  `UIKeyAutomaticallyAdjustsScrollViewInsets` 0 when it says NO,
+  `UIViewControllers` (the root again), `UINavigationBar`, the class names.
+  The objects list then has the bar, the root and its navigation item, if
+  the document declares one; the connections are the two storyboard
+  outlets (controller, then root) and `sceneViewController`.
+- The root is a `UIViewController` (a `UIClassSwapper`, its class names
+  last, when it has a custom class or a nib of its own): `UITitle`, its
+  navigation item (as in its own nib, or one with only
+  `UILargeTitleDisplayMode` when the document has none), the external
+  objects table (`UpstreamPlaceholder-1` for outlets into its view), its
+  view nib's name, its identifiers, `UIParentViewController`. The item
+  ends with `UINavigationBar`, a reference to the bar archived later.
+- The bar is laid out by Xcode, not the document: bounds 0x54 centred 27
+  below its frame's top, mask 2, hugging `{250, 250}`, zero layout margins
+  (directional), `UIViewInsetsLayoutMarginsFromSafeArea` 0 when the
+  document turns it off, `UIIsLocked`, `UIItems` (the root's item),
+  `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1.
+  Other bar settings, other segues and controllers nothing loads are
+  refused.
 
 ## WatchKit storyboards
 

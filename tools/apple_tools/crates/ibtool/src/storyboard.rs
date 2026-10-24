@@ -37,7 +37,7 @@ const EDITOR_ONLY: [&str; 8] = [
 
 fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
-        let editor_only = n.has_tag_name("viewController")
+        let editor_only = (n.has_tag_name("viewController") || n.has_tag_name("navigationController"))
             && (EDITOR_ONLY.contains(&c.tag_name().name()) || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
         if !allowed.contains(&c.tag_name().name()) && !editor_only {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
@@ -767,9 +767,12 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
             }
-            let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
-                (Some(c), None) => Some(c),
-                (None, Some(_)) => None,
+            // No text colour at all is a declared labelColor; a nil one is
+            // the default.
+            let (text_color, declared_color) = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
+                (Some(c), None) => (Some(c), true),
+                (None, Some(_)) => (None, false),
+                (None, None) => (None, true),
                 _ => return fail("a label needs one text colour or nil"),
             };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
@@ -793,7 +796,6 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             // A declared text colour, even labelColor, stays as it is when
             // the trait collection changes.
-            let declared_color = text_color.is_some();
             let text_color = match text_color {
                 Some(c) => color(nib, c)?,
                 None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
@@ -818,9 +820,10 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if traits.attributes().len() != 1 || traits.has_children() {
                 return fail("text input traits are not supported by this ibtool");
             }
+            // No text colour at all is the same as a nil one.
             let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
                 (Some(c), None) => Some(c),
-                (None, Some(_)) => None,
+                (None, _) => None,
                 _ => return fail("a text field needs one text colour or nil"),
             };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
@@ -1297,6 +1300,183 @@ fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections:
     ])
 }
 
+/// What a navigation controller's nib needs of its root view controller,
+/// which it embeds.
+struct RootController<'a, 'i> {
+    vc: Node<'a, 'i>,
+    /// Whether it has a nib of its own too (initial or identified).
+    loadable: bool,
+    view_nib_name: String,
+    class_name: String,
+    upstream_used: bool,
+}
+
+/// The id of a navigation controller's root view controller, its one
+/// relationship segue.
+fn navigation_root<'a>(nav: Node<'a, '_>) -> Result<&'a str, String> {
+    only_children(nav, &["navigationBar", "connections", "toolbarItems", "nil"])?;
+    for c in children(nav, "toolbarItems") {
+        if c.has_children() {
+            return fail("navigation controllers with toolbar items are not supported by this ibtool");
+        }
+    }
+    for c in children(nav, "nil") {
+        if c.attribute("name") != Some("viewControllers") {
+            return fail("<nil> inside <navigationController> is not supported by this ibtool");
+        }
+    }
+    let connections = children(nav, "connections").next().ok_or("a navigation controller without a root view controller")?;
+    only_children(connections, &["segue"])?;
+    let segues: Vec<Node> = children(connections, "segue").collect();
+    if segues.len() != 1 {
+        return fail("navigation controllers with segues other than their root's are not supported by this ibtool");
+    }
+    only_attributes(segues[0], &[("destination", None), ("kind", Some("relationship")), ("relationship", Some("rootViewController")), ("id", None)])?;
+    attr(segues[0], "destination")
+}
+
+/// A navigation controller's nib: the scenes' placeholders, the controller
+/// swapped in for UINavigationController, its root view controller (as in
+/// its own nib, with its navigation item, real or implied) and its bar.
+fn navigation_controller_nib(
+    platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, nav: Node, root: &RootController,
+) -> Result<(String, Vec<u8>), String> {
+    only_attributes(nav, &[
+        ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("storyboardIdentifier", None),
+        ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None), ("automaticallyAdjustsScrollViewInsets", Some("NO")),
+        ("sceneMemberID", Some("viewController")),
+    ])?;
+    let nav_id = attr(nav, "id")?;
+    let bar = children(nav, "navigationBar").next().ok_or("a navigation controller without a navigation bar")?;
+    only_attributes(bar, &[("key", Some("navigationBar")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None)])?;
+    only_children(bar, &["rect", "autoresizingMask"])?;
+    for m in children(bar, "autoresizingMask") {
+        if autoresizing_mask(m)? != 0 || m.has_children() {
+            return fail("navigation bars with an autoresizing mask are not supported by this ibtool");
+        }
+    }
+    let f = frame(bar)?;
+    if f.x != 0.0 {
+        return fail("navigation bars not at x 0 are not supported by this ibtool");
+    }
+    if let Some(identifier) = nav.attribute("storyboardIdentifier") {
+        if identifier.is_empty() || identifier.contains('/') || !identifier.is_ascii() {
+            return fail(format!("storyboard identifier {identifier:?} is not supported by this ibtool"));
+        }
+    } else if nav.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
+        return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
+    }
+    let vc = root.vc;
+    let name = nav.attribute("storyboardIdentifier").map_or_else(|| format!("UINavigationController-{nav_id}"), str::to_string);
+    let mut nib = Nib::new(platform, color_matched, localizable);
+    // The root's scene's storyboard placeholder comes first.
+    let root_storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "root storyboard");
+    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+    let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
+
+    // The root view controller.
+    let explicit_item = child(vc, "navigationItem", "navigationItem");
+    let item = match explicit_item {
+        Some(i) => match navigation_item(&mut nib, i)? {
+            Value::New(mut o) => {
+                o.values.push(("UINavigationBar", reference("bar")));
+                Value::New(o)
+            }
+            _ => unreachable!(),
+        },
+        None => Value::New(Object::new("UINavigationItem", vec![
+            ("UILargeTitleDisplayMode", Value::Int(0)),
+            ("UINavigationBar", reference("bar")),
+        ]).named("implied navigation item")),
+    };
+    let external = if root.upstream_used { vec![nib.string("UpstreamPlaceholder-1"), reference("root")] } else { Vec::new() };
+    let external = nib.array("NSDictionary", external);
+    let nib_name = nib.string(&root.view_nib_name);
+    let mut root_values = Vec::new();
+    if let Some(title) = vc.attribute("title") {
+        root_values.push(("UITitle", nib.text(attr(vc, "id")?, "title", title)));
+    }
+    root_values.extend([
+        ("UINavigationItem", item),
+        ("UIExternalObjectsTableForViewLoading", external),
+        ("UINibName", nib_name),
+    ]);
+    if let Some(identifier) = vc.attribute("storyboardIdentifier") {
+        root_values.push(("UIStoryboardIdentifier", nib.string(identifier)));
+        if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
+            root_values.push(("UIRestorationIdentifier", nib.string(identifier)));
+        }
+    }
+    root_values.push(("UIParentViewController", reference("controller")));
+    // One with its own nib too is swapped in, as it is there.
+    let root_controller = if vc.attribute("customClass").is_some() || root.loadable {
+        root_values.push(("UIClassName", nib.string(&root.class_name)));
+        root_values.push(("UIOriginalClassName", nib.string("UIViewController")));
+        Object::new("UIClassSwapper", root_values)
+    } else {
+        Object::new("UIViewController", root_values)
+    };
+    let children_value = nib.array("NSMutableArray", vec![Value::New(root_controller.named("root"))]);
+
+    // The bar, at the height Xcode gives it whatever the document says.
+    let hugging = nib.string("{250, 250}");
+    let mut bar_values = vec![
+        ("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])),
+        ("UICenter", doubles(&[f.x, f.y + 27.0])),
+        ("UIDeepDrawRect", Value::Bool(true)),
+        ("UIAutoresizeSubviews", Value::Bool(true)),
+        ("UIAutoresizingMask", Value::Int(2)),
+        ("UIViewContentHuggingPriority", hugging),
+        ("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])),
+        ("UIViewLayoutMarginsAreDirectional", Value::Bool(true)),
+    ];
+    if bar.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+        bar_values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+    }
+    bar_values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+    nib.large_content(&mut bar_values);
+    let items = nib.array("NSMutableArray", vec![reference(if explicit_item.is_some() { "navigation item" } else { "implied navigation item" })]);
+    bar_values.push(("UIIsLocked", Value::Bool(true)));
+    bar_values.push(("UIItems", items));
+    bar_values.push(("UIDelegate", reference("controller")));
+    bar_values.push(("UIBarPosition", Value::Int(2)));
+    bar_values.push(("UIBarTranslucence", Value::Int(1)));
+
+    let mut swapper = Vec::new();
+    if let Some(title) = nav.attribute("title") {
+        swapper.push(("UITitle", nib.text(nav_id, "title", title)));
+    }
+    if let Some(identifier) = nav.attribute("storyboardIdentifier") {
+        swapper.push(("UIStoryboardIdentifier", nib.string(identifier)));
+        if nav.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
+            swapper.push(("UIRestorationIdentifier", nib.string(identifier)));
+        }
+    }
+    swapper.push(("UIChildViewControllers", children_value));
+    if nav.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+        swapper.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
+    }
+    swapper.push(("UIViewControllers", nib.array("NSMutableArray", vec![reference("root")])));
+    swapper.push(("UINavigationBar", Value::New(Object::new("UINavigationBar", bar_values).named("bar"))));
+    let class = runtime_class_name(nav, module, "UINavigationController")?;
+    swapper.push(("UIClassName", nib.string(&class)));
+    swapper.push(("UIOriginalClassName", nib.string("UINavigationController")));
+    let swapper = Value::New(Object::new("UIClassSwapper", swapper).named("controller"));
+
+    let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller"), reference("bar"), reference("root")];
+    if explicit_item.is_some() {
+        objects.push(reference("navigation item"));
+    }
+    let connections = vec![
+        outlet(&mut nib, "storyboard", "controller", "storyboard"),
+        outlet(&mut nib, "storyboard", "root", "root storyboard"),
+        outlet(&mut nib, "sceneViewController", "owner", "controller"),
+    ];
+    let top = vec![root_storyboard, owner, responder, storyboard, swapper];
+    Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))))
+}
+
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
@@ -1325,13 +1505,31 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     };
     let color_matched = root.attribute("colorMatched") == Some("YES");
     let initial = root.attribute("initialViewController");
-    let mut files = Vec::new();
-    let mut identifiers = Vec::new();
     let scenes = children(root, "scenes").next().ok_or("storyboard has no scenes")?;
-    for scene_node in children(scenes, "scene") {
+    let scene_nodes: Vec<Node> = children(scenes, "scene").collect();
+    // Navigation controllers, with their root view controllers' ids. One
+    // that can be loaded (initial or identified) embeds its root
+    // controller, whose view nib is then compiled even if nothing else
+    // loads it.
+    let mut navs = Vec::new();
+    for (index, scene_node) in scene_nodes.iter().enumerate() {
+        if let Some(nav) = scene_node.descendants().find(|d| d.has_tag_name("navigationController")) {
+            let root_id = navigation_root(nav)?;
+            let loadable = initial == Some(attr(nav, "id")?) || nav.attribute("storyboardIdentifier").is_some();
+            navs.push((index, nav, root_id, loadable));
+        }
+    }
+    // Each scene's files and Info.plist entry, by scene.
+    let mut outputs: Vec<(usize, Vec<(String, Vec<u8>)>, Option<(String, bool, bool)>)> = Vec::new();
+    let mut roots: HashMap<&str, RootController> = HashMap::new();
+    for (index, scene_node) in scene_nodes.iter().enumerate() {
+        let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
-        only_children(objects_node, &["viewController", "placeholder"])?;
+        only_children(objects_node, &["viewController", "navigationController", "placeholder"])?;
+        if children(objects_node, "navigationController").next().is_some() {
+            continue;
+        }
         let vc = children(objects_node, "viewController").next().ok_or("scene without a view controller")?;
         only_attributes(vc, &[
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
@@ -1651,14 +1849,39 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             connections,
         );
         // A scene neither initial nor identified can't be loaded, and
-        // Xcode leaves it out.
+        // Xcode leaves it out, unless a navigation controller embeds it.
         let is_initial = initial == Some(vc_id);
-        if !is_initial && vc.attribute("storyboardIdentifier").is_none() {
+        let identified = vc.attribute("storyboardIdentifier").is_some();
+        let embedded = navs.iter().any(|n| n.2 == vc_id && n.3);
+        if embedded {
+            roots.insert(vc_id, RootController { vc, loadable: is_initial || identified, view_nib_name: view_nib_name.clone(), class_name: class_name.clone(), upstream_used });
+        }
+        if !is_initial && !identified && !embedded {
             continue;
         }
-        files.push((format!("{vc_nib_name}.nib"), nib::archive(vc_root)));
-        files.push((format!("{view_nib_name}.nib"), nib::archive(view_root)));
-        identifiers.push((vc_nib_name.clone(), is_initial, vc.attribute("storyboardIdentifier").is_some()));
+        let mut scene_files = vec![(format!("{view_nib_name}.nib"), nib::archive(view_root))];
+        let mut entry = None;
+        if is_initial || identified {
+            scene_files.push((format!("{vc_nib_name}.nib"), nib::archive(vc_root)));
+            entry = Some((vc_nib_name.clone(), is_initial, identified));
+        }
+        outputs.push((index, scene_files, entry));
+    }
+    for &(index, nav, root_id, loadable) in &navs {
+        if !loadable {
+            return fail("a navigation controller neither initial nor identified is not supported by this ibtool");
+        }
+        let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
+        let (name, bytes) = navigation_controller_nib(platform, color_matched, localizable, module, nav, root)?;
+        let entry = (name.clone(), initial == Some(attr(nav, "id")?), nav.attribute("storyboardIdentifier").is_some());
+        outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
+    }
+    outputs.sort_by_key(|o| o.0);
+    let mut files = Vec::new();
+    let mut identifiers = Vec::new();
+    for (_, scene_files, entry) in outputs {
+        files.extend(scene_files);
+        identifiers.extend(entry);
     }
     // Xcode renames nibs whose names differ only in case and keeps one of
     // equal identifiers.

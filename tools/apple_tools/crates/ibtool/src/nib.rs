@@ -62,6 +62,10 @@ struct Encoder {
     keys: Vec<&'static str>,
     key_index: HashMap<&'static str, usize>,
     names: HashMap<String, u32>,
+    /// References to objects not encoded yet: (object, value index, name),
+    /// resolved once everything is (an object may refer ahead, as a
+    /// navigation item to its bar).
+    pending: Vec<(u32, usize, String)>,
 }
 
 impl Encoder {
@@ -90,7 +94,14 @@ impl Encoder {
                 Value::Data(d) => Stored::Data(d),
                 Value::Nil => Stored::Nil,
                 Value::New(child) => Stored::Object(self.encode(child)),
-                Value::Ref(name) => Stored::Object(*self.names.get(&name).unwrap_or_else(|| panic!("no object named {name}"))),
+                Value::Ref(name) => match self.names.get(&name) {
+                    Some(&n) => Stored::Object(n),
+                    None => {
+                        let at = self.objects[me as usize].2.len();
+                        self.pending.push((me, at, name));
+                        Stored::Object(u32::MAX)
+                    }
+                },
             };
             self.objects[me as usize].2.push((ki, stored));
         }
@@ -111,8 +122,12 @@ fn varint(out: &mut Vec<u8>, mut v: usize) {
 }
 
 pub fn archive(root: Object) -> Vec<u8> {
-    let mut e = Encoder { objects: Vec::new(), keys: Vec::new(), key_index: HashMap::new(), names: HashMap::new() };
+    let mut e = Encoder { objects: Vec::new(), keys: Vec::new(), key_index: HashMap::new(), names: HashMap::new(), pending: Vec::new() };
     e.encode(root);
+    for (object, at, name) in std::mem::take(&mut e.pending) {
+        let n = *e.names.get(&name).unwrap_or_else(|| panic!("no object named {name}"));
+        e.objects[object as usize].2[at].1 = Stored::Object(n);
+    }
 
     let mut classes: Vec<&'static str> = Vec::new();
     for (c, _, _) in &e.objects {
