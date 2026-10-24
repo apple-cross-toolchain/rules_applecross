@@ -65,8 +65,11 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
 }
 
 struct Bundle {
-    /// The directory sealed: the bundle itself, or its `Contents`.
+    /// The directory sealed: the bundle itself, its `Contents`, or a
+    /// framework's current version.
     root: PathBuf,
+    /// A versioned framework, whose executable is at its version's root.
+    framework: bool,
     layout: resources::Layout,
     info_path: PathBuf,
     executable: Option<String>,
@@ -78,8 +81,8 @@ impl Bundle {
     fn executable_path(&self) -> Option<String> {
         let exe = self.executable.as_ref()?;
         Some(match self.layout {
-            resources::Layout::Shallow => exe.clone(),
-            resources::Layout::Deep => format!("MacOS/{exe}"),
+            resources::Layout::Deep if !self.framework => format!("MacOS/{exe}"),
+            _ => exe.clone(),
         })
     }
 }
@@ -89,15 +92,20 @@ fn bundle(path: &Path) -> Option<Bundle> {
     if !path.is_dir() {
         return None;
     }
-    let (root, layout) = if path.join("Contents/Info.plist").is_file() {
-        (path.join("Contents"), resources::Layout::Deep)
+    // A macOS bundle keeps its Info.plist in Contents, a versioned framework
+    // in its current version's Resources, sealed with the macOS rules.
+    let (root, layout, framework, info_path) = if path.join("Contents/Info.plist").is_file() {
+        (path.join("Contents"), resources::Layout::Deep, false, path.join("Contents/Info.plist"))
+    } else if path.join("Versions/Current/Resources/Info.plist").is_file() {
+        let root = path.join("Versions/Current");
+        (root.clone(), resources::Layout::Deep, true, root.join("Resources/Info.plist"))
     } else {
-        (path.to_path_buf(), resources::Layout::Shallow)
+        (path.to_path_buf(), resources::Layout::Shallow, false, path.join("Info.plist"))
     };
-    let info_path = root.join("Info.plist");
     let info = Value::parse(&std::fs::read(&info_path).ok()?).ok()?;
     Some(Bundle {
         root,
+        framework,
         layout,
         info_path,
         executable: info.get("CFBundleExecutable").and_then(|v| v.as_str()).map(String::from),
@@ -149,7 +157,7 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
 
     let (exe_path, identifier, info, code_resources) = if let Some(b) = bundle(path) {
         let exe = b.executable_path().ok_or_else(|| format!("{}: bundle has no CFBundleExecutable", path.display()))?;
-        let entries = resources::collect(&b.root, Some(&exe)).map_err(|e| e.to_string())?;
+        let entries = resources::collect(&b.root, Some(&exe), b.layout).map_err(|e| e.to_string())?;
         let seal = cf::xml::to_bytes(&resources::build(&entries, b.layout).map_err(|e| format!("{}: {e}", path.display()))?);
         let dir = b.root.join("_CodeSignature");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -165,10 +173,13 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
     let mut universal = macho::Universal::parse(data).map_err(|e| format!("{}: {e}", exe_path.display()))?;
     // A lone Mach-O file binds the Info.plist embedded in it, if any, and is
     // named by it.
+    let images = universal.images();
+    let preferred = sign::preferred_slice(&images).ok_or_else(|| format!("{}: universal files without an arm64 slice are not supported by this codesign", exe_path.display()))?;
     let (identifier, info) = match identifier {
         Some(i) => (i, info),
         None => {
-            let first = universal.images()[0];
+            // Named by the slice the signing Mac would run.
+            let first = images[preferred];
             let embedded = first.section("__TEXT", "__info_plist").map(<[u8]>::to_vec);
             let embedded_id = embedded.as_ref().and_then(|e| Value::parse(e).ok()).and_then(|v| v.get("CFBundleIdentifier").and_then(|i| i.as_str()).map(String::from));
             let identifier = match o.identifier.clone().or(embedded_id) {
@@ -196,6 +207,13 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
             entitlement_flags: sign::exec_seg_flags(entitlements_value.as_ref()),
         };
         sign::sign(image, &inputs).map_err(|e| format!("{}: {e}", exe_path.display()))?;
+    }
+    // codesign lays a universal file out again with its slices aligned to
+    // at least 16 KB.
+    if let macho::Universal::Fat(slices) = &mut universal {
+        for (align, _) in slices.iter_mut() {
+            *align = (*align).max(14);
+        }
     }
     let out = universal.into_bytes();
     replace(&exe_path, &out).map_err(|e| format!("{}: {e}", exe_path.display()))?;

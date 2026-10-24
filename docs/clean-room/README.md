@@ -13,7 +13,8 @@ that Mac, reading that Xcode through a read-only mount. Sources:
 - the outputs of Xcode 27.0's tools for constructed inputs;
 - Apple's public APIs, called from small programs;
 - published sources: the reference LZFSE encoder, CoreFoundation's string
-  hash and hash tables, the former open-source `swift-stdlib-tool`.
+  hash and hash tables, the former open-source `swift-stdlib-tool`, and the
+  Security project's `libsecurity_codesigning` (read, not copied).
 
 The tools are strict by default: their output is byte-identical to Xcode's,
 or the build fails on the input. Known gaps are on each page; the largest is
