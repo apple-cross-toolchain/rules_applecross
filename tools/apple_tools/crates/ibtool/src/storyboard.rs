@@ -220,13 +220,16 @@ fn layout_attribute(name: &str) -> Result<i64, String> {
 /// where it is first used.
 struct Nib {
     platform: Platform,
+    /// The document's `colorMatched`: without it, colours' components are
+    /// taken as they are rather than converted from their colour space.
+    color_matched: bool,
     shared: HashMap<String, String>,
     next: usize,
 }
 
 impl Nib {
-    fn new(platform: Platform) -> Nib {
-        Nib { platform, shared: HashMap::new(), next: 0 }
+    fn new(platform: Platform, color_matched: bool) -> Nib {
+        Nib { platform, color_matched, shared: HashMap::new(), next: 0 }
     }
 
     fn fresh(&mut self) -> String {
@@ -322,6 +325,9 @@ fn color(nib: &mut Nib, n: Node, colors: &[String]) -> Result<Value, String> {
         let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).unwrap().1;
         return Ok(nib.system_color(name, sc));
     }
+    if !nib.color_matched {
+        return unmatched_color(nib, n);
+    }
     // Equal colours are one object, compared at 10 significant digits. A
     // grey is archived as given (no conversion), named when it's exactly
     // black, white or clear.
@@ -377,6 +383,46 @@ fn color(nib: &mut Nib, n: Node, colors: &[String]) -> Result<Value, String> {
     }
     only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", Some("sRGB"))])?;
     let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?].map(significant_10);
+    let key = format!("color:rgb:{c:?}");
+    if let Some(v) = nib.existing(&key) {
+        return Ok(v);
+    }
+    let (components, text) = color_components(&RGB_KEYS, &c);
+    let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
+    keys.extend(components);
+    keys.push(("NSRGB", Value::Data(text)));
+    keys.push(("NSColorSpace", Value::Int(2)));
+    Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")))
+}
+
+/// A colour in a document without `colorMatched`: archived as sRGB with
+/// the document's components when they are calibrated RGB or white, which
+/// aren't converted; colours in other spaces are, so only their neutral
+/// black and white (which convert to themselves) are established.
+fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    let space = match (n.attribute("colorSpace"), n.attribute("customColorSpace")) {
+        (Some("custom"), Some(s)) => s,
+        (Some(s), None) => s,
+        _ => return fail("<color> without a colour space is not supported by this ibtool"),
+    };
+    let c = match space {
+        "calibratedRGB" | "sRGB" => {
+            only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None)])?;
+            [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?]
+        }
+        "calibratedWhite" | "genericGamma22GrayColorSpace" => {
+            only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None)])?;
+            // The grey becomes red, green and blue as a float.
+            let w = number(attr(n, "white")?)? as f32 as f64;
+            [w, w, w, number(attr(n, "alpha")?)?]
+        }
+        other => return fail(format!("colour space {other} without colorMatched is not supported by this ibtool")),
+    };
+    let calibrated = space.starts_with("calibrated");
+    if !calibrated && !(c[0] == c[1] && c[1] == c[2] && (c[0] == 0.0 || c[0] == 1.0)) {
+        return fail(format!("{space} colours other than black and white are converted without colorMatched, which is not supported by this ibtool"));
+    }
+    let c = c.map(significant_10);
     let key = format!("color:rgb:{c:?}");
     if let Some(v) = nib.existing(&key) {
         return Ok(v);
@@ -658,7 +704,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
     let object = match n.tag_name().name() {
         "label" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("userInteractionEnabled", Some("NO")), ("contentMode", Some("left")),
+                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", Some("left")),
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", Some("tailTruncation")), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
@@ -677,6 +723,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             values.push(("UIContentMode", Value::Int(7)));
+            if n.attribute("clipsSubviews").is_some() {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -708,7 +757,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
                 ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", Some("roundedRect")),
-                ("textAlignment", Some("natural")), ("minimumFontSize", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("textAlignment", Some("natural")), ("minimumFontSize", None), ("placeholder", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "nil", "fontDescription", "textInputTraits"])?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
@@ -729,6 +778,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             nib.large_content(&mut values);
             values.push(("UIContentHorizontalAlignment", Value::Int(1)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
+            if let Some(placeholder) = n.attribute("placeholder") {
+                values.push(("UIPlaceholder", nib.string(placeholder)));
+            }
             values.push(("UITextAlignment", Value::Int(4)));
             values.push(("UITextColor", nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0]))));
             values.push(("UIBorderStyle", Value::Int(3)));
@@ -1146,6 +1198,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         major < 17
     };
     let colors = system_colors(&doc, platform)?;
+    let color_matched = root.attribute("colorMatched") == Some("YES");
     let initial = root.attribute("initialViewController");
     let mut files = Vec::new();
     let mut identifiers = Vec::new();
@@ -1157,7 +1210,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let vc = children(objects_node, "viewController").next().ok_or("scene without a view controller")?;
         only_attributes(vc, &[
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
-            ("storyboardIdentifier", None), ("sceneMemberID", Some("viewController")),
+            ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
+            ("userLabel", None), ("sceneMemberID", Some("viewController")),
         ])?;
         let class_name = runtime_class_name(vc, module, "UIViewController")?;
         only_children(vc, &["view", "layoutGuides", "connections"])?;
@@ -1203,7 +1257,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         }
 
-        let mut nib = Nib::new(platform);
+        let mut nib = Nib::new(platform, color_matched);
         let f = match (generic_canvas, device_size) {
             (true, _) => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
             (false, Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
@@ -1399,16 +1453,26 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // A controller with a storyboard identifier is loaded by it.
         let vc_nib_name = vc.attribute("storyboardIdentifier").map_or_else(|| format!("UIViewController-{vc_id}"), str::to_string);
         let view_nib_name = format!("{vc_id}-view-{view_id}");
-        let mut vnib = Nib::new(platform);
+        let mut vnib = Nib::new(platform, color_matched);
         let owner = proxy(&mut vnib, "IBFilesOwner", "owner");
         let responder = proxy(&mut vnib, "IBFirstResponder", "responder");
         let storyboard = proxy(&mut vnib, "UIStoryboardPlaceholder", "storyboard");
         let external = if upstream_used { vec![vnib.string("UpstreamPlaceholder-1"), reference("controller")] } else { Vec::new() };
         let external = vnib.array("NSDictionary", external);
         let nib_name = vnib.string(&view_nib_name);
-        let mut swapper = vec![("UIExternalObjectsTableForViewLoading", external), ("UINibName", nib_name)];
+        let mut swapper = Vec::new();
+        if let Some(title) = vc.attribute("title") {
+            swapper.push(("UITitle", vnib.string(title)));
+        }
+        swapper.push(("UIExternalObjectsTableForViewLoading", external));
+        swapper.push(("UINibName", nib_name));
         if let Some(identifier) = vc.attribute("storyboardIdentifier") {
             swapper.push(("UIStoryboardIdentifier", vnib.string(identifier)));
+            if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
+                swapper.push(("UIRestorationIdentifier", vnib.string(identifier)));
+            }
+        } else if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
+            return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
         }
         swapper.push(("UIClassName", vnib.string(&class_name)));
         swapper.push(("UIOriginalClassName", vnib.string("UIViewController")));
