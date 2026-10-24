@@ -1,4 +1,4 @@
-# Bazel Apple toolchain for Linux
+# Bazel Apple toolchains for Linux
 
 This repository contains toolchains for Bazel that can be used to build apps
 and frameworks for Apple platforms from Linux.
