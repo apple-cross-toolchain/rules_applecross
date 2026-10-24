@@ -408,8 +408,9 @@ pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], 
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_PACKED_IMAGE, name }, &t, &payload)
 }
 
-/// An image set's atlas (layout 1004), its `dmp2` payload given.
-pub fn packed_dmp2_csi(name: &str, width: u32, height: u32, scale: u32, payload: &[u8]) -> Vec<u8> {
+/// An image set's atlas (layout 1004), its `dmp2` payload given: BGRA, or
+/// for greyscale images GA8 (rows a byte a pixel when `opaque`).
+pub fn packed_dmp2_csi(name: &str, width: u32, height: u32, scale: u32, gray: bool, opaque: bool, payload: &[u8]) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, 0, 0] {
@@ -418,8 +419,10 @@ pub fn packed_dmp2_csi(name: &str, width: u32, height: u32, scale: u32, payload:
     tlv(&mut t, 0x3e9, &slices);
     composition(&mut t);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    tlv(&mut t, 0x3ef, &(stride(width as usize) as u32).to_le_bytes());
-    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_PACKED_IMAGE, name }, &t, payload)
+    let row = if gray && opaque { (width as usize).div_ceil(32) * 32 } else { stride(width as usize) };
+    tlv(&mut t, 0x3ef, &(row as u32).to_le_bytes());
+    let (pixel_format, color_space) = if gray { (b" 8AG", 2) } else { (b"BGRA", 1) };
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_PACKED_IMAGE, name }, &t, payload)
 }
 
 /// An image stored in an atlas (layout 1003): its rectangle there and the
@@ -430,6 +433,11 @@ pub fn link_csi(name: &str, rect: (u32, u32, u32, u32), scale: u32, atlas: &[(u1
 
 /// A link with CSI flags given: an image set's rendering intent.
 pub fn link_csi_flags(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, atlas: &[(u16, u16)]) -> Vec<u8> {
+    link_csi_format(name, rect, scale, flags, false, atlas)
+}
+
+/// The same for a greyscale image (GA8, colour space 2) when `gray`.
+pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, gray: bool, atlas: &[(u16, u16)]) -> Vec<u8> {
     let (x, y, w, h) = rect;
     let mut t = Vec::new();
     let mut slices = Vec::new();
@@ -461,7 +469,8 @@ pub fn link_csi_flags(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags:
     composition.extend_from_slice(&1.0f32.to_le_bytes());
     tlv(&mut t, 0x3ec, &composition);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    csi(&CsiHeader { flags, width: w, height: h, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_INTERNAL_LINK, name }, &t, &[])
+    let (pixel_format, color_space) = if gray { (b" 8AG", 2) } else { (b"BGRA", 1) };
+    csi(&CsiHeader { flags, width: w, height: h, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_INTERNAL_LINK, name }, &t, &[])
 }
 
 /// An app icon's index of its sizes (part 218).
@@ -528,6 +537,28 @@ pub fn dmp2_image_csi_flags(name: &str, width: u32, height: u32, scale: u32, fla
     // Bytes per row, rounded up to 32.
     tlv(&mut t, 0x3ef, &(stride(width as usize) as u32).to_le_bytes());
     csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
+}
+
+/// A greyscale `dmp2` image (GA8, colour space 2), flags as for
+/// [`dmp2_image_csi_flags`]: bytes per row are a byte a pixel when opaque
+/// and four otherwise, rounded up to 32.
+pub fn dmp2_gray_image_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, opaque: bool, payload: &[u8]) -> Vec<u8> {
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, width, height] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    let mut metrics = Vec::new();
+    for v in [1u32, 0, 0, 0, 0, width, height] {
+        le32(&mut metrics, v);
+    }
+    tlv(&mut t, 0x3eb, &metrics);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let row = if opaque { (width as usize).div_ceil(32) * 32 } else { stride(width as usize) };
+    tlv(&mut t, 0x3ef, &(row as u32).to_le_bytes());
+    csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format: b" 8AG", color_space: 2, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
 }
 
 /// An image set's images (part 181, as image stacks').

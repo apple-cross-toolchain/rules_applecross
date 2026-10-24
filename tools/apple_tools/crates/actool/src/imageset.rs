@@ -67,19 +67,15 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             scales.push(scale);
             let path = dir.join(filename);
             let img = image::decode_png(&std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?)?;
-            // Xcode stores an image whose every pixel is grey (R = G = B,
-            // whatever the PNG's colour type) as GA8, not reproduced here.
-            if img.data.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2]) {
-                return Err(format!("{}: greyscale images (stored by Xcode as GA8) are not supported by this actool", path.display()));
-            }
             images.push(SetImage { scale, identifier: id, flags, filename: filename.to_string(), image: img });
         }
         if !scales.is_empty() {
             out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
         }
     }
-    // Per scale, translucent images and then opaque ones (whose atlas name
-    // says 1), each largest area first (equal areas by identifier): images over 18,050 px² per scale
+    // Per scale, translucent colour, translucent grey, opaque colour and
+    // opaque grey images (an atlas named for its opacity and greyness),
+    // each largest area first (equal areas by identifier): images over 18,050 px² per scale
     // factor, or a group's only packable one, stored on their own, the rest
     // packed into an atlas, as app icons are. An atlas's dimension1 is its
     // index at its scale.
@@ -88,8 +84,8 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
     scales.dedup();
     for scale in scales {
         let mut atlas_index = 0;
-        for opaque in [false, true] {
-            let mut group: Vec<&SetImage> = images.iter().filter(|i| i.scale == scale && is_opaque(i) == opaque).collect();
+        for (opaque, gray) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut group: Vec<&SetImage> = images.iter().filter(|i| i.scale == scale && is_opaque(i) == opaque && is_gray(i) == gray).collect();
             // Equal areas by identifier (12 probes of equal-area shapes).
             group.sort_by_key(|i| (std::cmp::Reverse(i.image.width * i.image.height), i.identifier));
             let cap = crate::stack::PACKING_AREA * scale as usize;
@@ -101,9 +97,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                 }
                 let total: usize = packable.iter().map(|i| i.image.width * i.image.height).sum();
                 if total - packable.last().unwrap().image.width * packable.last().unwrap().image.height >= cap {
-                    return Err(format!("image sets needing more than one {scale}x atlas of {} images are not supported by this actool", if opaque { "opaque" } else { "translucent" }));
+                    return Err(format!("image sets needing more than one {scale}x atlas of {} {} images are not supported by this actool", if opaque { "opaque" } else { "translucent" }, if gray { "greyscale" } else { "colour" }));
                 }
-                pack(scale, opaque, atlas_index, &packable, &mut out.renditions)?;
+                pack(scale, opaque, gray, atlas_index, &packable, &mut out.renditions)?;
                 atlas_index += 1;
             }
             for i in standalone {
@@ -132,8 +128,21 @@ fn payload(w: usize, h: usize, bgra: &[u8], what: &str) -> Result<Vec<u8>, Strin
     dmp2::encode(w, h, bgra, opaque).map_err(|e| format!("{what}: {e}"))
 }
 
+/// Whether Xcode stores an image as GA8: every pixel grey (R = G = B),
+/// whatever the PNG's colour type.
+fn is_gray(i: &SetImage) -> bool {
+    i.image.data.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2])
+}
+
 fn standalone_rendition(i: &SetImage) -> Result<Rendition, String> {
     let (w, h) = (i.image.width, i.image.height);
+    if is_gray(i) {
+        let bgra = i.image.premultiplied_bgra();
+        let ga: Vec<u8> = bgra.chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect();
+        let opaque = is_opaque(i);
+        let data = dmp2::encode_gray(w, h, &ga, opaque).map_err(|e| format!("{}: {e}", i.filename))?;
+        return Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_gray_image_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, opaque, &data) });
+    }
     let data = payload(w, h, &i.image.premultiplied_bgra(), &i.filename)?;
     Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_image_csi_flags(&i.filename, w as u32, h as u32, i.scale, i.flags, &data) })
 }
@@ -144,7 +153,8 @@ fn is_opaque(i: &SetImage) -> bool {
     i.image.data.chunks_exact(4).all(|p| p[3] == 255)
 }
 
-fn pack(scale: u32, opaque: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+fn pack(scale: u32, opaque: bool, gray: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
     let blocks: Vec<(u32, u32)> = images.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
     let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
     let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
@@ -157,11 +167,18 @@ fn pack(scale: u32, opaque: bool, index: u16, images: &[&SetImage], renditions: 
     for (i, (x, y)) in images.iter().zip(&positions) {
         let (w, h) = (i.image.width as u32, i.image.height as u32);
         crate::iconset::place(&mut pixels, stride, ah, &i.image.premultiplied_bgra(), *x, *y, w, h);
-        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_flags(&i.filename, (*x, *y, w, h), scale, i.flags, &key) });
+        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, i.flags, gray, &key) });
     }
-    let name = format!("ZZZZPackedAsset-{scale}.{}.0-gamut0", opaque as u8);
+    let name = format!("ZZZZPackedAsset-{scale}.{}.{}-gamut0", opaque as u8, gray as u8);
     // Opaque as its group is, its transparent padding notwithstanding.
-    let data = dmp2::encode(aw as usize, ah as usize, &pixels, opaque).map_err(|e| format!("{name}: {e}"))?;
-    renditions.push(Rendition { attrs: key, csi: car::packed_dmp2_csi(&name, aw, ah, scale, &data) });
+    let data = if gray {
+        // An opaque grey atlas is opaque throughout, its padding too.
+        let ga: Vec<u8> = pixels.chunks_exact(4).flat_map(|p| [p[0], if opaque { 255 } else { p[3] }]).collect();
+        dmp2::encode_gray(aw as usize, ah as usize, &ga, opaque)
+    } else {
+        dmp2::encode(aw as usize, ah as usize, &pixels, opaque)
+    }
+    .map_err(|e| format!("{name}: {e}"))?;
+    renditions.push(Rendition { attrs: key, csi: car::packed_dmp2_csi(&name, aw, ah, scale, gray, opaque, &data) });
     Ok(())
 }

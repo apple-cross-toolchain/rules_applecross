@@ -246,6 +246,15 @@ ties broken the other way, two between different residuals with equal
 integer costs and one between identical residuals, so the tie rule is not
 fully established.
 
+A greyscale image (GA8, below) is the same with 2-byte pixels: the stream
+header's last byte and the body header's second word are 2, mode 3 holds
+premultiplied grey and alpha per pixel, and mode 2 the alpha plane, the
+row codes and one 16-bit residual per pixel (high bytes, then low), the
+predictors working on the grey alone. No palette was seen for one, even
+of 16 grey-alpha pairs. In grey rows Xcode breaks ties between 1 and 3, 3
+and 4, and 1 and 2 by the order above (4,018 rows of 29 probes; 40 more
+probes were byte-identical).
+
 An image of more than 4 MiB (4 bytes a pixel) is `MLEC` with flags 1 (3
 when opaque), method 11 and a count of `KCBC` chunks: each `KCBC`, two zero
 words, its rows and its length, then the `01`, `04`, length, zero header and
@@ -271,13 +280,19 @@ bytes per row rounded up to 32 (240 is 256). Its CSI flags are the
 rendering intent: 16 automatic (no property), 8 template, 0 original. The
 key format is the app icons' without `dimension2` when nothing uses it.
 
+An image whose every pixel is grey (R = G = B, whatever its PNG's colour
+type) is stored as GA8: pixel format ` 8AG`, colour space 2, a greyscale
+`dmp2` payload, and bytes per row of one a pixel when opaque and four
+otherwise, rounded up to 32.
+
 Images small enough to pack (18,050 px² per scale factor, as for icons)
-are packed per scale, translucent ones and opaque ones in atlases of their
-own, as icons are packed (largest area first, equal areas by identifier,
+are packed per scale, translucent colour, translucent grey, opaque colour
+and opaque grey images each in atlases of their own, as icons are packed (largest area first, equal areas by identifier,
 twelve probes of equal-area shapes): an atlas is a `dmp2` image (layout
 1004, flags 0, keyed element 9, part 181, scale and, from the second at a
-scale on, dimension1 its index) named `ZZZZPackedAsset-{scale}.{opaque}.0-gamut0`
-and flagged opaque as its group is, whatever its padding; each image is a
+scale on, dimension1 its index) named `ZZZZPackedAsset-{scale}.{opaque}.{grey}-gamut0`
+and flagged opaque as its group is, whatever its padding (an opaque grey
+atlas's padding is opaque too: alpha 255, grey 0); each image is a
 layout 1003 link to it flagged with its rendering intent. A group's only
 packable image is stored on its own. The key format has dimension1 only
 when an atlas uses it.
@@ -285,8 +300,7 @@ when an atlas uses it.
 Refused: a group needing more than one atlas, atlases whose `dmp2` row
 predictors aren't established (common: the row under an atlas's empty top
 row ties between predictors 1 and 2, which Xcode breaks neither by cost,
-summation order, nor compressed size), images whose every pixel is grey
-(Xcode stores those as GA8, colour space 2, their atlas named `.1` last),
+summation order, nor compressed size),
 vector images (SVG, PDF), other idioms, appearances and other properties,
 folders, and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
