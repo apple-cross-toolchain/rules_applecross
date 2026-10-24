@@ -827,15 +827,34 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             Object::new("UITextField", values)
         }
         "button" => {
+            // `fixedFrame` is Interface Builder's alone, and a system button
+            // is archived as a rounded-rect one; a custom one has no type.
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("center")),
-                ("contentVerticalAlignment", Some("center")), ("buttonType", Some("roundedRect")), ("lineBreakMode", Some("middleTruncation")),
+                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", Some("center")),
+                ("contentVerticalAlignment", Some("center")), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "state", "connections"])?;
+            let button_type = match n.attribute("buttonType") {
+                Some("roundedRect" | "system") => Some(1),
+                None => None,
+                Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
+            };
+            only_children(n, &["rect", "state", "connections", "fontDescription", "color", "constraints"])?;
             let states: Vec<Node> = children(n, "state").collect();
-            if states.len() != 1 || states[0].attribute("key") != Some("normal") || states[0].attributes().len() != 2 || states[0].has_children() {
-                return fail("buttons other than one with a normal-state title are not supported by this ibtool");
+            if states.len() != 1 || states[0].attribute("key") != Some("normal") {
+                return fail("buttons other than one with a normal state are not supported by this ibtool");
+            }
+            only_attributes(states[0], &[("key", None), ("title", None)])?;
+            only_children(states[0], &["color"])?;
+            for c in children(states[0], "color") {
+                if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
+                    return fail("button state colours other than title and title shadow colours are not supported by this ibtool");
+                }
+            }
+            for c in children(n, "color") {
+                if !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor")) {
+                    return fail("button colours other than background and tint colours are not supported by this ibtool");
+                }
             }
             for c in children(n, "connections") {
                 only_children(c, &["action"])?;
@@ -847,22 +866,47 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                     scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), 64));
                 }
             }
+            if let Some(c) = child(n, "color", "backgroundColor") {
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            if n.attribute("opaque").is_none() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
+            if let Some(c) = child(n, "color", "tintColor") {
+                values.push(("UITintColor", color(nib, c)?));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             let state = nib.int_number(0);
-            let title = nib.string(attr(states[0], "title")?);
-            let content = Value::New(Object::new("UIButtonContent", vec![("UITitle", title)]));
+            let mut content = Vec::new();
+            if let Some(title) = states[0].attribute("title") {
+                content.push(("UITitle", nib.string(title)));
+            }
+            if let Some(c) = child(states[0], "color", "titleColor") {
+                content.push(("UITitleColor", color(nib, c)?));
+            }
+            if let Some(c) = child(states[0], "color", "titleShadowColor") {
+                content.push(("UIShadowColor", color(nib, c)?));
+            }
+            let content = Value::New(Object::new("UIButtonContent", content));
             values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", vec![state, content])));
             values.push(("UIAdjustsImageWhenHighlighted", Value::Bool(true)));
             values.push(("UIAdjustsImageWhenDisabled", Value::Bool(true)));
-            values.push(("UIButtonType", Value::Int(1)));
-            values.push(("UIFont", font(nib, None, Some(15.0))?));
+            if let Some(t) = button_type {
+                values.push(("UIButtonType", Value::Int(t)));
+            }
+            // A custom button's default font is larger.
+            let default_size = if button_type.is_some() { 15.0 } else { 18.0 };
+            values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), Some(default_size))?));
             values.push(("UIButtonConfiguration", Value::Nil));
             Object::new("UIButton", values)
         }

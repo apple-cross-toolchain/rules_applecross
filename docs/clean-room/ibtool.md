@@ -68,8 +68,8 @@ view with a frame and autoresizing mask, a background colour that is one of
 guides. Subviews: labels (system font, a font Xcode finds for iOS, or the
 Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
-rounded-rect buttons with a normal-state title and touch-up-inside actions
-on the controller, vertical stack views, image views of named images,
+rounded-rect, system and custom buttons with a normal state (title, title
+and shadow colours) and touch-up-inside actions on the controller, vertical stack views, image views of named images,
 plain views containing any of these.
 Constraints between those, with constants, and labels' and image views' own
 width and height; outlets from the controller into its view. Everything else, and
@@ -182,6 +182,14 @@ other values of the attributes these use, is refused. Observed:
   subviews, which join the queue (six probes nesting views two deep beside
   image views with their own constraints; depth first and level by level
   each fail one).
+- A button: a system button is archived as a rounded-rect one
+  (`UIButtonType` 1), a custom one has no `UIButtonType` and an 18-point
+  default font (15 otherwise); `fixedFrame` changes nothing. A background
+  colour follows `UICenter`, `UIOpaque` `UIDeepDrawRect` unless
+  `opaque="NO"`, a tint colour the mask, its own constraints the
+  autoresizing key, a font replaces the default; the normal state's
+  `UIButtonContent` holds `UITitle`, `UITitleColor`, `UIShadowColor` in
+  that order (twelve probes).
 - A multiplier other than 1 is `NSMultiplier` after `NSFirstAttribute`: a
   double holding the float nearest it (`1.2` as 1.2000000476837158, `2:3`
   as 2/3), three probes.
