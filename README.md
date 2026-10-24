@@ -184,6 +184,13 @@ actions, as this repository's `--config=relaxed` does:
 build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
 ```
 
+Info.plist's `BuildMachineOSBuild` records the Mac an app was built on, so
+it differs between Macs even with Xcode. On Linux it is the macOS SDK's build
+(`26A425` for Xcode 27.0); to match a particular Mac's build, pass that Mac's
+`sw_vers -buildVersion` as `--repo_env=RULES_APPLECROSS_BUILD_MACHINE_OS_BUILD=...`.
+`DTSDKBuild` and `DTPlatformBuild` are the SDK's own build, as Xcode writes
+them.
+
 ## Developing rules_applecross
 
 ### Ported tools
