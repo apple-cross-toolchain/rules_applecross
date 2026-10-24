@@ -25,7 +25,11 @@ fn find_product() -> Result<Product> {
     let manager = Manager::open(&dev_root, config.as_ref());
 
     if let Some(mgr) = &manager {
-        for platform in &mgr.platforms {
+        // The macOS SDK's product first: it names a macOS release, where the
+        // other platforms' SDKs name theirs (an iOS SDK's build number is
+        // not a macOS build).
+        let macos_first = mgr.platforms.iter().filter(|p| p.name == "macosx").chain(mgr.platforms.iter().filter(|p| p.name != "macosx"));
+        for platform in macos_first {
             for target in &platform.targets {
                 if let Some(product) = &target.product {
                     return Ok(product.clone());
@@ -81,14 +85,16 @@ fn main() -> Result<()> {
     } else if cli.product_version {
         println!("{}", product.version.as_deref().unwrap_or(""));
     } else if cli.product_version_extra {
-        // Rapid Security Response version; empty if none installed
-        println!("{}", product.user_visible_version.as_deref().unwrap_or(""));
+        // Rapid Security Response version; nothing at all if none installed
+        if let Some(extra) = &product.version_extra {
+            println!("{extra}");
+        }
     } else if cli.build_version {
         println!("{}", product.build_version.as_deref().unwrap_or(""));
     } else {
         println!("ProductName:\t\t{}", product.name.as_deref().unwrap_or("macOS"));
         println!("ProductVersion:\t\t{}", product.version.as_deref().unwrap_or(""));
-        if let Some(extra) = &product.user_visible_version {
+        if let Some(extra) = &product.version_extra {
             println!("ProductVersionExtra:\t{}", extra);
         }
         println!("BuildVersion:\t\t{}", product.build_version.as_deref().unwrap_or(""));

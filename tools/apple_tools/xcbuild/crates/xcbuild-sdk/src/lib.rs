@@ -170,6 +170,8 @@ pub struct Product {
     pub name: Option<String>,
     pub version: Option<String>,
     pub user_visible_version: Option<String>,
+    /// A Rapid Security Response's version, as `(a)`; absent without one.
+    pub version_extra: Option<String>,
     pub build_version: Option<String>,
     pub copyright: Option<String>,
 }
@@ -188,6 +190,7 @@ impl Product {
             name: get_string(dict, "ProductName"),
             version: get_string(dict, "ProductVersion"),
             user_visible_version: get_string(dict, "ProductUserVisibleVersion"),
+            version_extra: get_string(dict, "ProductVersionExtra"),
             build_version: get_string(dict, "ProductBuildVersion"),
             copyright: get_string(dict, "ProductCopyright"),
         })
