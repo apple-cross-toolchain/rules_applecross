@@ -767,9 +767,12 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
             }
-            let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
-                (Some(c), None) => Some(c),
-                (None, Some(_)) => None,
+            // No text colour at all is a declared labelColor; a nil one is
+            // the default.
+            let (text_color, declared_color) = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
+                (Some(c), None) => (Some(c), true),
+                (None, Some(_)) => (None, false),
+                (None, None) => (None, true),
                 _ => return fail("a label needs one text colour or nil"),
             };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
@@ -793,7 +796,6 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             // A declared text colour, even labelColor, stays as it is when
             // the trait collection changes.
-            let declared_color = text_color.is_some();
             let text_color = match text_color {
                 Some(c) => color(nib, c)?,
                 None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
@@ -818,9 +820,10 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if traits.attributes().len() != 1 || traits.has_children() {
                 return fail("text input traits are not supported by this ibtool");
             }
+            // No text colour at all is the same as a nil one.
             let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
                 (Some(c), None) => Some(c),
-                (None, Some(_)) => None,
+                (None, _) => None,
                 _ => return fail("a text field needs one text colour or nil"),
             };
             values.push(("UIDeepDrawRect", Value::Bool(true)));

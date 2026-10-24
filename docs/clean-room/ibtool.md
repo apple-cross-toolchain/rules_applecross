@@ -250,7 +250,9 @@ other values of the attributes these use, is refused. Observed:
   `clipsSubviews` is `UIClipsToBounds` after `UIContentMode`; a text
   field's `placeholder` is `UIPlaceholder` after `UIFont`, and its declared
   text colour its `UITextColor` (`UIDisableTextColorUpdateOnTraitCollectionChange`
-  is set either way; three probes).
+  is set either way; three probes). A text field with no text colour
+  element is as with a nil one; a label with none is as with a declared
+  `labelColor` (two probes).
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an
   empty identifier. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
