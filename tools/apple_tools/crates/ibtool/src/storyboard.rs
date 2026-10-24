@@ -65,9 +65,27 @@ fn doubles(v: &[f64]) -> Value {
 }
 
 /// The shortest decimal that round-trips, as NSColor archives components.
-fn component(x: f64) -> String {
-    let s = format!("{x}");
-    s.strip_suffix(".0").map(String::from).unwrap_or(s)
+/// `x` rounded to 10 significant digits, as `%.10g` would print it.
+fn significant_10(x: f64) -> f64 {
+    format!("{x:.9e}").parse().unwrap()
+}
+
+/// `x` as C's `%.3g` prints it: 3 significant digits, trailing zeros
+/// dropped, in exponent form (two exponent digits at least) below 1e-4.
+fn general_3(x: f64) -> String {
+    if x == 0.0 {
+        return "0".into();
+    }
+    let sci = format!("{x:.2e}");
+    let (mantissa, exponent) = sci.split_once('e').unwrap();
+    let exponent: i32 = exponent.parse().unwrap();
+    let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
+    if exponent < -4 || exponent >= 3 {
+        let sign = if exponent < 0 { '-' } else { '+' };
+        format!("{}e{sign}{:02}", trim(mantissa.to_string()), exponent.abs())
+    } else {
+        trim(format!("{x:.*}", (2 - exponent) as usize))
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -76,28 +94,98 @@ enum Platform {
     Tvos,
 }
 
-struct SystemColor {
-    white: f64,
-    alpha: f64,
+/// A system colour's components as Xcode archives them, whatever the
+/// document's copy says: a white and alpha, or sRGB and alpha.
+enum SystemColor {
+    Gray([f64; 2]),
+    Rgb([f64; 4]),
 }
 
-fn system_colors(doc: &Document) -> Result<Vec<(String, SystemColor)>, String> {
+/// iOS's system colours, as Xcode 27.0's ibtool archives them (measured).
+const SYSTEM_COLORS: &[(&str, SystemColor)] = &[
+    ("darkTextColor", SystemColor::Gray([0.0, 1.0])),
+    ("groupTableViewBackgroundColor", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
+    ("labelColor", SystemColor::Gray([0.0, 1.0])),
+    ("lightTextColor", SystemColor::Gray([1.0, 0.6])),
+    ("linkColor", SystemColor::Rgb([0.0, 0.4784313725, 1.0, 1.0])),
+    ("opaqueSeparatorColor", SystemColor::Rgb([0.7764705882, 0.7764705882, 0.7843137255, 1.0])),
+    ("placeholderTextColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.2980392157])),
+    ("quaternaryLabelColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.1764705882])),
+    ("quaternarySystemFillColor", SystemColor::Rgb([0.4549019608, 0.4549019608, 0.5019607843, 0.08])),
+    ("secondaryLabelColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.6])),
+    ("secondarySystemBackgroundColor", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
+    ("secondarySystemFillColor", SystemColor::Rgb([0.4705882353, 0.4705882353, 0.5019607843, 0.16])),
+    ("secondarySystemGroupedBackgroundColor", SystemColor::Gray([1.0, 1.0])),
+    ("separatorColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.12])),
+    ("systemBackgroundColor", SystemColor::Gray([1.0, 1.0])),
+    ("systemBlueColor", SystemColor::Rgb([0.0, 0.5333333333, 1.0, 1.0])),
+    ("systemBrownColor", SystemColor::Rgb([0.6745098039, 0.4980392157, 0.368627451, 1.0])),
+    ("systemCyanColor", SystemColor::Rgb([0.0, 0.7529411765, 0.9098039216, 1.0])),
+    ("systemFillColor", SystemColor::Rgb([0.4705882353, 0.4705882353, 0.5019607843, 0.2])),
+    ("systemGray2Color", SystemColor::Rgb([0.6823529412, 0.6823529412, 0.6980392157, 1.0])),
+    ("systemGray3Color", SystemColor::Rgb([0.7803921569, 0.7803921569, 0.8, 1.0])),
+    ("systemGray4Color", SystemColor::Rgb([0.8196078431, 0.8196078431, 0.8392156863, 1.0])),
+    ("systemGray5Color", SystemColor::Rgb([0.8980392157, 0.8980392157, 0.9176470588, 1.0])),
+    ("systemGray6Color", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
+    ("systemGrayColor", SystemColor::Rgb([0.5568627451, 0.5568627451, 0.5764705882, 1.0])),
+    ("systemGreenColor", SystemColor::Rgb([0.2039215686, 0.7803921569, 0.3490196078, 1.0])),
+    ("systemGroupedBackgroundColor", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
+    ("systemIndigoColor", SystemColor::Rgb([0.3803921569, 0.3333333333, 0.9607843137, 1.0])),
+    ("systemMintColor", SystemColor::Rgb([0.0, 0.7843137255, 0.7019607843, 1.0])),
+    ("systemOrangeColor", SystemColor::Rgb([1.0, 0.5529411765, 0.1568627451, 1.0])),
+    ("systemPinkColor", SystemColor::Rgb([1.0, 0.1764705882, 0.3333333333, 1.0])),
+    ("systemPurpleColor", SystemColor::Rgb([0.7960784314, 0.1882352941, 0.8784313725, 1.0])),
+    ("systemRedColor", SystemColor::Rgb([1.0, 0.2196078431, 0.2352941176, 1.0])),
+    ("systemTealColor", SystemColor::Rgb([0.0, 0.7647058824, 0.8156862745, 1.0])),
+    ("systemYellowColor", SystemColor::Rgb([1.0, 0.8, 0.0, 1.0])),
+    ("tertiaryLabelColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.2980392157])),
+    ("tertiarySystemBackgroundColor", SystemColor::Gray([1.0, 1.0])),
+    ("tertiarySystemFillColor", SystemColor::Rgb([0.462745098, 0.462745098, 0.5019607843, 0.12])),
+    ("tertiarySystemGroupedBackgroundColor", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
+    ("tintColor", SystemColor::Rgb([0.0, 0.5333333333, 1.0, 1.0])),
+];
+
+/// The system colours a document declares, which must be iOS ones this
+/// ibtool knows; their values are Xcode's, not the document's.
+fn system_colors(doc: &Document, platform: Platform) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for r in doc.root_element().children().filter(|c| c.has_tag_name("resources")) {
         for sc in children(r, "systemColor") {
             let name = attr(sc, "name")?.to_string();
-            let color = children(sc, "color").next().ok_or("<systemColor> without <color>")?;
-            if color.attribute("white").is_none() {
-                return fail(format!("system color {name}: only white/alpha components are supported by this ibtool"));
+            if platform != Platform::Ios {
+                return fail(format!("system color {name}: system colors outside iOS are not supported by this ibtool"));
             }
-            if color.attribute("customColorSpace") != Some("genericGamma22GrayColorSpace") {
-                return fail(format!("system color {name}: only the genericGamma22Gray color space is supported by this ibtool"));
+            if !SYSTEM_COLORS.iter().any(|(n, _)| *n == name) {
+                return fail(format!("system color {name} is not supported by this ibtool"));
             }
-            out.push((name, SystemColor { white: number(attr(color, "white")?)?, alpha: number(attr(color, "alpha")?)? }));
+            out.push(name);
         }
     }
     Ok(out)
 }
+
+/// Colour components as Interface Builder archives them: each rounded to 10
+/// significant digits, as a float followed by the double when the float
+/// isn't exact, then the components as text (`%.3g`, alpha only when not 1).
+fn color_components(names: &[(&'static str, &'static str)], values: &[f64]) -> (Vec<(&'static str, Value)>, Vec<u8>) {
+    let values: Vec<f64> = values.iter().map(|&x| significant_10(x)).collect();
+    let mut keys = Vec::new();
+    for (&(key, double_key), &x) in names.iter().zip(&values) {
+        keys.push((key, Value::Float(x as f32)));
+        if (x as f32) as f64 != x {
+            keys.push((double_key, Value::Double(x)));
+        }
+    }
+    let (alpha, rest) = values.split_last().unwrap();
+    let mut text: Vec<String> = rest.iter().map(|&x| general_3(x)).collect();
+    if *alpha != 1.0 {
+        text.push(general_3(*alpha));
+    }
+    (keys, text.join(" ").into_bytes())
+}
+
+const RGB_KEYS: [(&str, &str); 4] = [("UIRed", "UIRed-Double"), ("UIGreen", "UIGreen-Double"), ("UIBlue", "UIBlue-Double"), ("UIAlpha", "UIAlpha-Double")];
+const GRAY_KEYS: [(&str, &str); 2] = [("UIWhite", "UIWhite-Double"), ("UIAlpha", "UIAlpha-Double")];
 
 fn autoresizing_mask(n: Node) -> Result<i64, String> {
     let mut m = 0;
@@ -172,18 +260,18 @@ impl Nib {
         Value::New(Object::new(class, values))
     }
 
-    fn system_color(&mut self, name: &str, white: f64, alpha: f64) -> Value {
+    fn system_color(&mut self, name: &str, color: &SystemColor) -> Value {
         let name_value = self.string(name);
+        let (count, components, text_key, space) = match color {
+            SystemColor::Gray(c) => (2, color_components(&GRAY_KEYS, c), "NSWhite", 4),
+            SystemColor::Rgb(c) => (4, color_components(&RGB_KEYS, c), "NSRGB", 2),
+        };
         self.shared(format!("color:{name}"), || {
-            Object::new("UIColor", vec![
-                ("UISystemColorName", name_value),
-                ("UIColorComponentCount", Value::Int(2)),
-                ("UIWhite", Value::Float(white as f32)),
-                ("UIAlpha", Value::Float(alpha as f32)),
-                ("NSWhite", Value::Data(component(white).into_bytes())),
-                ("NSColorSpace", Value::Int(4)),
-            ])
-            .with_fallback("NSColor")
+            let mut keys = vec![("UISystemColorName", name_value), ("UIColorComponentCount", Value::Int(count))];
+            keys.extend(components.0);
+            keys.push((text_key, Value::Data(components.1)));
+            keys.push(("NSColorSpace", Value::Int(space)));
+            Object::new("UIColor", keys).with_fallback("NSColor")
         })
     }
 
@@ -195,30 +283,24 @@ impl Nib {
     }
 }
 
-fn color(nib: &mut Nib, n: Node, colors: &[(String, SystemColor)]) -> Result<Value, String> {
+fn color(nib: &mut Nib, n: Node, colors: &[String]) -> Result<Value, String> {
     if let Some(name) = n.attribute("systemColor") {
         only_attributes(n, &[("key", None), ("systemColor", None)])?;
-        let sc = &colors.iter().find(|(c, _)| c == name).ok_or_else(|| format!("system color {name} is not defined in the document"))?.1;
-        return Ok(nib.system_color(name, sc.white, sc.alpha));
+        if !colors.iter().any(|c| c == name) {
+            return fail(format!("system color {name} is not defined in the document"));
+        }
+        let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).unwrap().1;
+        return Ok(nib.system_color(name, sc));
     }
     only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", Some("sRGB"))])?;
-    let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?];
-    let mut text: Vec<String> = c[..3].iter().map(|&x| component(x)).collect();
-    if c[3] != 1.0 {
-        text.push(component(c[3]));
-    }
-    Ok(Value::New(
-        Object::new("UIColor", vec![
-            ("UIColorComponentCount", Value::Int(4)),
-            ("UIRed", Value::Float(c[0] as f32)),
-            ("UIGreen", Value::Float(c[1] as f32)),
-            ("UIBlue", Value::Float(c[2] as f32)),
-            ("UIAlpha", Value::Float(c[3] as f32)),
-            ("NSRGB", Value::Data(text.join(" ").into_bytes())),
-            ("NSColorSpace", Value::Int(2)),
-        ])
-        .with_fallback("NSColor"),
-    ))
+    let c = [attr(n, "red")?, attr(n, "green")?, attr(n, "blue")?, attr(n, "alpha")?].map(number);
+    let c = [c[0].clone()?, c[1].clone()?, c[2].clone()?, c[3].clone()?];
+    let (components, text) = color_components(&RGB_KEYS, &c);
+    let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
+    keys.extend(components);
+    keys.push(("NSRGB", Value::Data(text)));
+    keys.push(("NSColorSpace", Value::Int(2)));
+    Ok(Value::New(Object::new("UIColor", keys).with_fallback("NSColor")))
 }
 
 /// A text style's font as Xcode archives it: name, traits and the size
@@ -357,7 +439,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             nib.large_content(&mut values);
             values.push(("UIText", nib.string(attr(n, "text")?)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
-            values.push(("UITextColor", nib.system_color("labelColor", 0.0, 1.0)));
+            values.push(("UITextColor", nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0]))));
             values.push(("UIShadowOffset", doubles(&[0.0, -1.0])));
             if let Some(lines) = n.attribute("numberOfLines") {
                 values.push(("UINumberOfLines", Value::Int(lines.parse().map_err(|_| format!("not a number: {lines}"))?)));
@@ -390,7 +472,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIContentHorizontalAlignment", Value::Int(1)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             values.push(("UITextAlignment", Value::Int(4)));
-            values.push(("UITextColor", nib.system_color("labelColor", 0.0, 1.0)));
+            values.push(("UITextColor", nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0]))));
             values.push(("UIBorderStyle", Value::Int(3)));
             values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
             values.push(("UIMinimumFontSize", Value::Float(number(attr(n, "minimumFontSize")?)? as f32)));
@@ -581,7 +663,7 @@ fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections:
     ])
 }
 
-pub fn compile(xml: &str) -> Result<Compiled, String> {
+pub fn compile(xml: &str, minimum_deployment_target: Option<&str>) -> Result<Compiled, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let platform = match root.attribute("type") {
@@ -589,10 +671,20 @@ pub fn compile(xml: &str) -> Result<Compiled, String> {
         Some("com.apple.InterfaceBuilder.AppleTV.Storyboard") => Platform::Tvos,
         _ => return fail("not an iOS or tvOS storyboard"),
     };
-    // Without a <device>, Interface Builder lays the scene out on its
-    // generic 600x600 canvas.
+    // Without a <device>, Interface Builder lays an iOS scene out on its
+    // generic 600x600 canvas below iOS 17, and at the view's frame from
+    // iOS 17 on; Xcode's ibtool fails on a tvOS one.
     let has_device = children(root, "device").next().is_some();
-    let colors = system_colors(&doc)?;
+    let generic_canvas = if has_device {
+        false
+    } else if platform == Platform::Tvos {
+        return fail("a tvOS storyboard without a device is not compiled by Xcode's ibtool");
+    } else {
+        let target = minimum_deployment_target.ok_or("a storyboard without a device needs --minimum-deployment-target for this ibtool")?;
+        let major: u32 = target.split('.').next().and_then(|m| m.parse().ok()).ok_or_else(|| format!("not a deployment target: {target}"))?;
+        major < 17
+    };
+    let colors = system_colors(&doc, platform)?;
     let initial = attr(root, "initialViewController")?;
     let mut files = Vec::new();
     let mut identifiers = Vec::new();
@@ -649,7 +741,7 @@ pub fn compile(xml: &str) -> Result<Compiled, String> {
         }
 
         let mut nib = Nib::new(platform);
-        let f = if has_device { frame(view)? } else { Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 } };
+        let f = if generic_canvas { Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 } } else { frame(view)? };
         let mask = match children(view, "autoresizingMask").next() {
             Some(m) => autoresizing_mask(m)?,
             None => 0,

@@ -7,7 +7,6 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     Float(f32),
-    #[allow(dead_code)]
     Double(f64),
     Data(Vec<u8>),
     Nil,

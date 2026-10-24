@@ -45,9 +45,8 @@ not. foundation-hashing.md describes that set's layout.
 ## Supported elements
 
 Scenes whose view controller (with or without a custom class) has a root
-view with a frame and autoresizing mask, a background colour that is a
-document system colour (white/alpha, generic gamma 2.2 grey) or an sRGB
-colour, and either a safe-area layout guide or legacy top and bottom layout
+view with a frame and autoresizing mask, a background colour that is one of
+40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
 guides. Subviews: labels (system font or the Headline, Callout and, on
 tvOS, Title1 text styles; default colours), rounded-rect text fields,
 rounded-rect buttons with a normal-state title and touch-up-inside actions
@@ -55,8 +54,23 @@ on the controller, vertical stack views. Constraints between those, with
 constants; outlets from the controller into its view. Everything else, and
 other values of the attributes these use, is refused. Observed:
 
-- Without a `<device>`, the root view is laid out at 600x600 whatever its
-  frame says (`resources/Launch`).
+- Without a `<device>`, an iOS root view is laid out at 600x600 whatever its
+  frame says when the deployment target is below iOS 17.0, and at its frame
+  from 17.0 on (`resources/Launch`, at 12.0, 16.99, 17.0 and 26.0); Xcode's
+  ibtool fails on a tvOS storyboard without one.
+- Colour components are kept to 10 significant digits (`%.10g`). Each is
+  archived as a float (`UIRed`, `UIWhite`, `UIAlpha`, ...) followed, when
+  the float isn't exactly that value, by a `-Double` key with it; the text
+  form (`NSRGB`, `NSWhite`) is the components as `%.3g` would print them,
+  alpha only when it isn't 1 (`0.123 0.988 0.00392 0.3`, `1 1e-05 0.333
+  0.8`), for ten probe colours.
+- A system colour is archived with Xcode's own values whatever the
+  document's copy says (`systemBackgroundColor` given as white 0.333 is
+  white 1): white and alpha in the grey colour space (4) for the greys
+  (`labelColor`, `systemBackgroundColor`, `lightTextColor`, ...), sRGB (2)
+  otherwise, after its `UISystemColorName`. The 40 colours of the system
+  colour list measured on iOS are those this ibtool knows; others, and
+  system colours on tvOS, are refused.
 - Legacy layout guides become hidden `_UILayoutGuide` subviews, after the
   others, each with a `_UILayoutSupportConstraint` (width, priority 999),
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:
