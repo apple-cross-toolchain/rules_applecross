@@ -31,8 +31,14 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                 return Err(format!("{}: the {key} key of an image set is not supported by this actool", dir.display()));
             }
         }
-        // CSI flags: the rendering intent, automatic by default.
-        let mut flags = 16;
+        // CSI flags: the rendering intent, automatic by default; Xcode also
+        // reads it from `info` (WebRTC's web_view shell icons).
+        let mut flags = match contents["info"]["template-rendering-intent"].as_str() {
+            None => 16,
+            Some("template") => 8,
+            Some("original") => 0,
+            Some(v) => return Err(format!("{}: the image set info template-rendering-intent = {v} is not supported by this actool", dir.display())),
+        };
         if let Some(props) = contents["properties"].as_object() {
             for (k, v) in props {
                 match (k.as_str(), v.as_str()) {
@@ -89,7 +95,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
     scales.sort();
     scales.dedup();
     for scale in scales {
-        let mut atlas_index = [0, 0];
+        let mut planned: Vec<(usize, bool, bool, Vec<&SetImage>)> = Vec::new();
         for (gamut, opaque, gray) in [(0, false, false), (0, false, true), (0, true, false), (0, true, true), (1, false, false), (1, true, false)] {
             let mut group: Vec<&SetImage> =
                 images.iter().filter(|i| i.scale == scale && is_opaque(i) == opaque && is_gray(i) == gray && (gamut == 0 || i.extended.is_some())).collect();
@@ -104,27 +110,34 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                 }
                 // Next-fit atlases: one is closed once its area reaches the
                 // cap, the next taking the following index at this scale.
-                let mut atlases: Vec<Vec<&SetImage>> = Vec::new();
                 let mut total = 0;
                 for i in packable {
-                    if atlases.is_empty() || total >= cap {
-                        atlases.push(Vec::new());
+                    if planned.last().is_none_or(|a| (a.0, a.1, a.2) != (gamut, opaque, gray)) || total >= cap {
+                        planned.push((gamut, opaque, gray, Vec::new()));
                         total = 0;
                     }
                     total += i.image.width * i.image.height;
-                    atlases.last_mut().unwrap().push(i);
-                }
-                for atlas in atlases {
-                    if gamut == 0 {
-                        pack(scale, opaque, gray, atlas_index[0], &atlas, &mut out.renditions)?;
-                    } else {
-                        pack16(scale, opaque, atlas_index[1], &atlas, &mut out.renditions)?;
-                    }
-                    atlas_index[gamut] += 1;
+                    planned.last_mut().unwrap().3.push(i);
                 }
             }
             for i in standalone {
                 out.renditions.push(if gamut == 0 { standalone_rendition(i)? } else { standalone16(i)? });
+            }
+        }
+        // A scale's atlases (per gamut) take their dimension1 in the order
+        // of their indices as decimal strings: the 11th of 19 is 2, the
+        // 3rd is 11 (a catalog of 19, all else identical).
+        for gamut in [0, 1] {
+            let atlases: Vec<&(usize, bool, bool, Vec<&SetImage>)> = planned.iter().filter(|a| a.0 == gamut).collect();
+            let mut names: Vec<String> = (0..atlases.len()).map(|k| k.to_string()).collect();
+            names.sort();
+            for (k, (_, opaque, gray, atlas)) in atlases.into_iter().enumerate() {
+                let index = names.iter().position(|n| *n == k.to_string()).unwrap() as u16;
+                if gamut == 0 {
+                    pack(scale, *opaque, *gray, index, atlas, &mut out.renditions)?;
+                } else {
+                    pack16(scale, *opaque, index, atlas, &mut out.renditions)?;
+                }
             }
         }
     }

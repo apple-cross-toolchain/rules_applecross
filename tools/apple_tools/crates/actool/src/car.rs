@@ -98,32 +98,17 @@ impl Catalog {
         k
     }
 
-    /// Whether BITMAPKEYS' order is established for this catalog. Its
-    /// blocks follow a CoreFoundation table of the identifiers, filled in
-    /// the order their renditions were first allocated. That reproduces
-    /// Xcode's whenever the order can't depend on how collisions resolve,
-    /// and in catalogs without atlases; with atlases and identifiers that
-    /// share a bucket, Xcode's order sometimes differs in a way not
-    /// established (23 of 570 catalogs examined). Colours collide the same
-    /// way, atlases or not (25 of 54 random colour catalogs).
+    /// Whether BITMAPKEYS' order is established for this catalog: by the
+    /// number of identifiers (cf::hash::number_table_order).
     pub fn bitmap_key_order_established(&self) -> bool {
         let mut ids: Vec<u16> = Vec::new();
-        let mut sensitive = false;
         for r in &self.renditions {
-            sensitive |= r.attrs.iter().any(|a| a.0 == ATTR_PART && a.1 == PART_COLOR);
-            match r.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map_or(0, |a| a.1) {
-                0 => sensitive = true,
-                id if !ids.contains(&id) => ids.push(id),
-                _ => {}
+            let id = r.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map_or(0, |a| a.1);
+            if id != 0 && !ids.contains(&id) {
+                ids.push(id);
             }
         }
-        if !sensitive {
-            return true;
-        }
-        let size = cf::hash::table_size_for(ids.len()) as u64;
-        let mut buckets: Vec<u64> = ids.iter().map(|&i| cf::hash::number_hash(i as i64) % size).collect();
-        buckets.sort_unstable();
-        buckets.windows(2).all(|w| w[0] != w[1])
+        cf::hash::number_table_order_established(ids.len())
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -210,9 +195,9 @@ impl Catalog {
                 identifiers.push(id);
             }
         }
-        // Their values are allocated in the order a CoreFoundation table of
-        // the identifiers enumerates, filled in the order their renditions
-        // were first allocated (an atlas's 0 among them); the tree lists
+        // Their values are allocated in the order a table of the
+        // identifiers enumerates (cf::hash::number_table_order), filled in
+        // the order their renditions were first allocated; the tree lists
         // them in order.
         let filled: Vec<i64> = allocated_ids.iter().filter(|&&i| i != 0).map(|&i| i as i64).collect();
         let order: Vec<u16> = cf::hash::number_table_order(&filled).into_iter().map(|i| filled[i] as u16).filter(|&i| i != 0).collect();

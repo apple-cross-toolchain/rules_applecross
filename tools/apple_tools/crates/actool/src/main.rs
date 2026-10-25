@@ -520,7 +520,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         platform: platform.into(),
     };
     if !catalog.bitmap_key_order_established() {
-        return Err("this catalog's bitmap keys, with atlases or colours and identifiers that collide, are in an order not established for this actool".into());
+        return Err("this catalog's number of identifiers puts its bitmap keys in an order not established for this actool".into());
     }
     let car_path = out_dir.join("Assets.car");
     std::fs::write(&car_path, catalog.to_bytes()).map_err(|e| e.to_string())?;
