@@ -9,13 +9,14 @@ pub(super) fn scene_controller<'a, 'i>(scene: Node<'a, 'i>) -> Option<Node<'a, '
     children(scene, "objects")
         .next()?
         .children()
-        .find(|c| matches!(c.tag_name().name(), "viewController" | "tableViewController" | "navigationController" | "tabBarController" | "splitViewController"))
+        .find(|c| matches!(c.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController" | "navigationController" | "tabBarController" | "splitViewController"))
 }
 
 /// A controller's class, as its nib's name begins without an identifier.
 pub(super) fn original_class(c: Node) -> &'static str {
     match c.tag_name().name() {
         "tableViewController" => "UITableViewController",
+        "collectionViewController" => "UICollectionViewController",
         "navigationController" => "UINavigationController",
         "tabBarController" => "UITabBarController",
         "splitViewController" => "UISplitViewController",
@@ -71,7 +72,7 @@ pub(super) fn segue_destinations<'a>(controllers: &[Node<'a, '_>], initial: Opti
         for s in outgoing(c).filter(|s| s.attribute("kind") != Some("unwind")) {
             let destination = attr(s, "destination")?;
             if find(destination).is_none() {
-                return fail("a segue to anything but a view, table view, navigation, tab bar or split view controller is not supported by this ibtool");
+                return fail("a segue to anything but a view, table view, collection view, navigation, tab bar or split view controller is not supported by this ibtool");
             }
             if !loaded.contains(&destination) {
                 loaded.push(destination);
@@ -122,7 +123,7 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
         ("destination", None), ("kind", None), ("identifier", None), ("animates", Some("NO")), ("modalPresentationStyle", None),
         ("modalTransitionStyle", Some("crossDissolve")), ("id", None),
     ])?;
-    let destination = names.get(attr(s, "destination")?).ok_or("a segue to anything but a view, table view, navigation, tab bar or split view controller is not supported by this ibtool")?;
+    let destination = names.get(attr(s, "destination")?).ok_or("a segue to anything but a view, table view, collection view, navigation, tab bar or split view controller is not supported by this ibtool")?;
     let mut values = Vec::new();
     if let Some(identifier) = s.attribute("identifier") {
         values.push(("UIIdentifier", nib.string(identifier)));

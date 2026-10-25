@@ -170,6 +170,7 @@ pub(super) fn parent_controller_nib(
                     return fail("a child controller with segues is not supported by this ibtool");
                 }
                 let root_name = format!("child {i} root");
+                let title = navigation_title(&mut nib, *nav)?;
                 let (item, explicit) = match kind {
                     Kind::Tab => {
                         let (item, explicit) = tab::tab_bar_item(&mut nib, *nav, &item_name)?;
@@ -184,7 +185,7 @@ pub(super) fn parent_controller_nib(
                 };
                 let embedded = embedded_controller(&mut nib, r, &root_name, &child_name, Some(&format!("{child_name} bar")), None, nib_names)?;
                 let root_item = embedded.navigation_item.clone();
-                child_values.push(navigation_controller(&mut nib, module, *nav, &child_name, embedded, &root_name, false, Some((item, "controller")))?);
+                child_values.push(navigation_controller(&mut nib, module, *nav, &child_name, embedded, &root_name, false, title, Some((item, "controller")))?);
                 own_parts.push(reference(format!("{child_name} bar")));
                 if explicit {
                     own_parts.push(reference(item_name.clone()));
