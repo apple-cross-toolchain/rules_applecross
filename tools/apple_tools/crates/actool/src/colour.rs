@@ -188,12 +188,39 @@ fn wide_gamut(colorants: &[[i32; 3]; 3]) -> Option<bool> {
     ((area - 0.134469).abs() > 0.00001).then_some(area > 0.134469)
 }
 
-/// The linear range, in units of 2^-28, that Xcode stored in one 8-bit
-/// rendition from wide-gamut profiles: values down to -0.00181 and up to
-/// 1.00299 were, and -0.00189 and 1.00799 weren't (Display P3, across
-/// hues). This takes -0.0017 to 1.002; outside it, Xcode adds a 16-bit
-/// extended-sRGB rendition or might.
-const EIGHT_BIT_RANGE: std::ops::RangeInclusive<i64> = -456_340..=268_972_327;
+/// The premultiplied 12-bit encoded values (units of 1/4096) a wide-gamut
+/// profile's image stays within for Xcode to store it in 8 bits alone:
+/// -102 and 4109 did, -103 and 4110 gave a 16-bit rendition too (Display
+/// P3, opaque and translucent pixels).
+const EIGHT_BIT_RANGE: std::ops::RangeInclusive<i64> = -102..=4109;
+
+/// A half float's bits for `x`, rounding to nearest, ties to even.
+pub fn to_half(x: f64) -> u16 {
+    let sign = if x.is_sign_negative() { 0x8000 } else { 0 };
+    let a = x.abs();
+    if a < 2f64.powi(-14) {
+        return sign | (a * 2f64.powi(24)).round_ties_even() as u16;
+    }
+    let mut e = a.log2().floor() as i32;
+    if 2f64.powi(e) > a {
+        e -= 1;
+    } else if 2f64.powi(e + 1) <= a {
+        e += 1;
+    }
+    let mut m = (a / 2f64.powi(e) * 1024.0).round_ties_even() as u16;
+    if m == 2048 {
+        m = 1024;
+        e += 1;
+    }
+    sign | (((e + 15) as u16) << 10) | (m - 1024)
+}
+
+/// A half float's value.
+pub fn half_to_f64(h: u16) -> f64 {
+    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let (e, m) = ((h >> 10) & 0x1f, (h & 0x3ff) as f64);
+    sign * if e == 0 { m * 2f64.powi(-24) } else { (1.0 + m / 1024.0) * 2f64.powi(e as i32 - 15) }
+}
 
 /// How a profile's colours convert to sRGB.
 pub struct Conversion {
@@ -247,22 +274,32 @@ pub fn conversion(profile: &[u8]) -> Result<Conversion, String> {
 
 impl Conversion {
     /// Converts unpremultiplied RGBA pixels to sRGB in place, alpha as is
-    /// (Xcode premultiplies after converting). Refuses images Xcode would
-    /// give a 16-bit rendition, leaving the pixels as they were.
-    pub fn convert(&self, rgba: &mut [u8]) -> Result<(), String> {
-        let linear = |p: &[u8], c: usize| (0..3).map(|k| self.matrix[c][k] * self.curves[k][p[k] as usize]).sum::<i64>();
-        if self.wide && rgba.chunks_exact(4).any(|p| (0..3).any(|c| !EIGHT_BIT_RANGE.contains(&linear(p, c)))) {
-            return Err("this PNG has colours outside sRGB, for which Xcode adds a 16-bit extended-sRGB rendition this actool doesn't write".into());
-        }
+    /// (Xcode premultiplies after converting), and gives the 16-bit
+    /// rendition Xcode adds for a wide-gamut profile's image with colours
+    /// outside sRGB: premultiplied extended-sRGB half floats, RGBA. That
+    /// rendition keeps the 12-bit encoded value, signed and past 1, and
+    /// premultiplies it by alpha widened to 12 bits, `(257 a + 8) >> 4`.
+    pub fn convert(&self, rgba: &mut [u8]) -> Option<Vec<u16>> {
         let table = encode_table();
+        let encode12 = |k: i64| {
+            let l = k.abs() as f64 / 4096.0;
+            let e = if l <= 0.0031308 { 12.92 * l } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+            (e * 4096.0 + 0.5).floor() as i64 * k.signum()
+        };
+        let mut halves = Vec::with_capacity(rgba.len());
+        let mut wide = false;
         for p in rgba.chunks_exact_mut(4) {
-            let acc = [0, 1, 2].map(|c| linear(p, c));
-            for (c, acc) in acc.into_iter().enumerate() {
-                let index = (acc >> 15).clamp(0, 8191);
-                p[c] = table[((index + 1) >> 1) as usize];
+            let alpha12 = (257 * p[3] as i64 + 8) >> 4;
+            let k = [0, 1, 2].map(|c| (((0..3).map(|i| self.matrix[c][i] * self.curves[i][p[i] as usize]).sum::<i64>() >> 15) + 1) >> 1);
+            for c in 0..3 {
+                let premultiplied = (encode12(k[c]) as f64 * alpha12 as f64 / 4096.0 + 0.5).floor() as i64;
+                wide |= self.wide && !EIGHT_BIT_RANGE.contains(&premultiplied);
+                halves.push(to_half(premultiplied as f64 / 4096.0));
+                p[c] = table[k[c].clamp(0, 4096) as usize];
             }
+            halves.push(to_half(alpha12 as f64 / 4096.0));
         }
-        Ok(())
+        wide.then_some(halves)
     }
 }
 
@@ -320,6 +357,15 @@ mod tests {
         let srgb = [[28578, 14581, 912], [25241, 46981, 6362], [9376, 3972, 46799]];
         assert_eq!([generic, display, srgb].map(|c| wide_gamut(&c)), [Some(false); 3]);
         assert_eq!([p3, adobe].map(|c| wide_gamut(&c)), [Some(true); 2]);
+    }
+
+    /// Display P3's red in Xcode's 16-bit rendition (stored raw in a 1x7
+    /// image): 12-bit encoded 4476, -928 and -613, and opaque alpha.
+    #[test]
+    fn half_floats() {
+        assert_eq!([4476, -928, -613, 4096].map(|v| to_half(v as f64 / 4096.0)), [15455, 45888, 45258, 15360]);
+        assert_eq!(half_to_f64(45888), -928.0 / 4096.0);
+        assert_eq!(to_half(0.0), 0);
     }
 
     /// sRGB's own table (1024 entries) is taken for sRGB's curve; a table

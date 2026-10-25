@@ -12,7 +12,8 @@ fn header(mode: u8, width: usize, height: usize) -> Vec<u8> {
     header_bpp(mode, width, height, 4)
 }
 
-/// A stream's header, for pixels of `bpp` bytes (4 BGRA, 2 grey and alpha).
+/// A stream's header, for pixels of `bpp` bytes (4 BGRA, 2 grey and alpha),
+/// or [`HALF`].
 fn header_bpp(mode: u8, width: usize, height: usize, bpp: u8) -> Vec<u8> {
     let mut s = b"dmp2".to_vec();
     s.extend([mode, 1, 0x0a, bpp]);
@@ -20,6 +21,10 @@ fn header_bpp(mode: u8, width: usize, height: usize, bpp: u8) -> Vec<u8> {
     s.extend((height as u16).to_le_bytes());
     s
 }
+
+/// The header's pixel format for four half floats a pixel (16-bit
+/// renditions), where the others give their bytes a pixel.
+const HALF: u8 = 0x14;
 
 /// Mode 1: the pixels as they are, after the header (no length).
 fn raw(width: usize, height: usize, data: &[u8], bpp: u8) -> Vec<u8> {
@@ -45,7 +50,7 @@ fn smallest_or_raw(width: usize, height: usize, data: &[u8], bpp: u8, chosen: Ve
     if keep {
         return Ok(chosen);
     }
-    if strip_rows(bpp as usize * width, height) < height {
+    if strip_rows(data.len() / height, height) < height {
         return Err("this image would be stored uncompressed in strips, which is not established for this actool".into());
     }
     Ok(raw(width, height, data, bpp))
@@ -154,7 +159,10 @@ fn half(v: i32) -> i32 {
 
 /// YCoCg as mode 2 computes it, losing a bit of G and B.
 fn ycocg(b: u8, g: u8, r: u8) -> [i32; 3] {
-    let (r, g, b) = (r as i32, g as i32, b as i32);
+    ycocg_values(b as i32, g as i32, r as i32)
+}
+
+fn ycocg_values(b: i32, g: i32, r: i32) -> [i32; 3] {
     let co = half(b - r);
     let t = r + co;
     let cg = half(g - t);
@@ -318,6 +326,64 @@ fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String
         (lzfse_only, (strip_rows(row, height) == height).then(|| ga.to_vec()))
     };
     smallest_or_raw(width, height, ga, 2, chosen, lzvn_input)
+}
+
+/// The `dmp2` stream of a 16-bit image, premultiplied half floats (RGBA,
+/// little-endian) and its alpha in 8 bits: mode 3 (the half floats) or
+/// mode 2, whichever is smaller; no palette was seen for one, even of four
+/// colours. Mode 2 takes each colour as `round(v * 512)`, halves away from
+/// zero, with red where 8-bit images have blue.
+fn stream16(width: usize, height: usize, halves: &[u16], alpha: &[u8]) -> Result<Vec<u8>, String> {
+    let data: Vec<u8> = halves.iter().flat_map(|h| h.to_le_bytes()).collect();
+    if width * height < 8 {
+        return Ok(raw(width, height, &data, HALF));
+    }
+    let row = 8 * width;
+    let lzfse_only = striped_bpp(3, width, height, row, HALF, |y, h| data[y * row..(y + h) * row].to_vec());
+    let values: Vec<[i32; 3]> = halves
+        .chunks_exact(4)
+        .map(|p| {
+            let c = |i: usize| {
+                let v = crate::colour::half_to_f64(p[i]) * 512.0;
+                ((v.abs() + 0.5).floor() * v.signum()) as i32
+            };
+            ycocg_values(c(0), c(1), c(2))
+        })
+        .collect();
+    let transform16 = |y: usize, h: usize| transform_values(width, h, alpha[y * width..(y + h) * width].to_vec(), values[y * width..(y + h) * width].to_vec(), 3);
+    let mut ambiguous = false;
+    let predictive = striped_bpp(2, width, height, 7 * width + 1, HALF, |y, h| {
+        let (raw, a) = transform16(y, h);
+        ambiguous |= a;
+        raw
+    });
+    if ambiguous && predictive.len() <= lzfse_only.len() + lzfse_only.len() / 100 + 64 {
+        return Err("this image's dmp2 encoding (its row predictors) is not established for this actool".into());
+    }
+    if !ambiguous && predictive.len() == lzfse_only.len() {
+        return Err("this image's dmp2 modes tie, which is not established for this actool".into());
+    }
+    let (chosen, lzvn_input) = if !ambiguous && predictive.len() < lzfse_only.len() {
+        (predictive, (strip_rows(7 * width + 1, height) == height).then(|| transform16(0, height).0))
+    } else {
+        (lzfse_only, (strip_rows(row, height) == height).then(|| data.clone()))
+    };
+    smallest_or_raw(width, height, &data, HALF, chosen, lzvn_input)
+}
+
+/// The `MLEC` payload of a 16-bit image (see [`stream16`]), at most 4 MiB
+/// as BGRA would be (chunks of larger ones aren't established).
+pub fn encode16(width: usize, height: usize, halves: &[u16], alpha: &[u8], opaque: bool) -> Result<Vec<u8>, String> {
+    if width * height * 4 > 1 << 22 {
+        return Err(format!("a {width}x{height} 16-bit image is too large for this actool"));
+    }
+    let stream = stream16(width, height, halves, alpha)?;
+    let mut out = b"MLEC".to_vec();
+    le32(&mut out, if opaque { 2 } else { 0 });
+    le32(&mut out, 11);
+    le32(&mut out, 16 + stream.len() as u32);
+    body_bpp(&mut out, &stream, HALF as u32);
+    Ok(out)
 }
 
 /// The `MLEC` payload of a GA8 image: pixels of premultiplied grey and

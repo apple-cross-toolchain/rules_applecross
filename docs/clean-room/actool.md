@@ -375,14 +375,15 @@ What compiled byte-identical against Xcode 27.0:
   per size, legacy slots).
 - The corpus's display profiles and the wide-gamut system profiles, on
   grey, muted, gradient, noise, pastel (also translucent) and saturated
-  images: 24 image sets. The 38 refused all had a 16-bit rendition in
-  Xcode.
+  images, with their 16-bit renditions (below): 59 of 63 image sets, the
+  rest refused for their row predictors.
 - Profiles of our own with Generic RGB's colorants and each curve form:
   44 image sets, the rest refused for their row predictors.
 - A display profile's icon sets (single size and an image per size).
 - RxExample's catalog, an app icon with a display profile whose curves
-  are 1024-entry tables, and a second WebRTC catalog, taking the 350-catalog
-  comparison from 98 byte-identical to 100.
+  are 1024-entry tables, a WebRTC catalog with a Display P3 image, and
+  rules_xcodeproj's, whose display profile gives its image a 16-bit
+  rendition: the 350-catalog comparison went from 98 byte-identical to 101.
 
 ### Curves
 
@@ -431,18 +432,65 @@ point don't count.
 Xcode follows the API at the flip: a saturated image with profiles just
 either side of it got one rendition and two.
 
-From a wide profile, Xcode stored one 8-bit rendition when every channel
-of every pixel's linear sRGB value (`M . q`) stayed between about -0.0018
-and 1.003. On Display P3, across hues:
-- down to -0.00181 and up to 1.00299 gave one rendition;
-- -0.00189, and 1.00799 or more, gave two.
+From a wide profile, Xcode adds the rendition when any channel of any
+pixel, as the 16-bit rendition stores it (premultiplied, in 12-bit
+encoded units, below), is -103 or less or 4110 or more. -102 and 4109
+didn't, and -103 and 4110 did (Display P3, opaque pixels and translucent
+ones), so the edges are exact. A transparent pixel never counts: a fully
+transparent saturated red, or one at alpha 1 or 8, doesn't add it; at 64
+it does. Opaque values can't fall between -90 and -103 (the encoding near 0
+steps by about 13 there), which is why linear probes put the edge between
+-0.00181 and -0.00189. No narrow profile probed added the rendition, though
+RxExample's icon reaches -0.023 and 1.041 linear under its display profile,
+and Generic RGB's primaries fall outside sRGB too.
 
-The margins aren't symmetric, and no colour difference (ΔE76) or
-encoded-value measure tried explains them. This actool converts an image
-from a wide profile only within -0.0017 to 1.002, and refuses the rest. No
-narrow profile probed added the rendition, though RxExample's icon reaches
--0.023 and 1.041 under its display profile, and Generic RGB's primaries
-fall outside sRGB too.
+### The 16-bit rendition
+
+A second rendition of the image, keyed with display gamut (attribute 24)
+1 where the 8-bit one has 0:
+- **Pixels:** half floats, R, G, B, A, little-endian, extended sRGB.
+  Each channel is the 12-bit encoded value of the conversion below, not
+  clamped and mirrored for negatives: `e12 = sign(k) * round(enc(|k| /
+  4096) * 4096)`, with `k = ((sum M q >> 15) + 1) >> 1`. Alpha is widened to
+  12 bits, `A12 = (257 * a + 8) >> 4`. Colours are premultiplied in 12 bits,
+  `round(e12 * A12 / 4096)` (halves up), and stored as the nearest half
+  float of that over 4096 (ties to even); alpha as that of `A12 / 4096`.
+  This equals ImageIO's image drawn into an extended-sRGB half-float
+  `CGContext`, which equals Xcode's raw pixels. The model equals that
+  drawing for all 16,777,216 colours of Display P3 and of Adobe RGB, and
+  3,825 translucent values across alpha (from five colours).
+- **Header:** pixel format `RGBW` (stored `WBGR`), colour space 4, 0x3ef
+  eight bytes a pixel rounded up to 32. The MLEC body's second word and the
+  `dmp2` header's fourth byte are 0x14.
+- **`dmp2` modes:**
+  - mode 1 below 8 pixels, the half floats as they are;
+  - mode 3, the half floats compressed;
+  - mode 2, lossy: each colour as `round(h * 512)` (halves away from zero),
+    with R, G, B in the places B, G, R take at 8 bits, and the alpha plane
+    the source's 8-bit alpha.
+
+  The smallest wins, as at 8 bits; no palette was seen, even for four
+  colours. Mode 2's strips are the 8-bit ones' (`7 w + 1` bytes a row: a
+  1000 px image in strips of 299 rows).
+- **Atlases:** small images are packed as at 8 bits, but the 16-bit
+  renditions of colour images go in atlases of their own, per scale and
+  opacity. They're named `ZZZZPackedAsset-{scale}.{opaque}.0-gamut1`, keyed
+  with gamut 1, and their dimension1 is counted apart from the 8-bit
+  atlases'. The links carry the gamut in the atlas's key.
+- **Key format:** gamut comes after dimension1 when an image has the
+  rendition. BITMAPKEYS tracks it as a mask (3 for both gamuts).
+
+102 probe catalogs with the rendition were byte-identical against Xcode
+27.0: single images (tiny to 1000x700, opaque and
+translucent, Display P3, Adobe RGB, ROMM, ITU-2020, DCI-P3, ACEScg and
+display profiles) and atlases (both gamuts, translucent and opaque, two
+8-bit atlases with one 16-bit). App icons and image stacks that would need
+the rendition are refused, as are macOS catalogs (their key format isn't
+established), images of more than 4 MiB as BGRA, and two 16-bit atlases'
+order, which wasn't compared byte for byte. Images whose rows' predictor
+ties (1 against 2 or 3 with identical residuals) are refused as at 8 bits;
+Xcode breaks those either way (176 such rows in the probes), by a rule not
+established.
 
 ### Conversion
 
@@ -508,8 +556,10 @@ bytes per row rounded up to 32 (240 is 256). Its CSI flags are the
 rendering intent: 16 automatic (no property), 8 template, 0 original. The
 key format is the app icons' without `dimension2` when nothing uses it.
 
-An image whose every pixel is grey (R = G = B, whatever its PNG's colour
-type) is stored as GA8: pixel format ` 8AG`, colour space 2, a greyscale
+An image whose every pixel is grey once premultiplied (R = G = B, whatever
+its PNG's colour type: a transparent red pixel in a grey image, or (10, 12,
+11) at alpha 1, keeps it grey; (200, 0, 0) at alpha 1 doesn't) is stored as
+GA8: pixel format ` 8AG`, colour space 2, a greyscale
 `dmp2` payload, and bytes per row of one a pixel when opaque and four
 otherwise, rounded up to 32.
 
