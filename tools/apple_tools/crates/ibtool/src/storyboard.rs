@@ -272,9 +272,10 @@ impl Nib {
 
     /// A string a translation replaces, the `property` of the object `id`:
     /// in `Base.lproj` an `NSLocalizableString` keyed `<id>.<property>`
-    /// with the string as its development value.
+    /// with the string as its development value. An empty string is never
+    /// localized.
     fn text(&mut self, id: &str, property: &str, s: &str) -> Value {
-        if !self.localizable {
+        if !self.localizable || s.is_empty() {
             return self.string(s);
         }
         let key = self.string(&format!("{id}.{property}"));
@@ -468,7 +469,8 @@ fn navigation_item(nib: &mut Nib, n: Node) -> Result<Value, String> {
         return fail("navigation items with bar button items or other children are not supported by this ibtool");
     }
     let mut values = Vec::new();
-    if let Some(title) = n.attribute("title") {
+    // An empty title is left out.
+    if let Some(title) = n.attribute("title").filter(|t| !t.is_empty()) {
         // The attributed title holds the title's own object.
         let (first, string) = if nib.localizable {
             let Value::New(o) = nib.text(attr(n, "id")?, "title", title) else { unreachable!() };
@@ -524,6 +526,35 @@ fn runtime_class_name(n: Node, module: Option<&str>, default: &str) -> Result<St
         Some(m) if m.starts_with("__") => return fail(format!("custom module {m} is not supported by this ibtool")),
         Some(m) => format!("_TtC{}{m}{}{class}", m.len(), class.len()),
     })
+}
+
+/// A label's minimum font size and scale factor, when it adjusts its font
+/// size to fit (the default) and has either. A scale factor's size is
+/// rounded to the nearest quarter point, halves up; a size's factor is the
+/// size over the font's.
+fn minimum_font_size(n: Node) -> Result<Option<(f32, f32)>, String> {
+    if n.attribute("adjustsFontSizeToFit").is_some() {
+        return Ok(None);
+    }
+    let (factor, size) = (n.attribute("minimumScaleFactor"), n.attribute("minimumFontSize"));
+    if factor.is_none() && size.map_or(true, |s| number(s) == Ok(0.0)) {
+        return Ok(None);
+    }
+    let font_size = child(n, "fontDescription", "fontDescription")
+        .and_then(|f| f.attribute("pointSize"))
+        .ok_or("a minimum font size without the font's point size is not supported by this ibtool")?;
+    let font_size = number(font_size)?;
+    Ok(Some(match (factor, size) {
+        (Some(factor), _) => {
+            let factor = number(factor)? as f32;
+            (((factor as f64 * font_size * 4.0).round() / 4.0) as f32, factor)
+        }
+        (None, Some(size)) => {
+            let size = number(size)? as f32;
+            (size, (size as f64 / font_size) as f32)
+        }
+        (None, None) => unreachable!(),
+    }))
 }
 
 /// A font: `<fontDescription>`, or a control's default system font. Equal
@@ -615,9 +646,30 @@ fn frame(n: Node) -> Result<Frame, String> {
     Ok(Frame { x: number(attr(r, "x")?)?, y: number(attr(r, "y")?)?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? })
 }
 
+/// A subview's frame. Without one, or with an all-zero one, a label or a
+/// plain view is 1000x1000 at the origin and a button has no size.
+fn subview_frame(n: Node) -> Result<Frame, String> {
+    if let Some(f) = child(n, "rect", "frame").map(|_| frame(n)).transpose()? {
+        if f.x != 0.0 || f.y != 0.0 || f.w != 0.0 || f.h != 0.0 {
+            return Ok(f);
+        }
+    }
+    match n.tag_name().name() {
+        "label" | "view" => Ok(Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }),
+        "button" => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
+        other => fail(format!("<{other}> without a frame")),
+    }
+}
+
+/// Bounds and centre, each left out when zero.
 fn geometry(values: &mut Vec<(&'static str, Value)>, f: &Frame) {
-    values.push(("UIBounds", doubles(&[0.0, 0.0, f.w, f.h])));
-    values.push(("UICenter", doubles(&[f.x + f.w / 2.0, f.y + f.h / 2.0])));
+    if f.w != 0.0 || f.h != 0.0 {
+        values.push(("UIBounds", doubles(&[0.0, 0.0, f.w, f.h])));
+    }
+    let center = [f.x + f.w / 2.0, f.y + f.h / 2.0];
+    if center != [0.0, 0.0] {
+        values.push(("UICenter", doubles(&center)));
+    }
 }
 
 fn view_name(id: &str) -> String {
@@ -661,6 +713,15 @@ fn text_alignment(s: &str) -> Result<i64, String> {
 
 /// Whether a view is archived as not translating its autoresizing mask:
 /// when the document says so and a constraint is on it.
+/// A label's or button's autoresizing mask, which Xcode leaves out when
+/// the view doesn't translate it into constraints.
+fn ignored_autoresizing_mask(n: Node) -> Result<(), String> {
+    if children(n, "autoresizingMask").next().is_some() && n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
+        return fail(format!("<autoresizingMask> inside a <{}> that translates it is not supported by this ibtool", n.tag_name().name()));
+    }
+    Ok(())
+}
+
 fn does_not_translate(scene: &Scene, n: Node) -> bool {
     n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| scene.constrained.contains(&id))
 }
@@ -684,7 +745,8 @@ fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
 }
 
 /// The constraints a subview holds: on its own size, width before height
-/// whatever the document's order; then, for a container, those between it
+/// whatever the document's order and each dimension's constant before its
+/// aspect ratio; then, for a container, those between it
 /// and its subviews or among them, ordered as a root view's are.
 fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Result<Option<Value>, String> {
     let Some(cs) = children(n, "constraints").next() else { return Ok(None) };
@@ -701,7 +763,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
             if first != id || c.attribute("secondAttribute").is_some() || c.attribute("multiplier").is_some() {
                 return fail("a subview's constraint without a second item on another view is not supported by this ibtool");
             }
-            let rank = ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
+            let rank = 2 * ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
             if sizes.iter().any(|(r, _)| *r == rank) {
                 return fail("two constraints on a subview's same dimension are not supported by this ibtool");
             }
@@ -709,7 +771,17 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
             continue;
         };
         if first == second {
-            return fail("a constraint between an item and itself is not supported by this ibtool");
+            // An aspect ratio: after the constant on its dimension.
+            let rank = match (first == id, a, attr(c, "secondAttribute")?) {
+                (true, "width", "height") => 1,
+                (true, "height", "width") => 3,
+                _ => return fail("a constraint between an item and itself other than its own aspect ratio is not supported by this ibtool"),
+            };
+            if sizes.iter().any(|(r, _)| *r == rank) {
+                return fail("two aspect ratios on a subview's same dimension are not supported by this ibtool");
+            }
+            sizes.push((rank, c));
+            continue;
         }
         let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?)?;
         if others.iter().any(|(_, k, ..)| *k == key) {
@@ -721,7 +793,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
                 return fail(format!("a subview's constraints on {item} are not supported by this ibtool"));
             }
         }
-        let f = frame(*v)?;
+        let f = subview_frame(*v)?;
         others.push(((f.x * f.x + f.y * f.y, f.x), key, c, first, second));
     }
     sizes.sort_by_key(|f| f.0);
@@ -729,9 +801,15 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     let mut values = Vec::new();
     let item = |i: &str| reference(view_name(i));
     let mut made = Vec::new();
-    for (_, c) in sizes {
+    for (rank, c) in sizes {
         let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
-        made.push(constraint(reference(name.to_string()), layout_attribute(attr(c, "firstAttribute")?)?, None, constant, None));
+        let first = layout_attribute(attr(c, "firstAttribute")?)?;
+        made.push(if rank % 2 == 0 {
+            constraint(reference(name.to_string()), first, None, constant, None)
+        } else {
+            let second = Some((reference(name.to_string()), layout_attribute(attr(c, "secondAttribute")?)?));
+            multiplied(constraint(reference(name.to_string()), first, second, constant, None), multiplier(c)?)
+        });
     }
     for (_, _, c, first, second) in others {
         let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
@@ -752,18 +830,20 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
     let id = attr(n, "id")?;
     let name = view_name(id);
     scene.subviews.push((scene.parent.clone(), name.clone()));
-    let f = frame(n)?;
+    let f = subview_frame(n)?;
     let mut values = Vec::new();
     geometry(&mut values, &f);
     let object = match n.tag_name().name() {
         "label" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", Some("left")),
-                ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
-                ("lineBreakMode", Some("tailTruncation")), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
-                ("adjustsFontSizeToFit", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
+                ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
+                ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
+                ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "fontDescription", "nil", "color", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints"])?;
+            ignored_autoresizing_mask(n)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
             }
@@ -805,7 +885,33 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if let Some(lines) = n.attribute("numberOfLines") {
                 values.push(("UINumberOfLines", Value::Int(lines.parse().map_err(|_| format!("not a number: {lines}"))?)));
             }
+            // Tail truncation, the default, is left out.
+            let line_break = match attr(n, "lineBreakMode")? {
+                "wordWrap" => Some(0),
+                "characterWrap" => Some(1),
+                "clip" => Some(2),
+                "headTruncation" => Some(3),
+                "tailTruncation" => None,
+                "middleTruncation" => Some(5),
+                other => return fail(format!("lineBreakMode=\"{other}\" on <label> is not supported by this ibtool")),
+            };
+            let minimum = minimum_font_size(n)?;
+            if n.attribute("adjustsFontSizeToFit").is_none() {
+                values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
+            }
+            if let Some((size, _)) = minimum {
+                values.push(("UIMinimumFontSize", Value::Float(size)));
+            }
+            if let Some(mode) = line_break {
+                values.push(("UILineBreakMode", Value::Int(mode)));
+            }
             values.push(("UITextAlignment", Value::Int(text_alignment(attr(n, "textAlignment")?)?)));
+            if let Some((_, scale)) = minimum {
+                values.push(("UIMinimumScaleFactor", Value::Float(scale)));
+            }
+            if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
+                values.push(("UIAdjustsLetterSpacingToFit", Value::Bool(true)));
+            }
             values.push(("UIDisableUpdateTextColorOnTraitCollectionChange", Value::Bool(declared_color)));
             Object::new("UILabel", values)
         }
@@ -813,9 +919,17 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
                 ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", Some("roundedRect")),
-                ("textAlignment", Some("natural")), ("minimumFontSize", None), ("placeholder", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("textAlignment", Some("natural")), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                ("id", None),
             ])?;
-            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits"])?;
+            let clear_button_mode = match n.attribute("clearButtonMode") {
+                None => None,
+                Some("whileEditing") => Some(1),
+                Some("unlessEditing") => Some(2),
+                Some("always") => Some(3),
+                Some(other) => return fail(format!("clearButtonMode=\"{other}\" on <textField> is not supported by this ibtool")),
+            };
+            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits", "constraints"])?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
             if traits.attributes().len() != 1 || traits.has_children() {
                 return fail("text input traits are not supported by this ibtool");
@@ -829,9 +943,14 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
-            values.push(("UIClipsToBounds", Value::Bool(true)));
+            if n.attribute("clipsSubviews").is_some() {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -849,6 +968,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIBorderStyle", Value::Int(3)));
             values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
             values.push(("UIMinimumFontSize", Value::Float(number(attr(n, "minimumFontSize")?)? as f32)));
+            if let Some(mode) = clear_button_mode {
+                values.push(("UIClearButtonMode", Value::Int(mode)));
+            }
             values.push(("UIClearButtonOffset", doubles(&[3.0, 1.0])));
             values.push(("UIDisableTextColorUpdateOnTraitCollectionChange", Value::Bool(true)));
             values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
@@ -867,7 +989,8 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 None => None,
                 Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "state", "connections", "fontDescription", "color", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints"])?;
+            ignored_autoresizing_mask(n)?;
             let states: Vec<Node> = children(n, "state").collect();
             if states.len() != 1 || states[0].attribute("key") != Some("normal") {
                 return fail("buttons other than one with a normal state are not supported by this ibtool");
@@ -1409,6 +1532,9 @@ fn navigation_controller_nib(
         }
     }
     root_values.push(("UIParentViewController", reference("controller")));
+    if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+        root_values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
+    }
     // One with its own nib too is swapped in, as it is there.
     let root_controller = if vc.attribute("customClass").is_some() || root.loadable {
         root_values.push(("UIClassName", nib.string(&root.class_name)));
@@ -1526,7 +1652,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
-        only_children(objects_node, &["viewController", "navigationController", "placeholder"])?;
+        only_children(objects_node, &["viewController", "navigationController", "placeholder", "exit"])?;
+        // An exit nothing unwinds to is Interface Builder's alone.
+        for exit in children(objects_node, "exit") {
+            only_attributes(exit, &[("id", None), ("userLabel", Some("Exit")), ("sceneMemberID", Some("exit"))])?;
+            let id = attr(exit, "id")?;
+            if scene_node.document().descendants().any(|d| d != exit && d.attributes().any(|a| a.value() == id)) {
+                return fail("an exit something unwinds to is not supported by this ibtool");
+            }
+        }
         if children(objects_node, "navigationController").next().is_some() {
             continue;
         }
@@ -1534,7 +1668,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         only_attributes(vc, &[
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
-            ("userLabel", None), ("sceneMemberID", Some("viewController")),
+            ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("userLabel", None), ("sceneMemberID", Some("viewController")),
         ])?;
         let class_name = runtime_class_name(vc, module, "UIViewController")?;
         only_children(vc, &["view", "layoutGuides", "connections", "navigationItem", "size"])?;
@@ -1681,7 +1815,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 return Ok((0.0, 0.0));
             }
             let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("constraints between the root view and a nested view ({id}) are not supported by this ibtool"))?;
-            let f = frame(*v)?;
+            let f = subview_frame(*v)?;
             Ok((f.x * f.x + f.y * f.y, f.x))
         };
         let mut xml_constraints: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
@@ -1780,11 +1914,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         }
 
+        // Outlets, `view` among them, then actions, each in byte order of
+        // their names; actions with the same selector in document order.
         let mut connections = Vec::new();
-        for (label, destination) in &vc_outlets {
-            connections.push(outlet(&mut nib, label, "upstream", destination));
+        let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
+        outlets.push(("view", "owner", &root_name));
+        outlets.sort_by(|a, b| a.0.cmp(b.0));
+        for (label, source, destination) in outlets {
+            connections.push(outlet(&mut nib, label, source, destination));
         }
-        connections.push(outlet(&mut nib, "view", "owner", &root_name));
+        scene.actions.sort_by(|a, b| a.0.cmp(&b.0));
         for (selector, source, mask) in &scene.actions {
             let label = nib.string(selector);
             connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
@@ -1831,6 +1970,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         } else if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
             return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
+        }
+        if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+            swapper.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
         }
         swapper.push(("UIClassName", vnib.string(&class_name)));
         swapper.push(("UIOriginalClassName", vnib.string("UIViewController")));
