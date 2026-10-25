@@ -51,8 +51,8 @@ trailer. Observed from Xcode's nibs:
   hugging priority `{251, 251}`, a font name, `labelColor` are shared);
 - classes are listed in first use, then the fallback classes not already
   listed (UIColor's NSColor, UIFont's NSFont), which the class entry
-  references, in a set's order (NSColor before NSFont either way round;
-  alphabetical order would fit too).
+  references, in byte order: NSColor, NSFont, then UIView for a table
+  cell's content view (a set's order gives NSFont first with all three).
 
 The key table's order is a hash table's. Comparing Apple's key tables with
 containers filled through public APIs in candidate orders, `NSMutableSet`
@@ -336,7 +336,10 @@ when it is initial or identified. Observed with 25 probes:
   objects table (`UpstreamPlaceholder-1` for outlets into its view), its
   view nib's name, its identifiers, `UIParentViewController`,
   `UIKeyAutomaticallyAdjustsScrollViewInsets` when it says NO. The item
-  ends with `UINavigationBar`, a reference to the bar archived later.
+  ends with `UINavigationBar`, a reference to the bar archived later. Its
+  title is encoded before its navigation item, which shares an equal
+  string. A table view controller root is a `UITableViewController`, with
+  `UIClearsSelectionOnViewWillAppear` last (four probes).
 - The bar is laid out by Xcode, not the document: bounds 0x54 centred 27
   below its frame's top, mask 2, hugging `{250, 250}`, zero layout margins
   (directional), `UIViewInsetsLayoutMarginsFromSafeArea` 0 when the
@@ -344,6 +347,90 @@ when it is initial or identified. Observed with 25 probes:
   `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1.
   Other bar settings, other segues and controllers nothing loads are
   refused.
+
+## Table view controllers
+
+A `<tableViewController>` compiles as a view controller does, its class
+`UITableViewController` (`UITableViewController-<id>.nib` when it has no
+identifier), with `UIClearsSelectionOnViewWillAppear` false after
+`UIKeyAutomaticallyAdjustsScrollViewInsets` when it says NO. Its view nib's
+root view is its `<tableView>`, with no layout guides; the table's
+`dataSource` and `delegate` outlets to the controller are sorted with
+`view` (the upstream placeholder is in the nib for them). Observed with 94
+probes:
+
+- The table's values: geometry (the device's size, as a root view's),
+  `UIBackgroundColor`, `UIDeepDrawRect`, `UIOpaque` (unless it says NO),
+  `UIAutoresizeSubviews`, `UIAutoresizingMask`,
+  `UIClearsContextBeforeDrawing` false when it says NO, `UIClipsToBounds`,
+  the semantic content attribute, `UIViewLargeContentStoredProperties`,
+  `UIScrollViewIndicatorInsetAdjustmentBehavior` 1,
+  `UIShowsHorizontalScrollIndicator` false when it says NO (the vertical
+  one changes nothing), `UIBouncesZoom`, `UIAlwaysBounceVertical` when
+  YES, `UIKeyboardDismissMode` (onDrag 1, interactive 2),
+  `UIScrollViewContentInsetAdjustmentBehavior` 0, `UITableViewStyle`
+  (plain 0, grouped 1, insetGrouped 2), `UIStyle` (0 plain, else 1), the
+  separator style, `UIPrefetchingEnabled`, the row, section header and
+  footer heights and their three estimates as floats, `UIFillerRowHeight`
+  0.0 and `UISectionHeaderTopPadding` -1.0 as doubles,
+  `UIAllowsSelection` false, `UIAllowsMultipleSelection` or
+  `UIAllowsSelectionDuringEditing` true when set,
+  `UIInsetsContentViewsToSafeArea`, `UISeparatorColor`, the prototypes,
+  `UISectionIndexBackgroundColor`, `UISeparatorInsetReference` 0.
+- Left out, the row height is 44, a plain table's section heights 22, and
+  the estimates 0.
+- The separator style: default and singleLine are `UISeparatorStyle` and
+  `UISeparatorStyleIOS5AndLater` 1; none only
+  `UISeparatorStyleIOS9AndLater` 0; singleLineEtched all three, 2.
+- A plain table's white background, `systemBackgroundColor` or any opaque
+  grey white (gamma 2.2, calibrated or device), is
+  `tableBackgroundColor`; other colours, and every colour of a grouped
+  table, are archived as usual.
+- Each prototype cell with a reuse identifier is a nib of its own, in
+  `UITableViewCellPrototypeNibs`: a dictionary of the identifiers, in byte
+  order, each followed by a `UINib` (`captureEnclosingNIBBundleOnDecode`,
+  `archiveData` an `NSData` of the cell's nib), then in
+  `UITableViewCellPrototypeNibExternalObjects` the identifiers again, each
+  with an empty dictionary. A prototype without an identifier is left
+  out, and a cell's `rowHeight` changes nothing.
+- A cell's nib: the owner, the first responder and the cell (a
+  `UIClassSwapper` with a custom class), its connections the cell's
+  outlets in byte order of their names (the nib's empty array when there
+  are none). Its objects are the cell, its content view and the content
+  view's subviews; then, breadth first, each view's constraints and its
+  subviews, the content view's not listed again.
+- The cell: geometry from its frame in the document, `UISubviews` (the
+  content view and a `_UITableViewCellSeparatorView`), its background,
+  `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, `UIClipsToBounds`
+  when clipping, `UIViewPreservesSuperviewMargins` and
+  `UIViewPreservesSpecificSuperviewMargins` 15 when preserving margins,
+  the semantic content attribute, large content, `UIReuseIdentifier`,
+  `UIIndentationLevel` when not 0, `UISelectionStyle` (none 0, blue 1,
+  gray 2; left out for default), `UIAccessoryType` (disclosureIndicator 1,
+  checkmark 3, detailButton 4), `UIIndentationWidth` as a float,
+  `UITableCellBackgroundColorSet` with a background colour,
+  `UISystemBackgroundView`, `UIContentConfigurationView` nil,
+  `UIContentView`, and nil text, detail text and image labels.
+- A cell with a background colour archives it with
+  `UITableCellBackgroundColorSet`. Without one, a cell that selects other
+  than by default gets `tableCellPlainBackgroundColor` (whatever the
+  table's style) with `UIDidEncodeCompatibilityBackgroundColor`, and a
+  `_UISystemBackgroundView` sized as the cell rounded up (43.67 high is
+  44) holding a `UIBackgroundConfiguration` of that colour, a clear
+  stroke, `{0, 0, 0, 0}` insets and nothing customized.
+- The content view (a `UITableViewCellContentView`, archived with UIView
+  as its fallback class): geometry from the document, its subviews,
+  `UIDeepDrawRect`, `UIMultipleTouchEnabled`, `UIAutoresizeSubviews`,
+  `UIContentMode` 4, `UIClipsToBounds`, its constraints (ordered as a
+  container's), the margins as the cell's,
+  `UIViewInsetsLayoutMarginsFromSafeArea` 0 when it says NO, the semantic
+  content attribute, large content.
+- The separator is a point high at the cell's foot, from 8 points in to
+  its right edge, whatever the table's separator style or the device.
+
+Refused for now: static tables, cells with a style (Basic, Subtitle and
+the rest), actions in cells, tables as subviews, header and footer views,
+refresh controls, and other table and cell settings.
 
 ## WatchKit storyboards
 

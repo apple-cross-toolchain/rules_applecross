@@ -6,6 +6,8 @@ use crate::nib::{self, reference, Object, Value};
 use roxmltree::{Document, Node};
 use std::collections::HashMap;
 
+mod table;
+
 pub struct Compiled {
     /// (file name, contents) inside the .storyboardc directory.
     pub files: Vec<(String, Vec<u8>)>,
@@ -1410,7 +1412,8 @@ fn outlet(nib: &mut Nib, label: &str, source: &str, destination: &str) -> Value 
 fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections: Vec<Value>) -> Object {
     let top = nib.array("NSArray", top);
     let objects = nib.array("NSArray", objects);
-    let connections = nib.array("NSArray", connections);
+    // No connections are the nib's one empty array.
+    let connections = if connections.is_empty() { nib.empty_array() } else { nib.array("NSArray", connections) };
     Object::new("NSObject", vec![
         ("UINibTopLevelObjectsKey", top),
         ("UINibObjectsKey", objects),
@@ -1431,6 +1434,8 @@ struct RootController<'a, 'i> {
     loadable: bool,
     view_nib_name: String,
     class_name: String,
+    /// UIViewController or UITableViewController.
+    original_class: &'static str,
     upstream_used: bool,
 }
 
@@ -1498,7 +1503,12 @@ fn navigation_controller_nib(
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
 
-    // The root view controller.
+    // The root view controller. Its title is encoded before its
+    // navigation item, which may share the string.
+    let title = match vc.attribute("title") {
+        Some(title) => Some(nib.text(attr(vc, "id")?, "title", title)),
+        None => None,
+    };
     let explicit_item = child(vc, "navigationItem", "navigationItem");
     let item = match explicit_item {
         Some(i) => match navigation_item(&mut nib, i)? {
@@ -1517,8 +1527,8 @@ fn navigation_controller_nib(
     let external = nib.array("NSDictionary", external);
     let nib_name = nib.string(&root.view_nib_name);
     let mut root_values = Vec::new();
-    if let Some(title) = vc.attribute("title") {
-        root_values.push(("UITitle", nib.text(attr(vc, "id")?, "title", title)));
+    if let Some(title) = title {
+        root_values.push(("UITitle", title));
     }
     root_values.extend([
         ("UINavigationItem", item),
@@ -1535,13 +1545,16 @@ fn navigation_controller_nib(
     if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         root_values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
     }
+    if vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
+        root_values.push(("UIClearsSelectionOnViewWillAppear", Value::Bool(false)));
+    }
     // One with its own nib too is swapped in, as it is there.
     let root_controller = if vc.attribute("customClass").is_some() || root.loadable {
         root_values.push(("UIClassName", nib.string(&root.class_name)));
-        root_values.push(("UIOriginalClassName", nib.string("UIViewController")));
+        root_values.push(("UIOriginalClassName", nib.string(root.original_class)));
         Object::new("UIClassSwapper", root_values)
     } else {
-        Object::new("UIViewController", root_values)
+        Object::new(root.original_class, root_values)
     };
     let children_value = nib.array("NSMutableArray", vec![Value::New(root_controller.named("root"))]);
 
@@ -1652,7 +1665,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
-        only_children(objects_node, &["viewController", "navigationController", "placeholder", "exit"])?;
+        only_children(objects_node, &["viewController", "tableViewController", "navigationController", "placeholder", "exit"])?;
         // An exit nothing unwinds to is Interface Builder's alone.
         for exit in children(objects_node, "exit") {
             only_attributes(exit, &[("id", None), ("userLabel", Some("Exit")), ("sceneMemberID", Some("exit"))])?;
@@ -1664,21 +1677,36 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if children(objects_node, "navigationController").next().is_some() {
             continue;
         }
-        let vc = children(objects_node, "viewController").next().ok_or("scene without a view controller")?;
+        let vc = objects_node
+            .children()
+            .find(|c| c.has_tag_name("viewController") || c.has_tag_name("tableViewController"))
+            .ok_or("scene without a view controller")?;
+        // A table view controller's view is its table.
+        let is_table = vc.has_tag_name("tableViewController");
+        let original_class = if is_table { "UITableViewController" } else { "UIViewController" };
         only_attributes(vc, &[
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
-            ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("userLabel", None), ("sceneMemberID", Some("viewController")),
+            ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("clearsSelectionOnViewWillAppear", Some("NO")), ("userLabel", None),
+            ("sceneMemberID", Some("viewController")),
         ])?;
-        let class_name = runtime_class_name(vc, module, "UIViewController")?;
-        only_children(vc, &["view", "layoutGuides", "connections", "navigationItem", "size"])?;
+        if !is_table && vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
+            return fail("the clearsSelectionOnViewWillAppear attribute of <viewController> is not supported by this ibtool");
+        }
+        let class_name = runtime_class_name(vc, module, original_class)?;
+        only_children(vc, &[if is_table { "tableView" } else { "view" }, "layoutGuides", "connections", "navigationItem", "size"])?;
         if children(vc, "size").any(|s| s.attribute("key") != Some("freeformSize")) {
             return fail("sizes other than a freeform size inside <viewController> are not supported by this ibtool");
         }
         let vc_id = attr(vc, "id")?;
-        let view = children(vc, "view").next().ok_or("view controller without a view")?;
-        only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints"])?;
-        only_attributes(view, &[("key", Some("view")), ("contentMode", Some("scaleToFill")), ("id", None)])?;
+        let view = children(vc, if is_table { "tableView" } else { "view" }).next().ok_or("view controller without a view")?;
+        if is_table && children(vc, "layoutGuides").next().is_some() {
+            return fail("a table view controller with layout guides is not supported by this ibtool");
+        }
+        if !is_table {
+            only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints"])?;
+            only_attributes(view, &[("key", Some("view")), ("contentMode", Some("scaleToFill")), ("id", None)])?;
+        }
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
@@ -1699,7 +1727,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         let safe_area = children(view, "viewLayoutGuide").find(|g| g.attribute("key") == Some("safeArea"));
         let has_safe_area = safe_area.is_some();
-        if has_safe_area == !scene.guides.is_empty() {
+        if !is_table && has_safe_area == !scene.guides.is_empty() {
             return fail("a view needs either a safe-area layout guide or legacy top and bottom layout guides for this ibtool");
         }
 
@@ -1734,206 +1762,210 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
             (false, _, _, _) => frame(view)?,
         };
-        // Laid out at another size than its frame's, the root view resizes
-        // its autoresizing subviews: only those whose masks keep their frames
-        // (fixed left and top margins, size) are established.
-        let document = frame(view)?;
-        if (f.w, f.h) != (document.w, document.h) {
-            for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
-                if s.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
-                    continue;
-                }
-                let mask = match children(s, "autoresizingMask").next() {
-                    Some(m) => autoresizing_mask(m)?,
-                    None => 36,
-                };
-                if mask & (1 | 2 | 8 | 16) != 0 {
-                    return fail("an autoresizing subview of a view laid out at another size than its frame is not supported by this ibtool");
-                }
-            }
-        }
-        let mask = match children(view, "autoresizingMask").next() {
-            Some(m) => autoresizing_mask(m)?,
-            None => 0,
-        };
-        let background = child(view, "color", "backgroundColor").ok_or("view without a background color")?;
-
-        // The view's nib, in encoding order.
-        let owner = proxy(&mut nib, "IBFilesOwner", "owner");
-        let responder = proxy(&mut nib, "IBFirstResponder", "responder");
-        let upstream_used = !vc_outlets.is_empty() || view.descendants().any(|d| d.has_tag_name("action"));
-        let mut top = vec![owner, responder];
-        let mut objects = vec![reference("owner"), reference("responder")];
-        if upstream_used {
-            top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
-            objects.push(reference("upstream"));
-        }
-
-        let mut values = Vec::new();
-        geometry(&mut values, &f);
-        let mut subview_values = Vec::new();
-        for s in children(view, "subviews") {
-            for c in s.children().filter(|c| c.is_element()) {
-                subview_values.push(subview(&mut nib, &mut scene, c)?);
-            }
-        }
-        let mut guide_constraints = Vec::new();
-        let guide_kinds: Vec<&'static str> = scene.guides.iter().map(|g| g.1).collect();
-        for kind in guide_kinds {
-            let (guide, names) = legacy_guide(&mut nib, &root_name, kind);
-            subview_values.push(guide);
-            guide_constraints.extend(names);
-        }
-        if !subview_values.is_empty() {
-            values.push(("UISubviews", nib.array("NSMutableArray", subview_values)));
-        }
-        values.push(("UIBackgroundColor", color(&mut nib, background)?));
-        values.push(("UIDeepDrawRect", Value::Bool(true)));
-        values.push(("UIOpaque", Value::Bool(true)));
-        values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-        values.push(("UIAutoresizingMask", Value::Int(mask)));
-
-        // The view's constraints: the guides' first, then the document's in
-        // the order Xcode gives them, by first attribute.
-        let safe_area_id = safe_area.map(|g| attr(g, "id")).transpose()?;
-        let mut known: Vec<&str> = vec![view_id];
-        known.extend(view.descendants().filter(|d| d.is_element() && d.parent().is_some_and(|p| p.has_tag_name("subviews"))).filter_map(|d| d.attribute("id")));
-        let item = |id: &str| -> Result<Value, String> {
-            if let Some((_, kind)) = scene.guides.iter().find(|g| g.0 == id) {
-                return Ok(reference(format!("guide {kind}")));
-            }
-            if !known.contains(&id) {
-                return fail(format!("constraint item {id} is not supported by this ibtool"));
-            }
-            Ok(reference(view_name(id)))
-        };
-        // A group's place: its item's frame origin by distance from the
-        // root view's, then x, then id; the safe-area guide's is the origin.
-        let direct: Vec<Node> = children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
-        let place = |id: &str| -> Result<(f64, f64), String> {
-            if Some(id) == safe_area_id {
-                return Ok((0.0, 0.0));
-            }
-            let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("constraints between the root view and a nested view ({id}) are not supported by this ibtool"))?;
-            let f = subview_frame(*v)?;
-            Ok((f.x * f.x + f.y * f.y, f.x))
-        };
-        let mut xml_constraints: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
-        for cs in children(view, "constraints") {
-            for c in children(cs, "constraint") {
-                only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None), ("constant", None), ("id", None)])?;
-                let first = c.attribute("firstItem").unwrap_or(view_id);
-                let second = c.attribute("secondItem").unwrap_or(view_id);
-                if c.attribute("secondItem").is_none() && c.attribute("secondAttribute").is_none() {
-                    return fail("a root view constraint without a second item is not supported by this ibtool");
-                }
-                if first == second {
-                    return fail("a constraint between an item and itself is not supported by this ibtool");
-                }
-                // Where a legacy guide's own constraints go isn't established;
-                // one as the second item of a sibling constraint is.
-                let legacy = |id: &str| scene.guides.iter().any(|g| g.0 == id);
-                if legacy(first) || (legacy(second) && first == view_id) {
-                    return fail("constraints from a legacy layout guide, or between one and the root view, are not supported by this ibtool");
-                }
-                for id in [first, second] {
-                    if id != view_id && Some(id) != safe_area_id && !known.contains(&id) && !legacy(id) {
-                        return fail(format!("constraints on {id} are not supported by this ibtool"));
+        let (view_root, upstream_used) = if is_table {
+            table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?
+        } else {
+            // Laid out at another size than its frame's, the root view resizes
+            // its autoresizing subviews: only those whose masks keep their
+            // frames (fixed left and top margins, size) are established.
+            let document = frame(view)?;
+            if (f.w, f.h) != (document.w, document.h) {
+                for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
+                    if s.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+                        continue;
+                    }
+                    let mask = match children(s, "autoresizingMask").next() {
+                        Some(m) => autoresizing_mask(m)?,
+                        None => 36,
+                    };
+                    if mask & (1 | 2 | 8 | 16) != 0 {
+                        return fail("an autoresizing subview of a view laid out at another size than its frame is not supported by this ibtool");
                     }
                 }
-                let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?)?;
-                if xml_constraints.iter().any(|(_, k, ..)| *k == key) {
-                    return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
-                }
-                xml_constraints.push((place(key.0)?, key, c, first, Some(second)));
             }
-        }
-        xml_constraints.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
-        let mut constraint_values: Vec<Value> = guide_constraints.iter().map(|n| reference(n.clone())).collect();
-        let mut constraint_names = Vec::new();
-        // The safe-area guide is archived where a constraint first uses it.
-        let mut safe_area_used = false;
-        let mut resolve = |nib: &mut Nib, id: &str| -> Result<Value, String> {
-            if Some(id) != safe_area_id {
-                return item(id);
+            let mask = match children(view, "autoresizingMask").next() {
+                Some(m) => autoresizing_mask(m)?,
+                None => 0,
+            };
+            let background = child(view, "color", "backgroundColor").ok_or("view without a background color")?;
+
+            // The view's nib, in encoding order.
+            let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+            let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+            let upstream_used = !vc_outlets.is_empty() || view.descendants().any(|d| d.has_tag_name("action"));
+            let mut top = vec![owner, responder];
+            let mut objects = vec![reference("owner"), reference("responder")];
+            if upstream_used {
+                top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
+                objects.push(reference("upstream"));
+            }
+
+            let mut values = Vec::new();
+            geometry(&mut values, &f);
+            let mut subview_values = Vec::new();
+            for s in children(view, "subviews") {
+                for c in s.children().filter(|c| c.is_element()) {
+                    subview_values.push(subview(&mut nib, &mut scene, c)?);
+                }
+            }
+            let mut guide_constraints = Vec::new();
+            let guide_kinds: Vec<&'static str> = scene.guides.iter().map(|g| g.1).collect();
+            for kind in guide_kinds {
+                let (guide, names) = legacy_guide(&mut nib, &root_name, kind);
+                subview_values.push(guide);
+                guide_constraints.extend(names);
+            }
+            if !subview_values.is_empty() {
+                values.push(("UISubviews", nib.array("NSMutableArray", subview_values)));
+            }
+            values.push(("UIBackgroundColor", color(&mut nib, background)?));
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIOpaque", Value::Bool(true)));
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(mask)));
+
+            // The view's constraints: the guides' first, then the document's in
+            // the order Xcode gives them, by first attribute.
+            let safe_area_id = safe_area.map(|g| attr(g, "id")).transpose()?;
+            let mut known: Vec<&str> = vec![view_id];
+            known.extend(view.descendants().filter(|d| d.is_element() && d.parent().is_some_and(|p| p.has_tag_name("subviews"))).filter_map(|d| d.attribute("id")));
+            let item = |id: &str| -> Result<Value, String> {
+                if let Some((_, kind)) = scene.guides.iter().find(|g| g.0 == id) {
+                    return Ok(reference(format!("guide {kind}")));
+                }
+                if !known.contains(&id) {
+                    return fail(format!("constraint item {id} is not supported by this ibtool"));
+                }
+                Ok(reference(view_name(id)))
+            };
+            // A group's place: its item's frame origin by distance from the
+            // root view's, then x, then id; the safe-area guide's is the origin.
+            let direct: Vec<Node> = children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
+            let place = |id: &str| -> Result<(f64, f64), String> {
+                if Some(id) == safe_area_id {
+                    return Ok((0.0, 0.0));
+                }
+                let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("constraints between the root view and a nested view ({id}) are not supported by this ibtool"))?;
+                let f = subview_frame(*v)?;
+                Ok((f.x * f.x + f.y * f.y, f.x))
+            };
+            let mut xml_constraints: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
+            for cs in children(view, "constraints") {
+                for c in children(cs, "constraint") {
+                    only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None), ("constant", None), ("id", None)])?;
+                    let first = c.attribute("firstItem").unwrap_or(view_id);
+                    let second = c.attribute("secondItem").unwrap_or(view_id);
+                    if c.attribute("secondItem").is_none() && c.attribute("secondAttribute").is_none() {
+                        return fail("a root view constraint without a second item is not supported by this ibtool");
+                    }
+                    if first == second {
+                        return fail("a constraint between an item and itself is not supported by this ibtool");
+                    }
+                    // Where a legacy guide's own constraints go isn't established;
+                    // one as the second item of a sibling constraint is.
+                    let legacy = |id: &str| scene.guides.iter().any(|g| g.0 == id);
+                    if legacy(first) || (legacy(second) && first == view_id) {
+                        return fail("constraints from a legacy layout guide, or between one and the root view, are not supported by this ibtool");
+                    }
+                    for id in [first, second] {
+                        if id != view_id && Some(id) != safe_area_id && !known.contains(&id) && !legacy(id) {
+                            return fail(format!("constraints on {id} are not supported by this ibtool"));
+                        }
+                    }
+                    let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?)?;
+                    if xml_constraints.iter().any(|(_, k, ..)| *k == key) {
+                        return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
+                    }
+                    xml_constraints.push((place(key.0)?, key, c, first, Some(second)));
+                }
+            }
+            xml_constraints.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
+            let mut constraint_values: Vec<Value> = guide_constraints.iter().map(|n| reference(n.clone())).collect();
+            let mut constraint_names = Vec::new();
+            // The safe-area guide is archived where a constraint first uses it.
+            let mut safe_area_used = false;
+            let mut resolve = |nib: &mut Nib, id: &str| -> Result<Value, String> {
+                if Some(id) != safe_area_id {
+                    return item(id);
+                }
+                if safe_area_used {
+                    return Ok(reference("safe area guide"));
+                }
+                safe_area_used = true;
+                Ok(safe_area_guide(nib, &root_name))
+            };
+            for (_, _, c, first, second) in &xml_constraints {
+                let first = resolve(&mut nib, first)?;
+                let second = match second {
+                    Some(s) => Some((resolve(&mut nib, s)?, layout_attribute(attr(*c, "secondAttribute")?)?)),
+                    None => None,
+                };
+                let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+                let name = nib.fresh();
+                constraint_names.push(name.clone());
+                match multiplied(constraint(first, layout_attribute(attr(*c, "firstAttribute")?)?, second, constant, None), multiplier(*c)?) {
+                    Value::New(o) => constraint_values.push(Value::New(o.named(name))),
+                    _ => unreachable!(),
+                }
+            }
+            if !constraint_values.is_empty() {
+                values.push(("UIViewAutolayoutConstraints", nib.array("NSMutableArray", constraint_values)));
             }
             if safe_area_used {
-                return Ok(reference("safe area guide"));
+                values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![reference("safe area guide")])));
             }
-            safe_area_used = true;
-            Ok(safe_area_guide(nib, &root_name))
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            top.push(Value::New(Object::new("UIView", values).named(root_name.clone())));
+
+            objects.push(reference(root_name.clone()));
+            // The safe-area guide follows the root view.
+            if has_safe_area {
+                let identifier = nib.string("");
+                objects.push(Value::New(Object::new("UILayoutGuide", vec![
+                    ("UILayoutGuideOwningView", Value::Nil),
+                    ("UILayoutGuideIdentifier", identifier),
+                    ("UILayoutGuideOwningViewIsLocked", Value::Bool(false)),
+                    ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
+                    ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
+                ]).named("safe area")));
+            }
+            objects.extend(constraint_names.iter().map(|n| reference(n.clone())));
+            objects.extend(scene.guides.iter().map(|g| reference(format!("guide {}", g.1))));
+            // Then breadth first: each view in turn, from a queue, lists the
+            // constraints it holds and then its subviews, which join the queue.
+            let mut queue: std::collections::VecDeque<Option<&String>> = [None].into();
+            while let Some(v) = queue.pop_front() {
+                if let Some(v) = v {
+                    objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
+                }
+                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v) {
+                    objects.push(reference(s.clone()));
+                    queue.push_back(Some(s));
+                }
+            }
+
+            // Outlets, `view` among them, then actions, each in byte order of
+            // their names; actions with the same selector in document order.
+            let mut connections = Vec::new();
+            let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
+            outlets.push(("view", "owner", &root_name));
+            outlets.sort_by(|a, b| a.0.cmp(b.0));
+            for (label, source, destination) in outlets {
+                connections.push(outlet(&mut nib, label, source, destination));
+            }
+            scene.actions.sort_by(|a, b| a.0.cmp(&b.0));
+            for (selector, source, mask) in &scene.actions {
+                let label = nib.string(selector);
+                connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
+                    ("UILabel", label),
+                    ("UISource", reference(source.clone())),
+                    ("UIDestination", reference("upstream")),
+                    ("UIEventMask", Value::Int(*mask)),
+                ])));
+            }
+            (root_object(&mut nib, top, objects, connections), upstream_used)
         };
-        for (_, _, c, first, second) in &xml_constraints {
-            let first = resolve(&mut nib, first)?;
-            let second = match second {
-                Some(s) => Some((resolve(&mut nib, s)?, layout_attribute(attr(*c, "secondAttribute")?)?)),
-                None => None,
-            };
-            let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
-            let name = nib.fresh();
-            constraint_names.push(name.clone());
-            match multiplied(constraint(first, layout_attribute(attr(*c, "firstAttribute")?)?, second, constant, None), multiplier(*c)?) {
-                Value::New(o) => constraint_values.push(Value::New(o.named(name))),
-                _ => unreachable!(),
-            }
-        }
-        if !constraint_values.is_empty() {
-            values.push(("UIViewAutolayoutConstraints", nib.array("NSMutableArray", constraint_values)));
-        }
-        if safe_area_used {
-            values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![reference("safe area guide")])));
-        }
-        values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
-        nib.large_content(&mut values);
-        top.push(Value::New(Object::new("UIView", values).named(root_name.clone())));
-
-        objects.push(reference(root_name.clone()));
-        // The safe-area guide follows the root view.
-        if has_safe_area {
-            let identifier = nib.string("");
-            objects.push(Value::New(Object::new("UILayoutGuide", vec![
-                ("UILayoutGuideOwningView", Value::Nil),
-                ("UILayoutGuideIdentifier", identifier),
-                ("UILayoutGuideOwningViewIsLocked", Value::Bool(false)),
-                ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
-                ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
-            ]).named("safe area")));
-        }
-        objects.extend(constraint_names.iter().map(|n| reference(n.clone())));
-        objects.extend(scene.guides.iter().map(|g| reference(format!("guide {}", g.1))));
-        // Then breadth first: each view in turn, from a queue, lists the
-        // constraints it holds and then its subviews, which join the queue.
-        let mut queue: std::collections::VecDeque<Option<&String>> = [None].into();
-        while let Some(v) = queue.pop_front() {
-            if let Some(v) = v {
-                objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
-            }
-            for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v) {
-                objects.push(reference(s.clone()));
-                queue.push_back(Some(s));
-            }
-        }
-
-        // Outlets, `view` among them, then actions, each in byte order of
-        // their names; actions with the same selector in document order.
-        let mut connections = Vec::new();
-        let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
-        outlets.push(("view", "owner", &root_name));
-        outlets.sort_by(|a, b| a.0.cmp(b.0));
-        for (label, source, destination) in outlets {
-            connections.push(outlet(&mut nib, label, source, destination));
-        }
-        scene.actions.sort_by(|a, b| a.0.cmp(&b.0));
-        for (selector, source, mask) in &scene.actions {
-            let label = nib.string(selector);
-            connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
-                ("UILabel", label),
-                ("UISource", reference(source.clone())),
-                ("UIDestination", reference("upstream")),
-                ("UIEventMask", Value::Int(*mask)),
-            ])));
-        }
-        let view_root = root_object(&mut nib, top, objects, connections);
 
         // The view controller's nib: the scene's placeholders and a class
         // swapper standing in for the controller, which loads the view nib.
@@ -1945,7 +1977,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         }
         // A controller with a storyboard identifier is loaded by it.
-        let vc_nib_name = vc.attribute("storyboardIdentifier").map_or_else(|| format!("UIViewController-{vc_id}"), str::to_string);
+        let vc_nib_name = vc.attribute("storyboardIdentifier").map_or_else(|| format!("{original_class}-{vc_id}"), str::to_string);
         let view_nib_name = format!("{vc_id}-view-{view_id}");
         let mut vnib = Nib::new(platform, color_matched, localizable);
         let owner = proxy(&mut vnib, "IBFilesOwner", "owner");
@@ -1974,8 +2006,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
             swapper.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
         }
+        if vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
+            swapper.push(("UIClearsSelectionOnViewWillAppear", Value::Bool(false)));
+        }
         swapper.push(("UIClassName", vnib.string(&class_name)));
-        swapper.push(("UIOriginalClassName", vnib.string("UIViewController")));
+        swapper.push(("UIOriginalClassName", vnib.string(original_class)));
         let swapper = Value::New(Object::new("UIClassSwapper", swapper).named("controller"));
         let connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard"), outlet(&mut vnib, "sceneViewController", "owner", "controller")];
         let vc_root = root_object(
@@ -1996,7 +2031,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let identified = vc.attribute("storyboardIdentifier").is_some();
         let embedded = navs.iter().any(|n| n.2 == vc_id && n.3);
         if embedded {
-            roots.insert(vc_id, RootController { vc, loadable: is_initial || identified, view_nib_name: view_nib_name.clone(), class_name: class_name.clone(), upstream_used });
+            roots.insert(vc_id, RootController { vc, loadable: is_initial || identified, view_nib_name: view_nib_name.clone(), class_name: class_name.clone(), original_class, upstream_used });
         }
         if !is_initial && !identified && !embedded {
             continue;
