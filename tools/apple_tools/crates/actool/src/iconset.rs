@@ -26,14 +26,21 @@ struct Item {
     image: image::Rgba,
 }
 
+/// A device's entry in the partial Info.plist's icons: the bundle's flat
+/// icons it lists, and whether it names the catalog's icon.
+pub struct DeviceIcons {
+    pub files: Vec<String>,
+    pub named: bool,
+}
+
 pub struct Compiled {
     pub renditions: Vec<Rendition>,
     /// A macOS app's icon family.
     pub icns: Option<Vec<u8>>,
     /// Files copied into the bundle: (output name, source).
     pub bundle_files: Vec<(String, PathBuf)>,
-    pub phone_files: Vec<String>,
-    pub pad_files: Vec<String>,
+    pub phone: Option<DeviceIcons>,
+    pub pad: Option<DeviceIcons>,
     pub has_dimension1: bool,
 }
 
@@ -41,6 +48,7 @@ fn idiom_value(idiom: &str) -> u16 {
     match idiom {
         "iphone" => car::IDIOM_PHONE,
         "watch" => car::IDIOM_WATCH,
+        "ios-marketing" => car::IDIOM_MARKETING,
         "mac" => 0,
         _ => car::IDIOM_PAD,
     }
@@ -146,10 +154,17 @@ pub(crate) fn place(atlas: &mut [u8], stride: usize, ah: u32, img: &[u8], x: u32
 /// Compiles an icon set for the target devices; `mac` for a macOS catalog,
 /// whose renditions have no idiom or subtype.
 pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool) -> Result<Compiled, String> {
-    let wanted = |s: &&Slot| (s.idiom == "iphone" && phone) || (s.idiom == "ipad" && pad) || (s.idiom == "watch" && watch) || (s.idiom == "mac" && mac);
+    let wanted = |s: &&Slot| {
+        (s.idiom == "iphone" && phone) || (s.idiom == "ipad" && pad) || (s.idiom == "watch" && watch) || (s.idiom == "mac" && mac) || (s.idiom == "ios-marketing" && (phone || pad))
+    };
     let version = car::MlecVersions::for_platform(if mac { "macosx" } else { "" });
     // Rendition keys: macOS catalogs have no idiom or subtype attribute.
     let group_attrs = |idiom: u16, subtype: u16| if mac { Vec::new() } else { vec![(car::ATTR_IDIOM, idiom), (car::ATTR_SUBTYPE, subtype)] };
+    // With no image for any target device, Xcode compiles another device's
+    // (an iPad set for iPhone alone), which isn't established.
+    if !slots.iter().any(|s| wanted(&s) && s.idiom != "ios-marketing") && slots.iter().any(|s| s.idiom != "ios-marketing") {
+        return Err(format!("{name}: an icon set with no image for the target devices is not supported by this actool"));
+    }
     let slots: Vec<&Slot> = slots.iter().filter(wanted).collect();
     let xr = slots.iter().find(|s| s.idiom == "iphone" && s.size == 60.0 && s.scale == 3).copied();
     // dimension2: a size's rank among all of them, the 90 pt iPhone XR size
@@ -169,7 +184,14 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             return Err(format!("{}: two images for one size and scale", s.filename));
         }
         seen.push((s.idiom, s.subtype, s.size.to_bits(), s.scale));
-        let img = image::decode_png(&std::fs::read(&s.file).map_err(|e| format!("{}: {e}", s.file.display()))?)?;
+        let bytes = std::fs::read(&s.file).map_err(|e| format!("{}: {e}", s.file.display()))?;
+        image::check_color_management(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?;
+        let img = image::decode_png(&bytes)?;
+        // Xcode stores a grey icon as GA8 (grey atlases named `S.O.1`),
+        // which this actool doesn't write for icons yet.
+        if img.is_gray() {
+            return Err(format!("{}: a greyscale icon, which Xcode stores as GA8, is not supported by this actool", s.file.display()));
+        }
         let px = (s.size * s.scale as f64).round() as usize;
         if img.width != px || img.height != px {
             return Err(format!("{}: is {}x{} but should be {px}x{px}", s.file.display(), img.width, img.height));
@@ -293,21 +315,32 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
         }
     }
 
-    // The bundle's icons, copied as given: 60pt@2x for iPhone, 76pt@2x for iPad.
+    // The bundle's icons, copied as given: 60pt@2x for iPhone, 76pt@2x for
+    // iPad. Each target device's entry names the icon and lists those it
+    // has (iPad's, when it has its own, the iPhone one first when both are
+    // targets); for iPad alone, an App Store icon also names the icon for
+    // iPhone.
     let mut bundle_files = Vec::new();
-    let mut phone_files = Vec::new();
-    let mut pad_files = Vec::new();
+    let (mut phone_icons, mut pad_icons) = (None, None);
     let find = |idiom: &str, size: f64| slots.iter().find(|s| s.idiom == idiom && s.size == size && s.scale == 2).map(|s| s.file.clone());
+    let phone_file = if phone { find("iphone", 60.0) } else { None };
+    if let Some(f) = &phone_file {
+        bundle_files.push((format!("{name}60x60@2x.png"), f.clone()));
+    }
     if phone {
-        let f = find("iphone", 60.0).ok_or("an iPhone app icon set needs a 60pt @2x image for this actool")?;
-        bundle_files.push((format!("{name}60x60@2x.png"), f));
-        phone_files.push(format!("{name}60x60"));
+        phone_icons = Some(DeviceIcons { files: phone_file.iter().map(|_| format!("{name}60x60")).collect(), named: true });
     }
     if pad {
-        let f = find("ipad", 76.0).ok_or("an iPad app icon set needs a 76pt @2x image for this actool")?;
-        bundle_files.push((format!("{name}76x76@2x~ipad.png"), f));
-        pad_files.push(format!("{name}60x60"));
-        pad_files.push(format!("{name}76x76"));
+        let mut files = Vec::new();
+        if let Some(f) = find("ipad", 76.0) {
+            bundle_files.push((format!("{name}76x76@2x~ipad.png"), f));
+            files.extend(phone_file.iter().map(|_| format!("{name}60x60")));
+            files.push(format!("{name}76x76"));
+        }
+        if !phone && slots.iter().any(|s| s.idiom == "ios-marketing") {
+            phone_icons = Some(DeviceIcons { files: Vec::new(), named: true });
+        }
+        pad_icons = Some(DeviceIcons { files, named: true });
     }
     // A macOS app's icon family: its 16 and 128 pt images at 1x and 2x, in
     // the order Xcode writes them.
@@ -324,7 +357,7 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
     } else {
         None
     };
-    Ok(Compiled { renditions, icns, bundle_files, phone_files, pad_files, has_dimension1 })
+    Ok(Compiled { renditions, icns, bundle_files, phone: phone_icons, pad: pad_icons, has_dimension1 })
 }
 
 pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, String> {
@@ -336,6 +369,7 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             Some("ipad") => "ipad",
             Some("watch") => "watch",
             Some("mac") => "mac",
+            Some("ios-marketing") => "ios-marketing",
             other => return Err(format!("{filename}: the {} idiom is not supported by this actool in a multi-size icon set", other.unwrap_or("missing"))),
         };
         let size = i["size"].as_str().and_then(|s| s.split_once('x')).and_then(|(w, h)| (w == h).then(|| w.parse::<f64>().ok()).flatten()).ok_or_else(|| format!("{filename}: unsupported size"))?;
@@ -347,12 +381,16 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         // Xcode ignores entries that aren't iOS icon slots (Flutter's icon
         // sets have iPhone 40 and 60 pt at 1x and iPad 76 pt at 3x); which
         // it ignores isn't established beyond those, so only the current
-        // slots are compiled.
-        const PHONE: [(f64, u32); 9] = [(20.0, 2), (20.0, 3), (29.0, 1), (29.0, 2), (29.0, 3), (40.0, 2), (40.0, 3), (60.0, 2), (60.0, 3)];
-        const PAD: [(f64, u32); 9] = [(20.0, 1), (20.0, 2), (29.0, 1), (29.0, 2), (40.0, 1), (40.0, 2), (76.0, 1), (76.0, 2), (83.5, 2)];
+        // slots, the legacy ones (iPhone 57 pt, iPad 50 and 72 pt, compiled
+        // as any other) and the App Store's 1024 pt are compiled.
+        const PHONE: [(f64, u32); 11] = [(20.0, 2), (20.0, 3), (29.0, 1), (29.0, 2), (29.0, 3), (40.0, 2), (40.0, 3), (57.0, 1), (57.0, 2), (60.0, 2), (60.0, 3)];
+        const PAD: [(f64, u32); 13] = [
+            (20.0, 1), (20.0, 2), (29.0, 1), (29.0, 2), (40.0, 1), (40.0, 2), (50.0, 1), (50.0, 2), (72.0, 1), (72.0, 2), (76.0, 1), (76.0, 2), (83.5, 2),
+        ];
         let known = match idiom {
             "iphone" => PHONE.contains(&(size, scale)),
             "ipad" => PAD.contains(&(size, scale)),
+            "ios-marketing" => (size, scale) == (1024.0, 1),
             _ => true,
         };
         if !known {

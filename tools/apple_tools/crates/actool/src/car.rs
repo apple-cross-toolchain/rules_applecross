@@ -19,6 +19,8 @@ pub const ATTR_IDENTIFIER: u16 = 17;
 pub const IDIOM_PHONE: u16 = 1;
 pub const IDIOM_PAD: u16 = 2;
 pub const IDIOM_WATCH: u16 = 5;
+/// The App Store's (`ios-marketing`) icon.
+pub const IDIOM_MARKETING: u16 = 6;
 
 pub const ELEMENT_ICON: u16 = 85;
 pub const ELEMENT_PACKED: u16 = 9;

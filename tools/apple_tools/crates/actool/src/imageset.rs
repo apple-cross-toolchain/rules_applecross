@@ -140,10 +140,8 @@ fn payload(w: usize, h: usize, bgra: &[u8], what: &str) -> Result<Vec<u8>, Strin
     dmp2::encode(w, h, bgra, opaque).map_err(|e| format!("{what}: {e}"))
 }
 
-/// Whether Xcode stores an image as GA8: every pixel grey (R = G = B),
-/// whatever the PNG's colour type.
 fn is_gray(i: &SetImage) -> bool {
-    i.image.data.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2])
+    i.image.is_gray()
 }
 
 fn standalone_rendition(i: &SetImage) -> Result<Rendition, String> {

@@ -53,6 +53,7 @@ pub fn read(dir: &Path, layer_ext: &str, idiom: &str, scale: &str) -> Result<Sta
             // Xcode keeps grey layers grey (GA8), which this actool does not write.
             return Err(format!("{}: grey layers are not supported by this actool", path.display()));
         }
+        image::check_color_management(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         let image = image::decode_png(&bytes)?;
         layers.push(Layer { facet: format!("{name}/{stem}/Content"), filename, image, alpha_channel: image::png_has_alpha(&bytes) });
     }
