@@ -377,25 +377,47 @@ The conversion, for each channel of an 8-bit pixel `x`:
   BT.709's parameters (ITU-709, ITU-2020) are taken as a pure gamma 2.4; a
   gamma of 1.5 or more has a toe, `L = max(x^g, x / 16)`; a `curv` gamma of
   461/256 is snapped to 1.8 (Generic RGB);
-- `idx = clamp((sum M[r][c] * q_c) >> 15, 0, 8191)` with `M` the profile's
-  matrix to sRGB in s15Fixed16 integers (always multiples of 4);
-- the output is `E[(idx + 1) >> 1]`, with `E[k] = round(enc(k / 4096) *
-  255)` for the sRGB encoding `enc`, except at 65 of the 4097 entries,
-  all within 0.03 of a half.
+- `idx = clamp((sum M[r][c] * q_c) >> 15, 0, 8191)` with `M` the matrix
+  to sRGB in units of 2^-16 (below);
+- the output is `E[(idx + 1) >> 1]`, where the sRGB encoding `enc` is
+  itself rounded to 12 bits: `E[k] = round(round(enc(k / 4096) * 4096) *
+  255 / 4096)`.
 
-Three parts are measured data, not derived: the 65 exceptions in `E`
-(an approximate encoding: no LUT size, interpolation or rounding tried
-reproduces them), each profile's matrix (read back from the float path:
-an extended-linear float context's outputs are `M . q / 4096` exactly; the
-matrices are not the Bradford-adapted products of the profiles' colorants,
-which miss by up to 1.5 units), and the two curves' 12-bit tables (read
-back the same way, with own profiles of sRGB's colorants and one curve).
-Someone who derives any of them can replace them in `colour.rs`; a test
-checks the encoding table against its checksum. Adobe RGB's gamma
-(563/256) and a parametric gamma of exactly 2.2 follow a curve near
-`x^2.2` that differs at 75 of 256 inputs and is not implemented. Display
-profiles (curves as tables, as in the corpus's three refused catalogs)
-aren't established either.
+`M` comes from the colorants alone (not the white point or curves; a
+profile of our own with a profile's colorants and linear curves gives the
+same matrix). Each row of the source colorants `S` (XYZ by R, G, B) is
+scaled to sum as the same row of the sRGB profile's colorants `D` does,
+so white maps to white, and `M = D^-1 * S'`, computed in double precision.
+`M` is then an int16 matrix over a power of two: 2^14 while every entry is
+under 2 in magnitude, else 2^13 (ROMM's 2.03), so its entries are
+multiples of 4 or 8 units of 2^-16. Each entry rounds to the nearest.
+
+That derivation gives every entry read back from CoreGraphics:
+- Display P3, Adobe RGB, Generic RGB, ROMM, ITU-2020, DCI-P3 and ACEScg;
+- a profile with diagonal colorants (every diagonal gives the same matrix);
+- 40 profiles sweeping one colorant entry from 0 to 1.
+
+The one exception is Adobe RGB's `M[1][0]`, which can't be read back: 0
+and the derivation's -4 convert all 16,777,216 colours identically.
+
+The float path gives those matrices exactly. With an extended-linear
+32-bit float context, an 8-bit image's outputs are `round(M . q / 65536)
+/ 4096`. Primary ramps and a few thousand random colours leave one
+candidate per row, except rows near the identity.
+
+The three parts were first measured: `E`'s 65 departures from
+`round(enc(k / 4096) * 255)`, the matrices, and the curves' 12-bit tables.
+The derivations above reproduce all of them, and tests check them against
+the measured data.
+
+Not established: Adobe RGB's gamma (563/256) and a parametric gamma of
+exactly 2.2. They follow `x^2.2` within 1.3 (12-bit) but differ at 75 of
+256 inputs. The error jumps at inputs `16k + 8` and grows linearly away
+from nodes at `16k / 255`, like an expansion around the nearest of 17
+nodes; the best such model still misses 10. A 16-bit image's float output
+is `x^2.2` to float precision, so only the 8-bit path approximates.
+Display profiles (curves as tables, as in the corpus's three refused
+catalogs) aren't established either.
 
 ## Image sets
 
