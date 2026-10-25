@@ -6,6 +6,7 @@
 
 mod bom;
 mod car;
+mod colorset;
 mod directions;
 mod dmp2;
 mod icon;
@@ -107,6 +108,8 @@ struct Scan {
     solid_stacks: Vec<(String, PathBuf)>,
     /// Image sets by name.
     image_sets: Vec<(String, PathBuf)>,
+    /// Colour sets with a colour, by name.
+    color_sets: Vec<(String, PathBuf)>,
 }
 
 fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
@@ -139,6 +142,7 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
         match name.rsplit_once('.') {
             Some((stem, "imageset")) => found.image_sets.push((format!("{prefix}{stem}"), p)),
             Some((_, "colorset")) if !has_entries(&read_json(&p.join("Contents.json"))?, "colors", "color") => {}
+            Some((stem, "colorset")) => found.color_sets.push((format!("{prefix}{stem}"), p)),
             Some((stem, "appiconset")) if top => found.icon_sets.push((stem.to_string(), p)),
             Some((stem, "brandassets")) if top => found.brand_assets.push((stem.to_string(), p)),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
@@ -265,7 +269,10 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     if let Some(p) = o.inputs.iter().find(|p| is_document(p) && Some(*p) != document) {
         return Err(format!("{}: only the app icon's own Icon Composer document is supported by this actool", p.display()));
     }
-    let images = imageset::compile(&scan.image_sets, name_identifier)?;
+    let mut images = imageset::compile(&scan.image_sets, name_identifier)?;
+    let colors = colorset::compile(&scan.color_sets, name_identifier)?;
+    images.facets.extend(colors.facets);
+    images.renditions.extend(colors.renditions);
     if !images.is_empty() && platform != "ios" {
         return Err("image sets are supported by this actool for iOS only".into());
     }
@@ -488,7 +495,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         platform: platform.into(),
     };
     if !catalog.bitmap_key_order_established() {
-        return Err("this catalog's bitmap keys, with atlases and identifiers that collide, are in an order not established for this actool".into());
+        return Err("this catalog's bitmap keys, with atlases or colours and identifiers that collide, are in an order not established for this actool".into());
     }
     let car_path = out_dir.join("Assets.car");
     std::fs::write(&car_path, catalog.to_bytes()).map_err(|e| e.to_string())?;

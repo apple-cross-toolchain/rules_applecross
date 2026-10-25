@@ -100,18 +100,20 @@ impl Catalog {
     /// Xcode's whenever the order can't depend on how collisions resolve,
     /// and in catalogs without atlases; with atlases and identifiers that
     /// share a bucket, Xcode's order sometimes differs in a way not
-    /// established (23 of 570 catalogs examined).
+    /// established (23 of 570 catalogs examined). Colours collide the same
+    /// way, atlases or not (25 of 54 random colour catalogs).
     pub fn bitmap_key_order_established(&self) -> bool {
         let mut ids: Vec<u16> = Vec::new();
-        let mut atlases = false;
+        let mut sensitive = false;
         for r in &self.renditions {
+            sensitive |= r.attrs.iter().any(|a| a.0 == ATTR_PART && a.1 == crate::colorset::PART_COLOR);
             match r.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map_or(0, |a| a.1) {
-                0 => atlases = true,
+                0 => sensitive = true,
                 id if !ids.contains(&id) => ids.push(id),
                 _ => {}
             }
         }
-        if !atlases {
+        if !sensitive {
             return true;
         }
         let size = cf::hash::table_size_for(ids.len()) as u64;
@@ -717,4 +719,23 @@ pub fn texture_image_csi(name: &str, width: u32, height: u32, scale: u32, row_by
     tlv(&mut t, 0x3ef, &row_bytes.to_le_bytes());
     let payload = lzfse_bitmap(data, row_bytes as usize, height as usize, MlecVersions { single: 2, chunked: 1 });
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 0, layout: LAYOUT_TEXTURE_IMAGE, name }, &t, &payload)
+}
+
+pub const LAYOUT_COLOR: u16 = 1009;
+
+/// A colour set's colour (layout 1009, no bitmap): composition and 0x3ee
+/// TLVs, then `COLR` (written `RLOC`), version 1, the colour space's code,
+/// the component count and the components as doubles.
+pub fn color_csi(name: &str, space: u32, components: &[f64]) -> Vec<u8> {
+    let mut t = Vec::new();
+    tlv(&mut t, 0x3ec, &[0u8; 8]);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let mut payload = b"RLOC".to_vec();
+    le32(&mut payload, 1);
+    le32(&mut payload, space);
+    le32(&mut payload, components.len() as u32);
+    for c in components {
+        payload.extend_from_slice(&c.to_le_bytes());
+    }
+    csi(&CsiHeader { flags: 0, width: 0, height: 0, scale: 0, pixel_format: &[0; 4], color_space: 0, layout: LAYOUT_COLOR, name }, &t, &payload)
 }

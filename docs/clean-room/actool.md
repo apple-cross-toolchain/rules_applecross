@@ -358,6 +358,30 @@ without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were
 byte-identical.
 
+## Colour sets
+
+A colour set's colour is a rendition keyed by scale 1, the set's identifier
+(its name hashed as for image sets), element 85 and part 217, with a facet
+of the same element, part and identifier: a CSI of layout 1009 named after
+the set, no bitmap (flags, size, scale, pixel format and colour space 0),
+TLVs 0x3ec (0, 0.0) and 0x3ee (1), and the payload `COLR` (written `RLOC`),
+1, the colour space's code, the component count and the components as
+doubles. Codes: sRGB 1, gray-gamma-22 2, Display P3 3 (also when no space is
+named), extended sRGB 4, extended linear sRGB 5, extended gray 6. A
+component with a decimal point is read as a 32-bit float (`0.800` is
+0.800000011920929); one without, decimal or `0x` hex, as an integer out of
+255 (`1` is 1/255). Colours take bitmap keys as images do. Measured with
+twelve probes of every space and form, and colours beside image sets, an
+app icon and in a namespace folder.
+
+A dark colour is appearance 1 and adds `UIAppearanceDark` (1) to the
+appearance keys, but which of the two keys Xcode allocates first varies
+(Any first in 7 of 12 small catalogs, with nothing seen to tell them
+apart), so other appearances are refused, as are other idioms. In
+catalogs with colours, identifiers that share a bucket of the bitmap key
+table come out in an order not established (25 of 54 random colour
+catalogs), so those are refused, as with atlases.
+
 ## Image stacks
 
 tvOS brand assets' primary app icon (an `.imagestack` of
