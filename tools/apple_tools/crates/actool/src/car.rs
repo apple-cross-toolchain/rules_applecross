@@ -110,7 +110,7 @@ impl Catalog {
         let mut ids: Vec<u16> = Vec::new();
         let mut sensitive = false;
         for r in &self.renditions {
-            sensitive |= r.attrs.iter().any(|a| a.0 == ATTR_PART && a.1 == crate::colorset::PART_COLOR);
+            sensitive |= r.attrs.iter().any(|a| a.0 == ATTR_PART && a.1 == PART_COLOR);
             match r.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map_or(0, |a| a.1) {
                 0 => sensitive = true,
                 id if !ids.contains(&id) => ids.push(id),
@@ -623,6 +623,29 @@ pub fn dmp2_pixels_csi(name: &str, width: u32, height: u32, scale: u32, flags: u
     csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
 }
 
+/// A colour set's colours (element 85, as image sets').
+pub const PART_COLOR: u16 = 217;
+const LAYOUT_COLOR: u16 = 1009;
+
+/// A colour (layout 1009, no size or pixel format): `RLOC`, version 1,
+/// the colour space's code and the components as doubles.
+pub fn color_csi(name: &str, space: u32, components: &[f64]) -> Vec<u8> {
+    let mut t = Vec::new();
+    let mut c = Vec::new();
+    le32(&mut c, 0);
+    c.extend_from_slice(&0.0f32.to_le_bytes());
+    tlv(&mut t, 0x3ec, &c);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let mut payload = b"RLOC".to_vec();
+    le32(&mut payload, 1);
+    le32(&mut payload, space);
+    le32(&mut payload, components.len() as u32);
+    for v in components {
+        payload.extend_from_slice(&v.to_le_bytes());
+    }
+    csi(&CsiHeader { flags: 0, width: 0, height: 0, scale: 0, pixel_format: &[0; 4], color_space: 0, layout: LAYOUT_COLOR, name }, &t, &payload)
+}
+
 /// An image set's images (part 181, as image stacks').
 pub const PART_IMAGE: u16 = 181;
 
@@ -739,23 +762,4 @@ pub fn texture_image_csi(name: &str, width: u32, height: u32, scale: u32, row_by
     tlv(&mut t, 0x3ef, &row_bytes.to_le_bytes());
     let payload = lzfse_bitmap(data, row_bytes as usize, height as usize, MlecVersions { single: 2, chunked: 1 });
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 0, layout: LAYOUT_TEXTURE_IMAGE, name }, &t, &payload)
-}
-
-pub const LAYOUT_COLOR: u16 = 1009;
-
-/// A colour set's colour (layout 1009, no bitmap): composition and 0x3ee
-/// TLVs, then `COLR` (written `RLOC`), version 1, the colour space's code,
-/// the component count and the components as doubles.
-pub fn color_csi(name: &str, space: u32, components: &[f64]) -> Vec<u8> {
-    let mut t = Vec::new();
-    tlv(&mut t, 0x3ec, &[0u8; 8]);
-    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    let mut payload = b"RLOC".to_vec();
-    le32(&mut payload, 1);
-    le32(&mut payload, space);
-    le32(&mut payload, components.len() as u32);
-    for c in components {
-        payload.extend_from_slice(&c.to_le_bytes());
-    }
-    csi(&CsiHeader { flags: 0, width: 0, height: 0, scale: 0, pixel_format: &[0; 4], color_space: 0, layout: LAYOUT_COLOR, name }, &t, &payload)
 }
