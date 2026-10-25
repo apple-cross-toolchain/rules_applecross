@@ -14,6 +14,7 @@ mod icon;
 mod iconset;
 mod image;
 mod imageset;
+mod launchimage;
 mod qsort;
 mod stack;
 
@@ -35,6 +36,10 @@ struct Options {
     compress_pngs: bool,
     /// Whether output must be Xcode's byte for byte; see [`strict`].
     strict: bool,
+    /// `--launch-image`: the launch image set the bundle gets.
+    launch_image: Option<String>,
+    /// That set's `UILaunchImages`, for the partial Info.plist.
+    launch_entries: std::cell::RefCell<Vec<Value>>,
 }
 
 /// Strict output, the default: byte-identical to Xcode's, or the build fails.
@@ -59,7 +64,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--output-partial-info-plist" => o.partial_info_plist = Some(PathBuf::from(value(&a)?)),
             "--compress-pngs" => o.compress_pngs = true,
             "--errors" | "--warnings" | "--notices" => {}
-            "--alternate-app-icon" | "--launch-image" | "--accent-color" | "--widget-background-color" | "--sticker-pack-identifier-prefix"
+            "--launch-image" => o.launch_image = Some(value(&a)?),
+            "--alternate-app-icon" | "--accent-color" | "--widget-background-color" | "--sticker-pack-identifier-prefix"
             | "--stickers-icon-role" | "--filter-for-device-model" | "--filter-for-device-os-version" | "--product-type" | "--development-region" => {
                 let v = value(&a)?;
                 return Err(format!("{a} {v} is not supported by this actool"));
@@ -94,7 +100,7 @@ struct IconImage {
     size: String,
 }
 
-fn read_json(path: &Path) -> Result<serde_json::Value, String> {
+pub(crate) fn read_json(path: &Path) -> Result<serde_json::Value, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -111,6 +117,8 @@ struct Scan {
     image_sets: Vec<(String, PathBuf)>,
     /// Colour sets with colours, by name.
     color_sets: Vec<(String, PathBuf)>,
+    /// Launch image sets by name.
+    launch_images: Vec<(String, PathBuf)>,
 }
 
 fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
@@ -147,6 +155,7 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             Some((stem, "appiconset")) if top => found.icon_sets.push((stem.to_string(), p)),
             Some((stem, "brandassets")) if top => found.brand_assets.push((stem.to_string(), p)),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
+            Some((stem, "launchimage")) if top => found.launch_images.push((stem.to_string(), p)),
             None if p.is_dir() => {
                 // A folder: its Contents.json may say it provides a namespace.
                 let contents = p.join("Contents.json");
@@ -249,7 +258,11 @@ fn app_icon_set(icon_dir: &Path, ios: bool) -> Result<Option<IconSource>, String
     Ok(Some(IconSource::Single(icon.filename.clone(), src)))
 }
 
-fn write_partial_info_plist(o: &Options, entries: Vec<(&str, Value)>, outputs: &mut Vec<PathBuf>) -> Result<(), String> {
+fn write_partial_info_plist(o: &Options, mut entries: Vec<(&str, Value)>, outputs: &mut Vec<PathBuf>) -> Result<(), String> {
+    let launch = o.launch_entries.borrow();
+    if !launch.is_empty() {
+        entries.push(("UILaunchImages", Value::Array(launch.clone())));
+    }
     if let Some(p) = &o.partial_info_plist {
         std::fs::write(p, cf::xml::to_bytes(&Value::dict(entries))).map_err(|e| e.to_string())?;
         outputs.push(p.clone());
@@ -275,6 +288,26 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     let document = o.inputs.iter().find(|p| is_document(p) && o.app_icon.as_deref().is_some_and(|n| p.file_stem().is_some_and(|s| s.to_string_lossy() == n)));
     if let Some(p) = o.inputs.iter().find(|p| is_document(p) && Some(*p) != document) {
         return Err(format!("{}: only the app icon's own Icon Composer document is supported by this actool", p.display()));
+    }
+    // The launch image set --launch-image names is copied into the bundle;
+    // the others compile to nothing.
+    if let Some(name) = &o.launch_image {
+        let (_, dir) = scan.launch_images.iter().find(|(n, _)| n == name).ok_or_else(|| format!("none of the input catalogs contains a launch image set named \"{name}\""))?;
+        if platform != "ios" {
+            return Err("launch images are supported by this actool for iOS only".into());
+        }
+        let compiled = launchimage::compile(name, dir, phone, pad)?;
+        for (file, source) in &compiled.files {
+            let p = out_dir.join(file);
+            std::fs::copy(source, &p).map_err(|e| format!("{}: {e}", source.display()))?;
+            outputs.push(p);
+        }
+        if let Some((file, bytes)) = &compiled.made {
+            let p = out_dir.join(file);
+            std::fs::write(&p, bytes).map_err(|e| format!("{}: {e}", p.display()))?;
+            outputs.push(p);
+        }
+        *o.launch_entries.borrow_mut() = compiled.entries;
     }
     let mut images = imageset::compile(&scan.image_sets, name_identifier)?;
     let (color_facets, colors) = colorset::compile(&scan.color_sets, name_identifier)?;
