@@ -461,7 +461,6 @@ enum Kind {
 
 /// Writes Assets.car and the partial Info.plist of an app icon.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, has_dimension1: bool, mut renditions: Vec<car::Rendition>, images: imageset::Compiled, kind: Kind, mut outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
     renditions.extend(images.renditions);
     let has_dimension2 = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION2));
@@ -539,7 +538,6 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
 /// An app icon set with an image per size: packed into atlases, the bundle's
 /// icons copied as given (simulators and macOS only: devices' CgBI
 /// conversion of them is not established).
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, slots: &[iconset::Slot], phone: bool, pad: bool, mut outputs: Vec<PathBuf>, images: imageset::Compiled) -> Result<Vec<PathBuf>, String> {
     let watch = o.target_devices.iter().any(|d| d == "watch");

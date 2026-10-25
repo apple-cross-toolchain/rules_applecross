@@ -261,9 +261,11 @@ image of its own. Modes:
 - 1: the premultiplied BGRA pixels as they are;
 - 3: a 32-bit length and those pixels compressed: from 4096 bytes on as the
   reference LZFSE encoder compresses them (`lzfse_encode_buffer`), and below
-  that as raw LZVN, the `bvxn` block LZFSE would write without its header
-  and end marker (libcompression's `COMPRESSION_LZVN`; a single-colour
-  100x100 image's indices are LZFSE although raw LZVN would be smaller);
+  that as raw LZVN (libcompression's `COMPRESSION_LZVN`, the reference
+  `lzvn_encode_buffer`), even where that is larger than its input, which
+  LZFSE would store uncompressed instead (48 palette indices as 52 bytes;
+  a single-colour 100x100 image's indices are LZFSE although raw LZVN would
+  be smaller);
 - 4: a palette (count, at most 256, and entry size 4, 16 bits each;
   premultiplied BGRA entries), then a 32-bit length and the 8-bit indices
   compressed the same way;
@@ -272,8 +274,8 @@ image of its own. Modes:
   (one byte per pixel), one predictor code per row, then the high bytes
   and then the low bytes of three 16-bit values per pixel.
 
-Xcode writes whichever mode is smallest (modes 2 and 3 always; 4 when
-there are at most 256 colours; 1 never smaller in practice).
+Xcode writes whichever of modes 2, 3 and 4 (when there are at most 256
+colours) is smallest, unless mode 1 is chosen instead (below).
 
 The palette starts in ascending order of the 32-bit little-endian entries
 and is then sorted with macOS's `qsort` (FreeBSD's, whose order among
@@ -309,8 +311,7 @@ An image of more than 4 MiB (4 bytes a pixel) is `MLEC` with flags 1 (3
 when opaque), method 11 and a count of `KCBC` chunks: each `KCBC`, two zero
 words, its rows and its length, then the `01`, `04`, length, zero header and
 a `dmp2` stream of those rows alone (mode chosen per chunk). A chunk is as
-many rows as fit 4 MiB: 1441 px wide, 727, 727 and 706 rows. Images of
-fewer than 8 pixels are refused.
+many rows as fit 4 MiB: 1441 px wide, 727, 727 and 706 rows.
 
 Mode 4 has a second form, also a candidate in the competition for the
 smallest: at most 256 premultiplied colours without their alpha, the
@@ -336,10 +337,20 @@ examples uses mode 4. Where a row's predictor isn't established and mode 2
 could be the smallest, the image is refused; so are ties between modes.
 Mode 1 stores the pixels as they are after the header, with no length
 (BGRA, or grey and alpha for GA8): images of fewer than 8 pixels (1x1 to
-1x7 and 2x2, opaque, translucent, black and white), and any image no mode
-compresses smaller (random noise of 8 to 64 pixels square), 25 probes. An
-image that would be stored that way in strips is not established and is
-refused.
+1x7 and 2x2, opaque, translucent, black and white), and images the chosen
+mode doesn't compress into a buffer 4 bytes smaller than the pixels. LZVN's
+encoder gives up 9 or 10 bytes short of its buffer's end, depending on the
+data, so an image whose stream would save 9 bytes on mode 1 may be stored
+either way, and the test is the encoder's own: mode 1 when
+`lzvn_encode_buffer` into the pixels' size less 4 bytes fails. That matches
+194 of 194 small mode-2 images within 30 bytes of the margin, and 1,355 of
+1,355 small random images (gradients with noise and with copied pixels,
+4 to 16 pixels a side) compiled byte-identical; 245 more are refused for
+their row predictors. Whether that holds for a stream compressed with LZFSE
+(4096 bytes of data on) or a palette's is not established: one within 32
+bytes of mode 1 is refused, as is an image that would be stored that way
+in strips. Greyscale images are given the same test, unprobed near the
+margin.
 
 ## Image sets
 

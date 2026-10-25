@@ -9,6 +9,8 @@ extern "C" {
     fn lzfse_encode_buffer(dst: *mut u8, dst_size: usize, src: *const u8, src_size: usize, scratch: *mut c_void) -> usize;
     fn lzfse_encode_stream_buffer(dst: *mut u8, dst_size: usize, src: *const u8, src_size: usize, scratch: *mut c_void) -> usize;
     fn lzfse_decode_buffer(dst: *mut u8, dst_size: usize, src: *const u8, src_size: usize, scratch: *mut c_void) -> usize;
+    fn lzvn_encode_scratch_size() -> usize;
+    fn lzvn_encode_buffer(dst: *mut u8, dst_size: usize, src: *const u8, src_size: usize, scratch: *mut c_void) -> usize;
 }
 
 type Encoder = unsafe extern "C" fn(*mut u8, usize, *const u8, usize, *mut c_void) -> usize;
@@ -27,6 +29,19 @@ fn run(encoder: Encoder, src: &[u8]) -> Vec<u8> {
 /// libcompression's buffer encoder's output for `src`.
 pub fn encode(src: &[u8]) -> Vec<u8> {
     run(lzfse_encode_buffer, src)
+}
+
+/// LZVN's encoding of `src`, if its encoder fits it into `capacity` bytes.
+/// It gives up short of the end of its buffer, so this can be `None` for an
+/// output of at most `capacity` bytes.
+pub fn encode_lzvn(src: &[u8], capacity: usize) -> Option<Vec<u8>> {
+    let mut dst = vec![0u8; capacity];
+    let mut scratch = vec![0u8; unsafe { lzvn_encode_scratch_size() } + 1];
+    let n = unsafe { lzvn_encode_buffer(dst.as_mut_ptr(), dst.len(), src.as_ptr(), src.len(), scratch.as_mut_ptr().cast()) };
+    (n > 0).then(|| {
+        dst.truncate(n);
+        dst
+    })
 }
 
 /// libcompression's streaming encoder's output for `src` given in one piece.
