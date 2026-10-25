@@ -465,6 +465,12 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
     renditions.extend(images.renditions);
     let has_dimension2 = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION2));
     let has_dimension1 = has_dimension1 || renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION1 && a.1 != 0));
+    // A wide-gamut image's 16-bit rendition brings the gamut attribute, after
+    // dimension 1 (iOS; macOS catalogs aren't established).
+    let has_gamut = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_GAMUT));
+    if has_gamut && matches!(kind, Kind::Mac) {
+        return Err("a 16-bit rendition of an image with colours outside sRGB in a macOS catalog is not supported by this actool".into());
+    }
     let key_format = if matches!(kind, Kind::Mac) {
         vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_ELEMENT, car::ATTR_PART, car::ATTR_SIZE, car::ATTR_IDENTIFIER, car::ATTR_DIMENSION2, car::ATTR_LAYER, car::ATTR_SCALE]
     } else {
@@ -474,6 +480,9 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         }
         if has_dimension1 {
             k.push(car::ATTR_DIMENSION1);
+        }
+        if has_gamut {
+            k.push(car::ATTR_GAMUT);
         }
         k.extend([car::ATTR_IDENTIFIER, car::ATTR_ELEMENT, car::ATTR_PART]);
         k

@@ -138,15 +138,21 @@ pub(crate) mod pack {
 /// Graphics draws them) at `x`, `y`, repeating its edge pixels one pixel out.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn place(atlas: &mut [u8], stride: usize, ah: u32, img: &[u8], x: u32, y: u32, w: u32, h: u32) {
+    place_n(atlas, stride / 4, 4, ah, img, x, y, w, h);
+}
+
+/// [`place`] for pixels of `n` elements of any kind, `width` pixels a row.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn place_n<T: Copy>(atlas: &mut [T], width: usize, n: usize, ah: u32, img: &[T], x: u32, y: u32, w: u32, h: u32) {
     let top = (ah - y - h) as i64;
     for r in -1..=h as i64 {
         let sr = r.clamp(0, h as i64 - 1) as usize;
         for c in -1..=w as i64 {
             let sc = c.clamp(0, w as i64 - 1) as usize;
             let (ax, ay) = (x as i64 + c, top + r);
-            let at = ay as usize * stride + ax as usize * 4;
-            let from = (sr * w as usize + sc) * 4;
-            atlas[at..at + 4].copy_from_slice(&img[from..from + 4]);
+            let at = (ay as usize * width + ax as usize) * n;
+            let from = (sr * w as usize + sc) * n;
+            atlas[at..at + n].copy_from_slice(&img[from..from + n]);
         }
     }
 }

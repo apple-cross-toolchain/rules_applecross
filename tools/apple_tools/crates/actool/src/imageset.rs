@@ -67,15 +67,20 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             scales.push(scale);
             let path = dir.join(filename);
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let img = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-            images.push(SetImage { scale, identifier: id, flags, filename: filename.to_string(), image: img });
+            let (img, extended) = image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+            if extended.is_some() && img.is_gray() {
+                return Err(format!("{}: a grey image with colours outside sRGB is not supported by this actool", path.display()));
+            }
+            images.push(SetImage { scale, identifier: id, flags, filename: filename.to_string(), image: img, extended });
         }
         if !scales.is_empty() {
             out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
         }
     }
     // Per scale, translucent colour, translucent grey, opaque colour and
-    // opaque grey images (an atlas named for its opacity and greyness),
+    // opaque grey images (an atlas named for its opacity and greyness), then
+    // the 16-bit renditions of colour images from wide-gamut profiles in
+    // atlases of their own (gamut 1, indexed apart),
     // each largest area first (equal areas by identifier): images over 18,050 px² per scale
     // factor, or a group's only packable one, stored on their own, the rest
     // packed into an atlas, as app icons are. An atlas's dimension1 is its
@@ -84,9 +89,10 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
     scales.sort();
     scales.dedup();
     for scale in scales {
-        let mut atlas_index = 0;
-        for (opaque, gray) in [(false, false), (false, true), (true, false), (true, true)] {
-            let mut group: Vec<&SetImage> = images.iter().filter(|i| i.scale == scale && is_opaque(i) == opaque && is_gray(i) == gray).collect();
+        let mut atlas_index = [0, 0];
+        for (gamut, opaque, gray) in [(0, false, false), (0, false, true), (0, true, false), (0, true, true), (1, false, false), (1, true, false)] {
+            let mut group: Vec<&SetImage> =
+                images.iter().filter(|i| i.scale == scale && is_opaque(i) == opaque && is_gray(i) == gray && (gamut == 0 || i.extended.is_some())).collect();
             // Equal areas by identifier (12 probes of equal-area shapes).
             group.sort_by_key(|i| (std::cmp::Reverse(i.image.width * i.image.height), i.identifier));
             let cap = crate::stack::PACKING_AREA * scale as usize;
@@ -109,12 +115,16 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                     atlases.last_mut().unwrap().push(i);
                 }
                 for atlas in atlases {
-                    pack(scale, opaque, gray, atlas_index, &atlas, &mut out.renditions)?;
-                    atlas_index += 1;
+                    if gamut == 0 {
+                        pack(scale, opaque, gray, atlas_index[0], &atlas, &mut out.renditions)?;
+                    } else {
+                        pack16(scale, opaque, atlas_index[1], &atlas, &mut out.renditions)?;
+                    }
+                    atlas_index[gamut] += 1;
                 }
             }
             for i in standalone {
-                out.renditions.push(standalone_rendition(i)?);
+                out.renditions.push(if gamut == 0 { standalone_rendition(i)? } else { standalone16(i)? });
             }
         }
     }
@@ -127,10 +137,30 @@ struct SetImage {
     flags: u32,
     filename: String,
     image: image::Rgba,
+    /// The 16-bit rendition's pixels, for a wide-gamut profile's colours
+    /// outside sRGB: premultiplied half floats, RGBA.
+    extended: Option<Vec<u16>>,
 }
 
 fn image_attrs(i: &SetImage) -> Vec<(u16, u16)> {
     vec![(car::ATTR_SCALE, i.scale as u16), (car::ATTR_IDENTIFIER, i.identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)]
+}
+
+/// The attributes of an image's 16-bit rendition: gamut 1.
+fn image_attrs16(i: &SetImage) -> Vec<(u16, u16)> {
+    let mut attrs = image_attrs(i);
+    attrs.push((car::ATTR_GAMUT, 1));
+    attrs
+}
+
+/// An image's 16-bit rendition on its own.
+fn standalone16(i: &SetImage) -> Result<Rendition, String> {
+    let (w, h) = (i.image.width, i.image.height);
+    let halves = i.extended.as_ref().expect("a 16-bit rendition");
+    let alpha: Vec<u8> = i.image.data.chunks_exact(4).map(|p| p[3]).collect();
+    let opaque = is_opaque(i);
+    let data = dmp2::encode16(w, h, halves, &alpha, opaque).map_err(|e| format!("{}: {e}", i.filename))?;
+    Ok(Rendition { attrs: image_attrs16(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Half, opaque, &data) })
 }
 
 /// A `dmp2` payload, flagged opaque by the pixels (not the PNG's alpha).
@@ -150,7 +180,7 @@ fn standalone_rendition(i: &SetImage) -> Result<Rendition, String> {
         let ga: Vec<u8> = bgra.chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect();
         let opaque = is_opaque(i);
         let data = dmp2::encode_gray(w, h, &ga, opaque).map_err(|e| format!("{}: {e}", i.filename))?;
-        return Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_gray_image_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, opaque, &data) });
+        return Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Gray, opaque, &data) });
     }
     let data = payload(w, h, &i.image.premultiplied_bgra(), &i.filename)?;
     Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_image_csi_flags(&i.filename, w as u32, h as u32, i.scale, i.flags, &data) })
@@ -176,7 +206,8 @@ fn pack(scale: u32, opaque: bool, gray: bool, index: u16, images: &[&SetImage], 
     for (i, (x, y)) in images.iter().zip(&positions) {
         let (w, h) = (i.image.width as u32, i.image.height as u32);
         crate::iconset::place(&mut pixels, stride, ah, &i.image.premultiplied_bgra(), *x, *y, w, h);
-        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, i.flags, gray, &key) });
+        let pixels = if gray { car::Pixels::Gray } else { car::Pixels::Bgra };
+        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, i.flags, pixels, &key) });
     }
     let name = format!("ZZZZPackedAsset-{scale}.{}.{}-gamut0", opaque as u8, gray as u8);
     // Opaque as its group is, its transparent padding notwithstanding.
@@ -188,6 +219,36 @@ fn pack(scale: u32, opaque: bool, gray: bool, index: u16, images: &[&SetImage], 
         dmp2::encode(aw as usize, ah as usize, &pixels, opaque)
     }
     .map_err(|e| format!("{name}: {e}"))?;
-    renditions.push(Rendition { attrs: key, csi: car::packed_dmp2_csi(&name, aw, ah, scale, gray, opaque, &data) });
+    let pixels = if gray { car::Pixels::Gray } else { car::Pixels::Bgra };
+    renditions.push(Rendition { attrs: key, csi: car::packed_dmp2_csi(&name, aw, ah, scale, pixels, opaque, &data) });
+    Ok(())
+}
+
+/// One atlas of a scale's packable 16-bit renditions (gamut 1), packed as
+/// their 8-bit renditions are.
+fn pack16(scale: u32, opaque: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+    let blocks: Vec<(u32, u32)> = images.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
+    let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
+    let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
+    let mut halves = vec![0u16; 4 * (aw * ah) as usize];
+    let mut alpha = vec![0u8; (aw * ah) as usize];
+    let mut key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16), (car::ATTR_GAMUT, 1)];
+    if index > 0 {
+        key.push((car::ATTR_DIMENSION1, index));
+    }
+    for (i, (x, y)) in images.iter().zip(&positions) {
+        let (w, h) = (i.image.width, i.image.height);
+        let source = i.extended.as_ref().expect("a 16-bit rendition");
+        let source_alpha: Vec<u8> = i.image.data.chunks_exact(4).map(|p| p[3]).collect();
+        crate::iconset::place_n(&mut halves, aw as usize, 4, ah, source, *x, *y, w as u32, h as u32);
+        crate::iconset::place_n(&mut alpha, aw as usize, 1, ah, &source_alpha, *x, *y, w as u32, h as u32);
+        renditions.push(Rendition {
+            attrs: image_attrs16(i),
+            csi: car::link_csi_format(&i.filename, (*x, *y, w as u32, h as u32), scale, i.flags, car::Pixels::Half, &key),
+        });
+    }
+    let name = format!("ZZZZPackedAsset-{scale}.{}.0-gamut1", opaque as u8);
+    let data = dmp2::encode16(aw as usize, ah as usize, &halves, &alpha, opaque).map_err(|e| format!("{name}: {e}"))?;
+    renditions.push(Rendition { attrs: key, csi: car::packed_dmp2_csi(&name, aw, ah, scale, car::Pixels::Half, opaque, &data) });
     Ok(())
 }

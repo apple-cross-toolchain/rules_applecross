@@ -10,10 +10,12 @@ pub struct Rgba {
 }
 
 impl Rgba {
-    /// Whether Xcode stores the image as GA8: every pixel grey (R = G = B),
-    /// whatever the PNG's colour type.
+    /// Whether Xcode stores the image as GA8: every pixel grey once
+    /// premultiplied (R = G = B), whatever the PNG's colour type. A
+    /// transparent red pixel in a grey image keeps it grey, as does (10, 12,
+    /// 11) at alpha 1; (200, 0, 0) at alpha 1 doesn't.
     pub fn is_gray(&self) -> bool {
-        self.data.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2])
+        self.premultiplied_bgra().chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2])
     }
 
     /// Premultiplied BGRA, the byte order CoreUI's ARGB renditions and CgBI
@@ -87,25 +89,35 @@ pub fn check_color_management(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Decodes a PNG as Xcode reads an image set's or an app icon's: in sRGB,
-/// converting its profile's colours where that is established
-/// (crate::colour), refusing other colour management as
-/// check_color_management does.
+/// Decodes a PNG as Xcode reads an app icon's: in sRGB, converting its
+/// profile's colours where that is established (crate::colour). An icon
+/// Xcode would also store at 16 bits is refused.
 pub fn decode_png_srgb(bytes: &[u8]) -> Result<Rgba, String> {
+    match decode_png_extended(bytes)? {
+        (image, None) => Ok(image),
+        (_, Some(_)) => Err("this PNG has colours outside sRGB, for which Xcode adds a 16-bit extended-sRGB rendition this actool doesn't write for icons".into()),
+    }
+}
+
+/// Decodes a PNG as Xcode reads an image set's: in sRGB, as
+/// [`decode_png_srgb`], with the 16-bit rendition Xcode adds for colours
+/// outside sRGB from a wide-gamut profile (crate::colour::Conversion), and
+/// refusing other colour management as check_color_management does.
+pub fn decode_png_extended(bytes: &[u8]) -> Result<(Rgba, Option<Vec<u16>>), String> {
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let reader = decoder.read_info().map_err(|e| e.to_string())?;
     let info = reader.info();
     let Some(profile) = info.icc_profile.as_ref().filter(|p| !IDENTITY_PROFILES.contains(&fnv1a(p))) else {
         check_color_management(bytes)?;
-        return decode_png(bytes);
+        return Ok((decode_png(bytes)?, None));
     };
     if info.source_gamma.is_some() || info.source_chromaticities.is_some() || !matches!(info.color_type, png::ColorType::Rgb | png::ColorType::Rgba | png::ColorType::Indexed) {
         return Err("this PNG's ICC profile with a gamma, chromaticities or grey pixels is not supported by this actool".into());
     }
     let conversion = crate::colour::conversion(profile)?;
     let mut image = decode_png(bytes)?;
-    conversion.convert(&mut image.data)?;
-    Ok(image)
+    let extended = conversion.convert(&mut image.data);
+    Ok((image, extended))
 }
 
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba, String> {
