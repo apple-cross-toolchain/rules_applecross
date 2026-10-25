@@ -66,7 +66,7 @@ not. foundation-hashing.md describes that set's layout.
 Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
-guides, alone or in a navigation or tab bar controller. Subviews: labels (system font, a font Xcode finds for iOS, or the
+guides, alone or in a navigation, tab bar or split view controller. Subviews: labels (system font, a font Xcode finds for iOS, or the
 Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
 rounded-rect, system and custom buttons with a normal state (title, title
@@ -263,9 +263,11 @@ other values of the attributes these use, is refused. Observed:
   element is as with a nil one; a label with none is as with a declared
   `labelColor` (two probes).
 - A view's `UIBounds` is left out when its size is zero, and its
-  `UICenter` when the centre is the origin. A label or plain view without
-  a frame, or with an all-zero one, is 1000x1000 at the origin; a button
-  has no size (12 probes, one corpus storyboard).
+  `UICenter` when the centre is the origin. A label, button or plain view
+  without a frame, or with an all-zero one, is 1000x1000 at the origin,
+  or has no size when the document says `fixedFrame="YES"` (18 probes,
+  three corpus storyboards). An empty `<toolbarItems/>` on a view
+  controller changes nothing (one probe).
 - A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
   (or where it would be): wordWrap 0, characterWrap 1, clip 2,
   headTruncation 3, middleTruncation 5; tailTruncation, the default, is
@@ -397,6 +399,37 @@ rest are refused for other elements):
   their own, identified navigation children or ones loaded on their own
   too, tab bar items with insets, and tab bar controllers nothing loads are
   refused.
+
+## Split view controllers
+
+A `<splitViewController>` with master and detail relationships (view,
+table view or navigation controllers) compiles to
+`UISplitViewController-<id>.nib` (or its identifier's), which embeds its
+children as a tab bar controller's nib does, without tab bar items: a
+view controller child has a navigation item only if the document gives it
+one. Observed with 17 probes and two corpus storyboards:
+
+- The controller: its identifiers, `UIChildViewControllers` (master, then
+  detail, whatever the document's order),
+  `UISplitViewControllerPrimaryEdge` 0, the class names.
+- Three orders meet. The storyboard placeholders are in reverse, and the
+  storyboard outlets stably by class, of the held controllers in the
+  relationships' document order (a navigation child before its root).
+  The objects list the children by relationship name (detail before
+  master), then their parts and then the roots' navigation items in that
+  order too. With a tab bar controller's single relationship name, all
+  three are document order.
+- A navigation child is as in a tab bar controller's nib, with
+  `UIKeyAutomaticallyAdjustsScrollViewInsets` 0 when it says NO (as in
+  both).
+- Not compiled yet, though probed: `style` (doubleColumn and
+  tripleColumn alone change nothing; with a supplementary column,
+  tripleColumn adds `UISplitViewControllerStyle` 2 before the primary
+  edge), supplementary columns (in `UIChildViewControllers` between
+  master and detail) and compact columns (a separate
+  `UISplitViewControllerCompactColumnVC`). The objects' order by
+  relationship name holds for those too (compact, detail, master,
+  supplementary).
 
 ## Table view controllers
 
