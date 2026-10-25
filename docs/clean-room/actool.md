@@ -33,9 +33,13 @@ Established through a public API: drawing the source with
 exactly, while vImage's, ImageIO's thumbnails and Core Image's Lanczos do
 not. Drawing impulses into a 32-bit float context then gave the weights to
 nine digits: the kernel's value at every tap except the one nearest `c`,
-which weighs 1; normalized over the taps (taps beyond an edge count for the
-edge pixel); the rounding residual of the 14-bit weights on that nearest tap.
-This reproduces both icons with no differing sample.
+which weighs 1; normalized over the taps; each rounded to 14 bits, and then
+a tap beyond an edge added to the edge pixel's; the rounding residual of
+the 14-bit weights on that nearest tap. This reproduces both icons with no
+differing sample. Merging the taps beyond an edge before rounding instead
+differs for noisy images near the edges (up to 12 samples, rows and
+columns 1 and 118 of the 120 px icon; 25 random images through the public
+API agree with rounding first).
 
 ## CgBI PNGs
 
@@ -167,7 +171,25 @@ In BITMAPKEYS a subtype is a bit from a list (0: 0, 320: 8, 384: 9, 1792:
 16); size and layer are tracked too.
 
 For the simulators the bundle's 60pt@2x and 76pt@2x icons are the set's
-files, copied. A watch app's partial Info.plist names the icon only. A
+files, copied. In the partial Info.plist each target device's entry
+(`CFBundleIcons`, `CFBundleIcons~ipad`) names the icon and lists the
+bundle icons it has: iPad's lists the iPhone one first when both are
+targets and only when it has its own; a set without one lists none for
+that device. For iPad alone an App Store (`ios-marketing`) image also
+gives `CFBundleIcons` with the name only. The App Store's 1024pt image is
+idiom 6 with a MultiSized Image of its own, ranked among the sizes;
+legacy slots (iPhone 57pt at 1x and 2x, iPad 50pt and 72pt at 1x and 2x)
+are compiled as any other (20 probes, missing and legacy slots, App Store
+images, one device or both). A single-size set's bundle icons are both
+written whatever the target devices, each device's entry listing them as
+for both and naming the icon only for a target; building for iOS, a set's
+`mac` images are ignored (mypod's), and a set of only those compiles to
+nothing (no Assets.car, an empty partial Info.plist; Flutter's macOS
+template). With no image for any target device, Xcode compiles another
+device's (an iPad set for iPhone alone); that is refused. A grey icon (every
+pixel R = G = B, whatever the PNG's colour type) is stored as GA8, as
+image sets' are, in atlases named `S.O.1`; this actool refuses those for
+icons. A watch app's partial Info.plist names the icon only. A
 macOS catalog has no appearance table, key semantics 1, the key format
 (appearance, localization, element, part, size, identifier, dimension2,
 layer, scale) and no idiom or subtype; `NAME.icns` holds the 16pt and
@@ -187,9 +209,9 @@ is refused. An image under 40 pixels wide is stored with method 1, a
 run-length coding (per-row offsets, then runs), opaque or not; this actool
 refuses those. Xcode ignores entries that aren't iOS icon slots (Flutter's
 iPhone 40 and 60 pt at 1x, iPad 76 pt at 3x); this actool compiles the
-current slots only (iPhone 20, 40 and 60 pt at 2x and 3x, 29 pt at 1x to
-3x; iPad 20, 29, 40 and 76 pt at 1x and 2x, 83.5 pt at 2x) and refuses the
-rest.
+current and legacy slots (iPhone 20, 40 and 60 pt at 2x and 3x, 29 pt at
+1x to 3x, 57 pt at 1x and 2x; iPad 20, 29, 40, 50, 72 and 76 pt at 1x and
+2x, 83.5 pt at 2x) and the App Store's 1024 pt, and refuses the rest.
 
 ## Packed images
 
@@ -303,12 +325,21 @@ other than sRGB IEC61966-2.1's or GIMP's built-in sRGB (Display, Display P3,
 Generic RGB, opRGB and HD 709 profiles all convert; each of the corpus's 20
 profiles compiled on an opaque gradient against the gradient alone), or a
 gamma other than 1/2.2 or chromaticities other than sRGB's. Those are
-refused; an `sRGB` chunk changes nothing. App icons aren't converted. A
+refused; an `sRGB` chunk changes nothing. App icons are converted too
+(a single 1024 pt image and its bundle icons, and each image of a set
+with an image per size, Display P3 and Generic RGB alike), wide-gamut ones
+with a 16-bit extended-sRGB rendition beside each, and are refused the
+same way. A
 palette that would
 need strips (over 2 MiB of indices) is not established and is refused. Every layer in the
 examples uses mode 4. Where a row's predictor isn't established and mode 2
-could be the smallest, the image is refused; so are images that would be
-stored uncompressed (mode 1, never seen) and ties between modes.
+could be the smallest, the image is refused; so are ties between modes.
+Mode 1 stores the pixels as they are after the header, with no length
+(BGRA, or grey and alpha for GA8): images of fewer than 8 pixels (1x1 to
+1x7 and 2x2, opaque, translucent, black and white), and any image no mode
+compresses smaller (random noise of 8 to 64 pixels square), 25 probes. An
+image that would be stored that way in strips is not established and is
+refused.
 
 ## Image sets
 

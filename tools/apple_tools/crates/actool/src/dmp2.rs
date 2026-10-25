@@ -21,6 +21,30 @@ fn header_bpp(mode: u8, width: usize, height: usize, bpp: u8) -> Vec<u8> {
     s
 }
 
+/// Mode 1: the pixels as they are, after the header (no length).
+fn raw(width: usize, height: usize, data: &[u8], bpp: u8) -> Vec<u8> {
+    let mut s = header_bpp(1, width, height, bpp);
+    s.extend_from_slice(data);
+    s
+}
+
+/// The stream to store: the smallest compressed one, or mode 1 when that is
+/// smaller still (as for images of fewer than 8 pixels). Raw storage of an
+/// image that would be in strips, and ties with it, are not established.
+fn smallest_or_raw(width: usize, height: usize, data: &[u8], bpp: u8, chosen: Vec<u8>) -> Result<Vec<u8>, String> {
+    let raw_len = 12 + data.len();
+    if raw_len == chosen.len() {
+        return Err("this image's dmp2 modes tie, which is not established for this actool".into());
+    }
+    if raw_len > chosen.len() {
+        return Ok(chosen);
+    }
+    if strip_rows(bpp as usize * width, height) < height {
+        return Err("this image would be stored uncompressed in strips, which is not established for this actool".into());
+    }
+    Ok(raw(width, height, data, bpp))
+}
+
 /// Data compressed as dmp2 stores it: LZFSE from 4096 bytes on, and below
 /// that raw LZVN, without the `bvxn` block LZFSE would wrap it in.
 fn compressed(out: &mut Vec<u8>, data: &[u8]) {
@@ -216,9 +240,9 @@ fn transform_values(width: usize, height: usize, alpha: Vec<u8>, v: Vec<[i32; 3]
 
 /// The `dmp2` stream of rows of an image: whichever mode is smallest.
 fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
+    // Under 8 pixels, nothing compresses smaller than the pixels.
     if width * height < 8 {
-        // Under 8 bytes, LZFSE stores data raw; dmp2's form of that isn't established.
-        return Err("images of fewer than 8 pixels are not supported by this actool".into());
+        return Ok(raw(width, height, bgra, 4));
     }
     let row = 4 * width;
     let lzfse_only = striped(3, width, height, row, |y, h| bgra[y * row..(y + h) * row].to_vec());
@@ -242,15 +266,12 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
         // Another choice of predictors could make mode 2 the smallest.
         return Err("this image's dmp2 encoding (its row predictors) is not established for this actool".into());
     }
-    let raw_len = 12 + bgra.len();
     let min = candidates.iter().map(Vec::len).min().unwrap();
-    if raw_len <= min {
-        return Err("this image would be stored uncompressed, which is not established for this actool".into());
-    }
-    if candidates.iter().filter(|c| c.len() == min).count() > 1 {
+    if candidates.iter().filter(|c| c.len() == min).count() > 1 && 12 + bgra.len() > min {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
-    Ok(candidates.into_iter().find(|c| c.len() == min).unwrap())
+    let chosen = candidates.into_iter().find(|c| c.len() == min).unwrap();
+    smallest_or_raw(width, height, bgra, 4, chosen)
 }
 
 /// The `dmp2` stream of a GA8 image (premultiplied grey and alpha per
@@ -258,7 +279,7 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
 /// was ever seen for one).
 fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String> {
     if width * height < 8 {
-        return Err("images of fewer than 8 pixels are not supported by this actool".into());
+        return Ok(raw(width, height, ga, 2));
     }
     let row = 2 * width;
     let lzfse_only = striped_bpp(3, width, height, row, 2, |y, h| ga[y * row..(y + h) * row].to_vec());
@@ -277,10 +298,7 @@ fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
     let chosen = if !ambiguous && predictive.len() < lzfse_only.len() { predictive } else { lzfse_only };
-    if 12 + ga.len() <= chosen.len() {
-        return Err("this image would be stored uncompressed, which is not established for this actool".into());
-    }
-    Ok(chosen)
+    smallest_or_raw(width, height, ga, 2, chosen)
 }
 
 /// The `MLEC` payload of a GA8 image: pixels of premultiplied grey and

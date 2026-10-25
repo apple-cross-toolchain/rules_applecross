@@ -10,6 +10,12 @@ pub struct Rgba {
 }
 
 impl Rgba {
+    /// Whether Xcode stores the image as GA8: every pixel grey (R = G = B),
+    /// whatever the PNG's colour type.
+    pub fn is_gray(&self) -> bool {
+        self.data.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2])
+    }
+
     /// Premultiplied BGRA, the byte order CoreUI's ARGB renditions and CgBI
     /// PNGs both store.
     pub fn premultiplied_bgra(&self) -> Vec<u8> {
@@ -59,12 +65,12 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
 }
 
-/// Refuses an image set PNG Xcode colour-manages: an ICC profile other
-/// than the sRGB ones above, or a gamma or chromaticities other than
-/// sRGB's (as ImageIO writes them). Xcode converts those to sRGB before
-/// encoding image sets (Display, Display P3, Generic RGB, opRGB and HD 709
-/// profiles, gamma 1.0, P3 primaries), which isn't established; app icons
-/// it leaves as they are (docs/clean-room/actool.md).
+/// Refuses a PNG Xcode colour-manages: an ICC profile other than the sRGB
+/// ones above, or a gamma or chromaticities other than sRGB's (as ImageIO
+/// writes them). Xcode converts those to sRGB before encoding image sets
+/// and app icons (Display, Display P3, Generic RGB, opRGB and HD 709
+/// profiles, gamma 1.0, P3 primaries), which isn't established
+/// (docs/clean-room/actool.md).
 pub fn check_color_management(bytes: &[u8]) -> Result<(), String> {
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let reader = decoder.read_info().map_err(|e| e.to_string())?;
@@ -167,22 +173,26 @@ fn weights(src: usize, dst: usize) -> Vec<Vec<(usize, i32)>> {
         .map(|i| {
             let c = i as f64 * s;
             let nearest = (c + 0.5).floor() as i64;
-            let mut taps: Vec<(usize, f64)> = Vec::new();
+            let mut taps: Vec<(i64, f64)> = Vec::new();
             let lo = (c - 2.0 * s).floor() as i64;
             let hi = (c + 2.0 * s).ceil() as i64;
             for j in lo..=hi {
                 let w = if j == nearest { 1.0 } else { lanczos2((j as f64 - c) / s) };
-                if w == 0.0 {
-                    continue;
-                }
-                let jj = j.clamp(0, last) as usize;
-                match taps.iter_mut().find(|t| t.0 == jj) {
-                    Some(t) => t.1 += w,
-                    None => taps.push((jj, w)),
+                if w != 0.0 {
+                    taps.push((j, w));
                 }
             }
             let total: f64 = taps.iter().map(|t| t.1).sum();
-            let mut q: Vec<(usize, i32)> = taps.iter().map(|&(j, w)| (j, (w / total * 16384.0).round() as i32)).collect();
+            // Each tap's weight is rounded to 14 bits before a tap beyond an
+            // edge is added to the edge pixel's.
+            let mut q: Vec<(usize, i32)> = Vec::new();
+            for &(j, w) in &taps {
+                let (jj, w) = (j.clamp(0, last) as usize, (w / total * 16384.0).round() as i32);
+                match q.iter_mut().find(|t| t.0 == jj) {
+                    Some(t) => t.1 += w,
+                    None => q.push((jj, w)),
+                }
+            }
             let sum: i32 = q.iter().map(|t| t.1).sum();
             let near = nearest.clamp(0, last) as usize;
             if let Some(t) = q.iter_mut().find(|t| t.0 == near) {

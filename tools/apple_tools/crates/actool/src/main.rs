@@ -223,19 +223,26 @@ enum IconSource {
 }
 
 /// An app icon set's images; None for a set with no images, which compiles
-/// to nothing.
-fn app_icon_set(icon_dir: &Path) -> Result<Option<IconSource>, String> {
+/// to nothing. Building for iOS, Xcode ignores a set's macOS images (and
+/// compiles a set of only those to nothing).
+fn app_icon_set(icon_dir: &Path, ios: bool) -> Result<Option<IconSource>, String> {
     let images = icon_images(icon_dir)?;
-    if images.is_empty() {
+    if images.is_empty() || (ios && images.iter().all(|i| i.idiom == "mac")) {
         return Ok(None);
     }
     let universal: Vec<&IconImage> = images.iter().filter(|i| i.idiom == "universal" && i.platform.as_deref() == Some("ios") && i.size == "1024x1024").collect();
-    if universal.len() != 1 || images.len() != 1 {
+    let others = images.iter().filter(|i| !(ios && i.idiom == "mac")).count();
+    if universal.len() != 1 || others != 1 {
         let contents = read_json(&icon_dir.join("Contents.json"))?;
         return Ok(Some(IconSource::PerSize(iconset::slots(icon_dir, &contents["images"])?)));
     }
     let icon = universal[0];
-    let src = image::decode_png(&std::fs::read(&icon.file).map_err(|e| format!("{}: {e}", icon.file.display()))?)?;
+    let bytes = std::fs::read(&icon.file).map_err(|e| format!("{}: {e}", icon.file.display()))?;
+    image::check_color_management(&bytes).map_err(|e| format!("{}: {e}", icon.file.display()))?;
+    let src = image::decode_png(&bytes)?;
+    if src.is_gray() {
+        return Err(format!("{}: a greyscale icon, which Xcode stores as GA8, is not supported by this actool", icon.file.display()));
+    }
     if src.width != 1024 || src.height != 1024 {
         return Err(format!("{}: is {}x{} but should be 1024x1024", icon.file.display(), src.width, src.height));
     }
@@ -304,13 +311,13 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         }
         (Some(name), None) => {
             let (_, dir) = scan.icon_sets.iter().find(|(n, _)| n == name).ok_or_else(|| format!("none of the input catalogs contains an app icon set named \"{name}\""))?;
-            app_icon_set(dir)?.map(|source| (name.clone(), source))
+            app_icon_set(dir, platform == "ios")?.map(|source| (name.clone(), source))
         }
         (None, _) => None,
     };
     let Some((icon_name, source)) = icon else {
         if !images.is_empty() {
-            return finish(o, &out_dir, platform, None, false, Vec::new(), images, Kind::Ios { phone_files: &[], pad_files: &[] }, outputs);
+            return finish(o, &out_dir, platform, None, false, Vec::new(), images, Kind::Ios { phone: None, pad: None }, outputs);
         }
         // Nothing to compile: no Assets.car, an empty partial Info.plist.
         write_partial_info_plist(o, Vec::new(), &mut outputs)?;
@@ -334,22 +341,16 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         Ok(image::plain_png(&rgba, true))
     };
 
-    // The bundle's flat icons: 60pt@2x for iPhone, 76pt@2x for iPad.
-    let mut phone_files = Vec::new();
-    let mut pad_files = Vec::new();
-    if phone {
-        let p = out_dir.join(format!("{icon_name}60x60@2x.png"));
-        std::fs::write(&p, bundle_png(120)?).map_err(|e| e.to_string())?;
+    // The bundle's flat icons, 60pt@2x for iPhone and 76pt@2x for iPad,
+    // both whatever the target devices; each device's entry lists them as
+    // for both and names the icon only for a target.
+    for (file, size) in [(format!("{icon_name}60x60@2x.png"), 120), (format!("{icon_name}76x76@2x~ipad.png"), 152)] {
+        let p = out_dir.join(file);
+        std::fs::write(&p, bundle_png(size)?).map_err(|e| e.to_string())?;
         outputs.push(p);
-        phone_files.push(format!("{icon_name}60x60"));
     }
-    if pad {
-        let p = out_dir.join(format!("{icon_name}76x76@2x~ipad.png"));
-        std::fs::write(&p, bundle_png(152)?).map_err(|e| e.to_string())?;
-        outputs.push(p);
-        pad_files.push(format!("{icon_name}60x60"));
-        pad_files.push(format!("{icon_name}76x76"));
-    }
+    let phone_icons = iconset::DeviceIcons { files: vec![format!("{icon_name}60x60")], named: phone };
+    let pad_icons = iconset::DeviceIcons { files: vec![format!("{icon_name}60x60"), format!("{icon_name}76x76")], named: pad };
 
     // Assets.car: per idiom, the 1024 px image and the index of its sizes.
     let id = name_identifier(&icon_name);
@@ -371,7 +372,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     if renditions.is_empty() {
         return Err("--target-device iphone and/or ipad is required".into());
     }
-    finish(o, &out_dir, platform, Some(&icon_name), false, renditions, images, Kind::Ios { phone_files: &phone_files, pad_files: &pad_files }, outputs)
+    finish(o, &out_dir, platform, Some(&icon_name), false, renditions, images, Kind::Ios { phone: Some(phone_icons), pad: Some(pad_icons) }, outputs)
 }
 
 /// A tvOS or visionOS app icon from an image stack, when --app-icon names
@@ -452,8 +453,8 @@ fn stack_icon(o: &Options, out_dir: &Path, platform: &str, scan: &Scan, outputs:
 }
 
 /// What an app icon's catalog and partial Info.plist are for.
-enum Kind<'a> {
-    Ios { phone_files: &'a [String], pad_files: &'a [String] },
+enum Kind {
+    Ios { phone: Option<iconset::DeviceIcons>, pad: Option<iconset::DeviceIcons> },
     Watch,
     Mac,
 }
@@ -506,20 +507,24 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         write_partial_info_plist(o, Vec::new(), &mut outputs)?;
         return Ok(outputs);
     };
-    let primary = |files: &[String]| {
-        Value::dict([("CFBundlePrimaryIcon", Value::dict([
-            ("CFBundleIconFiles", Value::Array(files.iter().map(|f| Value::string(f.clone())).collect())),
-            ("CFBundleIconName", Value::string(icon_name)),
-        ]))])
+    let primary = |icons: &iconset::DeviceIcons| {
+        let mut entry = Vec::new();
+        if !icons.files.is_empty() {
+            entry.push(("CFBundleIconFiles", Value::Array(icons.files.iter().map(|f| Value::string(f.clone())).collect())));
+        }
+        if icons.named {
+            entry.push(("CFBundleIconName", Value::string(icon_name)));
+        }
+        Value::dict([("CFBundlePrimaryIcon", Value::dict(entry))])
     };
     let entries = match kind {
-        Kind::Ios { phone_files, pad_files } => {
+        Kind::Ios { phone, pad } => {
             let mut e = Vec::new();
-            if !phone_files.is_empty() {
-                e.push(("CFBundleIcons", primary(phone_files)));
+            if let Some(icons) = &phone {
+                e.push(("CFBundleIcons", primary(icons)));
             }
-            if !pad_files.is_empty() {
-                e.push(("CFBundleIcons~ipad", primary(pad_files)));
+            if let Some(icons) = &pad {
+                e.push(("CFBundleIcons~ipad", primary(icons)));
             }
             e
         }
@@ -559,7 +564,7 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
     } else if watch {
         Kind::Watch
     } else {
-        Kind::Ios { phone_files: &compiled.phone_files, pad_files: &compiled.pad_files }
+        Kind::Ios { phone: compiled.phone, pad: compiled.pad }
     };
     finish(o, out_dir, platform, Some(icon_name), compiled.has_dimension1, compiled.renditions, images, kind, outputs)
 }
