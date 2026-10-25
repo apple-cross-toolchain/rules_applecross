@@ -1823,12 +1823,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
         only_children(objects_node, &["viewController", "tableViewController", "navigationController", "tabBarController", "placeholder", "exit"])?;
-        // An exit nothing unwinds to is Interface Builder's alone.
+        // An exit is Interface Builder's alone; the unwind segues to it
+        // compile to templates of their own.
         for exit in children(objects_node, "exit") {
             only_attributes(exit, &[("id", None), ("userLabel", Some("Exit")), ("sceneMemberID", Some("exit"))])?;
             let id = attr(exit, "id")?;
-            if scene_node.document().descendants().any(|d| d != exit && d.attributes().any(|a| a.value() == id)) {
-                return fail("an exit something unwinds to is not supported by this ibtool");
+            let unwinds = |d: Node| d.has_tag_name("segue") && d.attribute("kind") == Some("unwind") && d.attribute("destination") == Some(id);
+            if scene_node.document().descendants().any(|d| d != exit && !unwinds(d) && d.attributes().any(|a| a.value() == id)) {
+                return fail("an exit referred to other than by an unwind segue is not supported by this ibtool");
             }
         }
         if children(objects_node, "navigationController").next().is_some() || children(objects_node, "tabBarController").next().is_some() {

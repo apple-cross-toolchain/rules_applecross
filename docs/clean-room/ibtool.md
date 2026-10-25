@@ -534,7 +534,18 @@ the same. Observed with 55 probes:
   `selectionSegueTemplate` outlet from the cell to it, sorted with the
   cell's outlets.
 
-Refused for now: unwind, embed, custom and popover segues, segues from
+An unwind segue leads to its scene's `<exit>` and loads nothing. Its
+template is a `UIStoryboardUnwindSegueTemplate`: `UIIdentifier` if any,
+`UIDestinationViewControllerIdentifier` archived as nil, `UIAnimates`
+false when it doesn't animate, and `UIAction` (the unwind action's
+selector). Otherwise it is triggered, listed and connected like any other
+template, from buttons, prototype cells or the controller itself, in a
+navigation root's nib as well; its `viewController` outlet sorts after a show
+template's, by class name. An exit placeholder adds nothing to the
+nibs: a scene with one compiles as it does without. Observed with 14
+probes.
+
+Refused for now: embed, custom and popover segues, segues from
 other elements (bar button items, gesture recognizers, a cell's
 accessory), and to other controllers.
 

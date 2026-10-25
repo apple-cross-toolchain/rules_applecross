@@ -66,7 +66,8 @@ pub(super) fn segue_destinations<'a>(controllers: &[Node<'a, '_>], initial: Opti
                 }
             }
         }
-        for s in outgoing(c) {
+        // An unwind segue loads nothing: it leads to its scene's exit.
+        for s in outgoing(c).filter(|s| s.attribute("kind") != Some("unwind")) {
             let destination = attr(s, "destination")?;
             if find(destination).is_none() {
                 return fail("a segue to anything but a view, table view, navigation or tab bar controller is not supported by this ibtool");
@@ -83,6 +84,9 @@ pub(super) fn segue_destinations<'a>(controllers: &[Node<'a, '_>], initial: Opti
 /// A segue's template: its identifier, its destination's nib and how it is
 /// performed.
 fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<Object, String> {
+    if s.attribute("kind") == Some("unwind") {
+        return unwind_template(nib, s);
+    }
     only_attributes(s, &[
         ("destination", None), ("kind", None), ("identifier", None), ("animates", Some("NO")), ("modalPresentationStyle", None),
         ("modalTransitionStyle", Some("crossDissolve")), ("id", None),
@@ -146,6 +150,28 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
         other => return fail(format!("{other} segues are not supported by this ibtool")),
     };
     Ok(Object::new(class, values))
+}
+
+/// An unwind segue's template: no destination, the action it unwinds to.
+fn unwind_template(nib: &mut Nib, s: Node) -> Result<Object, String> {
+    only_attributes(s, &[("destination", None), ("kind", None), ("identifier", None), ("unwindAction", None), ("animates", Some("NO")), ("id", None)])?;
+    // Interface Builder connects it to the exit of its own scene.
+    let destination = attr(s, "destination")?;
+    let scene = s.ancestors().find(|a| a.has_tag_name("scene"));
+    let exit = scene.and_then(|scene| scene.descendants().find(|d| d.attribute("id") == Some(destination)));
+    if !exit.is_some_and(|e| e.has_tag_name("exit")) {
+        return fail("an unwind segue to anything but its scene's exit is not supported by this ibtool");
+    }
+    let mut values = Vec::new();
+    if let Some(identifier) = s.attribute("identifier") {
+        values.push(("UIIdentifier", nib.string(identifier)));
+    }
+    values.push(("UIDestinationViewControllerIdentifier", Value::Nil));
+    if s.attribute("animates").is_some() {
+        values.push(("UIAnimates", Value::Bool(false)));
+    }
+    values.push(("UIAction", nib.string(attr(s, "unwindAction")?)));
+    Ok(Object::new("UIStoryboardUnwindSegueTemplate", values))
 }
 
 /// A controller's segue templates as one of its nibs (its own, or its
