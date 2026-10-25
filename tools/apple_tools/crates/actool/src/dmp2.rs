@@ -28,15 +28,21 @@ fn raw(width: usize, height: usize, data: &[u8], bpp: u8) -> Vec<u8> {
     s
 }
 
-/// The stream to store: the smallest compressed one, or mode 1 when that is
-/// smaller still (as for images of fewer than 8 pixels). Raw storage of an
-/// image that would be in strips, and ties with it, are not established.
-fn smallest_or_raw(width: usize, height: usize, data: &[u8], bpp: u8, chosen: Vec<u8>) -> Result<Vec<u8>, String> {
+/// The stream to store: the smallest compressed one, or mode 1 when Xcode's
+/// compressor runs out of room. It compresses into a buffer 4 bytes smaller
+/// than the raw pixels, and LZVN's encoder gives up 9 or 10 bytes short of
+/// its buffer's end (Xcode stored 194 of 194 small images near the margin as
+/// that predicts), so `lzvn_input`, the data of a single-strip mode 2 or 3
+/// stream, decides. For other streams near the margin it isn't established.
+fn smallest_or_raw(width: usize, height: usize, data: &[u8], bpp: u8, chosen: Vec<u8>, lzvn_input: Option<Vec<u8>>) -> Result<Vec<u8>, String> {
     let raw_len = 12 + data.len();
-    if raw_len == chosen.len() {
-        return Err("this image's dmp2 modes tie, which is not established for this actool".into());
-    }
-    if raw_len > chosen.len() {
+    let keep = match lzvn_input {
+        Some(input) if input.len() < 4096 => lzfse::encode_lzvn(&input, data.len() - 4).is_some(),
+        _ if chosen.len() + 32 <= raw_len => true,
+        _ if chosen.len() >= raw_len => false,
+        _ => return Err("whether this image's dmp2 stream is stored compressed is not established for this actool".into()),
+    };
+    if keep {
         return Ok(chosen);
     }
     if strip_rows(bpp as usize * width, height) < height {
@@ -46,10 +52,10 @@ fn smallest_or_raw(width: usize, height: usize, data: &[u8], bpp: u8, chosen: Ve
 }
 
 /// Data compressed as dmp2 stores it: LZFSE from 4096 bytes on, and below
-/// that raw LZVN, without the `bvxn` block LZFSE would wrap it in.
+/// that LZVN, even where its output is larger than the data (which LZFSE
+/// would store uncompressed instead).
 fn compressed(out: &mut Vec<u8>, data: &[u8]) {
-    let z = lzfse::encode(data);
-    let z = if data.len() < 4096 && z.starts_with(b"bvxn") && z.ends_with(b"bvx$") { z[12..z.len() - 4].to_vec() } else { z };
+    let z = if data.len() < 4096 { lzfse::encode_lzvn(data, 2 * data.len() + 64).expect("LZVN fits twice its input") } else { lzfse::encode(data) };
     le32(out, z.len() as u32);
     out.extend(z);
 }
@@ -271,7 +277,12 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
     let chosen = candidates.into_iter().find(|c| c.len() == min).unwrap();
-    smallest_or_raw(width, height, bgra, 4, chosen)
+    let lzvn_input = match chosen[4] {
+        2 if strip_rows(7 * width + 1, height) == height => Some(transform(width, height, bgra).0),
+        3 if strip_rows(row, height) == height => Some(bgra.to_vec()),
+        _ => None,
+    };
+    smallest_or_raw(width, height, bgra, 4, chosen, lzvn_input)
 }
 
 /// The `dmp2` stream of a GA8 image (premultiplied grey and alpha per
@@ -297,8 +308,16 @@ fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String
     if !ambiguous && predictive.len() == lzfse_only.len() {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
-    let chosen = if !ambiguous && predictive.len() < lzfse_only.len() { predictive } else { lzfse_only };
-    smallest_or_raw(width, height, ga, 2, chosen)
+    let (chosen, lzvn_input) = if !ambiguous && predictive.len() < lzfse_only.len() {
+        let input = (strip_rows(3 * width + 1, height) == height).then(|| {
+            let v: Vec<[i32; 3]> = ga.chunks_exact(2).map(|p| [p[0] as i32, 0, 0]).collect();
+            transform_values(width, height, ga.chunks_exact(2).map(|p| p[1]).collect(), v, 1).0
+        });
+        (predictive, input)
+    } else {
+        (lzfse_only, (strip_rows(row, height) == height).then(|| ga.to_vec()))
+    };
+    smallest_or_raw(width, height, ga, 2, chosen, lzvn_input)
 }
 
 /// The `MLEC` payload of a GA8 image: pixels of premultiplied grey and
