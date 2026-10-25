@@ -6,7 +6,9 @@ use crate::nib::{self, reference, Object, Value};
 use roxmltree::{Document, Node};
 use std::collections::{HashMap, HashSet};
 
+mod parent;
 mod segue;
+mod split;
 mod tab;
 mod table;
 
@@ -652,8 +654,9 @@ fn frame(n: Node) -> Result<Frame, String> {
     Ok(Frame { x: number(attr(r, "x")?)?, y: number(attr(r, "y")?)?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? })
 }
 
-/// A subview's frame. Without one, or with an all-zero one, a label or a
-/// plain view is 1000x1000 at the origin and a button has no size.
+/// A subview's frame. Without one, or with an all-zero one, a label, button
+/// or plain view is 1000x1000 at the origin, or has no size if its frame is
+/// fixed.
 fn subview_frame(n: Node) -> Result<Frame, String> {
     if let Some(f) = child(n, "rect", "frame").map(|_| frame(n)).transpose()? {
         if f.x != 0.0 || f.y != 0.0 || f.w != 0.0 || f.h != 0.0 {
@@ -661,8 +664,8 @@ fn subview_frame(n: Node) -> Result<Frame, String> {
         }
     }
     match n.tag_name().name() {
-        "label" | "view" => Ok(Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }),
-        "button" => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
+        "label" | "view" | "button" if n.attribute("fixedFrame").is_some() => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
+        "label" | "view" | "button" => Ok(Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }),
         other => fail(format!("<{other}> without a frame")),
     }
 }
@@ -1679,7 +1682,7 @@ fn navigation_controller(
     root: Embedded,
     root_name: &str,
     swapped: bool,
-    tab: Option<(Value, &str)>,
+    held: Option<(Option<Value>, &str)>,
 ) -> Result<Value, String> {
     let nav_id = attr(nav, "id")?;
     let bar_name = format!("{name} bar");
@@ -1688,9 +1691,10 @@ fn navigation_controller(
     if let Some(title) = nav.attribute("title") {
         values.push(("UITitle", nib.text(nav_id, "title", title)));
     }
-    let in_tab = tab.is_some();
-    if let Some((item, parent)) = tab {
-        values.push(("UITabBarItem", item));
+    if let Some((item, parent)) = held {
+        if let Some(item) = item {
+            values.push(("UITabBarItem", item));
+        }
         values.push(("UIParentViewController", reference(parent)));
     } else if let Some(identifier) = nav.attribute("storyboardIdentifier") {
         values.push(("UIStoryboardIdentifier", nib.string(identifier)));
@@ -1700,9 +1704,6 @@ fn navigation_controller(
     }
     values.push(("UIChildViewControllers", nib.array("NSMutableArray", vec![root.value])));
     if nav.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
-        if in_tab {
-            return fail("a tab bar controller's navigation controller that doesn't adjust scroll view insets is not supported by this ibtool");
-        }
         values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
     }
     values.push(("UIViewControllers", nib.array("NSMutableArray", vec![reference(root_name)])));
@@ -1854,7 +1855,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
     }
     let mut navs = Vec::new();
-    let mut tabs = Vec::new();
+    let mut parents = Vec::new();
     for (index, scene_node) in scene_nodes.iter().enumerate() {
         if let Some(nav) = scene_node.descendants().find(|d| d.has_tag_name("navigationController")) {
             let root_id = navigation_root(nav)?;
@@ -1862,17 +1863,22 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let loadable = initial == Some(nav_id) || nav.attribute("storyboardIdentifier").is_some() || reached.contains(nav_id);
             navs.push((index, nav, root_id, loadable));
         }
-        if let Some(tab) = scene_node.descendants().find(|d| d.has_tag_name("tabBarController")) {
-            let kids = tab::tab_children(tab)?;
-            let tab_id = attr(tab, "id")?;
-            let loadable = initial == Some(tab_id) || tab.attribute("storyboardIdentifier").is_some() || reached.contains(tab_id);
-            tabs.push((index, tab, kids, loadable));
+        let parent = scene_node.descendants().find_map(|d| match d.tag_name().name() {
+            "tabBarController" => Some((parent::Kind::Tab, d)),
+            "splitViewController" => Some((parent::Kind::Split, d)),
+            _ => None,
+        });
+        if let Some((kind, node)) = parent {
+            let kids = parent::children_of(kind, node)?;
+            let id = attr(node, "id")?;
+            let loadable = initial == Some(id) || node.attribute("storyboardIdentifier").is_some() || reached.contains(id);
+            parents.push((index, kind, node, kids, loadable));
         }
     }
-    // A loadable tab bar controller holds its children, and the roots of
-    // those that are navigation controllers.
-    let tab_children: HashSet<&str> = tabs.iter().filter(|t| t.3).flat_map(|t| t.2.iter().copied()).collect();
-    let in_tab_nav = |id: &str| navs.iter().any(|n| n.2 == id && tab_children.contains(attr(n.1, "id").unwrap_or("")));
+    // A loadable tab bar or split view controller holds its children, and
+    // the roots of those that are navigation controllers.
+    let held_children: HashSet<&str> = parents.iter().filter(|p| p.4).flat_map(|p| p.3.iter().map(|k| k.1)).collect();
+    let in_held_nav = |id: &str| navs.iter().any(|n| n.2 == id && held_children.contains(attr(n.1, "id").unwrap_or("")));
     // Each scene's files and Info.plist entry, by scene.
     let mut outputs: Vec<(usize, Vec<(String, Vec<u8>)>, Option<(String, bool, bool)>)> = Vec::new();
     let mut roots: HashMap<&str, RootController> = HashMap::new();
@@ -1880,7 +1886,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
-        only_children(objects_node, &["viewController", "tableViewController", "navigationController", "tabBarController", "placeholder", "exit"])?;
+        only_children(objects_node, &["viewController", "tableViewController", "navigationController", "tabBarController", "splitViewController", "placeholder", "exit"])?;
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
         for exit in children(objects_node, "exit") {
@@ -1891,7 +1897,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 return fail("an exit referred to other than by an unwind segue is not supported by this ibtool");
             }
         }
-        if children(objects_node, "navigationController").next().is_some() || children(objects_node, "tabBarController").next().is_some() {
+        if ["navigationController", "tabBarController", "splitViewController"].iter().any(|t| children(objects_node, t).next().is_some()) {
             continue;
         }
         let vc = objects_node
@@ -1911,7 +1917,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("the clearsSelectionOnViewWillAppear attribute of <viewController> is not supported by this ibtool");
         }
         let class_name = runtime_class_name(vc, module, original_class)?;
-        only_children(vc, &[if is_table { "tableView" } else { "view" }, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size"])?;
+        only_children(vc, &[if is_table { "tableView" } else { "view" }, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems"])?;
+        // Empty toolbar items change nothing compiled.
+        if children(vc, "toolbarItems").any(|t| t.has_children()) {
+            return fail("view controllers with toolbar items are not supported by this ibtool");
+        }
         if children(vc, "size").any(|s| s.attribute("key") != Some("freeformSize")) {
             return fail("sizes other than a freeform size inside <viewController> are not supported by this ibtool");
         }
@@ -2223,7 +2233,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let is_initial = initial == Some(vc_id);
         let identified = vc.attribute("storyboardIdentifier").is_some();
         let segue_destination = reached.contains(vc_id);
-        let embedded = navs.iter().any(|n| n.2 == vc_id && n.3) || tab_children.contains(vc_id) || in_tab_nav(vc_id);
+        let embedded = navs.iter().any(|n| n.2 == vc_id && n.3) || held_children.contains(vc_id) || in_held_nav(vc_id);
         let swapped = is_initial || identified || vc.attribute("customClass").is_some();
         let view_segues: Vec<Node> = scene.segues.iter().filter_map(|id| view.descendants().find(|d| d.attribute("id") == Some(id.as_str()))).collect();
 
@@ -2309,15 +2319,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         outputs.push((index, scene_files, entry));
     }
     for &(index, nav, root_id, loadable) in &navs {
-        if !loadable && tab_children.contains(attr(nav, "id")?) {
-            // Held by its tab bar controller's nib alone.
+        if !loadable && held_children.contains(attr(nav, "id")?) {
+            // Held by its parent's nib alone.
             continue;
         }
         if !loadable {
             return fail("a navigation controller nothing loads is not supported by this ibtool");
         }
-        if tab_children.contains(attr(nav, "id")?) {
-            return fail("a tab bar controller's navigation controller that is loaded on its own too is not supported by this ibtool");
+        if held_children.contains(attr(nav, "id")?) {
+            return fail("a child navigation controller that is loaded on its own too is not supported by this ibtool");
         }
         let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
         let swapped = initial == Some(attr(nav, "id")?) || nav.attribute("storyboardIdentifier").is_some();
@@ -2325,24 +2335,24 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let entry = (name.clone(), initial == Some(attr(nav, "id")?), nav.attribute("storyboardIdentifier").is_some());
         outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }
-    for (index, tab, kids, loadable) in &tabs {
+    for (index, kind, node, kids, loadable) in &parents {
         if !loadable {
-            return fail("a tab bar controller nothing loads is not supported by this ibtool");
+            return fail(format!("a {} nothing loads is not supported by this ibtool", kind.class()));
         }
         let mut held = Vec::new();
-        for id in kids {
-            if let Some(&(_, nav, root_id, _)) = navs.iter().find(|n| attr(n.1, "id").ok() == Some(*id)) {
+        for &(relationship, id) in kids {
+            if let Some(&(_, nav, root_id, _)) = navs.iter().find(|n| attr(n.1, "id").ok() == Some(id)) {
                 let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
-                held.push(tab::Child::Navigation(nav, root));
+                held.push((relationship, parent::Child::Navigation(nav, root)));
             } else {
-                let root = roots.get(*id).ok_or("a tab bar controller's child is not in a supported scene")?;
-                held.push(tab::Child::Controller(root));
+                let root = roots.get(id).ok_or("a child controller is not in a supported scene")?;
+                held.push((relationship, parent::Child::Controller(root)));
             }
         }
-        let tab_id = attr(*tab, "id")?;
-        let swapped = initial == Some(tab_id) || tab.attribute("storyboardIdentifier").is_some();
-        let (name, bytes) = tab::tab_bar_controller_nib(platform, color_matched, localizable, module, *tab, &held, swapped, &nib_names)?;
-        let entry = (name.clone(), initial == Some(tab_id), tab.attribute("storyboardIdentifier").is_some());
+        let id = attr(*node, "id")?;
+        let swapped = initial == Some(id) || node.attribute("storyboardIdentifier").is_some();
+        let (name, bytes) = parent::parent_controller_nib(platform, color_matched, localizable, module, *kind, *node, &held, swapped, &nib_names)?;
+        let entry = (name.clone(), initial == Some(id), node.attribute("storyboardIdentifier").is_some());
         outputs.push((*index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }
     outputs.sort_by_key(|o| o.0);
