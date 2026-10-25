@@ -7,6 +7,7 @@
 mod bom;
 mod car;
 mod colorset;
+mod colour;
 mod directions;
 mod dmp2;
 mod icon;
@@ -238,8 +239,7 @@ fn app_icon_set(icon_dir: &Path, ios: bool) -> Result<Option<IconSource>, String
     }
     let icon = universal[0];
     let bytes = std::fs::read(&icon.file).map_err(|e| format!("{}: {e}", icon.file.display()))?;
-    image::check_color_management(&bytes).map_err(|e| format!("{}: {e}", icon.file.display()))?;
-    let src = image::decode_png(&bytes)?;
+    let src = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", icon.file.display()))?;
     if src.is_gray() {
         return Err(format!("{}: a greyscale icon, which Xcode stores as GA8, is not supported by this actool", icon.file.display()));
     }

@@ -67,8 +67,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             scales.push(scale);
             let path = dir.join(filename);
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            image::check_color_management(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-            let img = image::decode_png(&bytes)?;
+            let img = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
             images.push(SetImage { scale, identifier: id, flags, filename: filename.to_string(), image: img });
         }
         if !scales.is_empty() {

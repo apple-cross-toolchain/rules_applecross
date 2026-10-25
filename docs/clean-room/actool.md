@@ -320,18 +320,8 @@ alpha plane and the index plane compressed together (WebRTC's incognito
 banner, 152 such colours where its colours with alpha number 204; 63 of
 the examined streams have it).
 
-Pixels are premultiplied as `(c * a + 127) / 255`. An image set PNG Xcode
-colour-manages is converted before any of this: one with an ICC profile
-other than sRGB IEC61966-2.1's or GIMP's built-in sRGB (Display, Display P3,
-Generic RGB, opRGB and HD 709 profiles all convert; each of the corpus's 20
-profiles compiled on an opaque gradient against the gradient alone), or a
-gamma other than 1/2.2 or chromaticities other than sRGB's. Those are
-refused; an `sRGB` chunk changes nothing. App icons are converted too
-(a single 1024 pt image and its bundle icons, and each image of a set
-with an image per size, Display P3 and Generic RGB alike), wide-gamut ones
-with a 16-bit extended-sRGB rendition beside each, and are refused the
-same way. A
-palette that would
+Pixels are premultiplied as `(c * a + 127) / 255`, after any colour
+conversion (below). A palette that would
 need strips (over 2 MiB of indices) is not established and is refused. Every layer in the
 examples uses mode 4. Where a row's predictor isn't established and mode 2
 could be the smallest, the image is refused; so are ties between modes.
@@ -351,6 +341,61 @@ their row predictors. Whether that holds for a stream compressed with LZFSE
 bytes of mode 1 is refused, as is an image that would be stored that way
 in strips. Greyscale images are given the same test, unprobed near the
 margin.
+
+## Colour-managed PNGs
+
+Xcode converts an image set's or app icon's PNG with an ICC profile other
+than sRGB IEC61966-2.1's or GIMP's built-in sRGB to sRGB (each of the
+corpus's 20 profiles compiled on an opaque gradient differs from the
+gradient alone). ImageIO's image drawn into an 8-bit sRGB `CGContext` gives
+Xcode's pixels exactly: compiling those pixels untagged gives Xcode's
+output for 64x68 images (a 16-level colour cube and a grey ramp) with
+Display P3, Adobe RGB, Generic RGB, ITU-709, ITU-2020, ROMM, DCI-P3, ACEScg
+and sRGB profiles. Wide-gamut profiles (Display P3, Adobe RGB, ITU-2020,
+ROMM, DCI-P3, ACEScg) add a 16-bit extended-sRGB rendition beside the
+8-bit one. A PNG with `gAMA` other than 1/2.2 or `cHRM` other than sRGB's
+is converted too; an `sRGB` chunk changes nothing.
+
+Of these, this actool converts the profiles with one 8-bit rendition that
+it knows: Generic RGB and ITU-709, matched by their colorants, white point
+and curves (`colour.rs`). The conversion below equals that drawing for
+all 16,777,216 colours of each, as it does for Display P3, Adobe RGB (with
+its curve measured), ROMM, ITU-2020, DCI-P3 and ACEScg with their own
+matrices and curves. With the two profiles, 49 image sets (gradients,
+noise, few colours and patterns, opaque and translucent, 6 to 300 px) and
+6 icon sets (a single 1024 pt image, an image per size, legacy slots)
+compiled byte-identical; 15 more image sets were refused for their row
+predictors.
+Other profiles, profiles with `gAMA` or `cHRM` beside them, and greyscale
+PNGs with profiles are refused. Translucent pixels are converted, then
+premultiplied.
+
+The conversion, for each channel of an 8-bit pixel `x`:
+
+- 12-bit linear `q = round(L(x / 255) * 4096)`, with `L` the profile's
+  curve: a parametric curve of type 3 in double precision, except that
+  BT.709's parameters (ITU-709, ITU-2020) are taken as a pure gamma 2.4; a
+  gamma of 1.5 or more has a toe, `L = max(x^g, x / 16)`; a `curv` gamma of
+  461/256 is snapped to 1.8 (Generic RGB);
+- `idx = clamp((sum M[r][c] * q_c) >> 15, 0, 8191)` with `M` the profile's
+  matrix to sRGB in s15Fixed16 integers (always multiples of 4);
+- the output is `E[(idx + 1) >> 1]`, with `E[k] = round(enc(k / 4096) *
+  255)` for the sRGB encoding `enc`, except at 65 of the 4097 entries,
+  all within 0.03 of a half.
+
+Three parts are measured data, not derived: the 65 exceptions in `E`
+(an approximate encoding: no LUT size, interpolation or rounding tried
+reproduces them), each profile's matrix (read back from the float path:
+an extended-linear float context's outputs are `M . q / 4096` exactly; the
+matrices are not the Bradford-adapted products of the profiles' colorants,
+which miss by up to 1.5 units), and the two curves' 12-bit tables (read
+back the same way, with own profiles of sRGB's colorants and one curve).
+Someone who derives any of them can replace them in `colour.rs`; a test
+checks the encoding table against its checksum. Adobe RGB's gamma
+(563/256) and a parametric gamma of exactly 2.2 follow a curve near
+`x^2.2` that differs at 75 of 256 inputs and is not implemented. Display
+profiles (curves as tables, as in the corpus's three refused catalogs)
+aren't established either.
 
 ## Image sets
 

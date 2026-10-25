@@ -185,8 +185,7 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
         }
         seen.push((s.idiom, s.subtype, s.size.to_bits(), s.scale));
         let bytes = std::fs::read(&s.file).map_err(|e| format!("{}: {e}", s.file.display()))?;
-        image::check_color_management(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?;
-        let img = image::decode_png(&bytes)?;
+        let img = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?;
         // Xcode stores a grey icon as GA8 (grey atlases named `S.O.1`),
         // which this actool doesn't write for icons yet.
         if img.is_gray() {
