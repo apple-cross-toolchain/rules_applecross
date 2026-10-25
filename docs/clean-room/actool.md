@@ -359,9 +359,8 @@ is converted too; an `sRGB` chunk changes nothing.
 Of these, this actool converts the profiles with one 8-bit rendition that
 it knows: Generic RGB and ITU-709, matched by their colorants, white point
 and curves (`colour.rs`). The conversion below equals that drawing for
-all 16,777,216 colours of each, as it does for Display P3, Adobe RGB (with
-its curve measured), ROMM, ITU-2020, DCI-P3 and ACEScg with their own
-matrices and curves. With the two profiles, 49 image sets (gradients,
+all 16,777,216 colours of each, as it does for Display P3, Adobe RGB,
+ROMM, ITU-2020, DCI-P3 and ACEScg with their own matrices and curves. With the two profiles, 49 image sets (gradients,
 noise, few colours and patterns, opaque and translucent, 6 to 300 px) and
 6 icon sets (a single 1024 pt image, an image per size, legacy slots)
 compiled byte-identical; 15 more image sets were refused for their row
@@ -410,14 +409,19 @@ The three parts were first measured: `E`'s 65 departures from
 The derivations above reproduce all of them, and tests check them against
 the measured data.
 
-Not established: Adobe RGB's gamma (563/256) and a parametric gamma of
-exactly 2.2. They follow `x^2.2` within 1.3 (12-bit) but differ at 75 of
-256 inputs. The error jumps at inputs `16k + 8` and grows linearly away
-from nodes at `16k / 255`, like an expansion around the nearest of 17
-nodes; the best such model still misses 10. A 16-bit image's float output
-is `x^2.2` to float precision, so only the 8-bit path approximates.
-Display profiles (curves as tables, as in the corpus's three refused
-catalogs) aren't established either.
+A gamma of exactly 2.2 takes another path. That's a parametric 2.2 (its
+s15Fixed16 value; the neighbouring values are ordinary gammas) or a
+`curv` gamma of 563/256, as in Adobe RGB. It has no toe, and widens the
+8-bit input to 12 bits first: `v12 = (257 * x + 8) >> 4`, then
+`q = round((v12 / 4096)^2.2 * 4096)`. That reproduces the 12-bit table read
+back for a parametric 2.2 profile of our own and for each of Adobe RGB's
+channels, all 256 entries, and is no closer than 0.003 to a rounding
+tie. A 16-bit image's float output is `x^2.2` to float precision; only the
+8-bit path does this. This actool doesn't use it yet: Adobe RGB is wide
+gamut, and other 2.2 profiles aren't among those it converts.
+
+Not established: display profiles (curves as tables, as in the corpus's
+three refused catalogs).
 
 ## Image sets
 
