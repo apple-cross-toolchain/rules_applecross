@@ -351,31 +351,108 @@ gradient alone). ImageIO's image drawn into an 8-bit sRGB `CGContext` gives
 Xcode's pixels exactly: compiling those pixels untagged gives Xcode's
 output for 64x68 images (a 16-level colour cube and a grey ramp) with
 Display P3, Adobe RGB, Generic RGB, ITU-709, ITU-2020, ROMM, DCI-P3, ACEScg
-and sRGB profiles. Wide-gamut profiles (Display P3, Adobe RGB, ITU-2020,
-ROMM, DCI-P3, ACEScg) add a 16-bit extended-sRGB rendition beside the
-8-bit one. A PNG with `gAMA` other than 1/2.2 or `cHRM` other than sRGB's
-is converted too; an `sRGB` chunk changes nothing.
+and sRGB profiles. A wide-gamut profile adds a 16-bit extended-sRGB
+rendition beside the 8-bit one, but only for an image with colours well
+outside sRGB (below). A PNG with `gAMA` other than 1/2.2 or `cHRM` other
+than sRGB's is converted too; an `sRGB` chunk changes nothing.
 
-Of these, this actool converts the profiles with one 8-bit rendition that
-it knows: Generic RGB and ITU-709, matched by their colorants, white point
-and curves (`colour.rs`). The conversion below equals that drawing for
-all 16,777,216 colours of each, as it does for Display P3, Adobe RGB,
-ROMM, ITU-2020, DCI-P3 and ACEScg with their own matrices and curves. With the two profiles, 49 image sets (gradients,
-noise, few colours and patterns, opaque and translucent, 6 to 300 px) and
-6 icon sets (a single 1024 pt image, an image per size, legacy slots)
-compiled byte-identical; 15 more image sets were refused for their row
-predictors.
-Other profiles, profiles with `gAMA` or `cHRM` beside them, and greyscale
-PNGs with profiles are refused. Translucent pixels are converted, then
-premultiplied.
+This actool converts any RGB profile with colorants and one curve for all
+three channels, in the forms below, and refuses the image where Xcode
+would add a 16-bit rendition (`colour.rs`). The conversion below equals
+that drawing for all 16,777,216 colours of Generic RGB, ITU-709, Display
+P3, Adobe RGB, ROMM, ITU-2020, DCI-P3 and ACEScg. Translucent pixels are
+converted, then premultiplied. Refused:
+- profiles with lookup tables (`A2B0` and the like);
+- a different curve per channel (below);
+- curves not established (below);
+- profiles beside `gAMA` or `cHRM`;
+- greyscale PNGs with profiles.
+
+What compiled byte-identical against Xcode 27.0:
+- Generic RGB and ITU-709: 50 image sets (gradients, noise, few colours
+  and patterns, opaque and translucent, 6 to 300 px; 14 more refused for
+  their row predictors) and 6 icon sets (a single 1024 pt image, an image
+  per size, legacy slots).
+- The corpus's display profiles and the wide-gamut system profiles, on
+  grey, muted, gradient, noise, pastel (also translucent) and saturated
+  images: 24 image sets. The 38 refused all had a 16-bit rendition in
+  Xcode.
+- Profiles of our own with Generic RGB's colorants and each curve form:
+  44 image sets, the rest refused for their row predictors.
+- A display profile's icon sets (single size and an image per size).
+- RxExample's catalog, an app icon with a display profile whose curves
+  are 1024-entry tables, and a second WebRTC catalog, taking the 350-catalog
+  comparison from 98 byte-identical to 100.
+
+### Curves
+
+- `curv` with no entries, or gamma 256/256: linear.
+- `curv` gamma 461/256: 1.8 with the toe (below). Gamma 563/256: the 2.2
+  path (below). Other `curv` gammas aren't established.
+- A `curv` table that ColorSync takes for sRGB's curve: sRGB's parametric
+  curve, evaluated as type 3 is. A table counts as sRGB's when its linear
+  interpolation stays near sRGB's curve everywhere. Tables of 256, 1024 and
+  4096 entries within 4.78 (of 65535) were taken. A 64-entry table, 6.32
+  away, and tables 8 or more away (a single entry included) weren't.
+- Other tables aren't established, and are refused. ColorSync reads them
+  one of two ways. A power-like table becomes a gamma it estimates from the
+  table, evaluated on the input widened to 12 bits, `v12 = (257 * x + 8)
+  >> 4` (`[0, 0.25, 1]` gives 2.0). Any
+  other table is interpolated linearly at `min(v12, 4095) / 4096` (exact on
+  the tables probed). Neither the estimate nor which tables count as
+  power-like is established.
+- `para` type 0: a gamma of 1.0 to 3.0, with the toe, except exactly 2.2
+  (the 2.2 path).
+- `para` type 3: in double precision, except BT.709's parameters as
+  ITU-709 and ITU-2020 write them, taken as gamma 2.4. Parameters near
+  BT.709's are taken the same way by a rule not established, and are
+  refused. Other types aren't established.
+
+With a different curve on each channel, ColorSync widens every channel's
+input to 12 bits (`v12`): gamma 1.8 with its toe then
+matches exactly on the widened input. An sRGB table on one of the channels
+misses 4 of 256 there, so such profiles are refused.
+
+### Wide gamut
+
+Xcode adds the 16-bit rendition only for profiles CoreGraphics calls wide
+gamut (`CGColorSpace.isWideGamutRGB`), and only for an image with colours
+outside sRGB beyond a margin.
+
+A profile is wide when its colorants' triangle in xy chromaticity has an
+area of 0.13447 or more (1.2327 times sRGB's). The flip fell between 0.134467
+and 0.134471 on every path tried: moving the red primary out, moving the
+green primary out, and moving the colorants toward Display P3's or Adobe
+RGB's. Moving the blue primary out never reached it. The curves and white
+point don't count.
+- Wide: Display P3, Adobe RGB, ITU-2020, ROMM, DCI-P3, ACEScg.
+- Not wide: Generic RGB, ITU-709, sRGB, and the corpus's display profile.
+
+Xcode follows the API at the flip: a saturated image with profiles just
+either side of it got one rendition and two.
+
+From a wide profile, Xcode stored one 8-bit rendition when every channel
+of every pixel's linear sRGB value (`M . q`) stayed between about -0.0018
+and 1.003. On Display P3, across hues:
+- down to -0.00181 and up to 1.00299 gave one rendition;
+- -0.00189, and 1.00799 or more, gave two.
+
+The margins aren't symmetric, and no colour difference (ΔE76) or
+encoded-value measure tried explains them. This actool converts an image
+from a wide profile only within -0.0017 to 1.002, and refuses the rest. No
+narrow profile probed added the rendition, though RxExample's icon reaches
+-0.023 and 1.041 under its display profile, and Generic RGB's primaries
+fall outside sRGB too.
+
+### Conversion
 
 The conversion, for each channel of an 8-bit pixel `x`:
 
 - 12-bit linear `q = round(L(x / 255) * 4096)`, with `L` the profile's
   curve: a parametric curve of type 3 in double precision, except that
   BT.709's parameters (ITU-709, ITU-2020) are taken as a pure gamma 2.4; a
-  gamma of 1.5 or more has a toe, `L = max(x^g, x / 16)`; a `curv` gamma of
-  461/256 is snapped to 1.8 (Generic RGB);
+  gamma has a toe, `L = max(x^g, x / 16)` (which matters from about 1.5
+  on); a `curv` gamma of 461/256 is snapped to 1.8 (Generic RGB);
 - `idx = clamp((sum M[r][c] * q_c) >> 15, 0, 8191)` with `M` the matrix
   to sRGB in units of 2^-16 (below);
 - the output is `E[(idx + 1) >> 1]`, where the sRGB encoding `enc` is
@@ -417,11 +494,7 @@ s15Fixed16 value; the neighbouring values are ordinary gammas) or a
 back for a parametric 2.2 profile of our own and for each of Adobe RGB's
 channels, all 256 entries, and is no closer than 0.003 to a rounding
 tie. A 16-bit image's float output is `x^2.2` to float precision; only the
-8-bit path does this. This actool doesn't use it yet: Adobe RGB is wide
-gamut, and other 2.2 profiles aren't among those it converts.
-
-Not established: display profiles (curves as tables, as in the corpus's
-three refused catalogs).
+8-bit path does this.
 
 ## Image sets
 
