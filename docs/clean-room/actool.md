@@ -223,20 +223,27 @@ Small images are packed into atlases
 attribute order, ending with four zero bytes. Measured over 70 random sets
 and every icon set in the examples:
 
-- BITMAPKEYS' blocks follow a CoreFoundation table of the identifiers,
-  filled in the order their renditions were first allocated (linear
-  probing, as CFBasicHash.c publishes). That reproduces 547 of 570 catalogs
-  examined; all 23 others have atlases and identifiers that share a
-  bucket, where Xcode's order differs in a way not established (rendition
-  key, facet, name and identifier orders, NSMutableSet growth, pre-sized
-  tables and hidden atlas entries all fit fewer). Catalogs with atlases
-  and colliding identifiers are refused.
+- BITMAPKEYS' blocks follow a table of the identifiers, filled in the
+  order their renditions were first allocated: CoreFoundation's number
+  hash, bucket counts and linear probing (as CFBasicHash.c publishes), but
+  growing as soon as an insertion takes it past its capacity, not before
+  one would. 7, 13, 23 and 41 buckets grow on the 7th, 12th, 20th and 33rd
+  entry, and a full 3-bucket table before the 4th. That reproduces all 258
+  catalogs of the 350-catalog comparison with BITMAPKEYS. The 14 of them
+  that CoreFoundation's own growth missed all have atlases, identifiers
+  sharing a bucket, and a count at or past a capacity, so where the table
+  grew shows. 52 entries,
+  85 to 88 and 119 or more aren't pinned (the 71- and 127-bucket tables'
+  growth), and catalogs with those counts are refused.
 - Per (scale, idiom, subtype), images are taken largest area first, equal
   areas by name identifier. One of more than 18,050 px² × scale is not
   packed; neither is the only packable image of a group.
 - Atlases fill next-fit: an atlas takes images while the area it already
-  holds is below the cap, then the next atlas (`dimension1` 1, 2, ...)
-  begins; the key format then includes `dimension1`.
+  holds is below the cap, then the next atlas begins; the key format then
+  includes `dimension1`. A scale's atlases take their `dimension1` in the
+  order of their creation indices as decimal strings: with 19 atlases the
+  third is 11 and the eleventh 2 ("0", "1", "10", ..., "18", "2", ...). With
+  ten or fewer that's their creation order.
 - Within an atlas, Jake Gordon's growing binary-tree packer, with blocks of
   (w + 2, h + 2) placed 2 px in. Each side of the atlas is the root's, plus
   one, rounded up to even.
@@ -576,10 +583,10 @@ component count and the components as doubles.
   output and this actool's were byte-identical. Other runs differ only in
   where those blocks lie.
 
-Colours take bitmap keys as images do. In catalogs with colours,
-identifiers that share a bucket of the bitmap key table came out in an
-order not established (25 of 54 random colour catalogs), so those are
-refused, as with atlases.
+Colours take bitmap keys as images do, in the order of the identifier
+table under Packed images; 54 of 54 random catalogs of 2 to 39 colour sets
+were byte-identical with it (25 of 54 like them had identifiers sharing a
+bucket, which the earlier model refused).
 
 Refused: idioms other than universal (Xcode thins them by target device: an
 iPhone build kept iphone and car and dropped universal), system colour
@@ -598,7 +605,8 @@ the same element, part and identifier. Each is a `dmp2` image (above),
 layout 12, named after its file: TLVs 0x3e9 (1, 0, 0, width, height), 0x3eb
 (1, 0, 0, 0, 0, width, height), the composition, 0x3ee 1 and 0x3ef the
 bytes per row rounded up to 32 (240 is 256). Its CSI flags are the
-rendering intent: 16 automatic (no property), 8 template, 0 original. The
+rendering intent: 16 automatic (no property), 8 template, 0 original. Xcode
+also takes `template-rendering-intent` from the image set's `info`. The
 key format is the app icons' without `dimension2` when nothing uses it.
 
 An image whose every pixel is grey once premultiplied (R = G = B, whatever

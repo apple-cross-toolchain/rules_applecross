@@ -64,20 +64,44 @@ pub fn number_hash(v: i64) -> u64 {
     v.unsigned_abs().wrapping_mul(2_654_435_761)
 }
 
-/// The bucket count of a CoreFoundation table grown one entry at a time to
-/// hold `n` entries.
-pub fn table_size_for(n: usize) -> usize {
-    let mut level = 0;
-    while TABLE_CAPACITIES[level] < n {
-        level += 1;
-    }
-    TABLE_SIZES[level]
-}
-
-/// The same for a table of integer CFNumbers, filled in `values` order.
+/// The enumeration order (indices into `values`) of actool's table of
+/// integer identifiers, filled in `values` order. Its buckets, hash and
+/// linear probing are CoreFoundation's, but it grows as soon as an insertion
+/// takes it past its capacity, rather than before an insertion would, and a
+/// full 3-bucket table before the next insertion: 7, 13, 23, 41 and 71
+/// buckets hold up to 6, 11, 19, 32 and 52 entries and grow on the 7th,
+/// 12th, 20th, 33rd and 53rd (258 of 258 catalogs). Counts where this
+/// isn't established are refused by [`number_table_order_established`].
 pub fn number_table_order(values: &[i64]) -> Vec<usize> {
     let hashes: Vec<u64> = values.iter().map(|&v| number_hash(v)).collect();
-    hashed_table_order(&hashes)
+    let mut level = 1;
+    let mut table: Vec<Option<usize>> = vec![None; TABLE_SIZES[level]];
+    let grow = |table: &mut Vec<Option<usize>>, level: usize| {
+        let old: Vec<usize> = table.iter().flatten().copied().collect();
+        *table = vec![None; TABLE_SIZES[level]];
+        for k in old {
+            insert(table, hashes[k], k);
+        }
+    };
+    for (n, &h) in hashes.iter().enumerate() {
+        if level == 1 && n == TABLE_SIZES[1] {
+            level += 1;
+            grow(&mut table, level);
+        }
+        insert(&mut table, h, n);
+        while level > 1 && n + 1 > TABLE_CAPACITIES[level] {
+            level += 1;
+            grow(&mut table, level);
+        }
+    }
+    table.into_iter().flatten().collect()
+}
+
+/// Whether [`number_table_order`] is established for `n` identifiers: the
+/// growth of the 71-bucket table (at 52 or 53 entries), of the 127-bucket
+/// one (85 to 88) and from 119 on aren't pinned by the catalogs examined.
+pub fn number_table_order_established(n: usize) -> bool {
+    n != 52 && !(85..=88).contains(&n) && n < 119
 }
 
 fn hashed_table_order(hashes: &[u64]) -> Vec<usize> {
@@ -159,4 +183,28 @@ pub fn set_order(keys: &[&str]) -> Vec<usize> {
         }
     }
     table.into_iter().flatten().collect()
+}
+
+#[cfg(test)]
+mod identifier_tests {
+    use super::*;
+
+    /// BITMAPKEYS orders of Xcode 27.0 catalogs, from their identifiers in
+    /// first-allocated order: three in a 3-bucket table, seven growing it to
+    /// 13 buckets as the seventh goes in, twenty growing it to 41.
+    #[test]
+    fn identifier_tables() {
+        let cases: [(&[i64], &[i64]); 3] = [
+            (&[53707, 38169, 64490], &[38169, 53707, 64490]),
+            (&[29645, 16260, 665, 18834, 39099, 31875, 40662], &[29645, 16260, 18834, 665, 40662, 31875, 39099]),
+            (
+                &[29730, 16758, 6177, 16623, 22442, 20047, 24378, 55041, 44678, 43317, 50974, 62641, 56507, 14700, 35962, 27243, 25029, 33513, 61679, 41912],
+                &[16758, 55041, 27243, 25029, 6177, 33513, 35962, 29730, 24378, 43317, 41912, 44678, 16623, 22442, 61679, 62641, 56507, 20047, 14700, 50974],
+            ),
+        ];
+        for (filled, xcode) in cases {
+            let order: Vec<i64> = number_table_order(filled).into_iter().map(|i| filled[i]).collect();
+            assert_eq!(order, xcode);
+        }
+    }
 }
