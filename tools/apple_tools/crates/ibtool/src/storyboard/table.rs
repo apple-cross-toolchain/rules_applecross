@@ -304,6 +304,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         actions: Vec::new(),
         segues: Vec::new(),
         containers: Vec::new(),
+        control_outlets: Vec::new(),
         guides: Vec::new(),
     };
     let cf = frame(content)?;
@@ -315,8 +316,8 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             subviews.push(subview(&mut nib, &mut scene, c)?);
         }
     }
-    if !scene.actions.is_empty() || !scene.segues.is_empty() {
-        return fail("actions and segues in a cell are not supported by this ibtool");
+    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() {
+        return fail("actions, outlets and segues in a cell are not supported by this ibtool");
     }
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
