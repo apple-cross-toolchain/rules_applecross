@@ -332,6 +332,14 @@ impl Nib {
     }
 }
 
+/// Whether a colour is an opaque white in a grey space, which some views'
+/// backgrounds take as a system colour.
+fn opaque_grey_white(n: Node) -> Result<bool, String> {
+    let space = n.attribute("customColorSpace").or_else(|| n.attribute("colorSpace"));
+    let grey = matches!(space, Some("genericGamma22GrayColorSpace" | "calibratedWhite" | "deviceWhite"));
+    Ok(grey && n.attribute("white").map(number).transpose()? == Some(1.0) && n.attribute("alpha").map(number).transpose()? == Some(1.0))
+}
+
 fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     // A system colour is Xcode's own whatever the document says: its
     // definition in the resources, or Xcode 11's fallback name and
@@ -521,10 +529,16 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
     })
 }
 
-/// A text field's `<textInputTraits>` as its values, in Xcode's order. The
+/// A system colour by name, as the table above has it.
+fn system_color_named(nib: &mut Nib, name: &str) -> Result<Value, String> {
+    let (_, c) = SYSTEM_COLORS.iter().find(|(n, _)| *n == name).ok_or_else(|| format!("system colour {name} is not supported by this ibtool"))?;
+    Ok(nib.system_color(name, c))
+}
+
+/// A text field's or text view's `<textInputTraits>` as its values, in Xcode's order. The
 /// enumerations are UIKit's; a default (0) is left out. Secure entry turns
 /// autocorrection and inline prediction off.
-fn text_input_traits(nib: &mut Nib, t: Node) -> Result<Vec<(&'static str, Value)>, String> {
+fn text_input_traits(nib: &mut Nib, t: Node, text_view: bool) -> Result<Vec<(&'static str, Value)>, String> {
     only_attributes(t, &[
         ("key", Some("textInputTraits")), ("autocapitalizationType", None), ("autocorrectionType", None), ("spellCheckingType", None),
         ("keyboardType", None), ("keyboardAppearance", None), ("returnKeyType", None), ("enablesReturnKeyAutomatically", Some("YES")),
@@ -543,12 +557,17 @@ fn text_input_traits(nib: &mut Nib, t: Node) -> Result<Vec<(&'static str, Value)
     let no_yes = ["default", "no", "yes"];
     let secure = t.attribute("secureTextEntry").is_some();
     let mut values = Vec::new();
+    // A text view's default is sentences: it leaves that out and writes
+    // none.
+    let capitalization = lookup("autocapitalizationType", &["none", "words", "sentences", "allCharacters"])?;
+    if (text_view && capitalization != 2) || (!text_view && capitalization != 0) {
+        values.push(("UIAutocapitalizationType", Value::Int(capitalization)));
+    }
     let mut push = |key: &'static str, v: i64| {
         if v != 0 {
             values.push((key, Value::Int(v)));
         }
     };
-    push("UIAutocapitalizationType", lookup("autocapitalizationType", &["none", "words", "sentences", "allCharacters"])?);
     push("UIAutocorrectionType", if secure { 1 } else { lookup("autocorrectionType", &no_yes)? });
     push("UISpellCheckingType", lookup("spellCheckingType", &no_yes)?);
     push("UIKeyboardAppearance", match t.attribute("keyboardAppearance") {
@@ -1068,7 +1087,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             };
             only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections"])?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
-            let trait_values = text_input_traits(nib, traits)?;
+            let trait_values = text_input_traits(nib, traits, false)?;
             for c in children(n, "connections") {
                 only_children(c, &["outlet", "action"])?;
                 for o in children(c, "outlet") {
@@ -1147,6 +1166,147 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
             }
             Object::new("UITextField", values)
+        }
+        "textView" => {
+            only_attributes(n, &[
+                ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("textAlignment", None),
+                ("text", None), ("editable", Some("NO")), ("selectable", Some("NO")), ("scrollEnabled", Some("NO")), ("bounces", Some("NO")),
+                ("bouncesZoom", Some("NO")), ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")),
+                ("adjustsFontForContentSizeCategory", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections"])?;
+            for c in children(n, "color") {
+                if !matches!(c.attribute("key"), Some("backgroundColor" | "textColor")) {
+                    return fail("text view colours other than its background and text are not supported by this ibtool");
+                }
+            }
+            let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
+                (Some(c), None) => Some(c),
+                (None, Some(_)) => None,
+                _ => return fail("a text view needs one text colour or nil"),
+            };
+            let text = match (n.attribute("text"), children(n, "string").find(|c| c.attribute("key") == Some("text"))) {
+                (Some(t), None) => Some(t.to_string()),
+                (None, Some(s)) => {
+                    only_attributes(s, &[("key", Some("text"))])?;
+                    Some(s.text().unwrap_or("").to_string())
+                }
+                (None, None) => None,
+                _ => return fail("a text view with two texts is not supported by this ibtool"),
+            };
+            if text.is_some() && nib.localizable {
+                return fail("a text view's text in a localizable storyboard is not supported by this ibtool");
+            }
+            let traits = children(n, "textInputTraits").next().ok_or("text view without text input traits")?;
+            if traits.attribute("secureTextEntry").is_some() {
+                return fail("a secure text view is not supported by this ibtool");
+            }
+            let trait_values = text_input_traits(nib, traits, true)?;
+            for c in children(n, "connections") {
+                only_children(c, &["outlet"])?;
+                for o in children(c, "outlet") {
+                    only_attributes(o, &[("property", Some("delegate")), ("destination", None), ("id", None)])?;
+                    if attr(o, "destination")? != scene.vc_id {
+                        return fail("a text view's delegate other than the scene's view controller is not supported by this ibtool");
+                    }
+                    scene.control_outlets.push(("delegate".into(), name.clone()));
+                }
+            }
+            let scrolls = n.attribute("scrollEnabled").is_none();
+            // An opaque grey white background is the system background.
+            if let Some(c) = child(n, "color", "backgroundColor") {
+                let background = if opaque_grey_white(c)? { system_color_named(nib, "systemBackgroundColor")? } else { color(nib, c)? };
+                values.push(("UIBackgroundColor", background));
+            }
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIOpaque", Value::Bool(true)));
+            if n.attribute("multipleTouchEnabled").is_some() {
+                values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
+            }
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            // A text view that doesn't scroll doesn't clip either.
+            if n.attribute("clipsSubviews").is_some() && scrolls {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+            if n.attribute("bounces").is_some() {
+                values.push(("UIBounceEnabled", Value::Bool(false)));
+            }
+            if n.attribute("showsHorizontalScrollIndicator").is_some() {
+                values.push(("UIShowsHorizontalScrollIndicator", Value::Bool(false)));
+            }
+            if n.attribute("showsVerticalScrollIndicator").is_some() {
+                values.push(("UIShowsVerticalScrollIndicator", Value::Bool(false)));
+            }
+            if !scrolls {
+                values.push(("UIScrollDisabled", Value::Bool(true)));
+            }
+            if n.attribute("bouncesZoom").is_none() {
+                values.push(("UIBouncesZoom", Value::Bool(true)));
+            }
+            values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
+            let alignment = text_alignment(n.attribute("textAlignment"))?;
+            let font_node = Some(child(n, "fontDescription", "fontDescription").ok_or("a text view without a font")?);
+            // The text is attributed with its colour, font and alignment
+            // (AppKit's NSTextAlignment: right 1, center 2; left left out),
+            // which the view's own values then refer to.
+            if let Some(text) = text {
+                let string = nib.string(&text);
+                values.push(("UIText", string));
+                let string = nib.string(&text);
+                let mut attributes = Vec::new();
+                if let Some(c) = text_color {
+                    attributes.extend([nib.string("NSColor"), color(nib, c)?]);
+                }
+                attributes.extend([nib.string("NSFont"), font(nib, font_node, None)?]);
+                let mut paragraph = Vec::new();
+                let ns_alignment = match alignment {
+                    0 => None,
+                    1 => Some(2),
+                    2 => Some(1),
+                    other => Some(other),
+                };
+                if let Some(a) = ns_alignment {
+                    paragraph.push(("NSAlignment", Value::Int(a)));
+                }
+                paragraph.push(("NSTabStops", Value::Nil));
+                attributes.extend([nib.string("NSParagraphStyle"), Value::New(Object::new("NSMutableParagraphStyle", paragraph))]);
+                let attributes = nib.array("NSDictionary", attributes);
+                values.push(("UIAttributedText", Value::New(Object::new("NSAttributedString", vec![("NSString", string), ("NSAttributes", attributes)]))));
+            }
+            if n.attribute("adjustsFontForContentSizeCategory").is_some() {
+                values.push(("UIAdjustsFontForContentSizeCategory", Value::Bool(true)));
+            }
+            values.push(("UIFont", font(nib, font_node, None)?));
+            if let Some(c) = text_color {
+                values.push(("UITextColor", color(nib, c)?));
+            }
+            values.push(("UITextAlignment", Value::Int(alignment)));
+            if n.attribute("editable").is_some() {
+                values.push(("UIEditable", Value::Bool(false)));
+            }
+            if n.attribute("selectable").is_some() {
+                values.push(("UISelectable", Value::Bool(false)));
+            }
+            values.extend(trait_values);
+            // Highlighted text is system blue, outlined in the secondary
+            // system fill.
+            let color_key = nib.string("NSColor");
+            let blue = system_color_named(nib, "systemBlueColor")?;
+            let outline_key = nib.string("NSTextHighlightOutlineColor");
+            let fill = system_color_named(nib, "secondarySystemFillColor")?;
+            values.push(("UITextHighlightAttributes", nib.array("NSDictionary", vec![color_key, blue, outline_key, fill])));
+            values.push(("UITextAllowsNumberPadPopover", Value::Bool(true)));
+            Object::new("UITextView", values)
         }
         "button" => {
             // `fixedFrame` is Interface Builder's alone, and a system button
