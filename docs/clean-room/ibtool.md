@@ -357,7 +357,7 @@ relationship segues, empty toolbar items) compiles to
 child: view and table view controllers as a navigation controller embeds
 its root, and navigation controllers with their bar and root. The
 children's scenes add their view nibs, and their own nibs only when they
-are identified or a segue reaches them. Observed with 13 probes and 19
+are identified or a segue reaches them. Observed with 17 probes and 19
 storyboards from the corpus that use one (4 of them compile today; the
 rest are refused for other elements):
 
