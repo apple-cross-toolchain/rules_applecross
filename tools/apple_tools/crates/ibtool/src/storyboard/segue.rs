@@ -81,6 +81,36 @@ pub(super) fn segue_destinations<'a>(controllers: &[Node<'a, '_>], initial: Opti
     Ok(reached)
 }
 
+/// The order Xcode lists controllers' nibs in the Info.plist: depth first
+/// from each initial or identified controller, in document order, through
+/// its relationships, its own segues and then its view's.
+pub(super) fn load_order<'a>(controllers: &[Node<'a, '_>], initial: Option<&str>) -> Vec<&'a str> {
+    fn visit<'a>(c: Node<'a, '_>, controllers: &[Node<'a, '_>], order: &mut Vec<&'a str>) {
+        let Some(id) = c.attribute("id") else { return };
+        if order.contains(&id) {
+            return;
+        }
+        order.push(id);
+        let segues = c.descendants().filter(|d| d.has_tag_name("segue") && d.attribute("kind") != Some("unwind"));
+        let own = |s: &Node| s.parent().is_some_and(|p| p.has_tag_name("connections") && p.parent() == Some(c));
+        let relationships = segues.clone().filter(|s| s.attribute("kind") == Some("relationship"));
+        let owned = segues.clone().filter(|s| s.attribute("kind") != Some("relationship") && own(s));
+        let viewed = segues.filter(|s| s.attribute("kind") != Some("relationship") && !own(s));
+        for s in relationships.chain(owned).chain(viewed) {
+            if let Some(d) = controllers.iter().find(|d| d.attribute("id").is_some() && d.attribute("id") == s.attribute("destination")) {
+                visit(*d, controllers, order);
+            }
+        }
+    }
+    let mut order = Vec::new();
+    for c in controllers {
+        if c.attribute("id") == initial || c.attribute("storyboardIdentifier").is_some() {
+            visit(*c, controllers, &mut order);
+        }
+    }
+    order
+}
+
 /// A segue's template: its identifier, its destination's nib and how it is
 /// performed.
 fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<Object, String> {
@@ -138,6 +168,14 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
                 values.push(("UIAnimates", Value::Bool(false)));
             }
             "UIStoryboardPresentationSegueTemplate"
+        }
+        "embed" => {
+            if animates {
+                return fail("an embed segue that doesn't animate is not supported by this ibtool");
+            }
+            values.push(("UIPerformOnViewLoad", Value::Bool(true)));
+            values.push(("UIContainerView", Value::Nil));
+            "UIStoryboardEmbedSegueTemplate"
         }
         "push" => {
             if animates {

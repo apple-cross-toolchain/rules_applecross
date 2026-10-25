@@ -698,6 +698,9 @@ struct Scene<'a> {
     /// The ids of the segues controls trigger, in depth-first order; each is
     /// a `perform:` action on a placeholder of its own.
     segues: Vec<String>,
+    /// Container views' `containerView` outlets: (the placeholder of the
+    /// view's embed segue, the view).
+    containers: Vec<(String, String)>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -1115,12 +1118,29 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             values.push(("UIStackViewLayoutMarginsRelative", Value::Bool(false)));
             Object::new("UIStackView", values)
         }
-        "view" => {
-            only_attributes(n, &[
-                ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
-                ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
-            ])?;
-            only_children(n, &["rect", "autoresizingMask", "color", "subviews", "constraints"])?;
+        "view" | "containerView" => {
+            // A container view is a plain view its embed segue fills.
+            let container = n.has_tag_name("containerView");
+            if container {
+                only_attributes(n, &[("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None)])?;
+                only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
+                let segues: Vec<Node> = children(n, "connections").flat_map(|c| c.children().filter(|c| c.is_element())).collect();
+                let [sg] = segues[..] else {
+                    return fail("a container view needs one embed segue for this ibtool");
+                };
+                if !sg.has_tag_name("segue") || sg.attribute("kind") != Some("embed") {
+                    return fail("a container view's connections other than its embed segue are not supported by this ibtool");
+                }
+                let placeholder = format!("upstream segue {}", scene.segues.len());
+                scene.segues.push(attr(sg, "id")?.to_string());
+                scene.containers.push((placeholder, name.clone()));
+            } else {
+                only_attributes(n, &[
+                    ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                    ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+                ])?;
+                only_children(n, &["rect", "autoresizingMask", "color", "subviews", "constraints"])?;
+            }
             let mut inner = Vec::new();
             for s in children(n, "subviews") {
                 for c in s.children().filter(|c| c.is_element()) {
@@ -1140,7 +1160,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 values.push(("UIBackgroundColor", color(nib, c)?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
-            values.push(("UIOpaque", Value::Bool(true)));
+            if n.attribute("opaque").is_none() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             let mask = match children(n, "autoresizingMask").next() {
                 Some(m) => autoresizing_mask(m)?,
@@ -1795,6 +1817,42 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         nib_names.insert(attr(*c, "id")?.to_string(), segue::nib_name(*c)?);
     }
     let reached = segue::segue_destinations(&controllers, initial)?;
+    // An embed segue's destination is laid out at its container's size, and
+    // so is every controller a segue leads to from it, unless one has a
+    // freeform size of its own.
+    let mut embedded: HashMap<&str, (f64, f64)> = HashMap::new();
+    for container in root.descendants().filter(|d| d.has_tag_name("containerView")) {
+        for sg in container.descendants().filter(|d| d.has_tag_name("segue")) {
+            let destination = attr(sg, "destination")?;
+            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && matches!(c.tag_name().name(), "viewController" | "tableViewController")) {
+                return fail("an embed segue to anything but a view or table view controller is not supported by this ibtool");
+            }
+            let f = frame(container)?;
+            if embedded.insert(destination, (f.w, f.h)).is_some() {
+                return fail("a controller embedded more than once is not supported by this ibtool");
+            }
+        }
+    }
+    let mut queue: Vec<&str> = embedded.keys().copied().collect();
+    while let Some(id) = queue.pop() {
+        let size = embedded[id];
+        let Some(c) = controllers.iter().find(|c| c.attribute("id") == Some(id)) else { continue };
+        let segues = c.descendants().filter(|d| d.has_tag_name("segue") && !matches!(d.attribute("kind"), Some("relationship" | "unwind" | "embed")));
+        for sg in segues {
+            let destination = attr(sg, "destination")?;
+            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && matches!(c.tag_name().name(), "viewController" | "tableViewController")) {
+                return fail("a segue from an embedded controller to anything but a view or table view controller is not supported by this ibtool");
+            }
+            match embedded.get(destination) {
+                Some(other) if *other != size => return fail("a controller laid out at two containers' sizes is not supported by this ibtool"),
+                Some(_) => {}
+                None => {
+                    embedded.insert(destination, size);
+                    queue.push(destination);
+                }
+            }
+        }
+    }
     let mut navs = Vec::new();
     let mut tabs = Vec::new();
     for (index, scene_node) in scene_nodes.iter().enumerate() {
@@ -1869,7 +1927,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), containers: Vec::new(), guides: Vec::new() };
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -1914,6 +1972,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // default device's 393x852.
         let traits = root.attribute("useTraitCollections") == Some("YES");
         let f = match (generic_canvas, has_device, device_size, freeform) {
+            (true, _, _, None) | (false, true, Some(_), None) if embedded.contains_key(vc_id) => {
+                let (w, h) = embedded[vc_id];
+                Frame { x: 0.0, y: 0.0, w, h }
+            }
+            (false, false, _, _) | (false, true, None, None) if embedded.contains_key(vc_id) => {
+                return fail("an embedded controller without a device or the generic canvas is not supported by this ibtool")
+            }
             (true, _, _, None) if traits => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
             (true, _, _, None) => Frame { x: 0.0, y: 0.0, w: 393.0, h: 852.0 },
             (true, _, _, Some((w, h))) if traits => Frame { x: 0.0, y: 0.0, w, h },
@@ -2121,6 +2186,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let mut connections = Vec::new();
             let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
             outlets.push(("view", "owner", &root_name));
+            outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
             outlets.sort_by(|a, b| a.0.cmp(b.0));
             for (label, source, destination) in outlets {
                 connections.push(outlet(&mut nib, label, source, destination));
@@ -2282,10 +2348,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     outputs.sort_by_key(|o| o.0);
     let mut files = Vec::new();
     let mut identifiers = Vec::new();
-    for (_, scene_files, entry) in outputs {
+    // The Info.plist lists the controllers in the order they load.
+    let order = segue::load_order(&controllers, initial);
+    let position = |index: usize| segue::scene_controller(scene_nodes[index]).and_then(|c| c.attribute("id")).and_then(|id| order.iter().position(|o| *o == id));
+    let mut entries = Vec::new();
+    for (index, scene_files, entry) in outputs {
         files.extend(scene_files);
-        identifiers.extend(entry);
+        entries.extend(entry.map(|e| (position(index), e)));
     }
+    entries.sort_by_key(|e| e.0.unwrap_or(usize::MAX));
+    identifiers.extend(entries.into_iter().map(|e| e.1));
     // Xcode renames nibs whose names differ only in case and keeps one of
     // equal identifiers.
     let mut names: Vec<String> = files.iter().map(|(n, _)| n.to_lowercase()).collect();
