@@ -1,149 +1,154 @@
-//! Colour sets (docs/clean-room/actool.md): a universal colour per set, for
-//! any appearance, stored as a `COLR` rendition of its colour space and
-//! components.
+//! Colour sets: each colour a rendition of its appearance
+//! (docs/clean-room/actool.md).
 
 use crate::car::{self, Facet, Rendition};
-use crate::imageset::Compiled;
 use crate::read_json;
-use std::path::PathBuf;
 
-pub const PART_COLOR: u16 = 217;
+/// The appearances colours are keyed by, and their names in the catalog's
+/// table, by value.
+pub const APPEARANCES: [&str; 6] =
+    ["UIAppearanceAny", "UIAppearanceDark", "UIAppearanceHighContrastAny", "UIAppearanceHighContrastDark", "UIAppearanceLight", "UIAppearanceHighContrastLight"];
 
-/// A component as Xcode reads it: with a decimal point, a 32-bit float;
-/// otherwise an integer (decimal or `0x` hex) out of 255.
-fn component(s: &str) -> Result<f64, String> {
-    if s.contains('.') {
-        return s
-            .parse::<f32>()
-            .map(f64::from)
-            .map_err(|_| format!("not a colour component: {s}"));
+/// Colour spaces by name, their code in a colour rendition and their
+/// components.
+const SPACES: [(&str, u32, &[&str]); 6] = [
+    ("srgb", 1, &["red", "green", "blue", "alpha"]),
+    ("gray-gamma-22", 2, &["white", "alpha"]),
+    ("display-p3", 3, &["red", "green", "blue", "alpha"]),
+    ("extended-srgb", 4, &["red", "green", "blue", "alpha"]),
+    ("extended-linear-srgb", 5, &["red", "green", "blue", "alpha"]),
+    ("extended-gray", 6, &["white", "alpha"]),
+];
+
+/// A component as Xcode reads it: with a decimal point, a float (single
+/// precision, "0.333" is 0.3330000042915344); `0x` and hex digits over
+/// 16^n - 1 ("0x1FF" is 511/4095); otherwise the leading integer over 255
+/// ("1" is 1/255, "1e-1" too). Leading spaces are skipped; nothing is
+/// clamped.
+fn component(text: &str) -> Option<f64> {
+    let t = text.trim_start();
+    if t.contains('.') {
+        return t.parse::<f32>().ok().map(f64::from);
     }
-    let n = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        Some(hex) => u32::from_str_radix(hex, 16),
-        None => s.parse::<u32>(),
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        let digits: String = hex.chars().take_while(char::is_ascii_hexdigit).collect();
+        let n = u64::from_str_radix(&digits, 16).ok()?;
+        return Some(n as f64 / (16f64.powi(digits.len() as i32) - 1.0));
     }
-    .map_err(|_| format!("not a colour component: {s}"))?;
-    Ok(n as f64 / 255.0)
+    let end = t.char_indices().take_while(|&(i, c)| c.is_ascii_digit() || (i == 0 && c == '-')).count();
+    t[..end].parse::<i64>().ok().map(|n| n as f64 / 255.0)
 }
 
-pub fn compile(
-    sets: &[(String, PathBuf)],
-    identifier: impl Fn(&str) -> u16,
-) -> Result<Compiled, String> {
-    let mut out = Compiled::default();
+/// The value of an entry's appearances: luminosity (light or dark) and
+/// contrast (high).
+fn appearance(entry: &serde_json::Value) -> Option<u16> {
+    let mut luminosity = None;
+    let mut high = false;
+    for a in entry["appearances"].as_array().map(Vec::as_slice).unwrap_or_default() {
+        match (a["appearance"].as_str(), a["value"].as_str()) {
+            (Some("luminosity"), Some(v @ ("light" | "dark"))) if luminosity.is_none() => luminosity = Some(v),
+            (Some("contrast"), Some("high")) if !high => high = true,
+            _ => return None,
+        }
+    }
+    Some(match (luminosity, high) {
+        (None, false) => 0,
+        (Some("dark"), false) => 1,
+        (None, true) => 2,
+        (Some("dark"), true) => 3,
+        (Some(_), false) => 4,
+        (Some(_), true) => 5,
+    })
+}
+
+/// Compiles colour sets, by name, for iOS: universal colours in the colour
+/// spaces above, for any appearance. Colour sets with no colours compile to
+/// nothing (the scan leaves them out).
+pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) -> u16) -> Result<(Vec<Facet>, Vec<Rendition>), String> {
+    let mut facets = Vec::new();
+    let mut renditions = Vec::new();
     for (name, dir) in sets {
+        let unsupported = |what: String| Err(format!("{}: {what} is not supported by this actool", dir.display()));
         let contents = read_json(&dir.join("Contents.json"))?;
-        for key in contents
-            .as_object()
-            .map(|o| o.keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default()
-        {
+        for key in contents.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default() {
             if !["colors", "info"].contains(&key.as_str()) {
-                return Err(format!(
-                    "{}: the {key} key of a colour set is not supported by this actool",
-                    dir.display()
-                ));
+                return unsupported(format!("the {key} key of a colour set"));
             }
         }
-        let entries: Vec<&serde_json::Value> = contents["colors"]
-            .as_array()
-            .ok_or_else(|| format!("{}: a colour set without a colors list", dir.display()))?
-            .iter()
-            .filter(|e| !e["color"].is_null())
-            .collect();
         let id = identifier(name);
-        out.facets.push(Facet {
-            name: name.clone(),
-            attrs: vec![
-                (car::ATTR_ELEMENT, car::ELEMENT_ICON),
-                (car::ATTR_PART, PART_COLOR),
-                (car::ATTR_IDENTIFIER, id),
-            ],
-        });
-        // A dark colour is appearance 1 and adds UIAppearanceDark to the
-        // appearance keys, but which of those two Xcode allocates first
-        // varies (7 of 12 small catalogs as Any first): not established.
-        if entries.len() != 1 {
-            return Err(format!("{}: colour sets with colours for other appearances or idioms are not supported by this actool", dir.display()));
-        }
-        let entry = entries[0];
-        for k in entry.as_object().unwrap().keys() {
-            if !["color", "idiom"].contains(&k.as_str()) {
-                return Err(format!(
-                    "{}: the {k} key of a colour is not supported by this actool",
-                    dir.display()
-                ));
+        let mut seen = Vec::new();
+        for entry in contents["colors"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            let Some(color) = entry["color"].as_object() else { continue };
+            for k in entry.as_object().unwrap().keys() {
+                if !["idiom", "appearances", "color"].contains(&k.as_str()) {
+                    return unsupported(format!("the {k} key of a colour"));
+                }
             }
+            if entry["idiom"].as_str() != Some("universal") {
+                return unsupported("a colour for an idiom other than universal".into());
+            }
+            let Some(appearance) = appearance(entry) else {
+                return unsupported(format!("the appearances {}", entry["appearances"]));
+            };
+            if seen.contains(&appearance) {
+                return unsupported("two colours for one appearance".into());
+            }
+            seen.push(appearance);
+            for k in color.keys() {
+                if !["color-space", "components"].contains(&k.as_str()) {
+                    return unsupported(format!("a colour's {k} key (system colours among them)"));
+                }
+            }
+            // Display P3 when none is named.
+            let space = color.get("color-space").and_then(|v| v.as_str()).unwrap_or("display-p3");
+            let Some(&(_, code, names)) = SPACES.iter().find(|s| s.0 == space) else {
+                return unsupported(format!("the colour space {space:?}"));
+            };
+            let given = color.get("components").and_then(|v| v.as_object()).cloned().unwrap_or_default();
+            if given.len() != names.len() {
+                return unsupported(format!("a {space} colour's components {}", serde_json::Value::Object(given)));
+            }
+            let mut components = Vec::new();
+            for n in names {
+                match given.get(*n).and_then(|v| v.as_str()).and_then(component) {
+                    Some(v) => components.push(v),
+                    None => return unsupported(format!("the {n} component {:?}", given.get(*n))),
+                }
+            }
+            let mut attrs = vec![(car::ATTR_SCALE, 1), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_COLOR)];
+            if appearance != 0 {
+                attrs.push((car::ATTR_APPEARANCE, appearance));
+            }
+            renditions.push(Rendition { attrs, csi: car::color_csi(name, code, &components) });
         }
-        if entry["idiom"].as_str() != Some("universal") {
-            return Err(format!(
-                "{}: colours for idioms other than universal are not supported by this actool",
-                dir.display()
-            ));
+        if !seen.is_empty() {
+            facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_COLOR), (car::ATTR_IDENTIFIER, id)] });
         }
-        let (space, values) = color_value(dir, &entry["color"])?;
-        out.renditions.push(Rendition {
-            attrs: vec![
-                (car::ATTR_SCALE, 1),
-                (car::ATTR_IDENTIFIER, id),
-                (car::ATTR_ELEMENT, car::ELEMENT_ICON),
-                (car::ATTR_PART, PART_COLOR),
-            ],
-            csi: car::color_csi(name, space, &values),
-        });
     }
-    Ok(out)
+    Ok((facets, renditions))
 }
 
-/// A colour's space code and components.
-fn color_value(
-    dir: &std::path::Path,
-    color: &serde_json::Value,
-) -> Result<(u32, Vec<f64>), String> {
-    for k in color
-        .as_object()
-        .ok_or("a colour that isn't an object")?
-        .keys()
-    {
-        if !["color-space", "components"].contains(&k.as_str()) {
-            return Err(format!(
-                "{}: the {k} key of a colour is not supported by this actool",
-                dir.display()
-            ));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Components as Xcode 27.0 stored them.
+    #[test]
+    fn components() {
+        let cases: [(&str, f64); 10] = [
+            ("0.123456789012345678", 0.12345679104328156),
+            ("0.333", 0.3330000042915344),
+            (".5", 0.5),
+            (" 0.5", 0.5),
+            ("1e-1", 1.0 / 255.0),
+            ("0x1FF", 511.0 / 4095.0),
+            ("0xff", 1.0),
+            ("256", 256.0 / 255.0),
+            ("-0.25", -0.25),
+            ("1.5", 1.5),
+        ];
+        for (text, value) in cases {
+            assert_eq!(component(text), Some(value), "{text}");
         }
     }
-    // Colour space codes; Display P3 when none is named.
-    let (space, names): (u32, &[&str]) = match color["color-space"].as_str() {
-        Some("srgb") => (1, &["red", "green", "blue", "alpha"]),
-        Some("gray-gamma-22") => (2, &["white", "alpha"]),
-        Some("display-p3") | None => (3, &["red", "green", "blue", "alpha"]),
-        Some("extended-srgb") => (4, &["red", "green", "blue", "alpha"]),
-        Some("extended-linear-srgb") => (5, &["red", "green", "blue", "alpha"]),
-        Some("extended-gray") => (6, &["white", "alpha"]),
-        Some(other) => {
-            return Err(format!(
-                "{}: colour space {other} is not supported by this actool",
-                dir.display()
-            ))
-        }
-    };
-    let components = color["components"]
-        .as_object()
-        .ok_or_else(|| format!("{}: a colour without components", dir.display()))?;
-    if components.len() != names.len() || names.iter().any(|n| !components.contains_key(*n)) {
-        return Err(format!(
-            "{}: these colour components are not supported by this actool",
-            dir.display()
-        ));
-    }
-    let values: Vec<f64> = names
-        .iter()
-        .map(|n| {
-            components[*n]
-                .as_str()
-                .ok_or_else(|| format!("{}: a colour component that isn't a string", dir.display()))
-                .and_then(component)
-        })
-        .collect::<Result<_, _>>()?;
-    Ok((space, values))
 }

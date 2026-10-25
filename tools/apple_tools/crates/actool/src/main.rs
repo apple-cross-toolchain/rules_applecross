@@ -109,7 +109,7 @@ struct Scan {
     solid_stacks: Vec<(String, PathBuf)>,
     /// Image sets by name.
     image_sets: Vec<(String, PathBuf)>,
-    /// Colour sets with a colour, by name.
+    /// Colour sets with colours, by name.
     color_sets: Vec<(String, PathBuf)>,
 }
 
@@ -277,11 +277,11 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         return Err(format!("{}: only the app icon's own Icon Composer document is supported by this actool", p.display()));
     }
     let mut images = imageset::compile(&scan.image_sets, name_identifier)?;
-    let colors = colorset::compile(&scan.color_sets, name_identifier)?;
-    images.facets.extend(colors.facets);
-    images.renditions.extend(colors.renditions);
+    let (color_facets, colors) = colorset::compile(&scan.color_sets, name_identifier)?;
+    images.facets.extend(color_facets);
+    images.renditions.extend(colors);
     if !images.is_empty() && platform != "ios" {
-        return Err("image sets are supported by this actool for iOS only".into());
+        return Err("image sets and colour sets are supported by this actool for iOS only".into());
     }
     if !images.is_empty() && (!scan.brand_assets.is_empty() || !scan.solid_stacks.is_empty()) {
         return Err("image sets alongside image stacks are not supported by this actool".into());
@@ -452,6 +452,22 @@ fn stack_icon(o: &Options, out_dir: &Path, platform: &str, scan: &Scan, outputs:
     Ok(Some(outputs))
 }
 
+/// The catalog's table of appearances: Any, and those its renditions use,
+/// by name.
+fn appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
+    let mut values = vec![0];
+    for r in renditions {
+        if let Some(&(_, v)) = r.attrs.iter().find(|a| a.0 == car::ATTR_APPEARANCE) {
+            if !values.contains(&v) {
+                values.push(v);
+            }
+        }
+    }
+    let mut table: Vec<(String, u16)> = values.into_iter().map(|v| (colorset::APPEARANCES[v as usize].to_string(), v)).collect();
+    table.sort();
+    table
+}
+
 /// What an app icon's catalog and partial Info.plist are for.
 enum Kind {
     Ios { phone: Option<iconset::DeviceIcons>, pad: Option<iconset::DeviceIcons> },
@@ -495,7 +511,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
             .into_iter()
             .chain(images.facets)
             .collect(),
-        appearances: if mac { Vec::new() } else { vec![("UIAppearanceAny".into(), 0)] },
+        appearances: if mac { Vec::new() } else { appearances(&renditions) },
         schema_version: 2,
         key_semantics: if mac { 1 } else { 2 },
         renditions,

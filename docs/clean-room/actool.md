@@ -544,6 +544,51 @@ channels, all 256 entries, and is no closer than 0.003 to a rounding
 tie. A 16-bit image's float output is `x^2.2` to float precision; only the
 8-bit path does this.
 
+## Colour sets
+
+A colour set's colours (iOS) are renditions keyed by appearance, scale 1,
+the set's identifier, element 85 and part 217; the set's facet has element,
+part and identifier. Each is a CSI with no size, scale or pixel format,
+layout 1009, the set's name, TLVs 0x3ec (0 and opacity 0.0) and 0x3ee 1,
+and a payload of `RLOC`, version 1, the colour space's code, the
+component count and the components as doubles.
+
+- **Colour spaces:** sRGB 1, `gray-gamma-22` 2, Display P3 3 (also when
+  no space is named), `extended-srgb` 4, `extended-linear-srgb` 5 and
+  `extended-gray` 6. The grey ones have white and alpha.
+- **Components** are read as text:
+  - with a decimal point, as a single-precision float ("0.333" is
+    0.3330000042915344);
+  - `0x` and hex digits, over 16^n - 1 ("0x33" is 0.2, "0x1FF" 511/4095);
+  - otherwise the leading integer over 255, alpha included ("1" is 1/255,
+    "1e-1" too, "256" is 256/255).
+
+  Leading spaces are skipped and nothing is clamped (1.5 and -0.25 stay).
+- **Appearances:** none 0 (`UIAppearanceAny`), dark 1 (`UIAppearanceDark`),
+  high contrast 2 (`UIAppearanceHighContrastAny`), dark and high contrast 3
+  (`UIAppearanceHighContrastDark`), light 4 (`UIAppearanceLight`), and light
+  and high contrast 5 (`UIAppearanceHighContrastLight`). The catalog's
+  APPEARANCEKEYS lists Any and those used, by name.
+- **Xcode's own output varies:** it allocates the appearance table's name and
+  value blocks in a different order on each run (six runs of one catalog gave
+  six orders), so a catalog with appearances has no one Xcode output. This
+  actool allocates them by name, an order Xcode also produced; that run's
+  output and this actool's were byte-identical. Other runs differ only in
+  where those blocks lie.
+
+Colours take bitmap keys as images do. In catalogs with colours,
+identifiers that share a bucket of the bitmap key table came out in an
+order not established (25 of 54 random colour catalogs), so those are
+refused, as with atlases.
+
+Refused: idioms other than universal (Xcode thins them by target device: an
+iPhone build kept iphone and car and dropped universal), system colour
+references (`"reference": "systemBlueColor"`, stored resolved, code 257,
+with their name), macOS catalogs, and keys not above. In the 350-catalog
+comparison 13 more catalogs now match: 8 byte-identical and 5 matching but
+for the appearance blocks' order. Two still stop at system colour
+references.
+
 ## Image sets
 
 For iOS, an image set's PNG images (universal idiom, at 1x, 2x or 3x, or no
@@ -593,30 +638,6 @@ translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were
 byte-identical.
-
-## Colour sets
-
-A colour set's colour is a rendition keyed by scale 1, the set's identifier
-(its name hashed as for image sets), element 85 and part 217, with a facet
-of the same element, part and identifier: a CSI of layout 1009 named after
-the set, no bitmap (flags, size, scale, pixel format and colour space 0),
-TLVs 0x3ec (0, 0.0) and 0x3ee (1), and the payload `COLR` (written `RLOC`),
-1, the colour space's code, the component count and the components as
-doubles. Codes: sRGB 1, gray-gamma-22 2, Display P3 3 (also when no space is
-named), extended sRGB 4, extended linear sRGB 5, extended gray 6. A
-component with a decimal point is read as a 32-bit float (`0.800` is
-0.800000011920929); one without, decimal or `0x` hex, as an integer out of
-255 (`1` is 1/255). Colours take bitmap keys as images do. Measured with
-twelve probes of every space and form, and colours beside image sets, an
-app icon and in a namespace folder.
-
-A dark colour is appearance 1 and adds `UIAppearanceDark` (1) to the
-appearance keys, but which of the two keys Xcode allocates first varies
-(Any first in 7 of 12 small catalogs, with nothing seen to tell them
-apart), so other appearances are refused, as are other idioms. In
-catalogs with colours, identifiers that share a bucket of the bitmap key
-table come out in an order not established (25 of 54 random colour
-catalogs), so those are refused, as with atlases.
 
 ## Image stacks
 
