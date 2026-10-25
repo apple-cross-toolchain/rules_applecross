@@ -508,9 +508,81 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
     Ok(match (platform, style) {
         (Platform::Ios, "UICTFontTextStyleHeadline") => (".SFUI-Semibold", 2, 14.0),
         (Platform::Ios, "UICTFontTextStyleCallout") => (".SFUI-Regular", 0, 13.0),
+        (Platform::Ios, "UICTFontTextStyleBody") => (".SFUI-Regular", 0, 14.0),
+        (Platform::Ios, "UICTFontTextStyleSubhead") => (".SFUI-Regular", 0, 12.0),
+        (Platform::Ios, "UICTFontTextStyleFootnote") => (".SFUI-Regular", 0, 12.0),
+        (Platform::Ios, "UICTFontTextStyleCaption1" | "UICTFontTextStyleCaption2") => (".SFUI-Regular", 0, 11.0),
+        (Platform::Ios, "UICTFontTextStyleTitle0") => (".SFUI-Regular", 0, 31.0),
+        (Platform::Ios, "UICTFontTextStyleTitle1") => (".SFUI-Regular", 0, 25.0),
+        (Platform::Ios, "UICTFontTextStyleTitle2") => (".SFUI-Regular", 0, 19.0),
+        (Platform::Ios, "UICTFontTextStyleTitle3") => (".SFUI-Regular", 0, 17.0),
         (Platform::Tvos, "UICTFontTextStyleTitle1") => (".SFUI-Medium", 0, 76.0),
         _ => return fail(format!("the {style} text style is not supported by this ibtool here")),
     })
+}
+
+/// A text field's `<textInputTraits>` as its values, in Xcode's order. The
+/// enumerations are UIKit's; a default (0) is left out. Secure entry turns
+/// autocorrection and inline prediction off.
+fn text_input_traits(nib: &mut Nib, t: Node) -> Result<Vec<(&'static str, Value)>, String> {
+    only_attributes(t, &[
+        ("key", Some("textInputTraits")), ("autocapitalizationType", None), ("autocorrectionType", None), ("spellCheckingType", None),
+        ("keyboardType", None), ("keyboardAppearance", None), ("returnKeyType", None), ("enablesReturnKeyAutomatically", Some("YES")),
+        ("secureTextEntry", Some("YES")), ("textContentType", None), ("smartDashesType", None), ("smartInsertDeleteType", None),
+        ("smartQuotesType", None),
+    ])?;
+    if t.has_children() {
+        return fail("text input traits with children are not supported by this ibtool");
+    }
+    let lookup = |key: &str, names: &[&str]| -> Result<i64, String> {
+        match t.attribute(key) {
+            None => Ok(0),
+            Some(v) => names.iter().position(|n| *n == v).map(|i| i as i64).ok_or_else(|| format!("{key}=\"{v}\" is not supported by this ibtool")),
+        }
+    };
+    let no_yes = ["default", "no", "yes"];
+    let secure = t.attribute("secureTextEntry").is_some();
+    let mut values = Vec::new();
+    let mut push = |key: &'static str, v: i64| {
+        if v != 0 {
+            values.push((key, Value::Int(v)));
+        }
+    };
+    push("UIAutocapitalizationType", lookup("autocapitalizationType", &["none", "words", "sentences", "allCharacters"])?);
+    push("UIAutocorrectionType", if secure { 1 } else { lookup("autocorrectionType", &no_yes)? });
+    push("UISpellCheckingType", lookup("spellCheckingType", &no_yes)?);
+    push("UIKeyboardAppearance", match t.attribute("keyboardAppearance") {
+        Some("alert") => 1,
+        _ => lookup("keyboardAppearance", &["default", "dark", "light"])?,
+    });
+    push("UIKeyboardType", lookup("keyboardType", &[
+        "default", "alphabet", "numbersAndPunctuation", "URL", "numberPad", "phonePad", "namePhonePad", "emailAddress", "decimalPad", "twitter",
+        "webSearch",
+    ])?);
+    push("UIReturnKeyType", lookup("returnKeyType", &[
+        "default", "go", "google", "join", "next", "route", "search", "send", "yahoo", "done", "emergencyCall", "continue",
+    ])?);
+    if t.attribute("enablesReturnKeyAutomatically").is_some() {
+        values.push(("UIEnablesReturnKeyAutomatically", Value::Bool(true)));
+    }
+    if secure {
+        values.push(("UISecureTextEntry", Value::Bool(true)));
+    }
+    if let Some(content) = t.attribute("textContentType") {
+        values.push(("UITextContentType", nib.string(content)));
+    }
+    let mut push = |key: &'static str, v: i64| {
+        if v != 0 {
+            values.push((key, Value::Int(v)));
+        }
+    };
+    push("UITextSmartInsertDeleteType", lookup("smartInsertDeleteType", &no_yes)?);
+    push("UITextSmartQuotesType", lookup("smartQuotesType", &no_yes)?);
+    push("UITextSmartDashesType", lookup("smartDashesType", &no_yes)?);
+    if secure {
+        values.push(("UITextInlinePredictionType", Value::Int(1)));
+    }
+    Ok(values)
 }
 
 /// The class a custom class names at run time: a Swift class in a module is
@@ -569,24 +641,31 @@ fn minimum_font_size(n: Node) -> Result<Option<(f32, f32)>, String> {
 /// A font: `<fontDescription>`, or a control's default system font. Equal
 /// fonts are one object.
 fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Value, String> {
-    let (style, name, size) = match n {
+    let (style, name, size, face) = match n {
         Some(n) => {
             if let Some(style) = n.attribute("style") {
                 only_attributes(n, &[("key", None), ("style", None)])?;
-                (Some(style), None, 0.0)
+                (Some(style), None, 0.0, "regular")
             } else if let Some(name) = n.attribute("name") {
                 only_attributes(n, &[("key", None), ("name", None), ("family", None), ("pointSize", None)])?;
-                (None, Some(name), number(attr(n, "pointSize")?)?)
+                (None, Some(name), number(attr(n, "pointSize")?)?, "regular")
             } else {
-                only_attributes(n, &[("key", None), ("type", Some("system")), ("pointSize", None)])?;
-                (None, None, number(attr(n, "pointSize")?)?)
+                only_attributes(n, &[("key", None), ("type", None), ("weight", None), ("pointSize", None)])?;
+                // The bold system font is the bold weight.
+                let face = match (attr(n, "type")?, n.attribute("weight")) {
+                    ("system", weight) => weight.unwrap_or("regular"),
+                    ("boldSystem", None) => "bold",
+                    ("italicSystem", None) => "italic",
+                    (kind, _) => return fail(format!("a {kind} font with a weight is not supported by this ibtool")),
+                };
+                (None, None, number(attr(n, "pointSize")?)?, face)
             }
         }
-        None => (None, None, default_size.ok_or("a font is required")?),
+        None => (None, None, default_size.ok_or("a font is required")?, "regular"),
     };
     // Xcode archives a font it finds under its own name.
     let name = name.map(|name| fonts::ALIASES.iter().find(|(a, _)| *a == name).map_or(name, |(_, to)| to));
-    let key = format!("font:{style:?}:{name:?}:{size}");
+    let key = format!("font:{style:?}:{name:?}:{size}:{face}");
     if let Some(v) = nib.existing(&key) {
         return Ok(v);
     }
@@ -618,18 +697,44 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
             (name, traits, size, false)
         }
         (None, None) => {
-            let name = ".SFUI-Regular";
+            // The system font's faces: its name, CoreText usage and traits.
+            let (name, usage, traits) = match face {
+                "ultraLight" => (".SFUI-Ultralight", "CTFontUltraLightUsage", 16),
+                "thin" => (".SFUI-Thin", "CTFontThinUsage", 4),
+                "light" => (".SFUI-Light", "CTFontLightUsage", 8),
+                "regular" => (".SFUI-Regular", "CTFontRegularUsage", 0),
+                "medium" => (".SFUI-Medium", "CTFontMediumUsage", 0),
+                "semibold" => (".SFUI-Semibold", "CTFontDemiUsage", 2),
+                "bold" => (".SFUI-Bold", "CTFontEmphasizedUsage", 2),
+                "heavy" => (".SFUI-Heavy", "CTFontHeavyUsage", 2),
+                "black" => (".SFUI-Black", "CTFontBlackUsage", 2),
+                "italic" => (".SFUI-RegularItalic", "CTFontObliqueUsage", 1),
+                other => return fail(format!("system font weight {other} is not supported by this ibtool")),
+            };
             values.push(("UIFontName", nib.string(name)));
-            let usage_key = nib.string("NSCTFontUIUsageAttribute");
-            let usage = nib.string("CTFontRegularUsage");
+            let mut attributes = Vec::new();
+            // Italic is a symbolic trait too.
+            if face == "italic" {
+                let traits_key = nib.string("NSCTFontTraitsAttribute");
+                let symbolic_key = nib.string("NSCTFontSymbolicTrait");
+                let symbolic = nib.int_number(1);
+                attributes.extend([traits_key, nib.array("NSDictionary", vec![symbolic_key, symbolic])]);
+            }
+            attributes.extend([nib.string("NSCTFontUIUsageAttribute"), nib.string(usage)]);
+            // Bold overrides the emphasized usage, in a mutable dictionary.
+            if face == "bold" {
+                attributes.extend([nib.string("NSCTFontUIUsageOverrideAttribute"), nib.string("CTFontBoldUsage")]);
+            }
             let size_key = nib.string("NSFontSizeAttribute");
             let size_value = nib.double_number(size);
-            let attributes = nib.array("NSDictionary", vec![usage_key, usage, size_key, size_value]);
+            attributes.extend([size_key, size_value]);
+            let class = if face == "bold" { "NSMutableDictionary" } else { "NSDictionary" };
+            let attributes = nib.array(class, attributes);
             values.push(("UIFontDescriptor", Value::New(Object::new("UIFontDescriptor", vec![
                 ("UIFontDescriptorAttributes", attributes),
                 ("UIFontDescriptorOptions", Value::Int(2147517444)),
             ]))));
-            (name, 0, size, true)
+            (name, traits, size, true)
         }
     };
     values.push(("UIFontPointSize", Value::Double(size)));
@@ -705,6 +810,8 @@ struct Scene<'a> {
     /// Container views' `containerView` outlets: (the placeholder of the
     /// view's embed segue, the view).
     containers: Vec<(String, String)>,
+    /// Controls' outlets to the controller: (label, the control).
+    control_outlets: Vec<(String, String)>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -720,11 +827,16 @@ fn hugging(nib: &mut Nib, n: Node) -> Result<Value, String> {
     Ok(nib.string(&format!("{{{h}, {v}}}")))
 }
 
-fn text_alignment(s: &str) -> Result<i64, String> {
+/// A label's or text field's `textAlignment`: NSTextAlignment, left when
+/// the document gives none.
+fn text_alignment(s: Option<&str>) -> Result<i64, String> {
     Ok(match s {
-        "center" => 1,
-        "natural" => 4,
-        other => return fail(format!("textAlignment {other} is not supported by this ibtool")),
+        None | Some("left") => 0,
+        Some("center") => 1,
+        Some("right") => 2,
+        Some("justified") => 3,
+        Some("natural") => 4,
+        Some(other) => return fail(format!("textAlignment {other} is not supported by this ibtool")),
     })
 }
 
@@ -922,7 +1034,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if let Some(mode) = line_break {
                 values.push(("UILineBreakMode", Value::Int(mode)));
             }
-            values.push(("UITextAlignment", Value::Int(text_alignment(attr(n, "textAlignment")?)?)));
+            values.push(("UITextAlignment", Value::Int(text_alignment(n.attribute("textAlignment"))?)));
             if let Some((_, scale)) = minimum {
                 values.push(("UIMinimumScaleFactor", Value::Float(scale)));
             }
@@ -935,10 +1047,18 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
         "textField" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
-                ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", Some("roundedRect")),
-                ("textAlignment", Some("natural")), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
-                ("id", None),
+                ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", None),
+                ("textAlignment", None), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("text", None), ("enabled", Some("NO")),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
+            let border = match n.attribute("borderStyle") {
+                None => None,
+                Some("line") => Some(1),
+                Some("bezel") => Some(2),
+                Some("roundedRect") => Some(3),
+                Some(other) => return fail(format!("borderStyle=\"{other}\" on <textField> is not supported by this ibtool")),
+            };
+            let alignment = text_alignment(n.attribute("textAlignment"))?;
             let clear_button_mode = match n.attribute("clearButtonMode") {
                 None => None,
                 Some("whileEditing") => Some(1),
@@ -946,10 +1066,34 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 Some("always") => Some(3),
                 Some(other) => return fail(format!("clearButtonMode=\"{other}\" on <textField> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits", "constraints"])?;
+            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections"])?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
-            if traits.attributes().len() != 1 || traits.has_children() {
-                return fail("text input traits are not supported by this ibtool");
+            let trait_values = text_input_traits(nib, traits)?;
+            for c in children(n, "connections") {
+                only_children(c, &["outlet", "action"])?;
+                for o in children(c, "outlet") {
+                    only_attributes(o, &[("property", Some("delegate")), ("destination", None), ("id", None)])?;
+                    if attr(o, "destination")? != scene.vc_id {
+                        return fail("a text field's delegate other than the scene's view controller is not supported by this ibtool");
+                    }
+                    scene.control_outlets.push(("delegate".into(), name.clone()));
+                }
+                for a in children(c, "action") {
+                    only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
+                    if attr(a, "destination")? != scene.vc_id {
+                        return fail("actions that don't target the scene's view controller are not supported by this ibtool");
+                    }
+                    let mask = match attr(a, "eventType")? {
+                        "valueChanged" => 4096,
+                        "primaryActionTriggered" => 8192,
+                        "editingDidBegin" => 65536,
+                        "editingChanged" => 131072,
+                        "editingDidEnd" => 262144,
+                        "editingDidEndOnExit" => 524288,
+                        other => return fail(format!("a text field's {other} action is not supported by this ibtool")),
+                    };
+                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), mask, "upstream".into()));
+                }
             }
             // No text colour at all is the same as a nil one.
             let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
@@ -971,26 +1115,37 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
+            if n.attribute("enabled").is_some() {
+                values.push(("UIDisabled", Value::Bool(true)));
+            }
             values.push(("UIContentHorizontalAlignment", Value::Int(1)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             if let Some(placeholder) = n.attribute("placeholder") {
                 values.push(("UIPlaceholder", nib.text(id, "placeholder", placeholder)));
             }
-            values.push(("UITextAlignment", Value::Int(4)));
+            values.push(("UITextAlignment", Value::Int(alignment)));
+            if let Some(text) = n.attribute("text") {
+                values.push(("UIText", nib.text(id, "text", text)));
+            }
             let text_color = match text_color {
                 Some(c) => color(nib, c)?,
                 None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
             };
             values.push(("UITextColor", text_color));
-            values.push(("UIBorderStyle", Value::Int(3)));
+            if let Some(border) = border {
+                values.push(("UIBorderStyle", Value::Int(border)));
+            }
             values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
             values.push(("UIMinimumFontSize", Value::Float(number(attr(n, "minimumFontSize")?)? as f32)));
             if let Some(mode) = clear_button_mode {
                 values.push(("UIClearButtonMode", Value::Int(mode)));
             }
             values.push(("UIClearButtonOffset", doubles(&[3.0, 1.0])));
+            values.extend(trait_values);
             values.push(("UIDisableTextColorUpdateOnTraitCollectionChange", Value::Bool(true)));
-            values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
+            if border == Some(3) {
+                values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
+            }
             Object::new("UITextField", values)
         }
         "button" => {
@@ -1968,7 +2123,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), containers: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), containers: Vec::new(), control_outlets: Vec::new(), guides: Vec::new() };
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -2024,8 +2179,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             (true, _, _, None) => Frame { x: 0.0, y: 0.0, w: 393.0, h: 852.0 },
             (true, _, _, Some((w, h))) if traits => Frame { x: 0.0, y: 0.0, w, h },
             (true, _, _, Some(_)) => return fail("a freeform size without trait collections is not supported by this ibtool"),
-            (false, true, Some(_), Some((w, h))) => Frame { x: 0.0, y: 0.0, w, h },
-            (false, true, Some((w, h)), None) => Frame { x: 0.0, y: 0.0, w, h },
+            // On a device, the view keeps its frame's origin (three probes).
+            (false, true, Some(_), Some((w, h))) | (false, true, Some((w, h)), None) => {
+                let origin = child(view, "rect", "frame").map(|_| frame(view)).transpose()?;
+                Frame { x: origin.as_ref().map_or(0.0, |o| o.x), y: origin.as_ref().map_or(0.0, |o| o.y), w, h }
+            }
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
             (false, _, _, _) => frame(view)?,
         };
@@ -2065,7 +2223,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // The view's nib, in encoding order.
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
             let responder = proxy(&mut nib, "IBFirstResponder", "responder");
-            let upstream_used = !vc_outlets.is_empty() || view.descendants().any(|d| d.has_tag_name("action"));
+            let upstream_used = !vc_outlets.is_empty() || view.descendants().any(|d| d.has_tag_name("action") || d.has_tag_name("outlet"));
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
             if upstream_used {
@@ -2232,11 +2390,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
             outlets.push(("view", "owner", &root_name));
             outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
+            outlets.extend(scene.control_outlets.iter().map(|(l, v)| (l.as_str(), v.as_str(), "upstream")));
             outlets.sort_by(|a, b| a.0.cmp(b.0));
             for (label, source, destination) in outlets {
                 connections.push(outlet(&mut nib, label, source, destination));
             }
-            scene.actions.sort_by(|a, b| a.0.cmp(&b.0));
+            // By event, then selector.
+            scene.actions.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
             for (selector, source, mask, destination) in &scene.actions {
                 let label = nib.string(selector);
                 connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![

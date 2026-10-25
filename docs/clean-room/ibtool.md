@@ -67,9 +67,11 @@ Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
 guides, alone or in a navigation, tab bar or split view controller (and table and collection view
-controllers). Subviews: labels (system font, a font Xcode finds for iOS, or the
-Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
-grey or system text colour), rounded-rect text fields,
+controllers). Subviews: labels (the system font in any weight, bold or
+italic, a font Xcode finds for iOS, or the iOS text styles and, on tvOS,
+Title1; the default or an sRGB, grey or system text colour), text fields
+(any border, alignment, text input traits, a delegate and editing actions on
+the controller),
 rounded-rect, system and custom buttons with a normal state (title, title
 and shadow colours) and touch-up-inside actions on the controller, vertical stack views, image views of named images,
 plain views containing any of these, and container views.
@@ -126,6 +128,18 @@ other values of the attributes these use, is refused. Observed:
   named colour is shared only by name (`whiteColor` and a white
   `systemBackgroundColor` stay two). Equal fonts are one object too, system
   fonts and text styles included.
+- The system font's weights are faces of SF UI: ultraLight
+  (`.SFUI-Ultralight`, usage `CTFontUltraLightUsage`, traits 16), thin
+  (Thin, `CTFontThinUsage`, 4), light (Light, 8), regular (Regular, 0),
+  medium (Medium, 0), semibold (Semibold, `CTFontDemiUsage`, 2), heavy
+  and black (2). Bold, and `boldSystem`, is `.SFUI-Bold` with usage
+  `CTFontEmphasizedUsage` and `NSCTFontUIUsageOverrideAttribute`
+  `CTFontBoldUsage`, in an `NSMutableDictionary`. `italicSystem` is
+  `.SFUI-RegularItalic`, `CTFontObliqueUsage`, traits 1, with an
+  `NSCTFontTraitsAttribute` of symbolic trait 1 first. The iOS text styles
+  are `.SFUI-Regular` (Headline `.SFUI-Semibold`, traits 2) with `NSSize`
+  Body 14, Subhead 12, Footnote 12, Caption1 and Caption2 11, Title0 31,
+  Title1 25, Title2 19, Title3 17, Headline 14, Callout 13 (23 probes).
 - A label's declared text colour, even `labelColor`, sets
   `UIDisableUpdateTextColorOnTraitCollectionChange`; a nil one is
   `labelColor` without it.
@@ -220,8 +234,10 @@ other values of the attributes these use, is refused. Observed:
   its constraints. With a custom class it is a `UIClassSwapper` with the
   same values, then `UIClassName` (the runtime name, as a controller's)
   and `UIOriginalClassName` `UIView`.
-- With a `<device>`, the root view is laid out at the device's size,
-  whatever its frame says: 26 device ids measured in both orientations
+- With a `<device>`, the root view is laid out at the device's size (or
+  its freeform size) at its frame's origin (a view below an opaque bar is
+  at y 64; eight probes, with simulated bars changing nothing),
+  whatever its frame's size says: 26 device ids measured in both orientations
   (landscape swaps width and height; `retina3_5` and `retina6_72` are
   393x852 either way; `appleTV` is 1920x1080). Ids Xcode doesn't know
   (`retina5_4`, `ipad10_5`, `ipad12_9`, `ipad8_3rounded`,
@@ -288,6 +304,24 @@ other values of the attributes these use, is refused. Observed:
   13, 17, 23 and 32 points). A text field's `clearButtonMode` is
   `UIClearButtonMode` after `UIMinimumFontSize`: whileEditing 1,
   unlessEditing 2, always 3 (three probes).
+- Text alignment (labels and text fields) is NSTextAlignment: left 0,
+  center 1, right 2, justified 3, natural 4, and left when the document
+  gives none (nine probes). A text field's `borderStyle` is
+  `UIBorderStyle` (line 1, bezel 2, roundedRect 3, none left out), with
+  `UIRoundedRectBackgroundCornerRadius` only for roundedRect; `text` is
+  `UIText` after `UITextAlignment`, and `enabled="NO"` is `UIDisabled`
+  before `UIContentHorizontalAlignment`.
+- Text input traits follow `UIClearButtonOffset`, each left out at its
+  default (0), in this order: `UIAutocapitalizationType` (none, words,
+  sentences, allCharacters), `UIAutocorrectionType` and
+  `UISpellCheckingType` (default, no, yes), `UIKeyboardAppearance` (dark
+  and alert 1, light 2), `UIKeyboardType` (UIKit's order: alphabet 1 to
+  webSearch 10), `UIReturnKeyType` (go 1 to continue 11),
+  `UIEnablesReturnKeyAutomatically`, `UISecureTextEntry`,
+  `UITextContentType` (the document's string), then the smart insert
+  delete, quotes and dashes types. Secure entry also sets autocorrection
+  to no, whatever the document says, and `UITextInlinePredictionType` 1
+  last (45 probes; `asciiCapableNumberPad` is not compiled and refused).
 - Nothing in the output comes from a label's `fixedFrame`, from a label's
   or button's `<autoresizingMask>` when it doesn't translate it into
   constraints (constrained or not), or from a scene's `<exit>` when
@@ -306,10 +340,15 @@ other values of the attributes these use, is refused. Observed:
   (`UIViewSafeAreaLayoutGuide-top`, ... as `NSLayoutIdentifier`, not
   archived), listed in the view's `UIViewLayoutGuides` after its
   constraints. Its connections: the controller's outlets with `view`
-  among them, then control actions, each in byte order of their names
-  (`aButton`, `view`, `zButton`; `B:`, `a:`; `tap1:`, `tap:`, `tap_:`),
-  whatever the document order, ids or positions; actions with the same
-  selector stay in document order (19 probes).
+  among them (a text field's `delegate` too, from the field to the
+  controller's placeholder), then control actions, each in byte order of
+  their names (`aButton`, `view`, `zButton`; `B:`, `a:`; `tap1:`, `tap:`,
+  `tap_:`), whatever the document order, ids or positions; actions with
+  the same selector stay in document order (19 probes). Actions on other
+  events sort by event mask first (valueChanged 4096,
+  primaryActionTriggered 8192, editingDidBegin 65536, editingChanged
+  131072, editingDidEnd 262144, editingDidEndOnExit 524288), then by name
+  (two probes).
 - A view nib that refers to its controller (an outlet into it, an action
   to it) has an `UpstreamPlaceholder-1` proxy, which the controller's nib
   maps to its class swapper in `UIExternalObjectsTableForViewLoading`.
