@@ -647,6 +647,37 @@ without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were
 byte-identical.
 
+## Launch images
+
+A launch image set (`.launchimage`) compiles to nothing unless
+`--launch-image` names it: a catalog with one and an image set gives the
+same Assets.car and partial Info.plist as the image set alone. The named
+set's images go into the bundle as files, copied byte for byte, and the
+partial Info.plist lists them under `UILaunchImages`. Observed with 13
+catalogs, four of them from the corpus:
+
+- An image's name is the set's, then `-` and its minimum system version
+  without the dot (7.0 is `700`, 8.0 `800`), then what tells it apart: an
+  iPhone's 4-inch (`retina4`) image `-568h`, 4.7-inch `-667h`, 5.5-inch
+  `-Portrait-736h` or `-Landscape-736h`, the 3.5-inch one nothing; an
+  iPad's `-Portrait` or `-Landscape`. The file adds `@2x` or `@3x` and,
+  for iPad, `~ipad`: `LaunchImage-700-568h@2x.png`,
+  `LaunchImage-700-Landscape@2x~ipad.png`.
+- `UILaunchImages` has one entry per name, in the set's order of their
+  first image: `UILaunchImageMinimumOSVersion`, `UILaunchImageName`,
+  `UILaunchImageOrientation` (`Portrait`, `Landscape`) and
+  `UILaunchImageSize`, the portrait size in points (`{414, 736}` for
+  both 5.5-inch images, `{768, 1024}` for iPad's).
+- Images for devices the build doesn't target are left out; slots without
+  a file are Interface Builder's alone.
+- A set without a single image gives an iPhone build an image Xcode makes:
+  a black 640x1136 `-700-568h@2x`, written as Xcode writes the simulator's
+  icons (see Simulator PNGs), with its entry. A set whose only images are
+  for iPad gives an iPhone build nothing.
+
+Refused: other system versions and subtypes, tvOS launch images, extents
+other than full screen, and images other than PNGs.
+
 ## Image stacks
 
 tvOS brand assets' primary app icon (an `.imagestack` of
