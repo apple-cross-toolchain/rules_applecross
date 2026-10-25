@@ -708,6 +708,19 @@ with 24 probes:
   64 corpus storyboards with three or more entries; document order
   explains 35, and none that depth first gets wrong.
 
+A storyboard reference (`<viewControllerPlaceholder>`) a segue leads to,
+embed segues included, has a nib of its own, named as a view controller's
+(`UIViewController-<id>`): the owner, the first responder, the storyboard
+placeholder and a `UIStoryboardViewControllerPlaceholder` whose
+`UIStoryboardIdentifier` is that name, with only the `sceneViewController`
+outlet. It is listed in `UIViewControllerIdentifiersToNibNames` as the
+controllers are, and the Info.plist's
+`UIViewControllerIdentifiersToExternalStoryboardReferences` maps its name
+to `UIReferencedBundleIdentifier` (if any), `UIReferencedControllerIdentifier`
+(the referenced identifier, if any) and `UIReferencedStoryboardName`;
+equal keys and values in those are one string each. A reference nothing
+leads to compiles to nothing. Observed with ten probes.
+
 Refused for now: custom and popover segues, segues from
 other elements (bar button items, gesture recognizers, a cell's
 accessory), and to other controllers.
