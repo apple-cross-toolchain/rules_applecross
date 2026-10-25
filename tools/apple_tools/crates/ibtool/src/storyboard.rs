@@ -6,6 +6,7 @@ use crate::nib::{self, reference, Object, Value};
 use roxmltree::{Document, Node};
 use std::collections::{HashMap, HashSet};
 
+mod collection;
 mod parent;
 mod segue;
 mod split;
@@ -1452,6 +1453,12 @@ fn outlet(nib: &mut Nib, label: &str, source: &str, destination: &str) -> Value 
 }
 
 fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections: Vec<Value>) -> Object {
+    root_object_with_pairs(nib, top, objects, connections, Vec::new())
+}
+
+/// A nib's root object with key-value pairs: values set by key path when
+/// the nib loads.
+fn root_object_with_pairs(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections: Vec<Value>, pairs: Vec<Value>) -> Object {
     let top = nib.array("NSArray", top);
     let objects = nib.array("NSArray", objects);
     // No connections are the nib's one empty array.
@@ -1463,7 +1470,7 @@ fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections:
         ("UINibVisibleWindowsKey", nib.empty_array()),
         ("UINibAccessibilityConfigurationsKey", nib.empty_array()),
         ("UINibTraitStorageListsKey", nib.empty_array()),
-        ("UINibKeyValuePairsKey", nib.empty_array()),
+        ("UINibKeyValuePairsKey", if pairs.is_empty() { nib.empty_array() } else { nib.array("NSArray", pairs) }),
         ("IBUINibLNEVersionKey", Value::Int(1)),
     ])
 }
@@ -1682,14 +1689,14 @@ fn navigation_controller(
     root: Embedded,
     root_name: &str,
     swapped: bool,
+    title: Option<Value>,
     held: Option<(Option<Value>, &str)>,
 ) -> Result<Value, String> {
-    let nav_id = attr(nav, "id")?;
     let bar_name = format!("{name} bar");
     let item = root.navigation_item.clone().unwrap_or_else(|| format!("{root_name} implied navigation item"));
     let mut values = Vec::new();
-    if let Some(title) = nav.attribute("title") {
-        values.push(("UITitle", nib.text(nav_id, "title", title)));
+    if let Some(title) = title {
+        values.push(("UITitle", title));
     }
     if let Some((item, parent)) = held {
         if let Some(item) = item {
@@ -1721,6 +1728,15 @@ fn navigation_controller(
     Ok(Value::New(controller.named(name)))
 }
 
+/// A navigation controller's title, made before what it holds: a string
+/// equal to its root's title is archived with its own.
+fn navigation_title(nib: &mut Nib, nav: Node) -> Result<Option<Value>, String> {
+    Ok(match nav.attribute("title") {
+        Some(title) => Some(nib.text(attr(nav, "id")?, "title", title)),
+        None => None,
+    })
+}
+
 /// A navigation controller's nib: the scenes' placeholders, the controller
 /// swapped in for UINavigationController, its root view controller (as in
 /// its own nib, with its navigation item, real or implied) and its bar.
@@ -1746,11 +1762,12 @@ fn navigation_controller_nib(
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
+    let title = navigation_title(&mut nib, nav)?;
     let mut embedded = embedded_controller(&mut nib, root, "root", "controller", Some("controller bar"), None, nib_names)?;
     let explicit_item = embedded.navigation_item.clone();
     let templates_objects = std::mem::take(&mut embedded.templates.objects);
     let templates_outlets = std::mem::take(&mut embedded.templates.outlets);
-    let controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, None)?;
+    let controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, title, None)?;
     let mut objects = vec![
         reference("root storyboard"),
         reference("owner"),
@@ -1825,7 +1842,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     for container in root.descendants().filter(|d| d.has_tag_name("containerView")) {
         for sg in container.descendants().filter(|d| d.has_tag_name("segue")) {
             let destination = attr(sg, "destination")?;
-            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && matches!(c.tag_name().name(), "viewController" | "tableViewController")) {
+            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && matches!(c.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController")) {
                 return fail("an embed segue to anything but a view or table view controller is not supported by this ibtool");
             }
             let f = frame(container)?;
@@ -1841,7 +1858,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let segues = c.descendants().filter(|d| d.has_tag_name("segue") && !matches!(d.attribute("kind"), Some("relationship" | "unwind" | "embed")));
         for sg in segues {
             let destination = attr(sg, "destination")?;
-            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && matches!(c.tag_name().name(), "viewController" | "tableViewController")) {
+            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && matches!(c.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController")) {
                 return fail("a segue from an embedded controller to anything but a view or table view controller is not supported by this ibtool");
             }
             match embedded.get(destination) {
@@ -1886,7 +1903,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
-        only_children(objects_node, &["viewController", "tableViewController", "navigationController", "tabBarController", "splitViewController", "placeholder", "exit"])?;
+        only_children(objects_node, &[
+            "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
+            "exit",
+        ])?;
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
         for exit in children(objects_node, "exit") {
@@ -1902,11 +1922,19 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         let vc = objects_node
             .children()
-            .find(|c| c.has_tag_name("viewController") || c.has_tag_name("tableViewController"))
+            .find(|c| matches!(c.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController"))
             .ok_or("scene without a view controller")?;
         // A table view controller's view is its table.
         let is_table = vc.has_tag_name("tableViewController");
-        let original_class = if is_table { "UITableViewController" } else { "UIViewController" };
+        let is_collection = vc.has_tag_name("collectionViewController");
+        // A table or collection view is the controller's root view.
+        let is_list = is_table || is_collection;
+        let view_key = match vc.tag_name().name() {
+            "tableViewController" => "tableView",
+            "collectionViewController" => "collectionView",
+            _ => "view",
+        };
+        let original_class = segue::original_class(vc);
         only_attributes(vc, &[
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
@@ -1914,10 +1942,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("sceneMemberID", Some("viewController")),
         ])?;
         if !is_table && vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
+            if is_collection {
+                return fail("the clearsSelectionOnViewWillAppear attribute of <collectionViewController> is not supported by this ibtool");
+            }
             return fail("the clearsSelectionOnViewWillAppear attribute of <viewController> is not supported by this ibtool");
         }
         let class_name = runtime_class_name(vc, module, original_class)?;
-        only_children(vc, &[if is_table { "tableView" } else { "view" }, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems"])?;
+        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems"])?;
         // Empty toolbar items change nothing compiled.
         if children(vc, "toolbarItems").any(|t| t.has_children()) {
             return fail("view controllers with toolbar items are not supported by this ibtool");
@@ -1926,11 +1957,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("sizes other than a freeform size inside <viewController> are not supported by this ibtool");
         }
         let vc_id = attr(vc, "id")?;
-        let view = children(vc, if is_table { "tableView" } else { "view" }).next().ok_or("view controller without a view")?;
-        if is_table && children(vc, "layoutGuides").next().is_some() {
-            return fail("a table view controller with layout guides is not supported by this ibtool");
+        let view = children(vc, view_key).next().ok_or("view controller without a view")?;
+        if is_list && children(vc, "layoutGuides").next().is_some() {
+            return fail("a table or collection view controller with layout guides is not supported by this ibtool");
         }
-        if !is_table {
+        if !is_list {
             only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints"])?;
             only_attributes(view, &[("key", Some("view")), ("contentMode", Some("scaleToFill")), ("id", None)])?;
         }
@@ -1954,7 +1985,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         let safe_area = children(view, "viewLayoutGuide").find(|g| g.attribute("key") == Some("safeArea"));
         let has_safe_area = safe_area.is_some();
-        if !is_table && has_safe_area == !scene.guides.is_empty() {
+        if !is_list && has_safe_area == !scene.guides.is_empty() {
             return fail("a view needs either a safe-area layout guide or legacy top and bottom layout guides for this ibtool");
         }
 
@@ -2000,6 +2031,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         };
         let (view_root, upstream_used) = if is_table {
             let (root, upstream_used, segues) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
+            scene.segues = segues;
+            (root, upstream_used)
+        } else if is_collection {
+            let (root, upstream_used, segues) = collection::collection_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
             scene.segues = segues;
             (root, upstream_used)
         } else {

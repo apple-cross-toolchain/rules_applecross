@@ -166,7 +166,8 @@ pub fn archive(root: Object) -> Vec<u8> {
     let mut nvalues = 0usize;
     for (c, _, vs) in &e.objects {
         varint(&mut objects, classes.iter().position(|x| x == c).unwrap());
-        varint(&mut objects, first);
+        // An object without values starts at 0.
+        varint(&mut objects, if vs.is_empty() { 0 } else { first });
         varint(&mut objects, vs.len());
         first += vs.len();
         for (k, v) in vs {

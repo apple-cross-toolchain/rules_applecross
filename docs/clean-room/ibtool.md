@@ -66,7 +66,8 @@ not. foundation-hashing.md describes that set's layout.
 Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
-guides, alone or in a navigation, tab bar or split view controller. Subviews: labels (system font, a font Xcode finds for iOS, or the
+guides, alone or in a navigation, tab bar or split view controller (and table and collection view
+controllers). Subviews: labels (system font, a font Xcode finds for iOS, or the
 Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
 rounded-rect, system and custom buttons with a normal state (title, title
@@ -341,7 +342,9 @@ when it is initial or identified. Observed with 25 probes:
   `UIKeyAutomaticallyAdjustsScrollViewInsets` when it says NO. The item
   ends with `UINavigationBar`, a reference to the bar archived later. Its
   title is encoded before its navigation item, which shares an equal
-  string. A table view controller root is a `UITableViewController`, with
+  string; the navigation controller's own title is encoded before both,
+  so a root title equal to it refers to its string (one corpus
+  storyboard). A table view controller root is a `UITableViewController`, with
   `UIClearsSelectionOnViewWillAppear` last (four probes).
 - The bar is laid out by Xcode, not the document: bounds 0x54 centred 27
   below its frame's top, mask 2, hugging `{250, 250}`, zero layout margins
@@ -514,6 +517,44 @@ probes:
 Refused for now: static tables, cells with a style (Basic, Subtitle and
 the rest), actions in cells, tables as subviews, header and footer views,
 refresh controls, and other table and cell settings.
+
+## Collection view controllers
+
+A `<collectionViewController>` whose collection view has a flow layout and
+prototype cells compiles like a table view controller: the collection
+view is its view nib's root view, and each prototype is a nib of its own
+inside it. Observed with 15 probes and one corpus storyboard:
+
+- The collection view: geometry, background colour, opaque, multiple
+  touch, mask, clipping, then `UIScrollViewIndicatorInsetAdjustmentBehavior`
+  1, `UIBouncesZoom`, `UIDelegate` archived as nil,
+  `UIScrollViewContentInsetAdjustmentBehavior` 0, `UICollectionLayout`,
+  `UIAllowsUserInitiatedMultipleSelection`, the cells' external objects
+  (`UICollectionViewCellPrototypeNibExternalObjects`) and nibs
+  (`UICollectionViewCellNibDict`), each keyed by reuse identifier in byte
+  order, and `UICollectionViewPrefetchingEnabled`. The objects list it and
+  then its layout; its outlets are sorted with `view` as a table's are.
+- The flow layout (`UICollectionViewFlowLayout`) has `UIInteritemSpacing`
+  and `UILineSpacing` as floats when they are not 10, and `UIItemSize`
+  when it is not 50x50. `automaticEstimatedItemSize` is not a value of
+  the layout but a key-value pair of the nib (`UINibKeyValuePairsKey`):
+  `estimatedItemSize` set to an `NSValue` size of the largest doubles.
+- A cell's nib: the cell (`UICollectionViewCell`, or swapped in) holding
+  its content view, a plain `UIView`; the cell's `UIReuseIdentifier`,
+  nil `UISystemBackgroundView` and `UIContentConfigurationView`, and
+  `UIContentView`. A content view holding constraints does not translate
+  its mask, and the cell gets four constraints of its own pinning it
+  (leading, trailing, top, bottom, each `UIIBSystemGenerated`), which the
+  objects leave out. The objects list the cell and its content view, then
+  breadth first each view's constraints and subviews (a table cell lists
+  its content view's subviews first).
+- An old-format content view (`<view key="contentView">`, no id) is not
+  the document's: an empty one compiles to a plain opaque view the
+  objects leave out. One with subviews keeps its constraints on the cell,
+  and is refused.
+- Cell outlets and a cell's segue work as a table cell's.
+- An object without values (a flow layout with every default) is written
+  with its first value index 0, not the running index.
 
 ## Segues
 
