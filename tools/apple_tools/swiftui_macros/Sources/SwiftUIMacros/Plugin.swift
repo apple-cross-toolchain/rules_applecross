@@ -9,5 +9,9 @@ struct SwiftUIMacrosPlugin: CompilerPlugin {
         StateProjectedValueMacro.self,
         StateInitialStoredValueMacro.self,
         ProjectedValueMacro.self,
+        EntryMacro.self,
+        EntryDefaultValueMacro.self,
+        EntryTypeCheckMacro.self,
+        EntryTypeCheckClassMacro.self,
     ]
 }

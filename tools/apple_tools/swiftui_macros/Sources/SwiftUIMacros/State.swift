@@ -22,7 +22,9 @@ struct StateProperty {
     let modifiers: String
     let isStatic: Bool
     let isPrivate: Bool
-    let hasObservers: Bool
+    /// The property's observers, which the setter runs around the write.
+    let willSet: AccessorDeclSyntax?
+    let didSet: AccessorDeclSyntax?
 
     var usesLazyStorage: Bool { isPrivate && !isStatic && initialValue != nil }
 
@@ -59,9 +61,11 @@ struct StateProperty {
 
         switch binding.accessorBlock?.accessors {
         case nil:
-            hasObservers = false
+            willSet = nil
+            didSet = nil
         case .accessors(let list) where list.allSatisfy({ ["willSet", "didSet"].contains($0.accessorSpecifier.text) }):
-            hasObservers = true
+            willSet = list.first { $0.accessorSpecifier.text == "willSet" }
+            didSet = list.first { $0.accessorSpecifier.text == "didSet" }
         default:
             throw MacroError(description: "'@State' cannot be applied to a computed property")
         }
@@ -215,9 +219,6 @@ public struct StateMacro: PeerMacro, AccessorMacro {
         in context: some MacroExpansionContext
     ) throws -> [AccessorDeclSyntax] {
         let p = try StateProperty(declaration, attribute: node)
-        if p.hasObservers {
-            throw MacroError(description: "'@State' with willSet or didSet is not supported by this SwiftUIMacros")
-        }
         let storage = p.usesLazyStorage ? "__\(p.name)" : "_\(p.name)"
         var accessors: [AccessorDeclSyntax] = []
         // Static properties have no init accessor; lazy storage has one only
@@ -235,8 +236,56 @@ public struct StateMacro: PeerMacro, AccessorMacro {
                 """)
         }
         accessors.append("get {\n\(raw: storage).wrappedValue\n}")
-        accessors.append("\(raw: p.isStatic ? "" : "nonmutating ")set {\n\(raw: storage).wrappedValue = newValue\n}")
+        accessors.append("\(raw: p.isStatic ? "" : "nonmutating ")set {\n\(raw: setter(p, storage: storage, in: context))\n}")
         return accessors
+    }
+
+    /// The write, with the observers' bodies run as closures around it: a
+    /// willSet's given the new value, a didSet's the old one (read first)
+    /// when it uses it.
+    static func setter(_ p: StateProperty, storage: String, in context: some MacroExpansionContext) -> String {
+        // As Apple's expansion lays it out: statements at 4; an observer's
+        // body starts at 4 when its closure is the setter's first statement
+        // and at 8 otherwise, later lines keeping their place in the source
+        // relative to that; the closures end at 8. Every line carries its
+        // own indentation, which the expansion's formatting keeps.
+        func closure(_ head: String, _ accessor: AccessorDeclSyntax, first: Bool, call: String) -> String {
+            let indent = first ? 4 : 8
+            let text = (accessor.body?.statements.description ?? "").drop { $0 == " " || $0 == "\n" }
+            var bodyLines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            while let last = bodyLines.last, last.allSatisfy({ $0 == " " }) {
+                bodyLines.removeLast()
+            }
+            let shifted = bodyLines.enumerated().map { k, line in
+                let trimmed = line.reversed().drop { $0 == " " }.reversed()
+                return String(repeating: " ", count: k == 0 ? indent : indent - 4) + String(trimmed)
+            }
+            return (["    " + head] + shifted + ["        })" + call]).joined(separator: "\n")
+        }
+        var lines: [String] = []
+        var oldValue: (name: String, local: String)?
+        if let didSet = p.didSet {
+            let name = didSet.parameters?.name.text ?? "oldValue"
+            let uses = didSet.body?.tokens(viewMode: .sourceAccurate).contains { $0.tokenKind == .identifier(name) } ?? false
+            if didSet.parameters != nil || uses {
+                let local = context.makeUniqueName("_oldValue_").text
+                oldValue = (name, local)
+                lines.append("    let \(local) = \(storage).wrappedValue")
+            }
+        }
+        if let willSet = p.willSet {
+            let name = willSet.parameters?.name.text ?? "newValue"
+            lines.append(closure("({ \(name) in", willSet, first: lines.isEmpty, call: "(newValue)"))
+        }
+        lines.append("    \(storage).wrappedValue = newValue")
+        if let didSet = p.didSet {
+            if let oldValue {
+                lines.append(closure("({ \(oldValue.name) in", didSet, first: false, call: "(\(oldValue.local))"))
+            } else {
+                lines.append(closure("({", didSet, first: false, call: "()"))
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 }
 

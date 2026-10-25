@@ -11,8 +11,10 @@ for probe in probes/*.swift; do
   name="$(basename "$probe" .swift)"
   check=(xcrun --sdk iphonesimulator swiftc -target arm64-apple-ios18.0-simulator
          -typecheck -module-name Probe -Xfrontend -dump-macro-expansions "$probe")
-  "${check[@]}" > "$out/$name.xcode" 2>&1
-  "${check[@]}" -load-plugin-executable "$plugin" > "$out/$name.clean-room" 2>&1
+  # Probes may fail to type-check on purpose (warnings and errors are
+  # compared too).
+  "${check[@]}" > "$out/$name.xcode" 2>&1 || true
+  "${check[@]}" -load-plugin-executable "$plugin" > "$out/$name.clean-room" 2>&1 || true
   if cmp -s "$out/$name.xcode" "$out/$name.clean-room"; then
     echo "identical: $probe"
   else

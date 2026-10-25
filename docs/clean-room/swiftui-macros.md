@@ -23,10 +23,16 @@ expansions Xcode's compiler prints with `-Xfrontend
 | `@_StateProjectedValue` | `StateProjectedValueMacro` |
 | `@_StateInitialStoredValue(_:)` | `StateInitialStoredValueMacro` |
 | `@_PropertyWrapperProjectedValue` | `ProjectedValueMacro` |
+| `@Entry` | `EntryMacro` (accessor, peer) |
+| `@__EntryDefaultValue` | `EntryDefaultValueMacro` |
+| `#_SwiftUIEntryTypeCheck` (value and class overloads) | `EntryTypeCheckMacro`, `EntryTypeCheckClassMacro` |
 
-Not implemented, and refused when used: `@Entry`, `@Animatable` and their
-helpers, `_SwiftUIState`, `@_StatePropertyWrapperStorage()` without an
-argument, and `@State` on a property with `willSet` or `didSet`.
+Not implemented, and refused when used: `@Animatable` and its helpers,
+`_SwiftUIState`, and `@_StatePropertyWrapperStorage()` without an argument.
+
+The observers and `@Entry` came back from Isomer's port of this plugin
+(AttilaTheFun/isomer, `swift_ui_macros`), derived the same way from
+Xcode's printed expansions; the layout of their text was matched here.
 
 ## The expansions
 
@@ -54,6 +60,29 @@ attribute's arguments:
   accessor (`@storageRestrictions(initializes:)`). A static property has
   neither the init accessor nor `nonmutating`. With lazy storage, only an
   implicit `nil` gets the init accessor.
+
+With `willSet` or `didSet`, the setter runs the observers' bodies as
+closures around the write: `({ newValue in ... })(newValue)` before it,
+and after it `({ ... })()`, or `({ oldValue in ... })(<old>)` when the
+didSet has a parameter or uses `oldValue`, `<old>` being
+`makeUniqueName("_oldValue_")`, read into a local first. Apple's text is
+laid out exactly: the setter's statements at 4, an observer's first body
+line at 4 when its closure is the setter's first statement and 8
+otherwise, later body lines at their source column shifted by that less 4,
+and each closure's end at 8.
+
+`@Entry` adds `get`, `set` and `_modify` through a peer key,
+`private struct __Key_<name>: SwiftUICore.EnvironmentKey` (or
+`TransactionKey`, `ContainerValueKey`, or `SwiftUI.FocusedValueKey` with
+`typealias Value` for the unwrapped type). The key's `defaultValue` is
+marked `@SwiftUICore.__EntryDefaultValue`, which makes it a getter; a
+default made by a call adds a `#sourceLocation`-wrapped `_typeCheck` whose
+class overload warns, and a closure-typed entry warns too. Its text is
+written as is, not reformatted (an empty closure default stays `{}`).
+
+Apple's private `@State` expansion needs Swift 6.4: with 6.3.2 the init
+accessor on `_name` makes a view's memberwise initializer private. The
+Linux toolchain here is 6.4.0 (`MODULE.bazel`).
 
 For the probe files covering these cases (`probes/`), the expansions Xcode's
 compiler prints with this plugin loaded in place of Apple's are identical to
