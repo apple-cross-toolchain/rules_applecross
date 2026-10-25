@@ -66,7 +66,7 @@ not. foundation-hashing.md describes that set's layout.
 Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
-guides, alone or as a navigation controller's root. Subviews: labels (system font, a font Xcode finds for iOS, or the
+guides, alone or in a navigation or tab bar controller. Subviews: labels (system font, a font Xcode finds for iOS, or the
 Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
 rounded-rect, system and custom buttons with a normal state (title, title
@@ -347,6 +347,55 @@ when it is initial or identified. Observed with 25 probes:
   document turns it off, `UIIsLocked`, `UIItems` (the root's item),
   `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1.
   Other bar settings, other segues and controllers nothing loads are
+  refused.
+
+## Tab bar controllers
+
+A `<tabBarController>` (its tab bar, children by `viewControllers`
+relationship segues, empty toolbar items) compiles to
+`UITabBarController-<id>.nib` (or its identifier's), which embeds every
+child: view and table view controllers as a navigation controller embeds
+its root, and navigation controllers with their bar and root. The
+children's scenes add their view nibs, and their own nibs only when they
+are identified or a segue reaches them. Observed with 17 probes and 19
+storyboards from the corpus that use one (4 of them compile today; the
+rest are refused for other elements):
+
+- Top-level objects: a storyboard placeholder per controller the nib holds,
+  in reverse: the last child's first, a navigation child's root before the
+  child itself. Then the owner, the first responder, the scene's own
+  storyboard placeholder and the controller (`UITabBarController`, or a
+  class swapper): `UITitle`, its identifiers, `UIChildViewControllers` (the
+  children, when it has any), `UIKeyAutomaticallyAdjustsScrollViewInsets`,
+  `UITabBar`, `UICustomizableViewControllers` and `UIViewControllers` (the
+  children both times), the class names.
+- The objects list continues with the tab bar and the children, then each
+  child's parts in order (a view controller's navigation item and tab bar
+  item; a navigation child's bar, tab bar item and root), then the roots'
+  navigation items. Only items the document declares are listed.
+- The connections are the scene's storyboard outlet, then one per held
+  controller in the placeholders' forward order, stably sorted by original
+  class (`UINavigationController`, `UITableViewController`,
+  `UIViewController`), then `sceneViewController`.
+- Each child begins as in its own nib, with `UITabBarItem` after its title
+  and `UIParentViewController` the tab bar controller; a view controller
+  child with no navigation item has none, while a navigation child's root
+  keeps its implied one. A child with no `<tabBarItem>` gets one Xcode
+  implies: `UIEnabled` and `UISpringLoaded`, both true. A declared item has
+  `UISystemItem` (UIKit's `UITabBarSystemItem` order), `UIEnabled`, `UITag`,
+  `UITitle`, `UIImage`, `UISelectedTemplateImage`. A view controller's own
+  nib carries its declared item the same way, after its title, and lists it
+  after the navigation item.
+- The bar is laid out by Xcode: bounds 0x54 centred at (0, 27), its
+  background colour if any, opaque, mask 10, hugging `{250, 250}`,
+  `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off, `UIDelegate`
+  the controller, `UIItems` (an `NSArray` of the children's items),
+  `UIBarTranslucence` 1, or 2 when `translucent="NO"`.
+- One empty external objects table and one empty attributes dictionary (of
+  navigation item titles) are shared by every object that has one.
+- Simulated bottom bar metrics change nothing. Children with segues of
+  their own, identified navigation children or ones loaded on their own
+  too, tab bar items with insets, and tab bar controllers nothing loads are
   refused.
 
 ## Table view controllers
