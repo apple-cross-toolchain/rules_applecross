@@ -647,6 +647,30 @@ without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were
 byte-identical.
 
+### JPEG images
+
+A JPEG in an image set is stored as a file, not decoded: a rendition keyed
+as a PNG's, layout 12, pixel format `JPEG`, no width, height or colour
+space in its header, the same TLVs as a `dmp2` image but 0x3ef, and the
+JPEG as a `RAWD` payload (version 0, length, bytes). JPEGs are never packed
+into atlases, whatever their size. Xcode keeps the file byte for byte when
+it holds JFIF, tables, frames (baseline or progressive), a restart
+interval, the scan and the standard 3,144-byte sRGB IEC61966-2.1 profile,
+and drops comments (seven probes, and all 24 of the corpus's JPEGs that hold no more).
+
+It rewrites other metadata: of the corpus's JPEGs, Exif, XMP, Photoshop
+(APP13), Ducky (APP12) and Adobe (APP14) segments were dropped, kept or
+moved with no rule these files settle, and those with Adobe RGB or other
+profiles were re-encoded. Those are refused.
+
+### PDF images
+
+Xcode stores a PDF as it is (layout 9, pixel format `PDF `, `RAWD`) and
+also rasterizes it at 1x, 2x and 3x into `dmp2` renditions (grey and alpha
+for a black drawing). Matching those needs CoreGraphics' rasterizer and
+antialiasing, which this actool doesn't reproduce: PDF image sets are
+refused, with or without `preserves-vector-representation`.
+
 ## Launch images
 
 A launch image set (`.launchimage`) compiles to nothing unless

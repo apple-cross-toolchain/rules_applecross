@@ -608,6 +608,29 @@ pub fn dmp2_pixels_csi(name: &str, width: u32, height: u32, scale: u32, flags: u
     csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
 }
 
+/// A JPEG image (layout 12): no size or colour space in the header, the
+/// slice and metrics of a dmp2 image, and the JPEG itself as `RAWD`.
+pub fn jpeg_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, jpeg: &[u8]) -> Vec<u8> {
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, width, height] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    let mut metrics = Vec::new();
+    for v in [1u32, 0, 0, 0, 0, width, height] {
+        le32(&mut metrics, v);
+    }
+    tlv(&mut t, 0x3eb, &metrics);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let mut payload = b"DWAR".to_vec();
+    le32(&mut payload, 0);
+    le32(&mut payload, jpeg.len() as u32);
+    payload.extend_from_slice(jpeg);
+    csi(&CsiHeader { flags, width: 0, height: 0, scale: scale * 100, pixel_format: b"GEPJ", color_space: 0, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
+}
+
 /// A colour set's colours (element 85, as image sets').
 pub const PART_COLOR: u16 = 217;
 const LAYOUT_COLOR: u16 = 1009;
