@@ -71,7 +71,7 @@ Headline, Callout and, on tvOS, Title1 text styles; the default or an sRGB,
 grey or system text colour), rounded-rect text fields,
 rounded-rect, system and custom buttons with a normal state (title, title
 and shadow colours) and touch-up-inside actions on the controller, vertical stack views, image views of named images,
-plain views containing any of these.
+plain views containing any of these, and container views.
 Constraints between those, with constants, and labels' and image views' own
 width and height; outlets from the controller into its view. Everything else, and
 other values of the attributes these use, is refused. Observed:
@@ -545,7 +545,34 @@ template's, by class name. An exit placeholder adds nothing to the
 nibs: a scene with one compiles as it does without. Observed with 14
 probes.
 
-Refused for now: embed, custom and popover segues, segues from
+A container view (`<containerView>`, with one embed segue) is a plain
+`UIView` in its scene's view nib, without `UIOpaque` when the document
+says `opaque="NO"`. Its embed segue gets a placeholder like a control's,
+in document order with the others, and instead of an action the
+placeholder has a `containerView` outlet to the view, sorted by label
+with the view nib's outlets. The template is a
+`UIStoryboardEmbedSegueTemplate`: `UIIdentifier` if any,
+`UIDestinationViewControllerIdentifier`, `UIPerformOnViewLoad` true and
+`UIContainerView` archived as nil. The destination, a view or table view
+controller, gets its own nib as other segue destinations do. Observed
+with 24 probes:
+
+- The embedded controller's root view is laid out at its container's
+  frame size, not its own frame's or the device's. So is every
+  controller a segue (of any kind) leads to from it, transitively, even
+  when another segue reaches it from a full-size controller; nested
+  containers use the inner container's size. A controller's own freeform
+  size still wins, and is not passed on.
+- The Info.plist inserts the controllers' identifiers (into its
+  CFDictionary order) depth first from each initial or identified
+  controller in document order, through its relationships, its own
+  segues and then its view's. It differs from document order only when
+  a controller is reached before one that precedes it in the document,
+  as a controller's own segue is before its container's. It also explains 48 of the
+  64 corpus storyboards with three or more entries; document order
+  explains 35, and none that depth first gets wrong.
+
+Refused for now: custom and popover segues, segues from
 other elements (bar button items, gesture recognizers, a cell's
 accessory), and to other controllers.
 
