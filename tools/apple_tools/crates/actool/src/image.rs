@@ -87,6 +87,29 @@ pub fn check_color_management(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Decodes a PNG as Xcode reads an image set's or an app icon's: in sRGB,
+/// converting a known profile's colours (crate::colour), refusing other
+/// colour management as check_color_management does.
+pub fn decode_png_srgb(bytes: &[u8]) -> Result<Rgba, String> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let reader = decoder.read_info().map_err(|e| e.to_string())?;
+    let info = reader.info();
+    let known = info.icc_profile.as_ref().filter(|p| !IDENTITY_PROFILES.contains(&fnv1a(p))).map(|p| crate::colour::known(p));
+    let Some(known) = known else {
+        check_color_management(bytes)?;
+        return decode_png(bytes);
+    };
+    let Some(known) = known else {
+        return Err("this PNG's ICC profile is one Xcode converts in a way not established for this actool".into());
+    };
+    if info.source_gamma.is_some() || info.source_chromaticities.is_some() || !matches!(info.color_type, png::ColorType::Rgb | png::ColorType::Rgba | png::ColorType::Indexed) {
+        return Err(format!("this PNG's {} profile with a gamma, chromaticities or grey pixels is not supported by this actool", known.name));
+    }
+    let mut image = decode_png(bytes)?;
+    known.convert(&mut image.data);
+    Ok(image)
+}
+
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba, String> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
