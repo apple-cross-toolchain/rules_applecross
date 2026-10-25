@@ -291,7 +291,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
                 return Err(format!("{}: Icon Composer documents are rendered flat by this actool, not as Xcode compiles them (docs/clean-room/actool.md)", doc.display()));
             }
             if o.target_devices.iter().any(|d| d == "mac") {
-                return document_mac_icon(o, &out_dir, platform, name, &icon::render(doc)?, outputs);
+                return document_mac_icon(o, &out_dir, platform, name, &icon::render(doc)?, outputs, images);
             }
             Some((name.clone(), IconSource::Single(format!("{name}1024x1024.png"), icon::render(doc)?)))
         }
@@ -560,7 +560,9 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
 /// An Icon Composer document's macOS icon, relaxed: its flat rendering
 /// compiled as a macOS icon set with an image per size, giving Assets.car,
 /// the .icns and CFBundleIconFile and CFBundleIconName, as an icon set does.
-fn document_mac_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, flat: &image::Rgba, outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+fn document_mac_icon(
+    o: &Options, out_dir: &Path, platform: &str, name: &str, flat: &image::Rgba, outputs: Vec<PathBuf>, images: imageset::Compiled,
+) -> Result<Vec<PathBuf>, String> {
     let bgra = flat.to_bgra();
     let dir = std::env::temp_dir().join(format!("actool-icon-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -575,7 +577,7 @@ fn document_mac_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, fl
             slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file, filename });
         }
     }
-    let result = per_size_icon(o, out_dir, platform, name, &slots, false, false, outputs);
+    let result = per_size_icon(o, out_dir, platform, name, &slots, false, false, outputs, images);
     let _ = std::fs::remove_dir_all(&dir);
     result
 }
