@@ -6,6 +6,7 @@ use crate::nib::{self, reference, Object, Value};
 use roxmltree::{Document, Node};
 use std::collections::HashMap;
 
+mod segue;
 mod table;
 
 pub struct Compiled {
@@ -688,8 +689,12 @@ struct Scene<'a> {
     subviews: Vec<(Option<String>, String)>,
     /// The superview of the subviews being compiled.
     parent: Option<String>,
-    /// Control actions: (selector, source, event mask), in depth-first order.
-    actions: Vec<(String, String, i64)>,
+    /// Control actions: (selector, source, event mask, the placeholder they
+    /// target), in depth-first order.
+    actions: Vec<(String, String, i64, String)>,
+    /// The ids of the segues controls trigger, in depth-first order; each is
+    /// a `perform:` action on a placeholder of its own.
+    segues: Vec<String>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -1010,13 +1015,22 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 }
             }
             for c in children(n, "connections") {
-                only_children(c, &["action"])?;
+                only_children(c, &["action", "segue"])?;
                 for a in children(c, "action") {
                     only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("touchUpInside")), ("id", None)])?;
                     if attr(a, "destination")? != scene.vc_id {
                         return fail("actions that don't target the scene's view controller are not supported by this ibtool");
                     }
-                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), 64));
+                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), 64, "upstream".into()));
+                }
+                // Xcode keeps only a control's last segue.
+                if children(c, "segue").count() > 1 {
+                    return fail("a control with more than one segue is not supported by this ibtool");
+                }
+                for sg in children(c, "segue") {
+                    let placeholder = format!("upstream segue {}", scene.segues.len());
+                    scene.segues.push(attr(sg, "id")?.to_string());
+                    scene.actions.push(("perform:".into(), name.clone(), 64, placeholder));
                 }
             }
             if let Some(c) = child(n, "color", "backgroundColor") {
@@ -1437,6 +1451,9 @@ struct RootController<'a, 'i> {
     /// UIViewController or UITableViewController.
     original_class: &'static str,
     upstream_used: bool,
+    /// The ids of the segues its view's controls trigger, and its own.
+    view_segues: Vec<String>,
+    own_segues: Vec<Node<'a, 'i>>,
 }
 
 /// The id of a navigation controller's root view controller, its one
@@ -1467,7 +1484,8 @@ fn navigation_root<'a>(nav: Node<'a, '_>) -> Result<&'a str, String> {
 /// swapped in for UINavigationController, its root view controller (as in
 /// its own nib, with its navigation item, real or implied) and its bar.
 fn navigation_controller_nib(
-    platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, nav: Node, root: &RootController,
+    platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, nav: Node, root: &RootController, swapped: bool,
+    nib_names: &HashMap<String, String>,
 ) -> Result<(String, Vec<u8>), String> {
     only_attributes(nav, &[
         ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("storyboardIdentifier", None),
@@ -1523,8 +1541,9 @@ fn navigation_controller_nib(
             ("UINavigationBar", reference("bar")),
         ]).named("implied navigation item")),
     };
-    let external = if root.upstream_used { vec![nib.string("UpstreamPlaceholder-1"), reference("root")] } else { Vec::new() };
-    let external = nib.array("NSDictionary", external);
+    let view_segues: Vec<Node> = root.view_segues.iter().filter_map(|id| vc.descendants().find(|d| d.attribute("id") == Some(id.as_str()))).collect();
+    let templates = segue::templates(&mut nib, "root", root.upstream_used, &view_segues, &root.own_segues, nib_names)?;
+    let external = nib.array("NSDictionary", templates.external);
     let nib_name = nib.string(&root.view_nib_name);
     let mut root_values = Vec::new();
     if let Some(title) = title {
@@ -1542,6 +1561,9 @@ fn navigation_controller_nib(
         }
     }
     root_values.push(("UIParentViewController", reference("controller")));
+    if let Some(array) = templates.array {
+        root_values.push(("UIStoryboardSegueTemplates", array));
+    }
     if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         root_values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
     }
@@ -1598,20 +1620,31 @@ fn navigation_controller_nib(
     }
     swapper.push(("UIViewControllers", nib.array("NSMutableArray", vec![reference("root")])));
     swapper.push(("UINavigationBar", Value::New(Object::new("UINavigationBar", bar_values).named("bar"))));
-    let class = runtime_class_name(nav, module, "UINavigationController")?;
-    swapper.push(("UIClassName", nib.string(&class)));
-    swapper.push(("UIOriginalClassName", nib.string("UINavigationController")));
-    let swapper = Value::New(Object::new("UIClassSwapper", swapper).named("controller"));
+    // Swapped in for its class only when initial, identified or of a
+    // custom class.
+    let swapper = if swapped || nav.attribute("customClass").is_some() {
+        let class = runtime_class_name(nav, module, "UINavigationController")?;
+        swapper.push(("UIClassName", nib.string(&class)));
+        swapper.push(("UIOriginalClassName", nib.string("UINavigationController")));
+        Object::new("UIClassSwapper", swapper)
+    } else {
+        Object::new("UINavigationController", swapper)
+    };
+    let swapper = Value::New(swapper.named("controller"));
 
     let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller"), reference("bar"), reference("root")];
     if explicit_item.is_some() {
         objects.push(reference("navigation item"));
     }
-    let connections = vec![
+    objects.extend(templates.objects);
+    let mut connections = vec![
         outlet(&mut nib, "storyboard", "controller", "storyboard"),
         outlet(&mut nib, "storyboard", "root", "root storyboard"),
         outlet(&mut nib, "sceneViewController", "owner", "controller"),
     ];
+    for t in &templates.outlets {
+        connections.push(outlet(&mut nib, "viewController", t, "root"));
+    }
     let top = vec![root_storyboard, owner, responder, storyboard, swapper];
     Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))))
 }
@@ -1650,11 +1683,20 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     // that can be loaded (initial or identified) embeds its root
     // controller, whose view nib is then compiled even if nothing else
     // loads it.
+    // Every controller's own nib's name, and the controllers only segues
+    // make loadable.
+    let controllers: Vec<Node> = scene_nodes.iter().filter_map(|s| segue::scene_controller(*s)).collect();
+    let mut nib_names: HashMap<String, String> = HashMap::new();
+    for c in &controllers {
+        nib_names.insert(attr(*c, "id")?.to_string(), segue::nib_name(*c)?);
+    }
+    let reached = segue::segue_destinations(&controllers, initial)?;
     let mut navs = Vec::new();
     for (index, scene_node) in scene_nodes.iter().enumerate() {
         if let Some(nav) = scene_node.descendants().find(|d| d.has_tag_name("navigationController")) {
             let root_id = navigation_root(nav)?;
-            let loadable = initial == Some(attr(nav, "id")?) || nav.attribute("storyboardIdentifier").is_some();
+            let nav_id = attr(nav, "id")?;
+            let loadable = initial == Some(nav_id) || nav.attribute("storyboardIdentifier").is_some() || reached.contains(nav_id);
             navs.push((index, nav, root_id, loadable));
         }
     }
@@ -1710,7 +1752,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), guides: Vec::new() };
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -1731,10 +1773,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("a view needs either a safe-area layout guide or legacy top and bottom layout guides for this ibtool");
         }
 
-        // Outlets from the view controller into its view.
+        // Outlets from the view controller into its view, and its own
+        // segues.
         let mut vc_outlets = Vec::new();
+        let own_segues: Vec<Node> = children(vc, "connections").flat_map(|c| children(c, "segue")).collect();
         for c in children(vc, "connections") {
-            only_children(c, &["outlet"])?;
+            only_children(c, &["outlet", "segue"])?;
             for o in children(c, "outlet") {
                 only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
                 vc_outlets.push((attr(o, "property")?.to_string(), view_name(attr(o, "destination")?)));
@@ -1763,7 +1807,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             (false, _, _, _) => frame(view)?,
         };
         let (view_root, upstream_used) = if is_table {
-            table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?
+            let (root, upstream_used, segues) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
+            scene.segues = segues;
+            (root, upstream_used)
         } else {
             // Laid out at another size than its frame's, the root view resizes
             // its autoresizing subviews: only those whose masks keep their
@@ -1807,6 +1853,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 for c in s.children().filter(|c| c.is_element()) {
                     subview_values.push(subview(&mut nib, &mut scene, c)?);
                 }
+            }
+            // Each control's segue has a placeholder of its own, after the
+            // controller's.
+            for i in 0..scene.segues.len() {
+                let n = i + 1 + usize::from(upstream_used);
+                let name = format!("upstream segue {i}");
+                top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{n}"), &name));
+                objects.push(reference(name));
             }
             let mut guide_constraints = Vec::new();
             let guide_kinds: Vec<&'static str> = scene.guides.iter().map(|g| g.1).collect();
@@ -1955,12 +2009,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 connections.push(outlet(&mut nib, label, source, destination));
             }
             scene.actions.sort_by(|a, b| a.0.cmp(&b.0));
-            for (selector, source, mask) in &scene.actions {
+            for (selector, source, mask, destination) in &scene.actions {
                 let label = nib.string(selector);
                 connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
                     ("UILabel", label),
                     ("UISource", reference(source.clone())),
-                    ("UIDestination", reference("upstream")),
+                    ("UIDestination", reference(destination.clone())),
                     ("UIEventMask", Value::Int(*mask)),
                 ])));
             }
@@ -1979,13 +2033,21 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // A controller with a storyboard identifier is loaded by it.
         let vc_nib_name = vc.attribute("storyboardIdentifier").map_or_else(|| format!("{original_class}-{vc_id}"), str::to_string);
         let view_nib_name = format!("{vc_id}-view-{view_id}");
+        // A scene is loaded when it is initial or identified, when a segue
+        // leads to it, or when a navigation controller embeds it; it is
+        // swapped in for its class only when initial, identified or of a
+        // custom class.
+        let is_initial = initial == Some(vc_id);
+        let identified = vc.attribute("storyboardIdentifier").is_some();
+        let segue_destination = reached.contains(vc_id);
+        let embedded = navs.iter().any(|n| n.2 == vc_id && n.3);
+        let swapped = is_initial || identified || vc.attribute("customClass").is_some();
+        let view_segues: Vec<Node> = scene.segues.iter().filter_map(|id| view.descendants().find(|d| d.attribute("id") == Some(id.as_str()))).collect();
+
         let mut vnib = Nib::new(platform, color_matched, localizable);
         let owner = proxy(&mut vnib, "IBFilesOwner", "owner");
         let responder = proxy(&mut vnib, "IBFirstResponder", "responder");
         let storyboard = proxy(&mut vnib, "UIStoryboardPlaceholder", "storyboard");
-        let external = if upstream_used { vec![vnib.string("UpstreamPlaceholder-1"), reference("controller")] } else { Vec::new() };
-        let external = vnib.array("NSDictionary", external);
-        let nib_name = vnib.string(&view_nib_name);
         let mut swapper = Vec::new();
         if let Some(title) = vc.attribute("title") {
             swapper.push(("UITitle", vnib.text(vc_id, "title", title)));
@@ -1993,8 +2055,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if let Some(item) = child(vc, "navigationItem", "navigationItem") {
             swapper.push(("UINavigationItem", navigation_item(&mut vnib, item)?));
         }
+        let templates = segue::templates(&mut vnib, "controller", upstream_used, &view_segues, &own_segues, &nib_names)?;
+        let external = vnib.array("NSDictionary", templates.external);
         swapper.push(("UIExternalObjectsTableForViewLoading", external));
-        swapper.push(("UINibName", nib_name));
+        swapper.push(("UINibName", vnib.string(&view_nib_name)));
         if let Some(identifier) = vc.attribute("storyboardIdentifier") {
             swapper.push(("UIStoryboardIdentifier", vnib.string(identifier)));
             if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
@@ -2003,42 +2067,51 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         } else if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
             return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
         }
+        if let Some(array) = templates.array {
+            swapper.push(("UIStoryboardSegueTemplates", array));
+        }
         if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
             swapper.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
         }
         if vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
             swapper.push(("UIClearsSelectionOnViewWillAppear", Value::Bool(false)));
         }
-        swapper.push(("UIClassName", vnib.string(&class_name)));
-        swapper.push(("UIOriginalClassName", vnib.string(original_class)));
-        let swapper = Value::New(Object::new("UIClassSwapper", swapper).named("controller"));
-        let connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard"), outlet(&mut vnib, "sceneViewController", "owner", "controller")];
-        let vc_root = root_object(
-            &mut vnib,
-            vec![owner, responder, storyboard, swapper],
-            {
-                let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
-                if child(vc, "navigationItem", "navigationItem").is_some() {
-                    objects.push(reference("navigation item"));
-                }
-                objects
-            },
-            connections,
-        );
-        // A scene neither initial nor identified can't be loaded, and
-        // Xcode leaves it out, unless a navigation controller embeds it.
-        let is_initial = initial == Some(vc_id);
-        let identified = vc.attribute("storyboardIdentifier").is_some();
-        let embedded = navs.iter().any(|n| n.2 == vc_id && n.3);
-        if embedded {
-            roots.insert(vc_id, RootController { vc, loadable: is_initial || identified, view_nib_name: view_nib_name.clone(), class_name: class_name.clone(), original_class, upstream_used });
+        let controller = if swapped {
+            swapper.push(("UIClassName", vnib.string(&class_name)));
+            swapper.push(("UIOriginalClassName", vnib.string(original_class)));
+            Object::new("UIClassSwapper", swapper)
+        } else {
+            Object::new(original_class, swapper)
+        };
+        let controller = Value::New(controller.named("controller"));
+        let mut connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard"), outlet(&mut vnib, "sceneViewController", "owner", "controller")];
+        for t in &templates.outlets {
+            connections.push(outlet(&mut vnib, "viewController", t, "controller"));
         }
-        if !is_initial && !identified && !embedded {
+        let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+        if child(vc, "navigationItem", "navigationItem").is_some() {
+            objects.push(reference("navigation item"));
+        }
+        objects.extend(templates.objects);
+        let vc_root = root_object(&mut vnib, vec![owner, responder, storyboard, controller], objects, connections);
+        if embedded {
+            roots.insert(vc_id, RootController {
+                vc,
+                loadable: swapped,
+                view_nib_name: view_nib_name.clone(),
+                class_name: class_name.clone(),
+                original_class,
+                upstream_used,
+                view_segues: scene.segues.clone(),
+                own_segues: own_segues.clone(),
+            });
+        }
+        if !is_initial && !identified && !segue_destination && !embedded {
             continue;
         }
         let mut scene_files = vec![(format!("{view_nib_name}.nib"), nib::archive(view_root))];
         let mut entry = None;
-        if is_initial || identified {
+        if is_initial || identified || segue_destination {
             scene_files.push((format!("{vc_nib_name}.nib"), nib::archive(vc_root)));
             entry = Some((vc_nib_name.clone(), is_initial, identified));
         }
@@ -2046,10 +2119,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     }
     for &(index, nav, root_id, loadable) in &navs {
         if !loadable {
-            return fail("a navigation controller neither initial nor identified is not supported by this ibtool");
+            return fail("a navigation controller nothing loads is not supported by this ibtool");
         }
         let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
-        let (name, bytes) = navigation_controller_nib(platform, color_matched, localizable, module, nav, root)?;
+        let swapped = initial == Some(attr(nav, "id")?) || nav.attribute("storyboardIdentifier").is_some();
+        let (name, bytes) = navigation_controller_nib(platform, color_matched, localizable, module, nav, root, swapped, &nib_names)?;
         let entry = (name.clone(), initial == Some(attr(nav, "id")?), nav.attribute("storyboardIdentifier").is_some());
         outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }

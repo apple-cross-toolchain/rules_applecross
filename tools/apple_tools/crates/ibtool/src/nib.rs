@@ -173,7 +173,11 @@ pub fn archive(root: Object) -> Vec<u8> {
             varint(&mut values, key_position[*k]);
             match v {
                 Stored::Int(i) => {
-                    if (-128..=127).contains(i) {
+                    // Negative values are 8 bytes wide.
+                    if *i < 0 {
+                        values.push(3);
+                        values.extend_from_slice(&i.to_le_bytes());
+                    } else if (-128..=127).contains(i) {
                         values.push(0);
                         values.push(*i as i8 as u8);
                     } else if (-32768..=32767).contains(i) {

@@ -25,12 +25,12 @@ fn height(n: Node, name: &str, default: Option<f32>) -> Result<f32, String> {
 }
 
 /// A table view controller's view nib: its table, the root view, holding
-/// its prototype cells' nibs. Returns the nib's root and whether it uses
-/// the controller's placeholder.
+/// its prototype cells' nibs. Returns the nib's root, whether it uses the
+/// controller's placeholder, and the ids of the segues its cells trigger.
 pub(super) fn table_view_nib(
     platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, table: Node, f: &Frame,
     vc_outlets: &[(String, String)],
-) -> Result<(Object, bool), String> {
+) -> Result<(Object, bool, Vec<String>), String> {
     only_attributes(table, &[
         ("key", Some("view")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
         ("contentMode", Some("scaleToFill")), ("alwaysBounceVertical", None), ("showsHorizontalScrollIndicator", Some("NO")),
@@ -82,6 +82,32 @@ pub(super) fn table_view_nib(
     }
     let upstream_used = !outlets.is_empty();
 
+    // Each prototype with a reuse identifier is a nib of its own, in byte
+    // order of the identifiers; one without is left out. A cell's segue
+    // is a placeholder of the table's nib, after the controller's, in
+    // document order.
+    let mut cells: Vec<(&str, Node, Option<String>)> = Vec::new();
+    let mut segues = Vec::new();
+    for p in children(table, "prototypes") {
+        only_children(p, &["tableViewCell"])?;
+        for c in children(p, "tableViewCell") {
+            let segue = children(c, "connections").flat_map(|cs| children(cs, "segue")).map(|sg| attr(sg, "id")).next().transpose()?;
+            if let Some(reuse) = c.attribute("reuseIdentifier") {
+                if cells.iter().any(|(r, ..)| *r == reuse) {
+                    return fail(format!("two prototypes reused as {reuse:?} are not supported by this ibtool"));
+                }
+                let placeholder = segue.map(|id| {
+                    segues.push(id.to_string());
+                    format!("upstream segue {}", segues.len() - 1)
+                });
+                cells.push((reuse, c, placeholder));
+            } else if segue.is_some() {
+                return fail("a segue from a prototype without a reuse identifier is not supported by this ibtool");
+            }
+        }
+    }
+    cells.sort_by(|a, b| a.0.cmp(b.0));
+
     let mut nib = Nib::new(platform, color_matched, localizable);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
@@ -90,6 +116,11 @@ pub(super) fn table_view_nib(
     if upstream_used {
         top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
         objects.push(reference("upstream"));
+    }
+    for i in 0..segues.len() {
+        let name = format!("upstream segue {i}");
+        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1 + usize::from(upstream_used)), &name));
+        objects.push(reference(name));
     }
 
     let mut values = Vec::new();
@@ -174,34 +205,25 @@ pub(super) fn table_view_nib(
         values.push(("UISeparatorColor", color(&mut nib, c)?));
     }
 
-    // Each prototype with a reuse identifier is a nib of its own, in byte
-    // order of the identifiers; one without is left out.
-    let mut cells = Vec::new();
-    for p in children(table, "prototypes") {
-        only_children(p, &["tableViewCell"])?;
-        for c in children(p, "tableViewCell") {
-            if let Some(reuse) = c.attribute("reuseIdentifier") {
-                if cells.iter().any(|(r, _)| *r == reuse) {
-                    return fail(format!("two prototypes reused as {reuse:?} are not supported by this ibtool"));
-                }
-                cells.push((reuse, c));
-            }
-        }
-    }
-    cells.sort_by(|a, b| a.0.cmp(b.0));
     if !cells.is_empty() {
         let mut nibs = Vec::new();
-        for (reuse, c) in &cells {
-            let bytes = cell_nib(platform, color_matched, localizable, module, *c)?;
+        for (reuse, c, placeholder) in &cells {
+            let bytes = cell_nib(platform, color_matched, localizable, module, *c, placeholder.is_some())?;
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
         }
         values.push(("UITableViewCellPrototypeNibs", nib.array("NSMutableDictionary", nibs)));
+        // A cell's external objects: its own nib's placeholder for its
+        // segue's.
         let mut external = Vec::new();
-        for (reuse, _) in &cells {
+        for (reuse, _, placeholder) in &cells {
             external.push(nib.string(reuse));
-            external.push(nib.array("NSMutableDictionary", Vec::new()));
+            let objects = match placeholder {
+                Some(p) => vec![nib.string("UpstreamPlaceholder-1"), reference(p.clone())],
+                None => Vec::new(),
+            };
+            external.push(nib.array("NSMutableDictionary", objects));
         }
         values.push(("UITableViewCellPrototypeNibExternalObjects", nib.array("NSMutableDictionary", external)));
     }
@@ -220,12 +242,12 @@ pub(super) fn table_view_nib(
         let source = if *source == "table" { root_name.as_str() } else { source };
         connections.push(outlet(&mut nib, label, source, destination));
     }
-    Ok((root_object(&mut nib, top, objects, connections), upstream_used))
+    Ok((root_object(&mut nib, top, objects, connections), upstream_used, segues))
 }
 
 /// A prototype cell's nib: the cell, its content view and the separator
 /// Xcode lays out at its foot, and the content view's subviews.
-fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node) -> Result<Vec<u8>, String> {
+fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool) -> Result<Vec<u8>, String> {
     only_attributes(cell, &[
         ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
@@ -268,6 +290,8 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let mut nib = Nib::new(platform, color_matched, localizable);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+    // A cell's segue is its placeholder's.
+    let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
 
     // The content view and its subviews, compiled as a container's are.
     let mut scene = Scene {
@@ -278,6 +302,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         subviews: Vec::new(),
         parent: Some(content_name.clone()),
         actions: Vec::new(),
+        segues: Vec::new(),
         guides: Vec::new(),
     };
     let cf = frame(content)?;
@@ -290,7 +315,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         }
     }
     if !scene.actions.is_empty() {
-        return fail("actions in a cell are not supported by this ibtool");
+        return fail("actions and segues in a cell are not supported by this ibtool");
     }
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
@@ -398,12 +423,18 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     } else {
         Object::new("UITableViewCell", values)
     };
-    let top = vec![owner, responder, Value::New(object.named(cell_name.clone()))];
+    let mut top = vec![owner, responder];
+    top.extend(upstream);
+    top.push(Value::New(object.named(cell_name.clone())));
 
     // The objects: the cell, its content view and the content view's
     // subviews; then, breadth first, each view's constraints and its
     // subviews, the content view's already listed.
-    let mut objects = vec![reference("owner"), reference("responder"), reference(cell_name.clone()), reference(content_name.clone())];
+    let mut objects = vec![reference("owner"), reference("responder")];
+    if has_segue {
+        objects.push(reference("upstream"));
+    }
+    objects.extend([reference(cell_name.clone()), reference(content_name.clone())]);
     let content_parent = Some(content_name.clone());
     objects.extend(scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| reference(s.1.clone())));
     let mut queue: std::collections::VecDeque<&String> = [&content_name].into();
@@ -417,10 +448,22 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         }
     }
 
-    // The cell's outlets into its content, in byte order of their names.
+    // The cell's outlets into its content and to its segue's placeholder,
+    // in byte order of their names.
     let mut outlets = Vec::new();
+    if has_segue {
+        outlets.push(("selectionSegueTemplate", "upstream".to_string()));
+    }
     for c in children(cell, "connections") {
-        only_children(c, &["outlet"])?;
+        only_children(c, &["outlet", "segue"])?;
+        if children(c, "segue").count() > 1 {
+            return fail("a cell with more than one segue is not supported by this ibtool");
+        }
+        for sg in children(c, "segue") {
+            if sg.attribute("trigger").is_some() {
+                return fail("a cell's accessory segue is not supported by this ibtool");
+            }
+        }
         for o in children(c, "outlet") {
             only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
             let destination = view_name(attr(o, "destination")?);
