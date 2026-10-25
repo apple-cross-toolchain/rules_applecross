@@ -1,4 +1,5 @@
-//! Image sets of PNG images: each image a `dmp2` rendition of its scale
+//! Image sets of PNG and JPEG images: each PNG a `dmp2` rendition of its
+//! scale, each JPEG stored as it is
 //! (docs/clean-room/actool.md).
 
 use crate::car::{self, Facet, Rendition};
@@ -60,8 +61,10 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             if entry["idiom"].as_str() != Some("universal") {
                 return Err(format!("{}: images for idioms other than universal are not supported by this actool", dir.display()));
             }
-            if !filename.to_ascii_lowercase().ends_with(".png") {
-                return Err(format!("{}/{filename}: image sets of images other than PNG are not supported by this actool", dir.display()));
+            let lower = filename.to_ascii_lowercase();
+            let jpeg = lower.ends_with(".jpg") || lower.ends_with(".jpeg");
+            if !lower.ends_with(".png") && !jpeg {
+                return Err(format!("{}/{filename}: image sets of images other than PNG and JPEG are not supported by this actool", dir.display()));
             }
             let scale = match entry["scale"].as_str() {
                 None => 1,
@@ -73,6 +76,13 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             scales.push(scale);
             let path = dir.join(filename);
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            // A JPEG is stored on its own, as it is but for its comments.
+            if jpeg {
+                let (stored, width, height) = stored_jpeg(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+                let attrs = vec![(car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
+                out.renditions.push(Rendition { attrs, csi: car::jpeg_csi(filename, width, height, scale, flags, &stored) });
+                continue;
+            }
             let (img, extended) = image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
             if extended.is_some() && img.is_gray() {
                 return Err(format!("{}: a grey image with colours outside sRGB is not supported by this actool", path.display()));
@@ -142,6 +152,57 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
         }
     }
     Ok(out)
+}
+
+/// The JPEG Xcode stores for an image set's JPEG, and its size: the file
+/// without its comments, when it holds only what is established to be kept
+/// as it is (JFIF, tables, frame, restart interval, scan, and the standard
+/// sRGB profile); other metadata Xcode rewrites, and other profiles it
+/// converts.
+fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
+    const SRGB_PROFILE_LEN: usize = 3144;
+    if !j.starts_with(&[0xff, 0xd8]) {
+        return Err("not a JPEG".into());
+    }
+    let mut out = j[..2].to_vec();
+    let mut size = None;
+    let mut i = 2;
+    loop {
+        if i + 4 > j.len() || j[i] != 0xff {
+            return Err("a JPEG this actool can't read".into());
+        }
+        let marker = j[i + 1];
+        let len = u16::from_be_bytes([j[i + 2], j[i + 3]]) as usize;
+        let segment = j.get(i..i + 2 + len).ok_or("a truncated JPEG")?;
+        match marker {
+            // The scan and what follows it, as they are.
+            0xda => {
+                out.extend_from_slice(&j[i..]);
+                break;
+            }
+            0xfe => {}
+            0xe0 if segment.get(4..9) == Some(b"JFIF\0") => out.extend_from_slice(segment),
+            0xe2 if segment.get(4..16) == Some(b"ICC_PROFILE\0") => {
+                let profile = &segment[18..];
+                let srgb = profile.len() == SRGB_PROFILE_LEN && profile.windows(17).any(|w| w == b"sRGB IEC61966-2.1");
+                if !srgb || segment[16..18] != [1, 1] {
+                    return Err("a JPEG with a colour profile other than sRGB's is not supported by this actool".into());
+                }
+                out.extend_from_slice(segment);
+            }
+            0xc0 | 0xc2 => {
+                let h = u16::from_be_bytes([segment[5], segment[6]]) as u32;
+                let w = u16::from_be_bytes([segment[7], segment[8]]) as u32;
+                size = Some((w, h));
+                out.extend_from_slice(segment);
+            }
+            0xc4 | 0xdb | 0xdd => out.extend_from_slice(segment),
+            m => return Err(format!("a JPEG with marker {m:#04x} (metadata Xcode rewrites) is not supported by this actool")),
+        }
+        i += 2 + len;
+    }
+    let (w, h) = size.ok_or("a JPEG without a frame")?;
+    Ok((out, w, h))
 }
 
 struct SetImage {
