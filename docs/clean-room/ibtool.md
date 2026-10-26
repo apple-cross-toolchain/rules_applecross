@@ -151,9 +151,10 @@ other values of the attributes these use, is refused. Observed:
 - A view gets `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints` only
   when its element says `translatesAutoresizingMaskIntoConstraints="NO"`
   (labels, a text field, a button and a stack view, with it removed) and a
-  constraint is on it: as an item, by its own constraints, or as a stack
-  view's arranged subview. A label that says so but has no constraint
-  doesn't get it.
+  constraint is on it: as an item, by its own constraints, as a stack
+  view's arranged subview, or as a stack view with arranged subviews
+  (two probes). A label that says so but has no constraint doesn't get
+  it.
 - A font named in `<fontDescription name=...>` is resolved from a set of iOS
   fonts that is neither the Mac's nor the simulator's: of the 1,182
   PostScript names macOS 27 lists (CoreText) and the 304 the iOS 27
@@ -210,20 +211,31 @@ other values of the attributes these use, is refused. Observed:
   root view and the safe-area guide at once, in three document orders,
   eight random subsets and some 30 smaller probes; legacy guides as the
   second item of a sibling constraint fit too. Constraints with equal keys
-  (the same first item and pair of attributes, their second items sibling
-  views) follow no single rule. Some cases are settled for constraints
-  with no constant, multiplier, relation or priority:
-  - Between centres (centerX or centerY both ways), the second items'
-    frames decide, whatever the ids, document and subview orders: the
-    lower one first, then the one further right (19 probes, and seven of
-    the corpus's storyboards).
-  - Between the same attribute, second items with the same frame come in
-    id order (three of the corpus's).
+  (the same first item and pair of attributes, different second items)
+  go by the length of the line Interface Builder draws for each, longest
+  first, whatever the ids and document and subview orders (380 probe
+  scenes of random frames, constants and ids):
+  - An alignment (the same edge or centre both ways) without a constant,
+    or any constraint whose two edges meet in the frames, is drawn along
+    the edge across both items: its length is their frames' span across
+    it (centerY: from the leftmost left edge to the rightmost right one).
+  - Any other is drawn between the two edges: its length is the distance
+    between them in the frames, whatever its constant.
+  - The safe-area guide measures as an empty rectangle at the root view's
+    origin (80 probe scenes on two devices; its laid-out frame fits half
+    of them), the top legacy guide as the root view's width and a point
+    tall at its top, and the bottom one as its width and no height at its
+    foot (240 probe scenes on three devices, placed to a quarter point).
+  - Equal lengths are left to the earlier rules: second items with the
+    same frame in id order (three of the corpus's), and centres the lower
+    one first, then the one further right (19 probes). Otherwise they
+    depend on the ids and the frames in a way not settled (120 probe
+    scenes), and are refused, as are lengths within a point of each other
+    and edges less than a point apart (a centre half a point from another
+    was drawn along the edge).
 
-  Others are refused. With a constant, the ids play a part too (22
-  probes). Top to bottom goes by the bottom edge from the top, then by id,
-  and leading to trailing by the trailing edge from the right, then by id
-  (ten probes, too few to settle either). Two constraints with the same
+  Multipliers, relations, priorities, margins and baselines in such ties
+  weren't probed and are refused. Two constraints with the same
   items and attributes are refused as well,
   as are constraints from a legacy guide (but the bottom guide as the first
   item of a sibling constraint, placed at the root view's foot, three
@@ -487,7 +499,12 @@ other values of the attributes these use, is refused. Observed:
   controller's placeholder), then control actions, each in byte order of
   their names (`aButton`, `view`, `zButton`; `B:`, `a:`; `tap1:`, `tap:`,
   `tap_:`), whatever the document order, ids or positions; actions with
-  the same selector stay in document order (19 probes). Actions on other
+  the same selector in the order Xcode visits their controls, whatever
+  their ids: the root view's subviews in document order, then, from the
+  last visited, each one's subviews the same way, as a stack (so siblings
+  stay in document order, 19 probes, and controls in containers of their
+  own come last container first, eight probes and one of the corpus's).
+  Actions on other
   events sort by event mask first (valueChanged 4096,
   primaryActionTriggered 8192, editingDidBegin 65536, editingChanged
   131072, editingDidEnd 262144, editingDidEndOnExit 524288), then by name
