@@ -49,7 +49,10 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
         // An empty list of gesture recognizers, or of animations (older
         // documents), is Interface Builder's alone (one probe).
         let empty_gestures = (c.has_tag_name("gestureRecognizers") || c.has_tag_name("animations")) && !c.children().any(|g| g.is_element());
-        if !allowed.contains(&c.tag_name().name()) && !editor_only && !empty_gestures {
+        // A view's variations go with its constraints, which compile them
+        // (`excluded_constraints`).
+        let variation = c.has_tag_name("variation") && allowed.contains(&"constraints");
+        if !allowed.contains(&c.tag_name().name()) && !editor_only && !empty_gestures && !variation {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
         }
     }
@@ -240,11 +243,27 @@ struct Nib {
     color_matched: bool,
     shared: HashMap<String, String>,
     next: usize,
+    /// The views whose default variations exclude constraints, where this
+    /// nib can hold them (a controller's view nib), else `None`.
+    variations: Option<Vec<Variation>>,
+    /// The ids of the views whose variations were compiled.
+    varied: Vec<String>,
+    /// Excluded constraints, encoded where the objects list them.
+    withheld: Vec<Object>,
+}
+
+/// A view's constraints, some of which its default variation excludes.
+struct Variation {
+    view: String,
+    /// Its constraints in the objects' order, each with the names of the
+    /// items it relates.
+    candidates: Vec<(String, Vec<String>)>,
+    excluded: Vec<String>,
 }
 
 impl Nib {
     fn new(platform: Platform, color_matched: bool, localizable: bool) -> Nib {
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0 }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), withheld: Vec::new() }
     }
 
     fn fresh(&mut self) -> String {
@@ -349,6 +368,16 @@ impl Nib {
         let mut values = vec![("NSInlinedValue", Value::Bool(true))];
         values.extend(items.into_iter().map(|v| ("UINibEncoderEmptyKey", v)));
         Value::New(Object::new(class, values))
+    }
+
+    /// An `NSSet` or `NSOrderedSet` of `items` in this order: keyed
+    /// `NS.object.<i>`, not inlined.
+    fn set(&mut self, class: &'static str, items: Vec<Value>) -> Result<Value, String> {
+        static KEYS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| (0..1024).map(|i| format!("NS.object.{i}")).collect());
+        if items.len() > KEYS.len() {
+            return fail("a set of more than 1024 objects is not supported by this ibtool");
+        }
+        Ok(Value::New(Object::new(class, KEYS.iter().map(String::as_str).zip(items).collect())))
     }
 
     fn system_color(&mut self, name: &str, color: &SystemColor) -> Value {
@@ -1993,6 +2022,124 @@ fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
     ids
 }
 
+/// The ids of the constraints `n` holds that its default variation
+/// excludes: those Interface Builder doesn't install (Installed unchecked).
+/// Variations for size classes are refused.
+fn excluded_constraints<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
+    let mut ids = Vec::new();
+    for v in children(n, "variation") {
+        if v.attribute("key") != Some("default") {
+            return fail("variations other than the default one are not supported by this ibtool");
+        }
+        only_attributes(v, &[("key", None)])?;
+        only_children(v, &["mask"])?;
+        for m in children(v, "mask") {
+            only_attributes(m, &[("key", Some("constraints"))])?;
+            only_children(m, &["exclude"])?;
+            for e in children(m, "exclude") {
+                only_attributes(e, &[("reference", None)])?;
+                ids.push(attr(e, "reference")?);
+            }
+        }
+    }
+    if ids.is_empty() && children(n, "variation").next().is_some() {
+        return fail("a variation that excludes no constraints is not supported by this ibtool");
+    }
+    Ok(ids)
+}
+
+/// Records the variation of the view `name` (`id` in the document), whose
+/// constraints are `candidates` in the objects' order with their items;
+/// the excluded ones are withheld from the view, to be encoded where the
+/// objects list them.
+fn record_variation(nib: &mut Nib, id: &str, name: &str, excluded: &[&str], candidates: Vec<(Node, String, Vec<String>)>) -> Result<(), String> {
+    if excluded.is_empty() {
+        return Ok(());
+    }
+    let Some(variations) = nib.variations.as_mut() else {
+        return fail("a variation of a view outside a controller's own view is not supported by this ibtool");
+    };
+    let mut names = Vec::new();
+    for e in excluded {
+        match candidates.iter().find(|c| c.0.attribute("id") == Some(*e)) {
+            Some(c) => names.push(c.1.clone()),
+            None => return fail(format!("a variation excluding {e}, which isn't one of the view's own constraints, is not supported by this ibtool")),
+        }
+    }
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names });
+    nib.varied.push(id.to_string());
+    Ok(())
+}
+
+/// A run of constraints in the objects, (name, holding view), as excluded
+/// constraints are ranked: each view's in turn, its installed constraints
+/// before its excluded ones (`withheld`).
+fn ranked_run<'a>(run: &[(Option<&'a String>, Option<String>)], withheld: &[String]) -> Vec<Option<&'a String>> {
+    let mut holders: Vec<&Option<String>> = Vec::new();
+    for (_, h) in run {
+        if !holders.contains(&h) {
+            holders.push(h);
+        }
+    }
+    let mut out = Vec::new();
+    for h in holders {
+        for excluded in [false, true] {
+            out.extend(run.iter().filter(|(n, hh)| hh == h && n.is_some_and(|n| withheld.contains(n)) == excluded).map(|(n, _)| *n));
+        }
+    }
+    out
+}
+
+/// The trait storage list of the root view `root`, if its views' default
+/// variations exclude constraints (198 probes): a `_UITraitStorageList`
+/// of a `_UIRelationshipTraitStorage` per such view, in the document's
+/// order depth first (`order`), for `traitStorageConstraints`, with one record for the
+/// default traits (an empty `UITraitCollection`, shared) whose removed
+/// objects are the excluded constraints by `ranks` compared as decimal
+/// strings, and as candidates all the view's constraints in the objects'
+/// order. Its descendants are the items
+/// those constraints relate, but the root view, in the order they first
+/// appear; a guide is its objects-list placeholder.
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>) -> Result<Option<Value>, String> {
+    let mut variations = nib.variations.take().unwrap_or_default();
+    if variations.is_empty() {
+        return Ok(None);
+    }
+    let place = |v: &Variation| order.iter().position(|o| *o == v.view);
+    if variations.iter().any(|v| place(v).is_none()) {
+        return fail("a variation of a view outside the root view is not supported by this ibtool");
+    }
+    variations.sort_by_key(place);
+    let mut storages = Vec::new();
+    let mut descendants: Vec<String> = Vec::new();
+    for v in variations {
+        for (_, items) in &v.candidates {
+            for item in items {
+                if item != root && !descendants.contains(item) {
+                    descendants.push(item.clone());
+                }
+            }
+        }
+        let traits = nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new()));
+        let added = nib.set("NSSet", Vec::new())?;
+        let mut removed: Vec<&String> = v.candidates.iter().map(|c| &c.0).filter(|c| v.excluded.contains(c)).collect();
+        removed.sort_by_key(|c| ranks.get(*c).map(usize::to_string));
+        let removed = nib.set("NSSet", removed.into_iter().map(|c| reference(c.clone())).collect())?;
+        let record = Object::new("_UIRelationshipTraitStorageRecord", vec![("UITraitCollection", traits), ("UIAddedObjects", added), ("UIRemovedObjects", removed)]);
+        let records = nib.array("NSMutableArray", vec![Value::New(record)]);
+        let candidates = nib.set("NSOrderedSet", v.candidates.iter().map(|c| reference(c.0.clone())).collect())?;
+        storages.push(Value::New(Object::new("_UIRelationshipTraitStorage", vec![
+            ("UIObject", reference(v.view.clone())),
+            ("UIKeyPath", nib.string("traitStorageConstraints")),
+            ("UIRecords", records),
+            ("UIRelationshipCandidates", candidates),
+        ])));
+    }
+    let storages = nib.array("NSArray", storages);
+    let descendants = nib.set("NSSet", descendants.into_iter().map(reference).collect())?;
+    Ok(Some(Value::New(Object::new("_UITraitStorageList", vec![("UITopLevelObject", reference(root.to_string())), ("UITraitStorages", storages), ("UIDescendants", descendants)]))))
+}
+
 /// The constraints a subview holds: on its own size, width before height
 /// whatever the document's order and each dimension's constant before its
 /// aspect ratio; then, for a container, those between it
@@ -2016,8 +2163,13 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         .filter(|c| c.attribute("firstItem") == Some(id) && c.attribute("secondItem") == Some(id))
         .collect();
     let own: Vec<Node> = children(n, "constraints").flat_map(|cs| children(cs, "constraint")).collect();
+    let excluded = excluded_constraints(n)?;
     if own.is_empty() && held.is_empty() {
+        record_variation(nib, id, name, &excluded, Vec::new())?;
         return Ok(None);
+    }
+    if !excluded.is_empty() && n != container {
+        return fail("a variation of an old-format collection view cell is not supported by this ibtool");
     }
     for cs in children(n, "constraints") {
         only_children(cs, &["constraint"])?;
@@ -2077,12 +2229,19 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     order_ties(&mut others, |o| (o.1, o.2), &direct, &[])?;
     let mut values = Vec::new();
     let item = |i: &str| if i == id && n != container { reference(name.to_string()) } else { reference(view_name(i)) };
+    let item_name = |i: &str| if i == id { name.to_string() } else { view_name(i) };
     let mut made = Vec::new();
+    let mut candidates = Vec::new();
     for (rank, c) in sizes {
         let second = (rank % 2 == 1).then(|| reference(name.to_string()));
         made.push((c, document_constraint(nib, c, reference(name.to_string()), second)?));
+        candidates.push((c, constraint_name(c)?, vec![name.to_string()]));
     }
     for (_, _, c, first, second) in others {
+        if !excluded.is_empty() && scene.scroll_guides.iter().any(|g| g.0 == second && g.2 == name) {
+            return fail("a variation of a scroll view's constraints on its own guides is not supported by this ibtool");
+        }
+        candidates.push((c, constraint_name(c)?, vec![item_name(first), item_name(second)]));
         let second = match scene.scroll_guides.iter().find(|g| g.0 == second && g.2 == name).cloned() {
             Some((guide, _, _)) if scene.defined_guides.contains(&guide) => reference(format!("scroll guide {guide}")),
             Some((guide, identifier, owner)) => {
@@ -2096,11 +2255,14 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     for (c, m) in made {
         let constraint_name = constraint_name(c)?;
         scene.own_constraints.push((name.to_string(), constraint_name.clone()));
-        match m {
-            Value::New(o) => values.push(Value::New(o.named(constraint_name))),
-            _ => unreachable!(),
+        let Value::New(o) = m else { unreachable!() };
+        if excluded.contains(&attr(c, "id")?) {
+            nib.withheld.push(o.named(constraint_name));
+        } else {
+            values.push(Value::New(o.named(constraint_name)));
         }
     }
+    record_variation(nib, id, name, &excluded, candidates)?;
     // An empty list writes nothing (one corpus storyboard).
     if values.is_empty() {
         return Ok(None);
@@ -5222,6 +5384,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     // Every controller's own nib's name, and the controllers only segues
     // make loadable.
     let controllers: Vec<Node> = scene_nodes.iter().filter_map(|s| segue::scene_controller(*s)).collect();
+    // The views whose variations a view nib compiled; any other is refused.
+    let mut varied: Vec<String> = Vec::new();
     let mut nib_names: HashMap<String, String> = HashMap::new();
     for c in &controllers {
         nib_names.insert(attr(*c, "id")?.to_string(), segue::nib_name(*c)?);
@@ -5699,6 +5863,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             scene.segues = segues;
             (root, upstream_used)
         } else {
+            nib.variations = Some(Vec::new());
             // Laid out at another size than its frame's, the root view resizes
             // its autoresizing subviews: only those whose masks keep their
             // frames (fixed left and top margins, size) are established.
@@ -5977,36 +6142,54 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             let mut constraint_values: Vec<Value> = guide_constraints.iter().map(|n| reference(n.clone())).collect();
             let mut constraint_names = Vec::new();
-            // The safe-area guide is archived where a constraint first uses it.
-            let mut safe_area_used = false;
-            let mut resolve = |nib: &mut Nib, id: &str| -> Result<Value, String> {
-                if Some(id) != safe_area_id {
-                    return item(id);
-                }
-                if safe_area_used {
-                    return Ok(reference("safe area guide"));
-                }
-                safe_area_used = true;
-                Ok(safe_area_guide(nib, &root_name))
-            };
+            let excluded = excluded_constraints(view)?;
+            let mut candidates = Vec::new();
+            // The safe-area guide is archived where an installed constraint
+            // first uses it, else in the view's guides (one probe).
+            let (mut safe_area_used, mut safe_area_defined) = (false, false);
             for (_, _, c, first, second) in &xml_constraints {
-                let first = resolve(&mut nib, first)?;
-                let second = match second {
-                    Some(s) => Some(resolve(&mut nib, s)?),
-                    None => None,
-                };
+                let withheld = excluded.contains(&attr(*c, "id")?);
+                let mut items = Vec::new();
+                let mut names = Vec::new();
+                for id in std::iter::once(*first).chain(*second) {
+                    if Some(id) != safe_area_id {
+                        items.push(item(id)?);
+                        // A legacy guide is itself in the objects (four
+                        // probes); its own constraints aren't candidates.
+                        names.push(match scene.guides.iter().find(|g| g.0 == id) {
+                            Some((_, kind)) => format!("guide {kind}"),
+                            None => view_name(id),
+                        });
+                        continue;
+                    }
+                    safe_area_used = true;
+                    names.push("safe area".to_string());
+                    if safe_area_defined || withheld {
+                        items.push(reference("safe area guide"));
+                    } else {
+                        safe_area_defined = true;
+                        items.push(safe_area_guide(&mut nib, &root_name));
+                    }
+                }
+                let second = (items.len() == 2).then(|| items.pop()).flatten();
+                let first = items.pop().expect("a first item");
                 let name = constraint_name(*c)?;
                 constraint_names.push(name.clone());
-                match document_constraint(&mut nib, *c, first, second)? {
-                    Value::New(o) => constraint_values.push(Value::New(o.named(name))),
-                    _ => unreachable!(),
+                candidates.push((*c, name.clone(), names));
+                let Value::New(o) = document_constraint(&mut nib, *c, first, second)? else { unreachable!() };
+                if withheld {
+                    nib.withheld.push(o.named(name));
+                } else {
+                    constraint_values.push(Value::New(o.named(name)));
                 }
             }
+            record_variation(&mut nib, view_id, &root_name, &excluded, candidates)?;
             if !constraint_values.is_empty() {
                 values.push(("UIViewAutolayoutConstraints", nib.array("NSMutableArray", constraint_values)));
             }
             if safe_area_used {
-                values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![reference("safe area guide")])));
+                let guide = if safe_area_defined { reference("safe area guide") } else { safe_area_guide(&mut nib, &root_name) };
+                values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![guide])));
             }
             margins(&mut values, view)?;
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -6168,8 +6351,56 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
             let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
-            (root_object_full(&mut nib, top, objects, connections, accessibility, pairs), upstream_used)
+            // Excluded constraints are ranked by their places counted from 1
+            // in the objects, with each run of constraints after the run of
+            // other objects that follows it, and each view's installed
+            // constraints in a run before its excluded ones (198 probes).
+            let withheld: Vec<String> = nib.withheld.iter().map(|o| o.name.clone().expect("named")).collect();
+            let holder = |name: &String| -> Option<String> {
+                if constraint_names.contains(name) {
+                    return Some(root_name.clone());
+                }
+                scene.own_constraints.iter().find(|c| &c.1 == name).map(|c| c.0.clone())
+            };
+            let listed: Vec<(Option<&String>, Option<String>)> = objects
+                .iter()
+                .map(|v| match v {
+                    Value::Ref(r) => (Some(r), holder(r)),
+                    _ => (None, None),
+                })
+                .collect();
+            let mut places: Vec<Option<&String>> = Vec::new();
+            let mut pending: &[(Option<&String>, Option<String>)] = &[];
+            for run in listed.chunk_by(|a, b| a.1.is_some() == b.1.is_some()) {
+                if run[0].1.is_some() {
+                    pending = run;
+                    continue;
+                }
+                places.extend(run.iter().map(|_| None));
+                places.extend(ranked_run(pending, &withheld));
+                pending = &[];
+            }
+            places.extend(ranked_run(pending, &withheld));
+            let ranks: HashMap<String, usize> = places.iter().enumerate().filter_map(|(i, n)| n.map(|n| (n.clone(), i + 1))).collect();
+            // Excluded constraints are encoded where the objects list them.
+            for o in std::mem::take(&mut nib.withheld) {
+                let name = o.name.clone().expect("named");
+                let at = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == name));
+                let at = at.ok_or("an excluded constraint the objects don't list is not supported by this ibtool")?;
+                objects[at] = Value::New(o);
+            }
+            // The views in the document's order, depth first.
+            let mut preorder = vec![root_name.clone()];
+            preorder.extend(view.descendants().filter(|d| d.is_element() && d.parent().is_some_and(|p| p.has_tag_name("subviews"))).filter_map(|d| d.attribute("id")).map(view_name));
+            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks)?;
+            let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
+            if let Some(list) = traits {
+                let lists = nib.array("NSArray", vec![list]);
+                root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
+            }
+            (root, upstream_used)
         };
+        varied.append(&mut nib.varied);
 
         // The view controller's nib: the scene's placeholders and a class
         // swapper standing in for the controller, which loads the view nib.
@@ -6544,5 +6775,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
     };
     files.push(("Info.plist".into(), cf::binary::to_bytes_with(&info, &share, cf::binary::Dictionaries::Grown)));
+    for v in root.descendants().filter(|d| d.has_tag_name("variation")) {
+        let holder = v.parent_element().and_then(|p| p.attribute("id"));
+        if !holder.is_some_and(|h| varied.iter().any(|v| v == h)) {
+            return fail(format!("a variation of {} is not supported by this ibtool", holder.unwrap_or("a view")));
+        }
+    }
     Ok(Compiled { files })
 }
