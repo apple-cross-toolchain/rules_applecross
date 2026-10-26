@@ -3252,15 +3252,16 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
 /// another order. Equal keys are refused: Xcode leaves them in the
 /// document's order, which it doesn't keep stably.
 fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: bool) -> Result<(&'a str, u8, [usize; 4]), String> {
-    const SIBLINGS: [&str; 19] = [
+    // The last baseline (`baseline`) after the first (three probes).
+    const SIBLINGS: [&str; 20] = [
         "centerXWithinMargins", "centerX", "rightMargin", "leftMargin", "right", "left", "trailingMargin", "leadingMargin", "trailing", "leading",
-        "centerYWithinMargins", "centerY", "topMargin", "bottomMargin", "bottom", "top", "firstBaseline", "width", "height",
+        "centerYWithinMargins", "centerY", "topMargin", "bottomMargin", "bottom", "top", "firstBaseline", "baseline", "width", "height",
     ];
-    let rank = |order: &[&str; 19], a: &str| order.iter().position(|o| *o == a).ok_or_else(|| format!("constraints on {a} are not supported by this ibtool"));
+    let rank = |order: &[&str], a: &str| order.iter().position(|o| *o == a).ok_or_else(|| format!("constraints on {a} are not supported by this ibtool"));
     let axis = |a: &str| match a {
         "leading" | "trailing" | "centerX" | "left" | "right" | "leadingMargin" | "trailingMargin" | "leftMargin" | "rightMargin"
         | "centerXWithinMargins" => 0,
-        "top" | "bottom" | "centerY" | "topMargin" | "bottomMargin" | "centerYWithinMargins" | "firstBaseline" => 1,
+        "top" | "bottom" | "centerY" | "topMargin" | "bottomMargin" | "centerYWithinMargins" | "firstBaseline" | "baseline" => 1,
         _ => 2,
     };
     if a1 != a2 && (axis(a1) != axis(a2) || axis(a1) == 2) {
@@ -3449,6 +3450,7 @@ fn attribute_codes(name: &str) -> Result<(i64, i64, i64), String> {
         "centerXWithinMargins" => (19, 9, 0),
         "centerYWithinMargins" => (20, 10, 0),
         "firstBaseline" => (12, 12, 0),
+        "baseline" => (11, 11, 0),
         other => {
             let code = layout_attribute(other)?;
             (code, code, 0)
