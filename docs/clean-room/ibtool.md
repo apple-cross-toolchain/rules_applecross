@@ -728,6 +728,14 @@ other values of the attributes these use, is refused. Observed:
   controller (in reverse document order) and listed right after it, their
   actions after `sceneViewController` (two probes). Beside segues or bar
   button items, and in other containers, they are refused.
+- A recognizer's segue (`<segue>` in its connections) is templated as a
+  bar button item's is: in `UIStoryboardSegueTemplates` after the
+  controls', listed after them and the controller, its `viewController`
+  outlet with the others, and the recognizer's `perform:` on it sorted by
+  selector with the recognizers' actions. In a navigation controller's
+  nib the root's templates come before its recognizers kept alive (five
+  probes). Several recognizers' segues, one beside bar button items' segues
+  or items, and in a navigation root beside other segues, are refused.
 
 - A scene's custom objects (`<customObject>`, of a custom class) are
   top-level in the controller's nib before its recognizers, in reverse
