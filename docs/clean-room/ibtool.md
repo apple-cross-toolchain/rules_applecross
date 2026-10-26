@@ -76,8 +76,8 @@ legacy guides, beside them, whether it lists the safe area or not, the
 safe-area guide following the root view in the objects as without them:
 three probes, constraints on that guide beside legacy ones refused), alone or in a navigation, tab bar or split view controller (and table and collection view
 controllers). Subviews: labels (the system font in any weight, bold or
-italic, a font Xcode finds for iOS, or the iOS text styles and, on tvOS,
-Title1; the default or an sRGB, grey or system text colour), text fields
+italic, a font Xcode finds for iOS, or the iOS and tvOS text styles; the
+default or an sRGB, grey or system text colour), text fields
 (any border, alignment, text input traits, a delegate and editing actions on
 the controller), text views (text, colours, scrolling and editing flags,
 traits, a delegate),
@@ -93,7 +93,8 @@ other values of the attributes these use, is refused. Observed:
   probes and RxSwift's ImagePicker) whatever its
   frame says when the deployment target is below iOS 17.0, and at its frame
   from 17.0 on (`resources/Launch`, at 12.0, 16.99, 17.0 and 26.0); Xcode's
-  ibtool fails on a tvOS storyboard without one.
+  ibtool fails on a tvOS storyboard without one. A tvOS device without an
+  orientation is landscape (a probe and a corpus storyboard).
 - Colour components are kept to 10 significant digits (`%.10g`). Each is
   archived as a float (`UIRed`, `UIWhite`, `UIAlpha`, ...) followed, when
   the float isn't exactly that value, by a `-Double` key with it; the text
@@ -149,6 +150,10 @@ other values of the attributes these use, is refused. Observed:
   are `.SFUI-Regular` (Headline `.SFUI-Semibold`, traits 2) with `NSSize`
   Body 14, Subhead 12, Footnote 12, Caption1 and Caption2 11, Title0 31,
   Title1 25, Title2 19, Title3 17, Headline 14, Callout 13 (23 probes).
+  tvOS's are `.SFUI-Medium` (Footnote `.SFUI-Regular`), none bold, with
+  `NSSize` Headline 38, Body 29, Callout 31, Subhead 29, Footnote 29,
+  Caption1 25, Caption2 23, Title1 76, Title2 57, Title3 48 (one
+  storyboard labelling each).
 - A label's declared text colour, even `labelColor`, sets
   `UIDisableUpdateTextColorOnTraitCollectionChange`; a nil one is
   `labelColor` without it.
@@ -418,8 +423,19 @@ other values of the attributes these use, is refused. Observed:
   a system symbol (`catalog="system"`) is a placeholder of width and
   height 0 naming it as both resource and symbol, shared by name apart
   from an image of the document's of that name (five probes, image views
-  and a button's normal state); no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
+  and a button's normal state; one the document's resources don't list
+  is archived as a plain image, so Interface Builder's own documents
+  always list theirs); no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
   when set (one probe). snag's launch screen is byte-identical.
+- A button state's `<preferredSymbolConfiguration>` is
+  `UIImageSymbolConfiguration` in its content right after `UIImage` (before
+  the title colour): `UISymbolScale` when given (default -1, small 1,
+  medium 2, large 3); for a point size, `UIPointSize` as a float and
+  `UISymbolWeight` when given (ultraLight 1 to black 9); for a text style,
+  the weight (4 unless given) and `UITextStyle`; for a system font, its
+  point size and weight (15 probes and a corpus storyboard). A system
+  font without a weight, other fonts and a configuration without an
+  image are refused.
 - A controller's own `restorationIdentifier` is `UIRestorationIdentifier`
   after `UINibName` (one probe; beside a storyboard identifier, or in an
   embedded controller, it is refused).
@@ -594,7 +610,17 @@ other values of the attributes these use, is refused. Observed:
 - A view nib that refers to its controller (an outlet into it, an action
   to it) has an `UpstreamPlaceholder-1` proxy, which the controller's nib
   maps to its class swapper in `UIExternalObjectsTableForViewLoading`.
-- tvOS views have no `UIViewLargeContentStoredProperties`.
+- tvOS views have no `UIViewLargeContentStoredProperties`. A tvOS button's
+  font is, whatever its type, the Body text style at size category 3:
+  `.SFUI-Medium` 29 with a descriptor of `NSCTFontSizeCategoryAttribute`
+  3, `NSCTFontUIUsageAttribute` `UICTFontTextStyleBody` and the size,
+  options 2147517444, not as a label's text style (four probes and a
+  corpus storyboard); one with a font of its own is refused. A tvOS
+  collection view's `UICollectionViewPrefetchingEnabled` is false unless
+  it says `prefetchingEnabled="YES"` (three probes and a corpus
+  storyboard; the attribute is refused). A tvOS navigation bar has no
+  `UIViewLayoutMargins` or `UIViewLayoutMarginsAreDirectional` (two
+  probes and a corpus storyboard).
 
 ## Stack views, content modes, named colours and gesture recognizers
 

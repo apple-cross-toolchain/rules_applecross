@@ -906,7 +906,18 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
         (Platform::Ios, "UICTFontTextStyleTitle1") => (".SFUI-Regular", 0, 25.0),
         (Platform::Ios, "UICTFontTextStyleTitle2") => (".SFUI-Regular", 0, 19.0),
         (Platform::Ios, "UICTFontTextStyleTitle3") => (".SFUI-Regular", 0, 17.0),
+        // tvOS's, from one storyboard labelling each: Medium but for
+        // Footnote, none bold.
+        (Platform::Tvos, "UICTFontTextStyleHeadline") => (".SFUI-Medium", 0, 38.0),
+        (Platform::Tvos, "UICTFontTextStyleBody") => (".SFUI-Medium", 0, 29.0),
+        (Platform::Tvos, "UICTFontTextStyleCallout") => (".SFUI-Medium", 0, 31.0),
+        (Platform::Tvos, "UICTFontTextStyleSubhead") => (".SFUI-Medium", 0, 29.0),
+        (Platform::Tvos, "UICTFontTextStyleFootnote") => (".SFUI-Regular", 0, 29.0),
+        (Platform::Tvos, "UICTFontTextStyleCaption1") => (".SFUI-Medium", 0, 25.0),
+        (Platform::Tvos, "UICTFontTextStyleCaption2") => (".SFUI-Medium", 0, 23.0),
         (Platform::Tvos, "UICTFontTextStyleTitle1") => (".SFUI-Medium", 0, 76.0),
+        (Platform::Tvos, "UICTFontTextStyleTitle2") => (".SFUI-Medium", 0, 57.0),
+        (Platform::Tvos, "UICTFontTextStyleTitle3") => (".SFUI-Medium", 0, 48.0),
         _ => return fail(format!("the {style} text style is not supported by this ibtool here")),
     })
 }
@@ -1309,6 +1320,40 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
     values.push(("NSName", nib.string(font_name)));
     values.push(("NSSize", Value::Double(ns_size)));
     Ok(nib.shared(key, || Object::new("UIFont", values).with_fallback("NSFont")))
+}
+
+/// A tvOS button's default font, whatever its type: the Body text style,
+/// at its size category (3), not as a label's text style (four probes and
+/// a corpus storyboard).
+fn tvos_button_font(nib: &mut Nib) -> Value {
+    if let Some(v) = nib.existing("font:tvOS button") {
+        return v;
+    }
+    let name = nib.string(".SFUI-Medium");
+    let attributes = vec![
+        nib.string("NSCTFontSizeCategoryAttribute"),
+        nib.int_number(3),
+        nib.string("NSCTFontUIUsageAttribute"),
+        nib.string("UICTFontTextStyleBody"),
+        nib.string("NSFontSizeAttribute"),
+        nib.double_number(29.0),
+    ];
+    let attributes = nib.array("NSDictionary", attributes);
+    let descriptor = Value::New(Object::new("UIFontDescriptor", vec![("UIFontDescriptorAttributes", attributes), ("UIFontDescriptorOptions", Value::Int(2147517444))]));
+    let ns_name = nib.string(".SFUI-Medium");
+    let values = vec![
+        ("UIFontName", name),
+        ("UIFontDescriptor", descriptor),
+        ("UIFontPointSize", Value::Double(29.0)),
+        ("UIFontTextStyleForScaling", Value::Nil),
+        ("UIFontPointSizeForScaling", Value::Double(0.0)),
+        ("UIFontMaximumPointSizeAfterScaling", Value::Double(0.0)),
+        ("UIFontTraits", Value::Int(0)),
+        ("UISystemFont", Value::Bool(true)),
+        ("NSName", ns_name),
+        ("NSSize", Value::Double(29.0)),
+    ];
+    nib.shared("font:tvOS button".into(), || Object::new("UIFont", values).with_fallback("NSFont"))
 }
 
 #[derive(Clone, Copy)]
@@ -2113,6 +2158,61 @@ fn ranked_run<'a>(run: &[(Option<&'a String>, Option<String>)], withheld: &[Stri
         }
     }
     out
+}
+
+/// A preferred symbol configuration, after the image it applies to (15
+/// probes): `UISymbolScale` (default -1, small 1, medium 2, large 3) when
+/// given, then a point size's `UIPointSize` (a float; a system font's
+/// too) and
+/// `UISymbolWeight` (ultraLight 1 to black 9) when given; a text style's
+/// weight, 4 unless given, and `UITextStyle`.
+fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
+    only_attributes(c, &[("key", Some("preferredSymbolConfiguration")), ("configurationType", None), ("pointSize", None), ("scale", None), ("weight", None)])?;
+    let mut values = Vec::new();
+    if let Some(scale) = c.attribute("scale") {
+        let code = match scale {
+            "default" => -1,
+            "small" => 1,
+            "medium" => 2,
+            "large" => 3,
+            other => return fail(format!("symbol scale {other} is not supported by this ibtool")),
+        };
+        values.push(("UISymbolScale", Value::Int(code)));
+    }
+    const WEIGHTS: [&str; 9] = ["ultraLight", "thin", "light", "regular", "medium", "semibold", "bold", "heavy", "black"];
+    let weight = match c.attribute("weight") {
+        Some(w) => Some(WEIGHTS.iter().position(|x| *x == w).ok_or_else(|| format!("symbol weight {w} is not supported by this ibtool"))? as i64 + 1),
+        None => None,
+    };
+    match c.attribute("configurationType") {
+        Some("pointSize") => {
+            only_children(c, &[])?;
+            values.push(("UIPointSize", Value::Float(number(attr(c, "pointSize")?)? as f32)));
+            values.extend(weight.map(|w| ("UISymbolWeight", Value::Int(w))));
+        }
+        Some("font") => {
+            only_children(c, &["fontDescription"])?;
+            if c.attribute("pointSize").is_some() {
+                return fail("a font symbol configuration with a point size is not supported by this ibtool");
+            }
+            let f = child(c, "fontDescription", "fontDescription").ok_or("a font symbol configuration without a font is not supported by this ibtool")?;
+            match (f.attribute("style"), f.attribute("type"), weight) {
+                (Some(style), None, _) => {
+                    only_attributes(f, &[("key", None), ("style", None)])?;
+                    values.push(("UISymbolWeight", Value::Int(weight.unwrap_or(4))));
+                    values.push(("UITextStyle", nib.string(style)));
+                }
+                (None, Some("system"), Some(w)) => {
+                    only_attributes(f, &[("key", None), ("type", None), ("pointSize", None)])?;
+                    values.push(("UIPointSize", Value::Float(number(attr(f, "pointSize")?)? as f32)));
+                    values.push(("UISymbolWeight", Value::Int(w)));
+                }
+                _ => return fail("this font symbol configuration is not supported by this ibtool"),
+            }
+        }
+        _ => return fail("this symbol configuration type is not supported by this ibtool"),
+    }
+    Ok(Value::New(Object::new("UIImageSymbolConfiguration", values)))
 }
 
 /// The trait storage list of the root view `root`, if its views' default
@@ -3559,7 +3659,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if st.attribute("catalog").is_some() && (st.attribute("image").is_none() || st.attribute("backgroundImage").is_some()) {
                     return fail("a button state's system catalog beside a background image, or without an image, is not supported by this ibtool");
                 }
-                only_children(st, &["color"])?;
+                only_children(st, &["color", "preferredSymbolConfiguration"])?;
                 for c in children(st, "color") {
                     if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
                         return fail("button state colours other than title and title shadow colours are not supported by this ibtool");
@@ -3677,6 +3777,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if let Some(image) = st.attribute("image") {
                     content.push(("UIImage", nib.image_in(image, st.attribute("catalog"))?));
                 }
+                if let Some(c) = child(*st, "preferredSymbolConfiguration", "preferredSymbolConfiguration") {
+                    if st.attribute("image").is_none() {
+                        return fail("a symbol configuration without an image is not supported by this ibtool");
+                    }
+                    content.push(("UIImageSymbolConfiguration", symbol_configuration(nib, c)?));
+                }
                 if let Some(image) = st.attribute("backgroundImage") {
                     content.push(("UIBackgroundImage", nib.image(image)));
                 }
@@ -3721,8 +3827,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             // A custom button's default font is larger.
             let default_size = if button_type.is_some() { 15.0 } else { 18.0 };
-            if configuration.is_none() {
-                values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), Some(default_size))?));
+            let given = child(n, "fontDescription", "fontDescription");
+            if configuration.is_none() && nib.platform == Platform::Tvos {
+                if given.is_some() {
+                    return fail("a tvOS button's font is not supported by this ibtool");
+                }
+                values.push(("UIFont", tvos_button_font(nib)));
+            } else if configuration.is_none() {
+                values.push(("UIFont", font(nib, given, Some(default_size))?));
             }
             // Its insets: top, left, bottom and right from the document's
             // minimum y and x and maximum y and x.
@@ -5093,11 +5205,11 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: Option<&str>, dele
         values.push(("UITintColor", color(nib, tint)?));
     }
     let hugging = nib.string("{250, 250}");
-    values.extend([
-        ("UIViewContentHuggingPriority", hugging),
-        ("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])),
-        ("UIViewLayoutMarginsAreDirectional", Value::Bool(true)),
-    ]);
+    values.push(("UIViewContentHuggingPriority", hugging));
+    // No layout margins on tvOS (two probes and a corpus storyboard).
+    if nib.platform != Platform::Tvos {
+        values.extend([("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])), ("UIViewLayoutMarginsAreDirectional", Value::Bool(true))]);
+    }
     if bar.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
         values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
     }
@@ -5453,8 +5565,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     let device = children(root, "device").next();
     let has_device = device.is_some();
     let device_size = match device {
-        // No orientation is portrait (one probe).
-        Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or("portrait"))?,
+        // No orientation is portrait (one probe), on tvOS landscape (a
+        // probe and a corpus storyboard).
+        Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or(if platform == Platform::Tvos { "landscape" } else { "portrait" }))?,
         None => None,
     };
     let generic_canvas = if has_device {
