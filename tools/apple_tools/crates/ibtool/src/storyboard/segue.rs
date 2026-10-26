@@ -134,12 +134,20 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
     }
     only_attributes(s, &[
         ("destination", None), ("kind", None), ("identifier", None), ("animates", Some("NO")), ("modalPresentationStyle", None),
-        ("modalTransitionStyle", Some("crossDissolve")), ("id", None),
+        ("modalTransitionStyle", Some("crossDissolve")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
     ])?;
+    if s.attribute("customModuleProvider") == Some("target") {
+        return fail("a segue's class in the target's module is not supported by this ibtool");
+    }
     let destination = names.get(attr(s, "destination")?).ok_or("a segue to anything but a view, table view, collection view, navigation, tab bar or split view controller or a storyboard reference is not supported by this ibtool")?;
     let mut values = Vec::new();
     if let Some(identifier) = s.attribute("identifier") {
         values.push(("UIIdentifier", nib.string(identifier)));
+    }
+    // Its custom class, by its runtime name, after its identifier (three
+    // probes).
+    if s.attribute("customClass").is_some() {
+        values.push(("UISegueClassName", nib.string(&runtime_class_name(s, None, "")?)));
     }
     values.push(("UIDestinationViewControllerIdentifier", nib.string(destination)));
     let animates = s.attribute("animates").is_some();
@@ -200,6 +208,8 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
             values.push(("UISplitViewControllerIndex", Value::Int(0)));
             "UIStoryboardPushSegueTemplate"
         }
+        // A custom segue is its class's alone (three probes).
+        "custom" if s.attribute("customClass").is_some() && !animates => "UIStoryboardSegueTemplate",
         other => return fail(format!("{other} segues are not supported by this ibtool")),
     };
     Ok(Object::new(class, values))
