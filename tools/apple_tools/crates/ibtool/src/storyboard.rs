@@ -1223,10 +1223,11 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         if tag == "activityIndicatorView" && c.has_children() {
             return fail("an activity indicator's actions are not supported by this ibtool");
         }
+        // Any of UIControlEvents (one probe for a slider's).
         for a in children(c, "action") {
-            only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("valueChanged")), ("id", None)])?;
+            only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
             let target = action_target(scene, a)?;
-            scene.actions.push((attr(a, "selector")?.to_string(), name.to_string(), 4096, target.into()));
+            scene.actions.push((attr(a, "selector")?.to_string(), name.to_string(), control_event(attr(a, "eventType")?)?, target.into()));
         }
     }
     let colors: Vec<&str> = children(n, "color").map(|c| c.attribute("key").unwrap_or("")).collect();
@@ -2406,9 +2407,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("textAlignment", None),
                 ("text", None), ("editable", Some("NO")), ("selectable", Some("NO")), ("scrollEnabled", Some("NO")), ("bounces", Some("NO")),
                 ("bouncesZoom", Some("NO")), ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")),
+                ("indicatorStyle", None),
                 ("adjustsFontForContentSizeCategory", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections"])?;
+            only_children(n, &["rect", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
+            // An accessibility configuration as any view's (one probe).
+            accessibility(nib, scene, n, &name)?;
             for c in children(n, "color") {
                 if !matches!(c.attribute("key"), Some("backgroundColor" | "textColor")) {
                     return fail("text view colours other than its background and text are not supported by this ibtool");
@@ -2470,6 +2474,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+            // Its indicator style (UIScrollViewIndicatorStyle: black 1, white
+            // 2; two probes).
+            match n.attribute("indicatorStyle") {
+                None | Some("default") => {}
+                Some("black") => values.push(("UIIndicatorStyle", Value::Int(1))),
+                Some("white") => values.push(("UIIndicatorStyle", Value::Int(2))),
+                Some(other) => return fail(format!("indicatorStyle {other} is not supported by this ibtool")),
+            }
             if n.attribute("bounces").is_some() {
                 values.push(("UIBounceEnabled", Value::Bool(false)));
             }
@@ -2627,21 +2639,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 for a in children(c, "action") {
                     only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
                     let target = action_target(scene, a)?;
-                    // UIControlEvents (13 probes).
-                    let mask = match attr(a, "eventType")? {
-                        "touchDown" => 1,
-                        "touchDownRepeat" => 2,
-                        "touchDragInside" => 4,
-                        "touchDragOutside" => 8,
-                        "touchDragEnter" => 16,
-                        "touchDragExit" => 32,
-                        "touchUpInside" => 64,
-                        "touchUpOutside" => 128,
-                        "touchCancel" => 256,
-                        "valueChanged" => 4096,
-                        "primaryActionTriggered" => 8192,
-                        other => return fail(format!("a button's {other} action is not supported by this ibtool")),
-                    };
+                    let mask = control_event(attr(a, "eventType")?)?;
                     scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), mask, target.into()));
                 }
                 // Xcode keeps only a control's last segue.
@@ -3009,7 +3007,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("image", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
-                ("verticalCompressionResistancePriority", None), ("id", None),
+                ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")), ("id", None),
             ])?;
             only_children(n, &["rect", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
@@ -3069,6 +3067,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             nib.large_content(&mut values);
             if let Some(image) = n.attribute("image") {
                 values.push(("UIImage", nib.image(image)));
+            }
+            // One probe.
+            if n.attribute("adjustsImageSizeForAccessibilityContentSizeCategory").is_some() {
+                values.push(("UIAdjustsImageSizeForAccessibilityContentSizeCategory", Value::Bool(true)));
             }
             if n.attribute("customClass").is_some() {
                 let class = runtime_class_name(n, scene.module, "UIImageView")?;
@@ -3451,6 +3453,25 @@ fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String)], per
 
 /// An action without an event mask: a gesture recognizer's or a bar button
 /// item's.
+/// An action's event, as UIControlEvents' mask (13 probes): Xcode writes
+/// `menuActionTriggered` with none, so it is refused.
+fn control_event(event: &str) -> Result<i64, String> {
+    Ok(match event {
+        "touchDown" => 1,
+        "touchDownRepeat" => 2,
+        "touchDragInside" => 4,
+        "touchDragOutside" => 8,
+        "touchDragEnter" => 16,
+        "touchDragExit" => 32,
+        "touchUpInside" => 64,
+        "touchUpOutside" => 128,
+        "touchCancel" => 256,
+        "valueChanged" => 4096,
+        "primaryActionTriggered" => 8192,
+        other => return fail(format!("a control's {other} action is not supported by this ibtool")),
+    })
+}
+
 /// The placeholder a control's action goes to: the scene's view controller
 /// (upstream) or its first responder.
 fn action_target(scene: &Scene, a: Node) -> Result<&'static str, String> {
