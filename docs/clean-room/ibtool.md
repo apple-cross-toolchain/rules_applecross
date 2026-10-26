@@ -1282,7 +1282,8 @@ whatever its spacing (eight probes).
 
 A button's states are its `UIButtonStatefulContent`, keyed by
 UIControlState in that order whatever the document's (normal 0, which it
-needs, highlighted 1, disabled 2, selected 4), each a `UIButtonContent` of
+needs, highlighted 1, disabled 2, selected 4, focused 8: two probes and a
+corpus storyboard), each a `UIButtonContent` of
 its title, image, background image (`UIBackgroundImage`) and colours (ten
 probes; a localizable build's titles for other states than normal are
 refused). A button may be hidden, tagged (both after `UIOpaque`) and
@@ -1810,7 +1811,8 @@ probes.
 
 A container view (`<containerView>`, with one embed segue) is a plain
 `UIView` in its scene's view nib, without `UIOpaque` when the document
-says `opaque="NO"`. Its embed segue gets a placeholder like a control's,
+says `opaque="NO"`. Without an embed segue it is only that (two probes,
+one of a custom class). Its embed segue gets a placeholder like a control's,
 in document order with the others, and instead of an action the
 placeholder has a `containerView` outlet to the view, sorted by label
 with the view nib's outlets. The template is a
