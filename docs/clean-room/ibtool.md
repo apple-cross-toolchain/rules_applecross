@@ -237,7 +237,9 @@ other values of the attributes these use, is refused. Observed:
   root view, and centerXWithinMargins, centerX, rightMargin, leftMargin,
   right, left, trailingMargin, leadingMargin, trailing, leading,
   centerYWithinMargins, centerY, topMargin, bottomMargin, bottom, top,
-  firstBaseline, width, height between siblings. A margin's
+  firstBaseline, baseline, width, height between siblings (the last
+  baseline, `baseline`, is code 11; three probes, one of 20 constraints
+  between vertical attributes; with the root view it is refused). A margin's
   `NSFirstAttributeV2`/`NSSecondAttributeV2` is its own code (leftMargin
   13 ... centerYWithinMargins 20) and the legacy key its edge's; the
   legacy `NSConstant` moves by the item's margin on that edge, the layout
