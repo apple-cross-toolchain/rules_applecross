@@ -632,9 +632,12 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
 fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, v: Node) -> Result<Vec<u8>, String> {
     only_attributes(v, &[
         ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
-        ("reuseIdentifier", None), ("id", None),
+        ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
     ])?;
-    only_children(v, &["rect", "autoresizingMask", "subviews"])?;
+    only_children(v, &["rect", "autoresizingMask", "subviews", "color", "constraints", "connections"])?;
+    if let Some(c) = children(v, "color").find(|c| !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor"))) {
+        return fail(format!("a collection reusable view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
+    }
     for required in ["opaque", "multipleTouchEnabled", "contentMode"] {
         if v.attribute(required).is_none() {
             return fail(format!("a collection reusable view without {required} is not supported by this ibtool"));
@@ -665,6 +668,12 @@ fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool,
     if !subviews.is_empty() {
         values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
     }
+    // Its background colour after its subviews, its tint after clipping and
+    // then its constraints; a custom class swaps it in after its reuse
+    // identifier (one probe each, and one of all of them).
+    if let Some(c) = child(v, "color", "backgroundColor") {
+        values.push(("UIBackgroundColor", color(&mut nib, c)?));
+    }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
@@ -672,10 +681,24 @@ fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool,
     if v.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }
+    if let Some(c) = child(v, "color", "tintColor") {
+        values.push(("UITintColor", color(&mut nib, c)?));
+    }
+    if let Some(own) = own_constraints(&mut nib, &mut scene, v, &name)? {
+        values.push(("UIViewAutolayoutConstraints", own));
+    }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIReuseIdentifier", nib.string(attr(v, "reuseIdentifier")?)));
-    let top = vec![owner, responder, Value::New(Object::new("UICollectionReusableView", values).named(name.clone()))];
+    let object = if v.attribute("customClass").is_some() {
+        let class = runtime_class_name(v, module, "UICollectionReusableView")?;
+        values.push(("UIClassName", nib.string(&class)));
+        values.push(("UIOriginalClassName", nib.string("UICollectionReusableView")));
+        Object::new("UIClassSwapper", values)
+    } else {
+        Object::new("UICollectionReusableView", values)
+    };
+    let top = vec![owner, responder, Value::New(object.named(name.clone()))];
     let identifier = nib.string("");
     let guide = Value::New(Object::new("UILayoutGuide", vec![
         ("UILayoutGuideOwningView", Value::Nil),
@@ -693,7 +716,23 @@ fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool,
             queue.push_back(s.clone());
         }
     }
-    nib::archive(root_object(&mut nib, top, objects, Vec::new()))
+    // Its outlets to its subviews, as a cell's, in byte order of their
+    // names (one probe).
+    let mut outlets = Vec::new();
+    for c in children(v, "connections") {
+        only_children(c, &["outlet"])?;
+        for o in children(c, "outlet") {
+            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
+            let destination = view_name(attr(o, "destination")?);
+            if !scene.subviews.iter().any(|s| s.1 == destination) {
+                return fail("a collection reusable view's outlets to anything but its subviews are not supported by this ibtool");
+            }
+            outlets.push((attr(o, "property")?, destination));
+        }
+    }
+    outlets.sort_by(|a, b| a.0.cmp(b.0));
+    let connections = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &name, destination)).collect();
+    nib::archive(root_object(&mut nib, top, objects, connections))
 }
 
 /// A constraint Xcode makes between the cell's and its content view's
