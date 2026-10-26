@@ -202,11 +202,6 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
         seen.push((s.idiom, s.subtype, s.size.to_bits(), s.scale));
         let bytes = std::fs::read(&s.file).map_err(|e| format!("{}: {e}", s.file.display()))?;
         let img = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?;
-        // Xcode stores a grey icon as GA8 (grey atlases named `S.O.1`),
-        // which this actool doesn't write for icons yet.
-        if img.is_gray() {
-            return Err(format!("{}: a greyscale icon, which Xcode stores as GA8, is not supported by this actool", s.file.display()));
-        }
         let px = (s.size * s.scale as f64).round() as usize;
         if img.width != px || img.height != px {
             return Err(format!("{}: is {}x{} but should be {px}x{px}", s.file.display(), img.width, img.height));
@@ -217,6 +212,16 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
         let img = items.iter().find(|i| i.filename == s.filename && i.scale == 3 && i.idiom == car::IDIOM_PHONE).unwrap().image.clone();
         items.push(Item { scale: 2, idiom: car::IDIOM_PHONE, subtype: 1792, dimension2: rank(90.0), filename: s.filename.clone(), image: img });
     }
+
+    // Xcode stores grey icons as GA8: their atlases are named `S.O.1`, and
+    // even those under 40 pixels are packed (one icon set, QReader's). A
+    // set mixing grey and colour icons, a grey one for macOS and a grey one
+    // stored on its own under 40 pixels are not established.
+    let gray = items.first().is_some_and(|i| i.image.is_gray());
+    if items.iter().any(|i| i.image.is_gray() != gray) || (gray && mac) {
+        return Err(format!("{name}: grey icons beside colour ones, or for macOS, are not supported by this actool"));
+    }
+    let ga = |i: &Item| -> Vec<u8> { i.image.premultiplied_bgra().chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect() };
 
     let mut renditions = Vec::new();
     // The index of sizes per idiom (and for the derived XR size).
@@ -284,16 +289,29 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             let blocks: Vec<(u32, u32)> = atlas.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
             let (positions, (rw, rh)) = pack::pack(&blocks);
             let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
-            let stride = car::stride(aw as usize);
+            let stride = if gray { (aw as usize * 2).div_ceil(32) * 32 } else { car::stride(aw as usize) };
             let mut pixels = vec![0u8; stride * ah as usize];
+            // An opaque grey atlas is opaque throughout, its padding too
+            // (grey 0, alpha 255), as an image set's is; not the bytes
+            // aligning its rows.
+            if gray && atlas.iter().all(|i| opaque_image(&i.image)) {
+                for row in pixels.chunks_exact_mut(stride) {
+                    row[..aw as usize * 2].chunks_exact_mut(2).for_each(|p| p[1] = 255);
+                }
+            }
             let mut key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16)];
             if !mac {
                 key.extend([(car::ATTR_DIMENSION1, n as u16), (car::ATTR_IDIOM, idiom), (car::ATTR_SUBTYPE, subtype)]);
             }
             for (i, (x, y)) in atlas.iter().zip(&positions) {
                 let (w, h) = (i.image.width as u32, i.image.height as u32);
-                place(&mut pixels, stride, ah, &i.image.premultiplied_bgra(), *x, *y, w, h);
-                renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi(&i.filename, (*x, *y, w, h), scale, &key) });
+                if gray {
+                    place_n(&mut pixels, stride / 2, 2, ah, &ga(i), *x, *y, w, h);
+                    renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, 0, car::Pixels::Gray, &key, None) });
+                } else {
+                    place(&mut pixels, stride, ah, &i.image.premultiplied_bgra(), *x, *y, w, h);
+                    renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi(&i.filename, (*x, *y, w, h), scale, &key) });
+                }
             }
             if mac && stride * (ah as usize) < 16384 {
                 return Err(format!("{name}: small atlases are not supported by this actool for macOS"));
@@ -310,9 +328,14 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
                 }
                 o[0]
             };
-            let atlas_name = format!("ZZZZPackedAsset-{scale}.{}.0-gamut0", opaque as u8);
+            let atlas_name = format!("ZZZZPackedAsset-{scale}.{}.{}-gamut0", opaque as u8, gray as u8);
             let atlas_version = if mac { version } else { car::MlecVersions::opacity(opaque) };
-            renditions.push(Rendition { attrs: key.clone(), csi: car::packed_csi(&atlas_name, aw, ah, scale, &pixels, atlas_version) });
+            let csi = if gray {
+                car::packed_gray_csi(&atlas_name, aw, ah, scale, &pixels, stride, atlas_version)
+            } else {
+                car::packed_csi(&atlas_name, aw, ah, scale, &pixels, atlas_version)
+            };
+            renditions.push(Rendition { attrs: key.clone(), csi });
         }
         standalone.sort_by_key(|i| i.dimension2);
         for i in standalone {
@@ -321,7 +344,12 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
                 return Err(format!("{}: small standalone images are not supported by this actool for macOS", i.filename));
             }
             // Below 40 pixels wide Xcode run-length encodes an iOS icon.
-            let csi = if !mac && w < 40 {
+            let csi = if gray {
+                if w < 40 {
+                    return Err(format!("{}: a grey icon under 40 pixels stored on its own is not supported by this actool", i.filename));
+                }
+                car::icon_image_gray_csi(&i.filename, w, h, scale, &ga(i), car::MlecVersions::opacity(opaque_image(&i.image)))
+            } else if !mac && w < 40 {
                 car::icon_image_rle_csi(&i.filename, w, h, scale, &i.image.premultiplied_bgra(), opaque_image(&i.image))
             } else {
                 let image_version = if mac { version } else { car::MlecVersions::opacity(opaque_image(&i.image)) };
