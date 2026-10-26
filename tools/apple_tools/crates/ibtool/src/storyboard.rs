@@ -552,8 +552,10 @@ struct NavigationItem<'a, 'i> {
 fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str) -> Result<NavigationItem<'a, 'i>, String> {
     only_attributes(n, &[("key", Some("navigationItem")), ("title", None), ("largeTitleDisplayMode", None), ("id", None)])?;
     for c in n.children().filter(|c| c.is_element()) {
-        if !c.has_tag_name("barButtonItem") || !matches!(c.attribute("key"), Some("leftBarButtonItem" | "rightBarButtonItem")) {
-            return fail("navigation items with children other than a left and a right bar button item are not supported by this ibtool");
+        let single = c.has_tag_name("barButtonItem") && matches!(c.attribute("key"), Some("leftBarButtonItem" | "rightBarButtonItem"));
+        let list = matches!(c.tag_name().name(), "leftBarButtonItems" | "rightBarButtonItems");
+        if !single && !list {
+            return fail("navigation items with children other than left and right bar button items are not supported by this ibtool");
         }
     }
     let mut values = Vec::new();
@@ -572,26 +574,55 @@ fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &s
         let attributes = nib.shared("empty attributes".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]));
         values.push(("UIAttributedTitle", Value::New(Object::new("NSAttributedString", vec![("NSString", string), ("NSAttributes", attributes)]))));
     }
-    // Each bar button item, then the arrays of them around the center
-    // item groups.
+    // Each side's first bar button item, then the arrays of each side's
+    // items around the center item groups, the first referred to and the
+    // rest defined there (a single item or a list: two probes).
     let mut bar_items = Vec::new();
     let mut actions = Vec::new();
     let mut segues = Vec::new();
-    let mut arrays = Vec::new();
-    for (key, single, array) in [("leftBarButtonItem", "UILeftBarButtonItem", "UILeftBarButtonItems"), ("rightBarButtonItem", "UIRightBarButtonItem", "UIRightBarButtonItems")] {
-        if let Some(b) = child(n, "barButtonItem", key) {
-            let item_name = format!("{name} {key}");
-            values.push((single, Value::New(bar_button_item(nib, b, &item_name, vc_id, &mut actions, &mut segues)?.named(item_name.clone()))));
-            arrays.push((array, item_name.clone()));
+    let mut arrays: Vec<(&str, Vec<Value>)> = Vec::new();
+    for (key, list, single, array) in [
+        ("leftBarButtonItem", "leftBarButtonItems", "UILeftBarButtonItem", "UILeftBarButtonItems"),
+        ("rightBarButtonItem", "rightBarButtonItems", "UIRightBarButtonItem", "UIRightBarButtonItems"),
+    ] {
+        let mut items: Vec<Node> = child(n, "barButtonItem", key).into_iter().collect();
+        for l in children(n, list) {
+            only_children(l, &["barButtonItem"])?;
+            items.extend(children(l, "barButtonItem"));
+        }
+        if items.len() > 1 && child(n, "barButtonItem", key).is_some() {
+            return fail("a navigation item with both a bar button item and a list on one side is not supported by this ibtool");
+        }
+        let mut entries = Vec::new();
+        for (i, b) in items.iter().enumerate() {
+            let item_name = if i == 0 { format!("{name} {key}") } else { format!("{name} {key} {i}") };
+            let object = Value::New(bar_button_item(nib, *b, &item_name, vc_id, &mut actions, &mut segues)?.named(item_name.clone()));
+            if i == 0 {
+                values.push((single, object));
+                entries.push(reference(item_name.clone()));
+            } else {
+                entries.push(object);
+            }
             bar_items.push(item_name);
         }
+        if !entries.is_empty() {
+            arrays.push((array, entries));
+        }
     }
-    if let Some((array, item)) = arrays.iter().find(|a| a.0 == "UILeftBarButtonItems") {
-        values.push((array, nib.array("NSArray", vec![reference(item.clone())])));
+    if bar_items.len() > 2 {
+        let mut selectors: Vec<&String> = actions.iter().map(|a| &a.0).collect();
+        selectors.sort();
+        if selectors.windows(2).any(|w| w[0] == w[1]) {
+            return fail("bar button items in lists sharing a selector are not supported by this ibtool");
+        }
+    }
+    let mut take = |wanted: &str| arrays.iter().position(|a| a.0 == wanted).map(|i| arrays.remove(i).1);
+    if let Some(entries) = take("UILeftBarButtonItems") {
+        values.push(("UILeftBarButtonItems", nib.array("NSArray", entries)));
     }
     values.push(("UICenterItemGroups", nib.empty_array()));
-    if let Some((array, item)) = arrays.iter().find(|a| a.0 == "UIRightBarButtonItems") {
-        values.push((array, nib.array("NSArray", vec![reference(item.clone())])));
+    if let Some(entries) = take("UIRightBarButtonItems") {
+        values.push(("UIRightBarButtonItems", nib.array("NSArray", entries)));
     }
     let mode = match n.attribute("largeTitleDisplayMode") {
         None | Some("automatic") => 0,
@@ -4314,7 +4345,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if !is_list {
             only_children(view, &[
                 "rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints", "connections", "userDefinedRuntimeAttributes", "edgeInsets",
-                "directionalEdgeInsets",
+                "directionalEdgeInsets", "accessibility",
             ])?;
             only_attributes(view, &[
                 ("key", Some("view")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", None),
@@ -4480,6 +4511,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             geometry(&mut values, &f);
             let pairs = runtime_attributes(&mut nib, view, &root_name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (root_name.clone(), p)));
+            // Its accessibility configuration, first in the objects' order
+            // (one probe).
+            accessibility(&mut nib, &mut scene, view, &root_name)?;
             let mut subview_values = Vec::new();
             for s in children(view, "subviews") {
                 for c in s.children().filter(|c| c.is_element()) {
