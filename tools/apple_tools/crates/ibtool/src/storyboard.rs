@@ -6181,19 +6181,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
     }
     info.push(("UIStoryboardVersion", cf::Value::Integer(1)));
-    // With storyboard references, the order Xcode adds the tables' entries
-    // in isn't established (RxSwift's example, 15 references): where their
-    // hashes collide so that the order would matter, it is refused.
-    if !references.is_empty() {
-        let order_sensitive = |keys: Vec<&str>| {
-            let reversed: Vec<&str> = keys.iter().rev().copied().collect();
-            let a: Vec<&str> = cf::hash::table_order(&keys).into_iter().map(|i| keys[i]).collect();
-            let b: Vec<&str> = cf::hash::table_order(&reversed).into_iter().map(|i| reversed[i]).collect();
-            a != b
-        };
-        if order_sensitive(identifiers.iter().map(|(n, ..)| n.as_str()).collect()) || order_sensitive(references.iter().map(|(n, _)| n.as_str()).collect()) {
-            return fail("storyboard references whose Info.plist tables' order would depend on the order Xcode adds them in are not supported by this ibtool");
-        }
+    // The identifiers' table is filled in document order (31 identifiers,
+    // and a corpus storyboard's with a reference). The order Xcode adds
+    // storyboard references in isn't established (RxSwift's example, 15
+    // references): where their hashes collide so that it would matter, it is
+    // refused.
+    let keys: Vec<&str> = references.iter().map(|(n, _)| n.as_str()).collect();
+    let reversed: Vec<&str> = keys.iter().rev().copied().collect();
+    let in_order: Vec<&str> = cf::hash::table_order(&keys).into_iter().map(|i| keys[i]).collect();
+    if in_order != cf::hash::table_order(&reversed).into_iter().map(|i| reversed[i]).collect::<Vec<_>>() {
+        return fail("storyboard references whose Info.plist table's order would depend on the order Xcode adds them in are not supported by this ibtool");
     }
     info.push(("UIViewControllerIdentifiersToNibNames", cf::Value::dict(identifiers.iter().map(|(n, ..)| (n.clone(), cf::Value::string(n.clone()))))));
     if !references.is_empty() {
