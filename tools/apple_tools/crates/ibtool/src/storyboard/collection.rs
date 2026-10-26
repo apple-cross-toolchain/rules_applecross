@@ -178,7 +178,7 @@ fn collection_values(
     values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
     let (flow, estimated) = match child(cv, "collectionViewLayout", "collectionViewLayout") {
         Some(custom) => (custom_layout(nib, module, custom)?, false),
-        None => flow_layout(cv)?,
+        None => flow_layout(nib, module, cv)?,
     };
     values.push(("UICollectionLayout", Value::New(flow.named(layout))));
     values.push(("UIAllowsUserInitiatedMultipleSelection", Value::Bool(true)));
@@ -259,11 +259,11 @@ pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name
 
 /// The collection view's flow layout, and whether it estimates its items'
 /// sizes automatically.
-fn flow_layout(cv: Node) -> Result<(Object, bool), String> {
+fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object, bool), String> {
     let layout = child(cv, "collectionViewFlowLayout", "collectionViewLayout").ok_or("a collection view without a flow layout is not supported by this ibtool")?;
     only_attributes(layout, &[
         ("key", Some("collectionViewLayout")), ("automaticEstimatedItemSize", Some("YES")), ("minimumLineSpacing", None),
-        ("minimumInteritemSpacing", None), ("id", None),
+        ("minimumInteritemSpacing", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
     ])?;
     only_children(layout, &["size", "inset"])?;
     let mut item = None;
@@ -297,7 +297,15 @@ fn flow_layout(cv: Node) -> Result<(Object, bool), String> {
     if (w, h) != (50.0, 50.0) {
         values.push(("UIItemSize", doubles(&[w, h])));
     }
-    Ok((Object::new("UICollectionViewFlowLayout", values), layout.attribute("automaticEstimatedItemSize").is_some()))
+    let estimated = layout.attribute("automaticEstimatedItemSize").is_some();
+    // A custom class is swapped in after its values (one probe).
+    if layout.attribute("customClass").is_some() {
+        let class = runtime_class_name(layout, module, "UICollectionViewFlowLayout")?;
+        values.push(("UIClassName", nib.string(&class)));
+        values.push(("UIOriginalClassName", nib.string("UICollectionViewFlowLayout")));
+        return Ok((Object::new("UIClassSwapper", values), estimated));
+    }
+    Ok((Object::new("UICollectionViewFlowLayout", values), estimated))
 }
 
 /// A custom layout: its class swapped in for `UICollectionViewLayout`, with

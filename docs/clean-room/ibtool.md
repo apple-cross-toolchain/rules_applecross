@@ -397,7 +397,9 @@ other values of the attributes these use, is refused. Observed:
   `systemBackgroundColor`, as a plain table's is its own. Secure text
   views (which add more keys), `alwaysBounceVertical` and text in
   localizable storyboards are refused (32 probes).
-- Nothing in the output comes from an empty `<gestureRecognizers/>` or `<animations/>`, nor from a label's `fixedFrame`, from a label's
+- Nothing in the output comes from an empty `<gestureRecognizers/>` or `<animations/>`, an empty
+  `<constraints/>`, a navigation controller's simulated metrics, a root
+  view's `insetsLayoutMarginsFromSafeArea="YES"`, nor from a label's `fixedFrame`, from a label's
   or button's `<autoresizingMask>` when it doesn't translate it into
   constraints (constrained or not), or from a scene's `<exit>` when
   nothing unwinds to it (ten probes). An exit something refers to is
@@ -609,8 +611,9 @@ rest are refused for other elements):
   controller's own
   nib carries its declared item the same way, after its title, and lists it
   after the navigation item.
-- The bar is laid out by Xcode: bounds 0x54 centred at (0, 27), its
-  background colour if any, opaque, mask 10, hugging `{250, 250}`,
+- The bar is laid out by Xcode: bounds 0x54 centred 27 below its frame's
+  top (at x 0; a mask of flexible width and top margin changes nothing:
+  four probes and a corpus storyboard), its background colour if any, opaque, mask 10, hugging `{250, 250}`,
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off, `UIDelegate`
   the controller, `UIItems` (an `NSArray` of the children's items),
   `UIBarTranslucence` 1, or 2 when `translucent="NO"`.
@@ -727,10 +730,11 @@ probes:
   44) holding a `UIBackgroundConfiguration` of that colour, a clear
   stroke, `{0, 0, 0, 0}` insets and nothing customized.
 - The content view (a `UITableViewCellContentView`, archived with UIView
-  as its fallback class): geometry from the document, its subviews,
-  `UIDeepDrawRect`, `UIMultipleTouchEnabled`, `UIAutoresizeSubviews`,
-  `UIContentMode` 4, `UIClipsToBounds`, its constraints (ordered as a
-  container's), the margins as the cell's,
+  as its fallback class): geometry from the document, its subviews, its
+  background colour, `UIDeepDrawRect`, `UIMultipleTouchEnabled`,
+  `UIAutoresizeSubviews`, `UIContentMode` 4, `UIClipsToBounds`, its
+  constraints (ordered as a container's), its own layout margins (two
+  probes), the margins as the cell's,
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 when it says NO, the semantic
   content attribute, large content.
 - The separator is a point high at the cell's foot, from 8 points in to
@@ -1004,7 +1008,11 @@ with `UIViewLayoutMarginsAreDirectional`), `preservesSuperviewLayoutMargins`
 (`UIViewInsetsLayoutMarginsFromSafeArea` 0). `exclusiveTouch` is refused
 (13 probes).
 
-Labels take `hidden`, `tag` and `alpha` as plain views do; a missing
+Labels take `hidden`, `tag` and `alpha` as plain views do, and a
+background colour before `UIDeepDrawRect` (other colours than text,
+highlighted and background are refused); without a `baselineAdjustment`
+(older documents) they have `UIBaselineAdjustment` 1 after the number of
+lines (one probe); a missing
 hugging priority is 250, and without either there is no
 `UIViewContentHuggingPriority` (three probes); their text
 may be a `<string key="text">` rather than an attribute. A minimum scale
@@ -1085,6 +1093,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
   when it is not 50x50. `automaticEstimatedItemSize` is not a value of
   the layout but a key-value pair of the nib (`UINibKeyValuePairsKey`):
   `estimatedItemSize` set to an `NSValue` size of the largest doubles.
+- A flow layout with a custom class is swapped in after its values (one
+  probe).
 - A custom layout (`<collectionViewLayout>` with a custom class) is a
   `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
   root or in a view (three probes).
