@@ -1255,7 +1255,8 @@ fn runtime_attributes(nib: &mut Nib, n: Node, name: &str) -> Result<Vec<Value>, 
     Ok(pairs)
 }
 
-/// A switch, slider or activity indicator: a non-opaque view laid out as
+/// A switch, slider, stepper, activity indicator or progress view: a
+/// non-opaque view laid out as
 /// usual, with its own values after its large content properties, and
 /// its value-changed actions on the controller.
 fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame, mut values: Vec<(&'static str, Value)>) -> Result<Object, String> {
@@ -1290,6 +1291,10 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             ]);
             children_allowed.push("color");
         }
+        "progressView" => {
+            allowed.extend([("progress", None), ("progressViewStyle", Some("bar"))]);
+            children_allowed.push("color");
+        }
         _ => {
             allowed.extend([
                 ("hidesWhenStopped", Some("YES")),
@@ -1299,13 +1304,28 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         }
     }
     only_attributes(n, &allowed)?;
+    // A progress view is laid out at least 4 tall, a bar's one less than its
+    // frame (five probes); a bar under 4 isn't established. Its opacity as
+    // the document gives it is the only one probed.
+    if tag == "progressView" {
+        if n.attribute("opaque").is_none() {
+            return fail("an opaque progress view is not supported by this ibtool");
+        }
+        let h = match n.attribute("progressViewStyle") {
+            Some(_) if f.h >= 4.0 => f.h - 1.0,
+            Some(_) => return fail("a bar progress view under 4 points tall is not supported by this ibtool"),
+            None => f.h.max(4.0),
+        };
+        values.clear();
+        geometry(&mut values, &Frame { h, ..*f });
+    }
     only_children(n, &children_allowed)?;
     // An accessibility configuration as any view's (two probes).
     accessibility(nib, scene, n, name)?;
     for c in children(n, "connections") {
         only_children(c, &["action"])?;
-        if tag == "activityIndicatorView" && c.has_children() {
-            return fail("an activity indicator's actions are not supported by this ibtool");
+        if matches!(tag, "activityIndicatorView" | "progressView") && c.has_children() {
+            return fail(format!("a {tag}'s actions are not supported by this ibtool"));
         }
         // Any of UIControlEvents (one probe for a slider's).
         for a in children(c, "action") {
@@ -1319,8 +1339,12 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         "switch" => &["onTintColor"],
         "slider" => &["minimumTrackTintColor", "maximumTrackTintColor", "thumbTintColor"],
         "stepper" => &["backgroundColor", "tintColor"],
+        "progressView" => &["progressTintColor", "trackTintColor"],
         _ => &["color"],
     };
+    if tag == "progressView" && n.attribute("progressViewStyle").is_some() && !colors.is_empty() {
+        return fail("a bar progress view's colours are not supported by this ibtool");
+    }
     if let Some(other) = colors.iter().find(|c| !known.contains(c)) {
         return fail(format!("a {tag}'s {other} colour is not supported by this ibtool"));
     }
@@ -1354,11 +1378,13 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         values.push(("UIViewAutolayoutConstraints", own));
     }
     // Hugging (each 250 unless given) is written, but for a switch, stepper
-    // or activity indicator not when it is 750 both ways. Then compression
-    // resistance, each 750 unless given, if either is.
+    // or activity indicator not when it is 750 both ways, nor for a
+    // progress view when it is 250 across and 750 down (three probes). Then
+    // compression resistance, each 750 unless given, if either is.
     let priority = |k: &str| n.attribute(k).unwrap_or("250");
     let (h, v) = (priority("horizontalHuggingPriority"), priority("verticalHuggingPriority"));
-    if tag == "slider" || (h, v) != ("750", "750") {
+    let default = if tag == "progressView" { ("250", "750") } else { ("750", "750") };
+    if tag == "slider" || (h, v) != default {
         values.push(("UIViewContentHuggingPriority", nib.string(&format!("{{{h}, {v}}}"))));
     }
     let resistance = (n.attribute("horizontalCompressionResistancePriority"), n.attribute("verticalCompressionResistancePriority"));
@@ -1439,6 +1465,22 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
                 values.push(("UIWraps", Value::Bool(true)));
             }
             "UIStepper"
+        }
+        "progressView" => {
+            // A progress of 0, or none, is left out; the colours follow.
+            let progress = n.attribute("progress").map(number).transpose()?.unwrap_or(0.0);
+            if progress != 0.0 {
+                values.push(("UIProgress", Value::Float(progress as f32)));
+            }
+            for (key, value_key) in [("progressTintColor", "UIProgressProgressTintColor"), ("trackTintColor", "UIProgressTrackTintColor")] {
+                if let Some(c) = child(n, "color", key) {
+                    values.push((value_key, color(nib, c)?));
+                }
+            }
+            if n.attribute("progressViewStyle").is_some() {
+                values.push(("UIProgressViewStyle", Value::Int(1)));
+            }
+            "UIProgressView"
         }
         _ => {
             // The modern style and the legacy one.
@@ -3214,7 +3256,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Object::new(original, values)
             }
         }
-        "switch" | "slider" | "stepper" | "activityIndicatorView" => simple_control(nib, scene, n, &name, &f, values)?,
+        "switch" | "slider" | "stepper" | "activityIndicatorView" | "progressView" => simple_control(nib, scene, n, &name, &f, values)?,
         "imageView" => {
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
