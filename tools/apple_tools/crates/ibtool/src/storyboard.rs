@@ -1622,11 +1622,13 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             };
             values.push(("UIActivityIndicatorViewStyle-Modern", Value::Int(modern)));
             values.push(("UIActivityIndicatorViewStyle", Value::Int(legacy)));
-            if n.attribute("animating").is_some() {
-                values.push(("UIAnimating", Value::Bool(true)));
-            }
+            // Not hiding when stopped, then animating (five probes, every
+            // style).
             if n.attribute("hidesWhenStopped").is_none() {
                 values.push(("UIHidesWhenStopped", Value::Bool(false)));
+            }
+            if n.attribute("animating").is_some() {
+                values.push(("UIAnimating", Value::Bool(true)));
             }
             // A colour is its tint too; a modern style's tint is otherwise
             // the secondary label colour.
@@ -4918,8 +4920,12 @@ fn navigation_controller_nib(
     nib_names: &HashMap<String, String>,
 ) -> Result<(String, Vec<u8>), String> {
     check_navigation_controller(nav)?;
-    if child(nav, "tabBarItem", "tabBarItem").is_some() {
-        return fail("a navigation controller's tab bar item in its own nib is not supported by this ibtool");
+    // Its tab bar item, in its own nib too, is its first value and follows
+    // its bar in the objects (two probes); beside a title or an identifier
+    // its place isn't established.
+    let has_tab_item = child(nav, "tabBarItem", "tabBarItem").is_some();
+    if has_tab_item && (nav.attribute("title").is_some() || nav.attribute("storyboardIdentifier").is_some()) {
+        return fail("a navigation controller's tab bar item in its own nib beside a title or identifier is not supported by this ibtool");
     }
     let nav_id = attr(nav, "id")?;
     let name = nav.attribute("storyboardIdentifier").map_or_else(|| format!("UINavigationController-{nav_id}"), str::to_string);
@@ -4930,6 +4936,7 @@ fn navigation_controller_nib(
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
     let title = navigation_title(&mut nib, nav)?;
+    let tab_item = if has_tab_item { Some(tab::tab_bar_item(&mut nib, nav, "tab bar item")?.0) } else { None };
     let mut embedded = embedded_controller(&mut nib, root, "root", "controller", Some("controller bar"), None, nib_names)?;
     let explicit_item = embedded.navigation_item.clone();
     let templates_objects = std::mem::take(&mut embedded.templates.objects);
@@ -4940,11 +4947,18 @@ fn navigation_controller_nib(
     let gestures = std::mem::take(&mut embedded.gestures);
     let gesture_actions = std::mem::take(&mut embedded.gesture_actions);
     let item_outlets = std::mem::take(&mut embedded.item_outlets);
-    let controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, title, None)?;
+    let mut controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, title, None)?;
+    if let (Some(item), Value::New(o)) = (tab_item, &mut controller) {
+        o.values.insert(0, ("UITabBarItem", item));
+    }
     // The root's gesture recognizers follow the controller (two probes).
     let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
     objects.extend(gestures.iter().map(|g| reference(g.clone())));
-    objects.extend([reference("controller bar"), reference("root")]);
+    objects.push(reference("controller bar"));
+    if has_tab_item {
+        objects.push(reference("tab bar item"));
+    }
+    objects.push(reference("root"));
     if let Some(item) = explicit_item {
         objects.push(reference(item));
     }
@@ -5835,11 +5849,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // probes, and six of accessibility on several views), but
             // attributes of several views don't always: their order changes
             // with unrelated views added, and not with ids (docs), so they
-            // are refused, as are attributes beside a switch's frame.
+            // are refused, as are attributes beside a switch's frame. Several
+            // switches' frames aren't in that order either (three in a
+            // corpus storyboard came third, first, second).
             let distinct = |names: Vec<&String>| names.into_iter().collect::<std::collections::HashSet<_>>().len();
             let user_views = distinct(scene.pairs.iter().map(|p| &p.0).filter(|n| !scene.switch_frames.contains(n)).collect());
-            if user_views > 1 || (user_views == 1 && !scene.switch_frames.is_empty()) {
-                return fail("user-defined runtime attributes of more than one view, or beside a switch, are not supported by this ibtool");
+            if user_views > 1 || (user_views == 1 && !scene.switch_frames.is_empty()) || scene.switch_frames.len() > 1 {
+                return fail("user-defined runtime attributes of more than one view, beside a switch, or several switches are not supported by this ibtool");
             }
             let position = |name: &String| order.iter().position(|o| o == name).unwrap_or(usize::MAX);
             scene.pairs.sort_by_key(|p| position(&p.0));

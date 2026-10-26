@@ -756,7 +756,10 @@ a nib of its own too, as any controller a segue loads; one loaded
 otherwise as well is refused. Its bar's `multipleTouchEnabled` is
 `UIMultipleTouchEnabled` before the autoresizing keys and `clipsSubviews`
 `UIClipsToBounds` after them (two corpus storyboards, Swift and
-Objective-C).
+Objective-C). A navigation controller's tab bar item in its own nib (a
+tab's child loaded on its own, or one with none) is its first value and
+follows its bar in the objects, as a tab's child's (two probes, a corpus
+storyboard's); beside a title or a storyboard identifier it is refused.
 
 Bar button items in a tab or split view controller's children, beside a
 tab bar item or a gesture recognizer, and with images, are refused (46
@@ -1148,7 +1151,11 @@ probes). In `Base.lproj` the hint and label are `NSLocalizableString`s
 keyed `<id>.accessibilityHint` and `<id>.accessibilityLabel`, as titles
 are; the identifier stays a string (one probe). Runtime attributes, switches (their frame pair) and accessibility
 settings inside cells and table headers are refused, but for one switch's
-frame in a prototype table cell (above).
+frame in a prototype table cell and a prototype cell's own accessibility
+configuration (three probes, a corpus storyboard: it is the cell nib's,
+for the cell) when its views have none. Several switches' frames in a
+controller's view are refused too: three in a corpus storyboard came
+third, first, second.
 
 A button with a plain `<buttonConfiguration>` and a title has no
 `UIButtonStatefulContent` or `UIFont`; its `UIButtonConfiguration` is
@@ -1349,8 +1356,9 @@ controls (42 probes):
   false, `UIWraps` true.
 - **An activity indicator.** `UIActivityIndicatorViewStyle-Modern` and
   `UIActivityIndicatorViewStyle` (medium 100 and 1, large 101 and 0,
-  whiteLarge 0 and 0, white 1 and 1, gray 2 and 2), `UIAnimating`,
-  `UIHidesWhenStopped` false unless set, and `UIColor`. A colour is also
+  whiteLarge 0 and 0, white 1 and 1, gray 2 and 2), `UIHidesWhenStopped`
+  false unless set, `UIAnimating` (in that order: five probes, every
+  style), and `UIColor`. A colour is also
   `UITintColor`, with `UIDisableUpdateColorOnTraitCollectionChange`;
   without one, a modern style's tint is the secondary label colour. One
   hidden when stopped and not animating is `UIHidden`, once if it is
