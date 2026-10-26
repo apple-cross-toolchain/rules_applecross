@@ -29,10 +29,6 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
     for (name, dir) in sets {
-        // A set without a Contents.json is left out (one probe).
-        if !dir.join("Contents.json").is_file() {
-            continue;
-        }
         let contents = read_json(&dir.join("Contents.json"))?;
         for key in contents.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default() {
             if !["images", "info", "properties"].contains(&key.as_str()) {

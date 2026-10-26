@@ -693,8 +693,10 @@ says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
 identifier is the hash of that full name. Other assets in folders, and
 other folder properties, are refused. Files that aren't assets (a README,
 with or without an extension, at the top or in a folder) are ignored
-(three probes). So are an image set without a `Contents.json` (one probe)
-and, without a word, an image or icon whose file is missing (five probes:
+(three probes). So are image, colour and data sets without a
+`Contents.json` (three probes; an app icon set without one is an empty set,
+compiling to nothing even when `--app-icon` names it, one probe) and,
+without a word, an image or icon whose file is missing (five probes:
 an icon set of only missing files compiles to nothing; one whose 1024 px
 image is missing but whose dark and tinted ones aren't is refused).
 
