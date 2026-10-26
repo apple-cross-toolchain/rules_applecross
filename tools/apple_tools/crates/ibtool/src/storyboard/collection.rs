@@ -16,7 +16,7 @@ pub(super) fn collection_view_nib(
         ("key", Some("view")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")),
         ("dataMode", Some("prototypes")), ("id", None),
     ])?;
-    only_children(cv, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "cells", "connections"])?;
+    only_children(cv, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "connections"])?;
     for c in children(cv, "color") {
         if c.attribute("key") != Some("backgroundColor") {
             return fail(format!("a collection view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
@@ -166,7 +166,10 @@ fn collection_values(
     values.push(("UIBouncesZoom", Value::Bool(true)));
     values.push(("UIDelegate", Value::Nil));
     values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
-    let (flow, estimated) = flow_layout(cv)?;
+    let (flow, estimated) = match child(cv, "collectionViewLayout", "collectionViewLayout") {
+        Some(custom) => (custom_layout(nib, module, custom)?, false),
+        None => flow_layout(cv)?,
+    };
     values.push(("UICollectionLayout", Value::New(flow.named(layout))));
     values.push(("UIAllowsUserInitiatedMultipleSelection", Value::Bool(true)));
     if !cells.is_empty() {
@@ -204,7 +207,7 @@ pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name
         ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("dataMode", Some("prototypes")),
         ("pagingEnabled", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
     ])?;
-    only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "cells", "connections", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "connections", "constraints"])?;
     for c in children(n, "color") {
         if c.attribute("key") != Some("backgroundColor") {
             return fail(format!("a collection view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
@@ -284,6 +287,17 @@ fn flow_layout(cv: Node) -> Result<(Object, bool), String> {
         values.push(("UIItemSize", doubles(&[w, h])));
     }
     Ok((Object::new("UICollectionViewFlowLayout", values), layout.attribute("automaticEstimatedItemSize").is_some()))
+}
+
+/// A custom layout: its class swapped in for `UICollectionViewLayout`, with
+/// nothing else (three probes).
+fn custom_layout(nib: &mut Nib, module: Option<&str>, layout: Node) -> Result<Object, String> {
+    only_attributes(layout, &[("key", Some("collectionViewLayout")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None)])?;
+    only_children(layout, &[])?;
+    let class = runtime_class_name(layout, module, "UICollectionViewLayout")?;
+    let class_name = nib.string(&class);
+    let original = nib.string("UICollectionViewLayout");
+    Ok(Object::new("UIClassSwapper", vec![("UIClassName", class_name), ("UIOriginalClassName", original)]))
 }
 
 /// A prototype cell's nib: the cell, its content view and the content
