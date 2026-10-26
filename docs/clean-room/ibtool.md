@@ -179,7 +179,10 @@ other values of the attributes these use, is refused. Observed:
   (seven devices, by bisection), so a subview at (0, 0) whose id sorts
   before the guide's comes first (two image views at different heights,
   labels at one frame told apart by id, and probes that tell the distance
-  from x + y, the centre and y then x). In a group, constraints whose
+  from x + y, the centre and y then x). A view nested in plain views, with
+  the root view as its constraint's other item either way round, goes by
+  its origin in the root view's coordinates (four probes; one whose root
+  subview is resized where it is laid out is refused). In a group, constraints whose
   second item is deeper than the root's subviews come first, by first and
   then second attribute in the siblings' order below (eleven probes; a
   deeper view as the first item, which would group them by it, is refused),
@@ -394,7 +397,7 @@ other values of the attributes these use, is refused. Observed:
   `systemBackgroundColor`, as a plain table's is its own. Secure text
   views (which add more keys), `alwaysBounceVertical` and text in
   localizable storyboards are refused (32 probes).
-- Nothing in the output comes from an empty `<gestureRecognizers/>`, nor from a label's `fixedFrame`, from a label's
+- Nothing in the output comes from an empty `<gestureRecognizers/>` or `<animations/>`, nor from a label's `fixedFrame`, from a label's
   or button's `<autoresizingMask>` when it doesn't translate it into
   constraints (constrained or not), or from a scene's `<exit>` when
   nothing unwinds to it (ten probes). An exit something refers to is

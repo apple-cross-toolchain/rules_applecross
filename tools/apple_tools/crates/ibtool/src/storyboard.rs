@@ -46,8 +46,9 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
         let editor_only = matches!(n.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController" | "navigationController")
             && (EDITOR_ONLY.contains(&c.tag_name().name()) || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
-        // An empty list of gesture recognizers is Interface Builder's alone.
-        let empty_gestures = c.has_tag_name("gestureRecognizers") && !c.children().any(|g| g.is_element());
+        // An empty list of gesture recognizers, or of animations (older
+        // documents), is Interface Builder's alone (one probe).
+        let empty_gestures = (c.has_tag_name("gestureRecognizers") || c.has_tag_name("animations")) && !c.children().any(|g| g.is_element());
         if !allowed.contains(&c.tag_name().name()) && !editor_only && !empty_gestures {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
         }
@@ -4094,9 +4095,35 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 if Some(id) == bottom_guide {
                     return Ok((f.h * f.h, 0.0));
                 }
-                let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("root view constraints on a nested view ({id}), between it and the root view or as their first item, are not supported by this ibtool"))?;
-                let f = subview_frame(*v)?;
-                Ok((f.x * f.x + f.y * f.y, f.x))
+                if let Some(v) = direct.iter().find(|v| v.attribute("id") == Some(id)) {
+                    let f = subview_frame(*v)?;
+                    return Ok((f.x * f.x + f.y * f.y, f.x));
+                }
+                // A view nested in plain views: its origin in the root view's
+                // coordinates (four probes).
+                let nested = || format!("root view constraints on a view nested in other than plain views ({id}) are not supported by this ibtool");
+                let mut v = view.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id)).ok_or_else(nested)?;
+                let (mut x, mut y) = (0.0, 0.0);
+                while v != view {
+                    if !v.has_tag_name("view") || v.parent().is_none_or(|p| !p.has_tag_name("subviews")) {
+                        return fail(nested());
+                    }
+                    let parent = v.parent().and_then(|p| p.parent()).ok_or_else(nested)?;
+                    // The root's subview where it is laid out, if that
+                    // doesn't resize it and so move what it holds.
+                    let f = if parent == view {
+                        let (laid, document) = (subview_frame(v)?, frame(v)?);
+                        if (laid.w, laid.h) != (document.w, document.h) {
+                            return fail(nested());
+                        }
+                        laid
+                    } else {
+                        frame(v)?
+                    };
+                    (x, y) = (x + f.x, y + f.y);
+                    v = parent;
+                }
+                Ok((x * x + y * y, x))
             };
             let mut xml_constraints: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, Option<&str>)> = Vec::new();
             for cs in children(view, "constraints") {
