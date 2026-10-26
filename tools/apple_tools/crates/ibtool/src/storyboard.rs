@@ -2573,7 +2573,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // `fixedFrame` is Interface Builder's alone, and a system button
             // is archived as a rounded-rect one; a custom one has no type.
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
+                ("opaque", Some("NO")), ("contentMode", None), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
                 ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", None), ("enabled", Some("NO")), ("selected", Some("YES")),
                 ("clipsSubviews", Some("YES")), ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("customClass", None), ("customModule", None),
                 ("customModuleProvider", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
@@ -2641,9 +2641,6 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 states.push((value, key, st));
             }
-            if !states.iter().any(|s| s.0 == 0) {
-                return fail("a button without a normal state is not supported by this ibtool");
-            }
             states.sort_by_key(|s| s.0);
             for c in children(n, "color") {
                 if !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor")) {
@@ -2679,6 +2676,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             alpha(&mut values, n)?;
+            // A content mode other than scale to fill after the mask (one
+            // probe).
+            let mode = content_mode(n.attribute("contentMode").unwrap_or("scaleToFill"))?;
+            if mode != 0 {
+                values.push(("UIContentMode", Value::Int(mode)));
+            }
             if n.attribute("clipsSubviews").is_some() {
                 if child(n, "color", "tintColor").is_some() {
                     return fail("a clipping button with a tint colour is not supported by this ibtool");
@@ -2747,7 +2750,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 stateful.push(Value::New(Object::new("UIButtonContent", content)));
             }
-            if configuration.is_none() {
+            // No states at all, no stateful content (two probes).
+            if configuration.is_none() && !stateful.is_empty() {
                 values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", stateful)));
             }
             // NSLineBreakMode unless the default middle truncation (two
@@ -2804,7 +2808,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", Some("vertical")), ("distribution", None), ("alignment", None),
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
-                ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")),
+                ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
@@ -2848,7 +2853,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
             }
             let refs = arranged_names(&arranged);
-            values.push(("UISubviews", nib.array("NSMutableArray", arranged)));
+            // An empty stack view has neither list (one probe).
+            let empty = arranged.is_empty();
+            if !empty {
+                values.push(("UISubviews", nib.array("NSMutableArray", arranged)));
+            }
             for c in children(n, "color") {
                 if c.attribute("key") != Some("backgroundColor") {
                     return fail("stack view colours other than a background colour are not supported by this ibtool");
@@ -2874,9 +2883,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if directional {
                 values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
             }
+            if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+                values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+            }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
-            values.push(("UIStackViewArrangedSubviews", nib.array("NSArray", refs)));
+            if !empty {
+                values.push(("UIStackViewArrangedSubviews", nib.array("NSArray", refs)));
+            }
             values.push(("UIStackViewAxis", Value::Int(vertical as i64)));
             values.push(("UIStackViewDistribution", Value::Int(distribution)));
             values.push(("UIStackViewAlignment", Value::Int(alignment)));
@@ -2889,7 +2903,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIStackViewSpacing", Value::Double(spacing)));
             values.push(("UIStackViewBaselineRelative", Value::Bool(n.attribute("baselineRelativeArrangement").is_some())));
             values.push(("UIStackViewLayoutMarginsRelative", Value::Bool(margins.is_some())));
-            Object::new("UIStackView", values)
+            // A custom class is swapped in, last (one probe).
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UIStackView")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UIStackView")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UIStackView", values)
+            }
         }
         "view" | "containerView" | "scrollView" => {
             // A container view is a plain view its embed segue fills; a
@@ -3636,6 +3658,9 @@ fn embedded_controller(
     nib_names: &HashMap<String, String>,
 ) -> Result<Embedded, String> {
     let vc = root.vc;
+    if vc.attribute("restorationIdentifier").is_some() {
+        return fail("an embedded controller's restoration identifier is not supported by this ibtool");
+    }
     // Its title is encoded before its navigation item, which may share the
     // string.
     let title = match vc.attribute("title") {
@@ -4260,6 +4285,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("clearsSelectionOnViewWillAppear", Some("NO")), ("userLabel", None),
+            ("restorationIdentifier", None),
             ("sceneMemberID", Some("viewController")),
         ])?;
         if !is_table && vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
@@ -4851,6 +4877,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let external = vnib.array("NSDictionary", external);
         swapper.push(("UIExternalObjectsTableForViewLoading", external));
         swapper.push(("UINibName", vnib.string(&view_nib_name)));
+        // Its own restoration identifier after the nib name (one probe).
+        if let Some(identifier) = vc.attribute("restorationIdentifier") {
+            if vc.attribute("storyboardIdentifier").is_some() {
+                return fail("a controller's restoration identifier beside a storyboard identifier is not supported by this ibtool");
+            }
+            swapper.push(("UIRestorationIdentifier", vnib.string(identifier)));
+        }
         if let Some(identifier) = vc.attribute("storyboardIdentifier") {
             swapper.push(("UIStoryboardIdentifier", vnib.string(identifier)));
             if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {

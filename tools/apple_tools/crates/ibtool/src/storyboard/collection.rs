@@ -276,10 +276,17 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
             _ => return fail("a flow layout's sizes other than its item size are not supported by this ibtool"),
         }
     }
+    // Its section inset, top, left, bottom and right, unless zero (one
+    // probe).
+    let mut section_inset = None;
     for i in children(layout, "inset") {
-        let zero = ["minX", "minY", "maxX", "maxY"].iter().all(|k| i.attribute(*k).map(number) == Some(Ok(0.0)));
-        if i.attribute("key") != Some("sectionInset") || !zero {
-            return fail("a flow layout's section insets are not supported by this ibtool");
+        if i.attribute("key") != Some("sectionInset") {
+            return fail("a flow layout's insets other than its section inset are not supported by this ibtool");
+        }
+        let edge = |k: &str| number(attr(i, k)?);
+        let inset = [edge("minY")?, edge("minX")?, edge("maxY")?, edge("maxX")?];
+        if inset != [0.0; 4] {
+            section_inset = Some(inset);
         }
     }
     let mut values = Vec::new();
@@ -297,6 +304,12 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
     let (w, h) = item.ok_or("a flow layout without an item size is not supported by this ibtool")?;
     if (w, h) != (50.0, 50.0) {
         values.push(("UIItemSize", doubles(&[w, h])));
+    }
+    if let Some(inset) = section_inset {
+        if layout.attribute("scrollDirection").is_some() {
+            return fail("a flow layout with both a section inset and a scroll direction is not supported by this ibtool");
+        }
+        values.push(("UISectionInset", doubles(&inset)));
     }
     // A horizontal scroll direction after the item size (one probe).
     if layout.attribute("scrollDirection").is_some() {
