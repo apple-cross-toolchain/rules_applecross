@@ -95,18 +95,22 @@ pub(super) fn tab_bar(nib: &mut Nib, tab: Node, items: Vec<Value>) -> Result<Val
         ],
     )?;
     only_children(bar, &["rect", "autoresizingMask", "color"])?;
+    // Xcode lays the bar out itself, so a flexible width and top margin
+    // change nothing (two probes).
     for m in children(bar, "autoresizingMask") {
-        if autoresizing_mask(m)? != 0 || m.has_children() {
+        if ![0, 10].contains(&autoresizing_mask(m)?) || m.has_children() {
             return fail("tab bars with an autoresizing mask are not supported by this ibtool");
         }
     }
     if children(bar, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
         return fail("tab bar colours other than the background are not supported by this ibtool");
     }
-    if frame(bar)?.x != 0.0 {
+    let f = frame(bar)?;
+    if f.x != 0.0 {
         return fail("tab bars not at x 0 are not supported by this ibtool");
     }
-    let mut values = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])), ("UICenter", doubles(&[0.0, 27.0]))];
+    // 0x54, centred 27 below its frame's top (three probes).
+    let mut values = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])), ("UICenter", doubles(&[0.0, f.y + 27.0]))];
     if let Some(c) = child(bar, "color", "backgroundColor") {
         values.push(("UIBackgroundColor", color(nib, c)?));
     }

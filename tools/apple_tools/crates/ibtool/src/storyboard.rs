@@ -1430,8 +1430,11 @@ fn margins(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), Strin
         values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
         values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
     }
-    if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
-        values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+    // Turned on, the default, it changes nothing (one probe).
+    match n.attribute("insetsLayoutMarginsFromSafeArea") {
+        None | Some("YES") => {}
+        Some("NO") => values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0))),
+        Some(other) => return fail(format!("insetsLayoutMarginsFromSafeArea=\"{other}\" is not supported by this ibtool")),
     }
     Ok(())
 }
@@ -1756,6 +1759,10 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
             _ => unreachable!(),
         }
     }
+    // An empty list writes nothing (one corpus storyboard).
+    if values.is_empty() {
+        return Ok(None);
+    }
     Ok(Some(nib.array("NSMutableArray", values)))
 }
 
@@ -1805,6 +1812,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 (None, None) => (None, true),
                 _ => return fail("a label needs one text colour or nil"),
             };
+            // Its colours: text, highlighted and background, the background
+            // before `UIDeepDrawRect` (one corpus storyboard).
+            if let Some(c) = children(n, "color").find(|c| !matches!(c.attribute("key"), Some("textColor" | "highlightedColor" | "backgroundColor"))) {
+                return fail(format!("a label's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
+            }
+            if let Some(c) = child(n, "color", "backgroundColor") {
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             if n.attribute("userInteractionEnabled").is_some() {
@@ -1882,6 +1897,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIShadowOffset", doubles(&[0.0, -1.0])));
             if let Some(lines) = n.attribute("numberOfLines") {
                 values.push(("UINumberOfLines", Value::Int(lines.parse().map_err(|_| format!("not a number: {lines}"))?)));
+            }
+            // Older documents leave the baseline adjustment out, which is
+            // aligning centres (one corpus storyboard).
+            if n.attribute("baselineAdjustment").is_none() {
+                values.push(("UIBaselineAdjustment", Value::Int(1)));
             }
             // Tail truncation, the default, is left out.
             let line_break = match attr(n, "lineBreakMode")? {
@@ -3503,7 +3523,8 @@ fn navigation_root<'a>(nav: Node<'a, '_>) -> Result<&'a str, String> {
             return fail("navigation controllers with toolbar items are not supported by this ibtool");
         }
     }
-    for c in children(nav, "nil") {
+    // Simulated metrics are Interface Builder's alone (one probe).
+    for c in children(nav, "nil").filter(|c| !c.attribute("key").is_some_and(|k| k.starts_with("simulated"))) {
         if c.attribute("name") != Some("viewControllers") {
             return fail("<nil> inside <navigationController> is not supported by this ibtool");
         }
@@ -4203,7 +4224,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 "directionalEdgeInsets",
             ])?;
             only_attributes(view, &[
-                ("key", Some("view")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
+                ("key", Some("view")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", None),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
                 ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
             ])?;

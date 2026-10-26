@@ -693,7 +693,10 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
             return fail(format!("a cell's content view without {required} is not supported by this ibtool"));
         }
     }
-    only_children(content, &["rect", "autoresizingMask", "subviews", "constraints"])?;
+    only_children(content, &["rect", "autoresizingMask", "subviews", "constraints", "color", "edgeInsets"])?;
+    if children(content, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
+        return fail("a cell's content view colours other than its background are not supported by this ibtool");
+    }
     for m in children(content, "autoresizingMask") {
         if autoresizing_mask(m)? != 0 || m.has_children() {
             return fail("a cell's content view with an autoresizing mask is not supported by this ibtool");
@@ -746,6 +749,11 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
     }
+    // A background colour after its subviews, layout margins after its
+    // constraints (two probes).
+    if let Some(c) = child(content, "color", "backgroundColor") {
+        cv.push(("UIBackgroundColor", color(nib, c)?));
+    }
     cv.push(("UIDeepDrawRect", Value::Bool(true)));
     cv.push(("UIMultipleTouchEnabled", Value::Bool(true)));
     cv.push(("UIAutoresizeSubviews", Value::Bool(true)));
@@ -755,6 +763,12 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
     }
     if let Some(own) = own_constraints(nib, &mut scene, content, &content_name)? {
         cv.push(("UIViewAutolayoutConstraints", own));
+    }
+    if let Some((m, directional)) = layout_margins(content)? {
+        cv.push(("UIViewLayoutMargins", doubles(&m)));
+        if directional {
+            cv.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
+        }
     }
     if content.attribute("preservesSuperviewLayoutMargins").is_some() {
         cv.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
