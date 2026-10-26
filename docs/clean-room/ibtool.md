@@ -877,12 +877,14 @@ refused, as runtime attributes are):
 (an `NSNumber` of UIAccessibilityTraits' bits: button 1, link 2, image 4,
 static text 64, not enabled 256, header 65536, none 0) and
 `UIIsAccessibilityElement` (0 or 1); equal numbers are one object (14
-probes). Runtime attributes, switches (their frame pair) and accessibility
+probes). In `Base.lproj` the hint and label are `NSLocalizableString`s
+keyed `<id>.accessibilityHint` and `<id>.accessibilityLabel`, as titles
+are; the identifier stays a string (one probe). Runtime attributes, switches (their frame pair) and accessibility
 settings inside cells and table headers are refused: those nibs aren't
 built with them.
 
 Buttons take a custom class, swapped in after `UIButtonConfiguration`
-(two probes). Stack views and visual effect views take runtime
+(two probes), and labels one swapped in last (two probes). Stack views and visual effect views take runtime
 attributes (two probes). Image views take a custom class (swapped in, after their image), runtime
 attributes and accessibility settings; text fields accessibility settings;
 the root view a custom class (swapped in, after its large content
@@ -930,7 +932,8 @@ its not-translating key, no `insetsLayoutMarginsFromSafeArea`
 and regular and prominent 1 and 0 with `UIBlurEffectAutomaticStyle` 4 and 5),
 `UIVisualEffectViewGroupName` nil and `UIVisualEffectViewContentView`, its
 content view as a `_UIVisualEffectContentView` (its subviews, mask 18,
-`UIShouldNotAdaptToMaterials`, content mode 4, clipping), listed as its child
+`UIShouldNotAdaptToMaterials`, content mode 4, clipping, then
+`UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off), listed as its child
 (seven probes; material styles and constraints it holds are refused).
 
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no

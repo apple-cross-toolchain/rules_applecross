@@ -1467,13 +1467,16 @@ fn accessibility(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Resul
     }
     only_attributes(a, &[("key", None), ("hint", None), ("identifier", None), ("label", None)])?;
     only_children(a, &["accessibilityTraits", "bool"])?;
-    if nib.localizable && (a.attribute("hint").is_some() || a.attribute("label").is_some()) {
-        return fail("a localizable accessibility label or hint is not supported by this ibtool");
-    }
+    // A hint and label are localizable (one probe); the identifier isn't.
+    let id = attr(n, "id")?;
     let mut values = vec![("UIAccessibileObject", reference(name))];
     for (attribute, key) in [("hint", "UIAccessibilityHint"), ("identifier", "UIAccessibilityIdentifier"), ("label", "UIAccessibilityLabel")] {
         if let Some(v) = a.attribute(attribute) {
-            values.push((key, nib.string(v)));
+            let value = match attribute {
+                "identifier" => nib.string(v),
+                _ => nib.text(id, &format!("accessibility{}", if attribute == "hint" { "Hint" } else { "Label" }), v),
+            };
+            values.push((key, value));
         }
     }
     if let Some(t) = child(a, "accessibilityTraits", "traits") {
@@ -1768,7 +1771,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
-                ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None),
+                ("customModule", None), ("customModuleProvider", None), ("id", None),
             ])?;
             only_children(n, &[
                 "rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections", "string", "userDefinedRuntimeAttributes",
@@ -1897,7 +1901,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIAdjustsLetterSpacingToFit", Value::Bool(true)));
             }
             values.push(("UIDisableUpdateTextColorOnTraitCollectionChange", Value::Bool(declared_color)));
-            Object::new("UILabel", values)
+            // A custom class is swapped in, last (two probes).
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UILabel")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UILabel")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UILabel", values)
+            }
         }
         "textField" => {
             only_attributes(n, &[
@@ -2030,7 +2042,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             };
             let content = child(n, "view", "contentView").ok_or("a visual effect view without a content view")?;
             only_attributes(content, &[
-                ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
+                ("key", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
                 ("id", None),
             ])?;
             only_children(content, &["rect", "autoresizingMask", "subviews"])?;
@@ -2069,6 +2081,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             cv.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
             cv.push(("UIContentMode", Value::Int(4)));
             cv.push(("UIClipsToBounds", Value::Bool(true)));
+            if content.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+                cv.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+            }
             cv.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut cv);
             values.push(("UIDeepDrawRect", Value::Bool(true)));
