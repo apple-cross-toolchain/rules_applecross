@@ -709,7 +709,21 @@ A `<navigationController>` (its bar, a root view controller by a
 relationship segue, empty toolbar items) compiles to
 `UINavigationController-<id>.nib` (or its identifier's), which embeds the
 root controller; the root's scene adds its view nib, and its own nib only
-when it is initial or identified. Observed with 25 probes:
+when it is initial or identified. A navigation controller nothing loads
+(neither initial, identified nor a segue's destination) compiles to
+nothing, nor does its root unless the root is identified, nor a controller
+only its root's segues reach (three probes and a corpus storyboard). One
+without a root controller (no relationship segue) that something loads
+is a nib of the owner, the first responder, its storyboard placeholder
+and the controller holding its bar alone: `UIStoryboardIdentifier` and
+`UIRestorationIdentifier` when identified, `UINavigationBar` without
+`UIItems`, and the class names when swapped in; the objects list the
+three placeholders, the controller and the bar, the connections its
+storyboard outlet and the owner's `sceneViewController` (five probes,
+initial, identified, of a custom class and a modal segue's destination,
+and a corpus storyboard's five). With a title, a tab bar item or
+presentation settings, or as a tab or split view controller's child, it
+is refused. Observed with 25 probes:
 
 - Top-level objects: the root's scene's storyboard placeholder, the owner,
   the first responder, the navigation controller's storyboard placeholder
