@@ -728,6 +728,11 @@ objects (its own nib's, or its navigation controller's).
 - **Order.** These connections come after the templates' outlets, by
   selector: actions with one selector the right item's first, and the
   `perform:`s in the order of their templates' outlets.
+- **Back item.** A back bar button item is `UIBackBarButtonItem`, compiled
+  as any other item, right after the title and before the other items, and
+  first among the items in the objects, wherever the document puts it (six
+  probes, a root and a pushed controller). One with connections or a
+  custom view, or in a navigation bar inside a view, is refused.
 - **Custom views.** An item's custom view (`<button key="customView">`, a
   segmented control) is its `UICustomView`, first among its values: the
   view compiled as a subview, its document mask kept. The objects list the
