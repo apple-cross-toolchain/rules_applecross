@@ -381,7 +381,16 @@ the same residuals (five rows; the same image gives the same choice each
 time, and the residuals are those of the code it picks), so the choice depends on
 something besides the row's residuals. Costs from unpremultiplied pixels
 contradict other rows, and other left-or-up rules in predictor 1's cost
-explain at most two.
+explain at most two. Nor do these, each tried on all 32,621 rows of the
+149 corpus images Xcode stores in mode 2 (339 tied rows in the 129 it
+otherwise fits): float summation orders for one predictor against the
+others (in order, per channel, in 4, 8 or 16 lanes, per pixel, in double),
+log2 rounded to a float, the alpha plane's residuals counted too (4,502
+rows then contradict), predictor 1 costed at the better of left and up
+per value or per pixel (17,490 rows contradict), and costs taken on a
+lossless YCoCg-R or on RGB (4,234 to 6,854 rows contradict, against 173
+for the lossy values above, most of those in images whose colours are
+converted).
 
 A greyscale image (GA8, below) is the same with 2-byte pixels: the stream
 header's last byte and the body header's second word are 2, mode 3 holds
