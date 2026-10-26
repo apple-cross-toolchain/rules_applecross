@@ -468,6 +468,11 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             subviews.push(subview(&mut nib, &mut scene, c)?);
         }
     }
+    // These nibs don't list placeholder guides: a subview's own safe-area
+    // guide or a scroll view's guides are refused here.
+    if !scene.unused_guides.is_empty() {
+        return fail("a safe-area or scroll view guide in a cell, header or table is not supported by this ibtool");
+    }
     if scene.actions.iter().any(|a| a.3 != "upstream") || scene.actions.len() > 1 || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
         return fail("actions other than one on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
@@ -661,6 +666,11 @@ fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool,
         for c in s.children().filter(|c| c.is_element()) {
             subviews.push(subview(&mut nib, &mut scene, c)?);
         }
+    }
+    // These nibs don't list placeholder guides: a subview's own safe-area
+    // guide or a scroll view's guides are refused here.
+    if !scene.unused_guides.is_empty() {
+        return fail("a safe-area or scroll view guide in a cell, header or table is not supported by this ibtool");
     }
     if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() || !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
         return fail("actions, outlets, segues, runtime attributes and accessibility settings in a collection reusable view are not supported by this ibtool");

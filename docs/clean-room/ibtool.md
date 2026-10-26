@@ -1106,14 +1106,26 @@ hidden (`UIHidden`, after `UIDeepDrawRect`; one probe). A collection view
 in a view may page (`UIPagingEnabled`, after
 `UIScrollViewIndicatorInsetAdjustmentBehavior`; one probe).
 
-A scroll view without content and frame layout guides (those are refused)
-is compiled as a plain view, `UIScrollView` (or swapped for its custom
+A scroll view is compiled as a plain view, `UIScrollView` (or swapped for its custom
 class), then after its large content properties
 `UIScrollViewIndicatorInsetAdjustmentBehavior` 1, `UIShowsHorizontalScrollIndicator`
 and `UIShowsVerticalScrollIndicator` false when hidden, `UIBouncesZoom`,
 `UIAlwaysBounceVertical`, `UIDirectionalLockEnabled`, the minimum and maximum
 zoom scales (floats) and `UIScrollViewContentInsetAdjustmentBehavior` 0
-(eight probes).
+(eight probes). Its content and frame layout guides are each a
+placeholder `UILayoutGuide` at the start of its turn in the objects,
+whether or not a constraint uses them, and nothing else when none does.
+Its subviews' constraints to them (held by the scroll view, the guide
+their second item) are ordered as constraints between siblings; a guide
+is defined where a constraint first uses it: the content guide a
+`_UIScrollViewLayoutGuide`, the frame guide a `UILayoutGuide`, owned and
+locked by the scroll view, not archived, named
+`UIScrollView-contentLayoutGuide` or `-frameLayoutGuide`, with system
+constraints to the scroll view (the content guide's minimum x and y, the
+frame guide's those and its width and height, each named after the guide
+and attribute, not archived). Three probes and 210 random storyboards (44
+with scroll views); a guide as a first item, and guides in cells,
+headers or table views (whose nibs don't list them), are refused.
 
 Interface Builder's `misplaced` and `ambiguous` flags and placeholder
 constraints compile to nothing, though a view a placeholder constraint is
