@@ -1157,7 +1157,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
 - A flow layout with a custom class is swapped in after its values (one
   probe); a horizontal one has `UIScrollDirection` 1 after its item size
   (one probe), and a section inset other than zero `UISectionInset` (top,
-  left, bottom, right) there too (one probe).
+  left, bottom, right) there too (one probe), before the scroll direction
+  when it has both (two probes).
 - A custom layout (`<collectionViewLayout>` with a custom class) is a
   `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
   root or in a view (three probes).
