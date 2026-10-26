@@ -792,7 +792,8 @@ states than normal are refused).
 
 A label's, plain view's or button's `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
-`UINibAccessibilityConfigurationsKey`, in document order:
+`UINibAccessibilityConfigurationsKey` (one view's in a nib; more are
+refused, as runtime attributes are):
 `UIAccessibileObject` (sic), then those given of `UIAccessibilityHint`,
 `UIAccessibilityIdentifier`, `UIAccessibilityLabel`, `UIAccessibilityTraits`
 (an `NSNumber` of UIAccessibilityTraits' bits: button 1, link 2, image 4,
@@ -801,6 +802,16 @@ static text 64, not enabled 256, header 65536, none 0) and
 probes). Runtime attributes, switches (their frame pair) and accessibility
 settings inside cells and table headers are refused: those nibs aren't
 built with them.
+
+Image views take a custom class (swapped in, after their image), runtime
+attributes and accessibility settings; text fields accessibility settings;
+the root view a custom class (swapped in, after its large content
+properties). A label may adjust its font for the content size category
+(`UIAdjustsFontForContentSizeCategory`, after its text) and have a
+highlighted colour (`UIHighlightedColor`, after its text colour); a button
+may clip its subviews (`UIClipsToBounds`, after its mask; with a tint colour
+refused) and give a state an image (`UIImage`, an image placeholder, after
+its title) (eleven probes).
 
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
@@ -844,8 +855,10 @@ Switches, sliders and activity indicators (23 probes):
 
 User-defined runtime attributes of a view, the root view or a controller
 are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
-document order, the root view's before its subviews'; a controller's are in
-its own nib. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
+document order; a controller's are in its own nib. Those of more than one
+view in a nib, or beside a switch's frame pair, are refused: probes put
+them in the objects' order, but one corpus storyboard's views' aren't, for
+reasons its connections bear on and that aren't established. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
 boolean one of 0 or 1, a string the string, a colour the colour and a size an
 `NSValue` (`NS.special` 2, `NS.sizeval` `{w, h}`). Those of an embedded
 controller and of other kinds of view are refused (13 probes).
