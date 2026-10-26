@@ -362,7 +362,9 @@ other values of the attributes these use, is refused. Observed:
   `UICenter` when the centre is the origin. A label, button or plain view
   without a frame, or with an all-zero one, is 1000x1000 at the origin,
   or has no size when the document says `fixedFrame="YES"` (18 probes,
-  three corpus storyboards). An empty `<toolbarItems/>` on a view
+  three corpus storyboards); so is an image view or a segmented control
+  (four probes, one corpus storyboard), an image view's `fixedFrame`
+  otherwise changing nothing. An empty `<toolbarItems/>` on a view
   controller changes nothing (one probe).
 - A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
   (or where it would be): wordWrap 0, characterWrap 1, clip 2,

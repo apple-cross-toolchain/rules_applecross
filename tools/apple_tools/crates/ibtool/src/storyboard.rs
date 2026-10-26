@@ -1140,9 +1140,10 @@ fn frame(n: Node) -> Result<Frame, String> {
     Ok(Frame { x: number(attr(r, "x")?)?, y: number(attr(r, "y")?)?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? })
 }
 
-/// A subview's frame. Without one, or with an all-zero one, a label, button
-/// or plain view is 1000x1000 at the origin, or has no size if its frame is
-/// fixed.
+/// A subview's frame. Without one, or with an all-zero one, a label, button,
+/// image view, segmented control or plain view is 1000x1000 at the origin,
+/// or has no size if its frame is fixed (image views and segmented controls:
+/// four probes).
 fn subview_frame(n: Node) -> Result<Frame, String> {
     if let Some(f) = child(n, "rect", "frame").map(|_| frame(n)).transpose()? {
         if f.x != 0.0 || f.y != 0.0 || f.w != 0.0 || f.h != 0.0 {
@@ -1150,8 +1151,8 @@ fn subview_frame(n: Node) -> Result<Frame, String> {
         }
     }
     match n.tag_name().name() {
-        "label" | "view" | "button" if n.attribute("fixedFrame").is_some() => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
-        "label" | "view" | "button" => Ok(Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }),
+        "label" | "view" | "button" | "imageView" | "segmentedControl" if n.attribute("fixedFrame").is_some() => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
+        "label" | "view" | "button" | "imageView" | "segmentedControl" => Ok(Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }),
         other => fail(format!("<{other}> without a frame")),
     }
 }
@@ -3111,7 +3112,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("image", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
-                ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")), ("id", None),
+                ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")),
+                ("fixedFrame", Some("YES")), ("id", None),
             ])?;
             only_children(n, &["rect", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
