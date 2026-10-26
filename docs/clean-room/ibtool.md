@@ -1372,6 +1372,23 @@ inside it. Observed with 15 probes and one corpus storyboard:
   (one probe), and a section inset other than zero `UISectionInset` (top,
   left, bottom, right) there too (one probe), before the scroll direction
   when it has both (two probes).
+- Section headers and footers (`<collectionReusableView>`,
+  `sectionHeaderView` or `sectionFooterView`) are nibs of their own, keyed
+  `UICollectionElementKindSectionHeader/<reuse identifier>` (or `Footer`)
+  in byte order: an empty external objects table each in
+  `UICollectionViewSupplementaryViewPrototypeNibExternalObjects` after the
+  cells' and a `UINib` each in `UICollectionViewSupplementaryViewNibDict`
+  after theirs. A header's nib holds the owner, the first responder and a
+  `UICollectionReusableView` (geometry, subviews, `UIDeepDrawRect`,
+  multiple touch, `UIAutoresizeSubviews`, `UIContentMode` 4, clipping,
+  semantic content and large content properties, `UIReuseIdentifier`), its
+  objects listing an unowned safe-area guide after it, then its subviews
+  breadth first. The flow layout's non-zero `headerReferenceSize` and
+  `footerReferenceSize` are `UIHeaderReferenceSize` and
+  `UIFooterReferenceSize` after its item size (five probes). Their
+  constraints, outlets, actions, colours, custom classes and masks are
+  refused, as are reference sizes beside a section inset or horizontal
+  scrolling.
 - A custom layout (`<collectionViewLayout>` with a custom class) is a
   `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
   root or in a view (three probes).
