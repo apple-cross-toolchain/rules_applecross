@@ -2157,7 +2157,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     for container in root.descendants().filter(|d| d.has_tag_name("containerView")) {
         for sg in container.descendants().filter(|d| d.has_tag_name("segue")) {
             let destination = attr(sg, "destination")?;
-            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && matches!(c.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController")) {
+            let kinds = ["viewController", "tableViewController", "collectionViewController", "viewControllerPlaceholder"];
+            if !controllers.iter().any(|c| c.attribute("id") == Some(destination) && kinds.contains(&c.tag_name().name())) {
                 return fail("an embed segue to anything but a view or table view controller is not supported by this ibtool");
             }
             let f = frame(container)?;
@@ -2214,13 +2215,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     // Each scene's files and Info.plist entry, by scene.
     let mut outputs: Vec<(usize, Vec<(String, Vec<u8>)>, Option<(String, bool, bool)>)> = Vec::new();
     let mut roots: HashMap<&str, RootController> = HashMap::new();
+    // Storyboard references by nib name, with what they refer to.
+    let mut references: Vec<(String, cf::Value)> = Vec::new();
     for (index, scene_node) in scene_nodes.iter().enumerate() {
         let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
         only_children(objects_node, &[
             "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
-            "exit",
+            "exit", "viewControllerPlaceholder",
         ])?;
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
@@ -2231,6 +2234,42 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             if scene_node.document().descendants().any(|d| d != exit && !unwinds(d) && d.attributes().any(|a| a.value() == id)) {
                 return fail("an exit referred to other than by an unwind segue is not supported by this ibtool");
             }
+        }
+        // A storyboard reference a segue leads to is a placeholder in a nib
+        // of its own, which the Info.plist resolves; one nothing leads to
+        // compiles to nothing.
+        if let Some(placeholder) = children(objects_node, "viewControllerPlaceholder").next() {
+            only_attributes(placeholder, &[
+                ("storyboardName", None), ("referencedIdentifier", None), ("bundleIdentifier", None), ("id", None), ("sceneMemberID", Some("viewController")),
+            ])?;
+            let id = attr(placeholder, "id")?;
+            if initial == Some(id) {
+                return fail("an initial storyboard reference is not supported by this ibtool");
+            }
+            if !reached.contains(id) {
+                continue;
+            }
+            let name = segue::nib_name(placeholder)?;
+            let mut nib = Nib::new(platform, color_matched, localizable);
+            let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+            let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+            let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
+            let identifier = nib.string(&name);
+            let controller = Value::New(Object::new("UIStoryboardViewControllerPlaceholder", vec![("UIStoryboardIdentifier", identifier)]).named("controller"));
+            let objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+            let connections = vec![outlet(&mut nib, "sceneViewController", "owner", "controller")];
+            let root = root_object(&mut nib, vec![owner, responder, storyboard, controller], objects, connections);
+            outputs.push((index, vec![(format!("{name}.nib"), nib::archive(root))], Some((name.clone(), false, false))));
+            let mut target = Vec::new();
+            if let Some(bundle) = placeholder.attribute("bundleIdentifier") {
+                target.push(("UIReferencedBundleIdentifier", cf::Value::string(bundle)));
+            }
+            if let Some(controller) = placeholder.attribute("referencedIdentifier") {
+                target.push(("UIReferencedControllerIdentifier", cf::Value::string(controller)));
+            }
+            target.push(("UIReferencedStoryboardName", cf::Value::string(attr(placeholder, "storyboardName")?)));
+            references.push((name, cf::Value::dict(target)));
+            continue;
         }
         if ["navigationController", "tabBarController", "splitViewController"].iter().any(|t| children(objects_node, t).next().is_some()) {
             continue;
@@ -2743,9 +2782,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     }
     info.push(("UIStoryboardVersion", cf::Value::Integer(1)));
     info.push(("UIViewControllerIdentifiersToNibNames", cf::Value::dict(identifiers.iter().map(|(n, ..)| (n.clone(), cf::Value::string(n.clone()))))));
+    if !references.is_empty() {
+        info.push(("UIViewControllerIdentifiersToExternalStoryboardReferences", cf::Value::dict(references)));
+    }
     let info = cf::Value::dict(info);
+    // In the external references, equal keys and values are one string
+    // each (two probes).
     let share = |_: &cf::Value, at: &cf::binary::Position| {
         use cf::binary::Step;
+        if let [Step::Value(k), Step::Value(_), _] = at {
+            return k == "UIViewControllerIdentifiersToExternalStoryboardReferences";
+        }
         let Some(entry) = &shared_entry else { return false };
         match at {
             [Step::Value(k)] => k == "UIStoryboardDesignatedEntryPointIdentifier",
