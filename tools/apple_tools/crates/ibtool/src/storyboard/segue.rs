@@ -137,10 +137,11 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
     only_attributes(s, &[
         ("destination", None), ("kind", None), ("identifier", None), ("animates", Some("NO")), ("modalPresentationStyle", None),
         ("modalTransitionStyle", Some("crossDissolve")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
-        ("destinationCreationSelector", None), ("popoverAnchorView", None),
+        ("destinationCreationSelector", None), ("popoverAnchorView", None), ("popoverAnchorBarButtonItem", None),
     ])?;
     only_children(s, &["popoverArrowDirection"])?;
-    if s.attribute("kind") != Some("popoverPresentation") && (s.attribute("popoverAnchorView").is_some() || s.has_children()) {
+    let popover_settings = s.attribute("popoverAnchorView").is_some() || s.attribute("popoverAnchorBarButtonItem").is_some() || s.has_children();
+    if s.attribute("kind") != Some("popoverPresentation") && popover_settings {
         return fail("a popover's settings on another kind of segue are not supported by this ibtool");
     }
     let creation = s.attribute("destinationCreationSelector");
@@ -228,9 +229,13 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
         // views and anchors; its anchor view is an outlet from its
         // placeholder (four probes, one corpus storyboard).
         "popoverPresentation" => {
-            let from_button = s.parent_element().and_then(|c| c.parent_element()).is_some_and(|b| b.has_tag_name("button"));
-            if animates || s.attribute("popoverAnchorView").is_none() || !from_button {
-                return fail("a popover segue from other than a button, without an anchor view, or that doesn't animate, is not supported by this ibtool");
+            let source = s.parent_element().and_then(|c| c.parent_element());
+            let from_button = source.is_some_and(|b| b.has_tag_name("button")) && s.attribute("popoverAnchorView").is_some();
+            // Or from a bar button item anchored on itself, its anchor an
+            // outlet from the template (a corpus storyboard).
+            let from_item = source.is_some_and(|b| b.has_tag_name("barButtonItem") && s.attribute("popoverAnchorBarButtonItem") == b.attribute("id"));
+            if animates || !(from_button || from_item) || (from_button && s.attribute("popoverAnchorBarButtonItem").is_some()) {
+                return fail("a popover segue from other than a button or bar button item, without an anchor, or that doesn't animate, is not supported by this ibtool");
             }
             let mut arrows = 0;
             for d in children(s, "popoverArrowDirection") {

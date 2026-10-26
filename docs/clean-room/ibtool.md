@@ -1725,9 +1725,23 @@ the same. Observed with 55 probes:
   nib, sorted with the outlets (popovers' in their placeholders' order).
   Popovers' placeholders come first, in reverse document order, then the
   other segues' in document order, the templates listed in document order
-  all the same (ten probes, CodeExamples' AdaptivePopover). Popovers from
-  bar button items, cells or the controller itself, without an anchor
-  view, not animating or beside container views are refused.
+  all the same (ten probes, CodeExamples' AdaptivePopover). A popover
+  from a controller's own navigation item's bar button item, anchored on
+  that item (`popoverAnchorBarButtonItem`), has the same template in the
+  controller's nib, performed by the item, and an `anchorBarButtonItem`
+  outlet from the template to the item after the controller's outlets and
+  before `sceneViewController` (three probes). Popovers from cells or the
+  controller itself, without an anchor, not animating or beside container
+  views are refused.
+- In a controller's own nib, its outlets to its navigation item's bar
+  button items are there too, by name after its storyboard outlet, and
+  its items' actions on the scene's first responder are event connections
+  to the first responder proxy, sorted by selector with the others (five
+  probes). Beside outlets to recognizers, custom views or custom objects,
+  in an embedded controller and beside gesture recognizers they are
+  refused.
+- A controller's freeform size is ignored on a device Xcode doesn't know
+  (ipad10_5, ipad12_9): the view keeps its frame (three probes).
 - A control's segue (a button's, or a prototype cell's) is triggered from
   its view nib through a placeholder of its own: the view nib has
   `UpstreamPlaceholder-<n>` proxies, the controller's first if the view
