@@ -4467,7 +4467,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
         only_children(objects_node, &[
             "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
-            "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer",
+            "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer", "pageViewController",
         ])?;
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
@@ -4482,6 +4482,61 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // A storyboard reference a segue leads to is a placeholder in a nib
         // of its own, which the Info.plist resolves; one nothing leads to
         // compiles to nothing.
+        // A page view controller, identified, without pages of its own: its
+        // nib holds it, swapped in, with its identifier, archived-view
+        // setting, transition style (page curl 0, scroll 1), navigation
+        // orientation (horizontal 0, vertical 1), spine location (none 0,
+        // min 1, mid 2, max 3) and page spacing, a whole number (seven
+        // probes).
+        if let Some(page) = children(objects_node, "pageViewController").next() {
+            only_attributes(page, &[
+                ("storyboardIdentifier", None), ("autoresizesArchivedViewToFullSize", Some("NO")), ("transitionStyle", None), ("pageSpacing", None),
+                ("navigationOrientation", None), ("spineLocation", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+                ("id", None), ("sceneMemberID", Some("viewController")),
+            ])?;
+            only_children(page, &[])?;
+            let id = attr(page, "id")?;
+            let Some(identifier) = page.attribute("storyboardIdentifier") else {
+                return fail("a page view controller without a storyboard identifier is not supported by this ibtool");
+            };
+            if initial == Some(id) {
+                return fail("an initial page view controller is not supported by this ibtool");
+            }
+            let pick = |a: &str, values: &[(&str, i64)]| -> Result<i64, String> {
+                let v = attr(page, a)?;
+                values.iter().find(|(n, _)| *n == v).map(|(_, c)| *c).ok_or_else(|| format!("{a}=\"{v}\" on <pageViewController> is not supported by this ibtool"))
+            };
+            let transition = pick("transitionStyle", &[("pageCurl", 0), ("scroll", 1)])?;
+            let orientation = pick("navigationOrientation", &[("horizontal", 0), ("vertical", 1)])?;
+            let spine = pick("spineLocation", &[("none", 0), ("min", 1), ("mid", 2), ("max", 3)])?;
+            let spacing = number(page.attribute("pageSpacing").unwrap_or("0"))?;
+            if spacing.fract() != 0.0 || spacing < 0.0 {
+                return fail("a page view controller's fractional page spacing is not supported by this ibtool");
+            }
+            let mut nib = Nib::new(platform, color_matched, localizable);
+            let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+            let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+            let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
+            let mut values = vec![("UIStoryboardIdentifier", nib.string(identifier))];
+            if page.attribute("autoresizesArchivedViewToFullSize").is_some() {
+                values.push(("UIAutoresizesArchivedViewToFullSize", Value::Bool(false)));
+            }
+            values.extend([
+                ("UITransitionStyle", Value::Int(transition)),
+                ("UINavigationOrientation", Value::Int(orientation)),
+                ("UISpineLocation", Value::Int(spine)),
+                ("UIPageSpacing", Value::Int(spacing as i64)),
+            ]);
+            let class = runtime_class_name(page, module, "UIPageViewController")?;
+            values.push(("UIClassName", nib.string(&class)));
+            values.push(("UIOriginalClassName", nib.string("UIPageViewController")));
+            let controller = Value::New(Object::new("UIClassSwapper", values).named("controller"));
+            let objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+            let connections = vec![outlet(&mut nib, "storyboard", "controller", "storyboard"), outlet(&mut nib, "sceneViewController", "owner", "controller")];
+            let root = root_object(&mut nib, vec![owner, responder, storyboard, controller], objects, connections);
+            outputs.push((index, vec![(format!("{identifier}.nib"), nib::archive(root))], Some((identifier.to_string(), false, true))));
+            continue;
+        }
         if let Some(placeholder) = children(objects_node, "viewControllerPlaceholder").next() {
             only_attributes(placeholder, &[
                 ("storyboardName", None), ("referencedIdentifier", None), ("bundleIdentifier", None), ("id", None), ("sceneMemberID", Some("viewController")),

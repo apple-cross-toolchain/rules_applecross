@@ -9,7 +9,12 @@ pub(super) fn scene_controller<'a, 'i>(scene: Node<'a, 'i>) -> Option<Node<'a, '
     children(scene, "objects")
         .next()?
         .children()
-        .find(|c| matches!(c.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController" | "navigationController" | "tabBarController" | "splitViewController" | "viewControllerPlaceholder"))
+        .find(|c| {
+            matches!(
+                c.tag_name().name(),
+                "viewController" | "tableViewController" | "collectionViewController" | "navigationController" | "tabBarController" | "splitViewController" | "viewControllerPlaceholder" | "pageViewController"
+            )
+        })
 }
 
 /// A controller's class, as its nib's name begins without an identifier.
@@ -20,6 +25,7 @@ pub(super) fn original_class(c: Node) -> &'static str {
         "navigationController" => "UINavigationController",
         "tabBarController" => "UITabBarController",
         "splitViewController" => "UISplitViewController",
+        "pageViewController" => "UIPageViewController",
         _ => "UIViewController",
     }
 }
@@ -71,7 +77,7 @@ pub(super) fn segue_destinations<'a>(controllers: &[Node<'a, '_>], initial: Opti
         // An unwind segue loads nothing: it leads to its scene's exit.
         for s in outgoing(c).filter(|s| s.attribute("kind") != Some("unwind")) {
             let destination = attr(s, "destination")?;
-            if find(destination).is_none() {
+            if find(destination).is_none_or(|d| d.has_tag_name("pageViewController")) {
                 return fail("a segue to anything but a view, table view, collection view, navigation, tab bar or split view controller or a storyboard reference is not supported by this ibtool");
             }
             // Reached even if loaded already as a parent's child: a

@@ -662,6 +662,20 @@ Bar button items in a tab or split view controller's children, beside a
 tab bar item or a gesture recognizer, and with images, are refused (46
 probes).
 
+## Page view controllers
+
+An identified `<pageViewController>` without pages of its own compiles to
+a nib named by its identifier: the owner, first responder and storyboard
+placeholders and the controller, swapped in (its custom class's runtime
+name, or `UIPageViewController`), with `UIStoryboardIdentifier`,
+`UIAutoresizesArchivedViewToFullSize` false when the document says NO,
+`UITransitionStyle` (page curl 0, scroll 1), `UINavigationOrientation`
+(horizontal 0, vertical 1), `UISpineLocation` (none 0, min 1, mid 2, max 3)
+and `UIPageSpacing` as a whole number (12.5 is 12), then its storyboard and
+`sceneViewController` outlets; the Info.plist lists it as a controller
+(seven probes). Fractional spacing, an unidentified or initial one,
+children and segues to one are refused.
+
 ## Tab bar controllers
 
 A `<tabBarController>` (its tab bar, children by `viewControllers`
