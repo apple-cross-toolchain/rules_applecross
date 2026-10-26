@@ -4809,9 +4809,29 @@ fn text_attributes(nib: &mut Nib, t: Node) -> Result<Value, String> {
 /// title padding 1), its title an attributed string, localizable as
 /// `<id>.configuration.title`, and an empty subtitle (four probes).
 fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, String> {
-    only_attributes(c, &[("key", Some("configuration")), ("style", Some("plain")), ("title", None)])?;
+    only_attributes(c, &[("key", Some("configuration")), ("style", None), ("image", None), ("catalog", Some("system")), ("title", None)])?;
     only_children(c, &[])?;
-    let clear = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]));
+    // Its style, and the background colour each but plain has: the tint
+    // blue (0, 136/255, 1), translucent when tinted, and a translucent grey
+    // (four probes).
+    let (style, fill) = match attr(c, "style")? {
+        "plain" => (0, None),
+        "gray" => (1, Some([120.0 / 255.0, 120.0 / 255.0, 128.0 / 255.0, 0.16])),
+        "tinted" => (2, Some([0.0, 136.0 / 255.0, 1.0, 0.18])),
+        "filled" => (3, Some([0.0, 136.0 / 255.0, 1.0, 1.0])),
+        other => return fail(format!("style=\"{other}\" on <buttonConfiguration> is not supported by this ibtool")),
+    };
+    let clear = match fill {
+        None => nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0])),
+        Some(c) => {
+            let (components, text) = exact_color_components(&RGB_KEYS, &c);
+            let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
+            keys.extend(components);
+            keys.push(("NSRGB", Value::Data(text)));
+            keys.push(("NSColorSpace", Value::Int(2)));
+            Value::New(Object::new("UIColor", keys).with_fallback("NSColor"))
+        }
+    };
     let stroke = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]));
     let insets = nib.string("{0, 0, 0, 0}");
     let background = Object::new("UIBackgroundConfiguration", vec![
@@ -4850,18 +4870,24 @@ fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, Strin
         ("defaultStyle", Value::Int(0)),
         ("defaultStyle_v2", Value::Int(0)),
     ]);
+    // A system symbol as its image (two probes); other images are refused.
+    let image = match (c.attribute("image"), c.attribute("catalog")) {
+        (None, None) => Value::Nil,
+        (Some(name), Some(_)) => nib.system_image(name),
+        _ => return fail("a button configuration's image other than a system symbol is not supported by this ibtool"),
+    };
     let title = nib.text(id, "configuration.title", c.attribute("title").unwrap_or(""));
     let attributes = nib.shared("empty attributes".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]));
     let subtitle = nib.string("");
     Ok(Value::New(Object::new("UIButtonConfiguration", vec![
-        ("UIButtonConfigurationButtonStyle", Value::Int(0)),
+        ("UIButtonConfigurationButtonStyle", Value::Int(style)),
         ("UIButtonConfigurationBackground", Value::New(background)),
         ("UIButtonConfigurationCornerStyle", Value::Int(0)),
         ("UIButtonConfigurationButtonSize", Value::Int(0)),
         ("UIButtonConfigurationMacIdiomStyle", Value::Int(0)),
         ("UIButtonConfigurationBaseBackgroundColor", Value::Nil),
         ("UIButtonConfigurationBaseForegroundColor", Value::Nil),
-        ("UIButtonConfigurationImage", Value::Nil),
+        ("UIButtonConfigurationImage", image),
         ("UIButtonConfigurationPreferredSymbolConfigurationForImage", Value::Nil),
         ("UIButtonConfigurationSymbolContentTransition", Value::Nil),
         ("UIButtonConfigurationShowsActivityIndicator", Value::Bool(false)),
