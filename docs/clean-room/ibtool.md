@@ -920,6 +920,15 @@ when it has none), `UIPlaceholder`, `UIEnablesReturnKeyAutomatically` and
 `UISecureTextEntry` false and `UISearchBarStyle` 2 for minimal; its delegate
 outlet is an outlet like any other (six probes).
 
+A map view is an `MKMapView`: opaque, multiple touch, mask 36, clipping,
+its constraint keys, zero `UIViewLayoutMargins`, then MapKit's keys
+(`MKDelegate` nil, `MKMapType` 0, zoom, scroll, pitch and rotation on,
+user location and traffic off, buildings on, `MKShowsCompass` unless
+`showsCompass="NO"`, `MKShowsScaleKey` with `showsScale`, points of
+interest on, an `MKStandardMapConfiguration`, `MKPitchButtonVisibility` 1,
+no user tracking button); its delegate outlet is an outlet like others
+(six probes; other map types and settings are refused).
+
 A picker view is a `UIPickerView`: the view keys (opaque, hidden, mask 36),
 hugging `{250, 250}` and after its large content properties
 `UIAllowSelectingCells` true; its data source and delegate outlets are
@@ -989,8 +998,12 @@ User-defined runtime attributes of a view, the root view or a controller
 are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
 document order; a controller's are in its own nib. Those of more than one
 view in a nib, or beside a switch's frame pair, are refused: probes put
-them in the objects' order, but one corpus storyboard's views' aren't, for
-reasons its connections bear on and that aren't established. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
+them in the objects' order (siblings, a container and its subview with
+its list before or after its subviews, the root view and a subview,
+custom classes, a stack view or another view between, outlets to either:
+fifteen probes), but one corpus storyboard's (TreasureHunt's claim
+button) follow the document's order of their lists instead, for reasons
+not established. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
 boolean one of 0 or 1, a string the string, a colour the colour and a size an
 `NSValue` (`NS.special` 2, `NS.sizeval` `{w, h}`). Those of an embedded
 controller and of other kinds of view are refused (13 probes).

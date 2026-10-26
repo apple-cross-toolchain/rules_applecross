@@ -2141,6 +2141,66 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIAllowSelectingCells", Value::Bool(true)));
             Object::new("UIPickerView", values)
         }
+        "mapView" => {
+            // An MKMapView: a view's keys, zero layout margins, then MapKit's
+            // with their defaults but for the scale and compass (five
+            // probes).
+            only_attributes(n, &[
+                ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("mapType", Some("standard")),
+                ("showsScale", Some("YES")), ("showsCompass", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "constraints", "connections"])?;
+            for required in ["clipsSubviews", "multipleTouchEnabled"] {
+                if n.attribute(required).is_none() {
+                    return fail(format!("a map view without {required} is not supported by this ibtool"));
+                }
+            }
+            view_connections(scene, n, &name)?;
+            values.extend([
+                ("UIDeepDrawRect", Value::Bool(true)),
+                ("UIOpaque", Value::Bool(true)),
+                ("UIMultipleTouchEnabled", Value::Bool(true)),
+                ("UIAutoresizeSubviews", Value::Bool(true)),
+                ("UIAutoresizingMask", Value::Int(36)),
+                ("UIClipsToBounds", Value::Bool(true)),
+            ]);
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewLayoutMargins", doubles(&[0.0; 4])));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.extend([
+                ("MKDelegate", Value::Nil),
+                ("MKMapType", Value::Int(0)),
+                ("MKZoomEnabled", Value::Bool(true)),
+                ("MKScrollEnabled", Value::Bool(true)),
+                ("MKShowsUserLocation", Value::Bool(false)),
+                ("MKPitchEnabled", Value::Bool(true)),
+                ("MKRotateEnabled", Value::Bool(true)),
+                ("MKShowsBuildings", Value::Bool(true)),
+                ("MKShowsTraffic", Value::Bool(false)),
+                ("MKShowsCompass", Value::Bool(n.attribute("showsCompass").is_none())),
+                ("MKShowsScaleKey", Value::Bool(n.attribute("showsScale").is_some())),
+                ("MKShowsPointsOfInterest", Value::Bool(true)),
+                ("MKPointOfInterestFilter", Value::Nil),
+            ]);
+            let configuration = Object::new("MKStandardMapConfiguration", vec![
+                ("MKMapConfigurationElevationStyle", Value::Int(0)),
+                ("MKMapConfigurationShowsTraffic", Value::Bool(false)),
+                ("MKMapConfigurationShowsHiking", Value::Bool(false)),
+                ("MKMapConfigurationShowsTopographicFeatures", Value::Bool(false)),
+                ("MKMapConfigurationPointOfInterestFilter", Value::Nil),
+                ("MKStandardMapConfigurationEmphasisStyle", Value::Int(0)),
+            ]);
+            values.push(("MKPreferredConfiguration", Value::New(configuration)));
+            values.push(("MKPitchButtonVisibility", Value::Int(1)));
+            values.push(("MKShowsUserTrackingButton", Value::Bool(false)));
+            Object::new("MKMapView", values)
+        }
         "searchBar" => {
             only_attributes(n, &[
                 ("key", Some("tableHeaderView")), ("contentMode", Some("redraw")), ("text", None), ("placeholder", None), ("barStyle", Some("black")),
