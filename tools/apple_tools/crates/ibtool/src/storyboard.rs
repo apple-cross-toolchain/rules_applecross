@@ -836,7 +836,7 @@ fn gesture_order(views: &[(String, Vec<String>)]) -> Vec<&String> {
 
 /// A scene's gesture recognizer (tap, pan or swipe), with the selectors of
 /// its actions on the controller.
-fn gesture_recognizer(nib: &mut Nib, r: Node, vc_id: &str) -> Result<(Object, Vec<String>), String> {
+fn gesture_recognizer(nib: &mut Nib, module: Option<&str>, r: Node, vc_id: &str) -> Result<(Object, Vec<String>), String> {
     let count = |key: &str| -> Result<Option<i64>, String> {
         match r.attribute(key) {
             None | Some("1") => Ok(None),
@@ -846,7 +846,7 @@ fn gesture_recognizer(nib: &mut Nib, r: Node, vc_id: &str) -> Result<(Object, Ve
     let mut values = vec![("UIGestureRecognizer.allowedTouchTypes", Value::Int(15)), ("UIGestureRecognizer.requiresExclusiveTouchType", Value::Bool(true))];
     let class = match r.tag_name().name() {
         "tapGestureRecognizer" => {
-            only_attributes(r, &[("numberOfTapsRequired", None), ("numberOfTouchesRequired", None), ("id", None)])?;
+            only_attributes(r, &[("numberOfTapsRequired", None), ("numberOfTouchesRequired", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
             let (taps, touches) = (count("numberOfTapsRequired")?, count("numberOfTouchesRequired")?);
             if taps.is_some() && touches.is_some() {
                 return fail("a tap gesture recognizer with both its taps and touches set is not supported by this ibtool");
@@ -862,7 +862,7 @@ fn gesture_recognizer(nib: &mut Nib, r: Node, vc_id: &str) -> Result<(Object, Ve
             "UITapGestureRecognizer"
         }
         "panGestureRecognizer" => {
-            only_attributes(r, &[("minimumNumberOfTouches", None), ("maximumNumberOfTouches", None), ("id", None)])?;
+            only_attributes(r, &[("minimumNumberOfTouches", None), ("maximumNumberOfTouches", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
             if let Some(t) = count("minimumNumberOfTouches")? {
                 values.push(("UIPanGestureRecognizer.minimumNumberOfTouches", Value::Int(t)));
             }
@@ -874,7 +874,7 @@ fn gesture_recognizer(nib: &mut Nib, r: Node, vc_id: &str) -> Result<(Object, Ve
             "UIPanGestureRecognizer"
         }
         "swipeGestureRecognizer" => {
-            only_attributes(r, &[("direction", None), ("id", None)])?;
+            only_attributes(r, &[("direction", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
             // UISwipeGestureRecognizerDirection; right, the default, is
             // left out.
             match r.attribute("direction") {
@@ -906,7 +906,13 @@ fn gesture_recognizer(nib: &mut Nib, r: Node, vc_id: &str) -> Result<(Object, Ve
     if selectors.len() > 1 {
         return fail("a gesture recognizer with more than one action is not supported by this ibtool");
     }
-    let _ = nib;
+    // A custom class is swapped in for it, as for a view (two probes).
+    if r.attribute("customClass").is_some() {
+        let runtime = runtime_class_name(r, module, class)?;
+        values.push(("UIClassName", nib.string(&runtime)));
+        values.push(("UIOriginalClassName", nib.string(class)));
+        return Ok((Object::new("UIClassSwapper", values), selectors));
+    }
     Ok((Object::new(class, values), selectors))
 }
 
@@ -1675,6 +1681,11 @@ fn view_name(id: &str) -> String {
     format!("view {id}")
 }
 
+/// A document constraint's object name, by its id, for outlets to it.
+fn constraint_name(c: Node) -> Result<String, String> {
+    Ok(format!("constraint {}", attr(c, "id")?))
+}
+
 /// What compiling a scene's view collects besides the view itself.
 struct Scene<'a> {
     vc_id: &'a str,
@@ -1899,13 +1910,13 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     let mut made = Vec::new();
     for (rank, c) in sizes {
         let second = (rank % 2 == 1).then(|| reference(name.to_string()));
-        made.push(document_constraint(nib, c, reference(name.to_string()), second)?);
+        made.push((c, document_constraint(nib, c, reference(name.to_string()), second)?));
     }
     for (_, _, c, first, second) in others {
-        made.push(document_constraint(nib, c, item(first), Some(item(second)))?);
+        made.push((c, document_constraint(nib, c, item(first), Some(item(second)))?));
     }
-    for m in made {
-        let constraint_name = nib.fresh();
+    for (c, m) in made {
+        let constraint_name = constraint_name(c)?;
         scene.own_constraints.push((name.to_string(), constraint_name.clone()));
         match m {
             Value::New(o) => values.push(Value::New(o.named(constraint_name))),
@@ -4116,7 +4127,10 @@ fn embedded_controller(
             if gesture_delegate(*r) {
                 return fail("an embedded controller's gesture recognizer's delegate is not supported by this ibtool");
             }
-            let (object, selectors) = gesture_recognizer(nib, *r, attr(vc, "id")?)?;
+            if r.attribute("customClass").is_some() {
+                return fail("an embedded controller's gesture recognizer with a custom class is not supported by this ibtool");
+            }
+            let (object, selectors) = gesture_recognizer(nib, None, *r, attr(vc, "id")?)?;
             defined.push((id, format!("{name} gesture {id}"), object, selectors));
         }
         let mut entries = Vec::new();
@@ -4906,7 +4920,26 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             only_children(c, &["outlet", "outletCollection", "segue"])?;
             for o in children(c, "outlet") {
                 only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
-                vc_outlets.push((attr(o, "property")?.to_string(), view_name(attr(o, "destination")?)));
+                // An outlet to a constraint is as one to a view (three
+                // probes); one to a placeholder constraint, which the build
+                // removes, is refused.
+                let destination = attr(o, "destination")?;
+                let target = vc.document().descendants().find(|d| d.is_element() && d.attribute("id") == Some(destination));
+                let name = match target {
+                    Some(c) if c.has_tag_name("constraint") => {
+                        if c.attribute("placeholder").is_some() {
+                            return fail("an outlet to a placeholder constraint is not supported by this ibtool");
+                        }
+                        constraint_name(c)?
+                    }
+                    // Xcode puts one to a gesture recognizer in the
+                    // controller's nib, beside the recognizer (one probe).
+                    Some(g) if g.tag_name().name().ends_with("GestureRecognizer") => {
+                        return fail("a controller's outlet to a gesture recognizer is not supported by this ibtool");
+                    }
+                    _ => view_name(destination),
+                };
+                vc_outlets.push((attr(o, "property")?.to_string(), name));
             }
             for o in children(c, "outletCollection") {
                 only_attributes(o, &[("property", None), ("destination", None), ("collectionClass", None), ("id", None)])?;
@@ -5237,7 +5270,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     Some(s) => Some(resolve(&mut nib, s)?),
                     None => None,
                 };
-                let name = nib.fresh();
+                let name = constraint_name(*c)?;
                 constraint_names.push(name.clone());
                 match document_constraint(&mut nib, *c, first, second)? {
                     Value::New(o) => constraint_values.push(Value::New(o.named(name))),
@@ -5469,7 +5502,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         let mut gesture_objects = Vec::new();
         for r in recognizers.iter().rev() {
-            let (object, selectors) = gesture_recognizer(&mut vnib, *r, vc_id)?;
+            let (object, selectors) = gesture_recognizer(&mut vnib, module, *r, vc_id)?;
             gesture_objects.push((Value::New(object.named(format!("gesture {}", attr(*r, "id")?))), attr(*r, "id")?, selectors));
         }
         let mut placeholders = Vec::new();

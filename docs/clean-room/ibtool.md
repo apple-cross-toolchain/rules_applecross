@@ -520,7 +520,8 @@ other values of the attributes these use, is refused. Observed:
   (`UIViewSafeAreaLayoutGuide-top`, ... as `NSLayoutIdentifier`, not
   archived), listed in the view's `UIViewLayoutGuides` after its
   constraints. Its connections: the controller's outlets with `view`
-  among them (a text field's `delegate` too, from the field to the
+  among them (to constraints too, the root view's or a subview's: three
+  probes; a text field's `delegate` too, from the field to the
   controller's placeholder), then control actions, each in byte order of
   their names (`aButton`, `view`, `zButton`; `B:`, `a:`; `tap1:`, `tap:`,
   `tap_:`), whatever the document order, ids or positions; actions with
@@ -603,7 +604,8 @@ other values of the attributes these use, is refused. Observed:
   `requiresExclusiveTouchType`, then a tap's `_imp` `UITapRecognizer`
   (taps or touches when not 1), a pan's minimum and maximum touches and
   `allowedScrollTypesMask` 0, a swipe's direction (left 2, up 4, down 8,
-  right left out). The controller's external objects map
+  right left out); with a custom class, a `UIClassSwapper` of those values
+  and the class names, as a view's (two probes). The controller's external objects map
   `UpstreamPlaceholder-1` to it, before the controller's own placeholder
   and the segues', which move up by one; `UITopLevelObjectsToKeepAliveFromStoryboard`
   follows the segue templates; its action is an event connection without
@@ -1354,8 +1356,11 @@ the same. Observed with 55 probes:
   showDetail with `UIActionName` `showDetailViewController:sender:`
   instead of `showViewController:sender:`),
   `UIStoryboardPresentationSegueTemplate` or
-  `UIStoryboardPushSegueTemplate`. Its values: `UIIdentifier` (the
-  segue's identifier, if any), `UIDestinationViewControllerIdentifier`
+  `UIStoryboardPushSegueTemplate`; a custom segue (with a class) a plain
+  `UIStoryboardSegueTemplate` without an action name. Its values:
+  `UIIdentifier` (the segue's identifier, if any), `UISegueClassName` (a
+  custom class's runtime name, for any kind: three probes),
+  `UIDestinationViewControllerIdentifier`
   (the destination's nib's name), then for show `UIAnimates` false when it
   doesn't animate and `UIActionName`; for presentation
   `UIModalPresentationStyle` (fullScreen 0, pageSheet 1, formSheet 2,
