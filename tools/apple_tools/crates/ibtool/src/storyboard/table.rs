@@ -6,10 +6,7 @@ use super::*;
 /// A table's background: a plain table's white, as a system background
 /// or any opaque grey white, is its own `tableBackgroundColor`.
 fn table_background(nib: &mut Nib, n: Node, plain: bool) -> Result<Value, String> {
-    let space = n.attribute("customColorSpace").or_else(|| n.attribute("colorSpace"));
-    let grey = matches!(space, Some("genericGamma22GrayColorSpace" | "calibratedWhite" | "deviceWhite"));
-    let white = n.attribute("systemColor") == Some("systemBackgroundColor")
-        || (grey && n.attribute("white").map(number).transpose()? == Some(1.0) && n.attribute("alpha").map(number).transpose()? == Some(1.0));
+    let white = n.attribute("systemColor") == Some("systemBackgroundColor") || opaque_grey_white(n)?;
     if plain && white {
         return Ok(nib.system_color("tableBackgroundColor", &SystemColor::Gray([1.0, 1.0])));
     }

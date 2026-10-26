@@ -71,7 +71,8 @@ controllers). Subviews: labels (the system font in any weight, bold or
 italic, a font Xcode finds for iOS, or the iOS text styles and, on tvOS,
 Title1; the default or an sRGB, grey or system text colour), text fields
 (any border, alignment, text input traits, a delegate and editing actions on
-the controller),
+the controller), text views (text, colours, scrolling and editing flags,
+traits, a delegate),
 rounded-rect, system and custom buttons with a normal state (title, title
 and shadow colours) and touch-up-inside actions on the controller, vertical stack views, image views of named images,
 plain views containing any of these, and container views.
@@ -322,6 +323,28 @@ other values of the attributes these use, is refused. Observed:
   delete, quotes and dashes types. Secure entry also sets autocorrection
   to no, whatever the document says, and `UITextInlinePredictionType` 1
   last (45 probes; `asciiCapableNumberPad` is not compiled and refused).
+- A text view (`UITextView`) is a scroll view: after its view values,
+  `UIScrollViewIndicatorInsetAdjustmentBehavior` 1, then `UIBounceEnabled`,
+  `UIShowsHorizontalScrollIndicator`, `UIShowsVerticalScrollIndicator`
+  (each false when turned off), `UIScrollDisabled`, `UIBouncesZoom` (left
+  out when off) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
+  that doesn't scroll doesn't clip. Its text (a `<string key="text">` or
+  the older `text` attribute) is `UIText` and `UIAttributedText`, an
+  `NSAttributedString` whose attributes are `NSColor` (the text colour, if
+  any), `NSFont` and `NSParagraphStyle` (an `NSMutableParagraphStyle` with
+  `NSAlignment` in AppKit's order, right 1 and center 2, left left out,
+  and nil `NSTabStops`); the view's own `UIFont` and `UITextColor` then
+  refer to them. Then `UIAdjustsFontForContentSizeCategory`, `UIFont`,
+  `UITextColor` (none for a nil colour), `UITextAlignment`, `UIEditable`
+  and `UISelectable` (false when turned off), the text input traits,
+  `UITextHighlightAttributes` (`NSColor` system blue,
+  `NSTextHighlightOutlineColor` secondary system fill) and
+  `UITextAllowsNumberPadPopover`. A text view's autocapitalization
+  defaults to sentences: that is left out, and none (or no attribute) is
+  written as 0. An opaque grey white background is
+  `systemBackgroundColor`, as a plain table's is its own. Secure text
+  views (which add more keys), `alwaysBounceVertical` and text in
+  localizable storyboards are refused (32 probes).
 - Nothing in the output comes from a label's `fixedFrame`, from a label's
   or button's `<autoresizingMask>` when it doesn't translate it into
   constraints (constrained or not), or from a scene's `<exit>` when
