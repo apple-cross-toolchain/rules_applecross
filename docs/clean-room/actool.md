@@ -782,11 +782,34 @@ ImageIO writes it (big-endian, its first IFD at 8), kept as it is, the
 orientation also recorded in the rendition's 0x3ee TLV (1 otherwise; two
 probes). A Photoshop (APP13) segment of only an empty IPTC record, its
 digest or both is dropped (one probe, one of the corpus's), and so is XMP
-without properties (two probes). Other Exif is rewritten (little-endian
-Exif comes out big-endian, some entries dropped and values changed), and
-XMP's properties become Exif and IPTC (an XMP orientation becomes Exif's;
-a title and byline, IPTC's): those are refused, as are JPEGs with Adobe
-RGB or other profiles, which were re-encoded.
+without properties (two probes).
+
+Other Exif ImageIO writes back in its own form (18 probes, five of the
+corpus's JPEGs):
+- Big-endian (little-endian Exif is turned round), IFD0 at 8, its entries
+  by tag, then its values of more than four bytes in that order, each
+  padded to an even length, then the Exif IFD the same way. The input's
+  order and layout don't matter.
+- YCbCr positioning is dropped, whatever its value. Pixel dimensions
+  stored as SHORTs become LONGs. Other entries probed (orientation,
+  resolutions and their unit, the Exif and FlashPix versions, components
+  configuration, user comment, colour space, pixel dimensions, however
+  wrong) are kept as they are. No entries are added: Exif without an
+  orientation stays without one.
+- Rationals are turned into a value and back into a fraction: 25400/1000
+  is 127/5, 144/2 72/1, 2/6 1/3, while 7/3, 1000/3 and 333/1000 stay.
+  123456789/1000000 becomes 1355679/10981, a convergent of its continued
+  fraction within 1e-9 of it, 72/0 becomes 0/1 and 4294967295/2
+  2147483647/1.
+
+This actool writes Exif of those entries so, and the orientation in the
+TLV as before. It takes rationals only where every earlier convergent of
+the fraction is more than 1e-6 off, so that it is written in lowest
+terms. Other entries, a second IFD (thumbnails), zero denominators and
+terms past a signed 32-bit integer are refused. So is XMP with
+properties: they become Exif and IPTC (an XMP orientation becomes Exif's;
+a title and byline, IPTC's). JPEGs with Adobe RGB or other profiles, which
+were re-encoded, are refused too.
 
 ### PDF images
 

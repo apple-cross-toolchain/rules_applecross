@@ -249,15 +249,18 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32, u16), String> {
                     return Err("a JPEG with XMP properties (which Xcode turns into Exif and IPTC) is not supported by this actool".into());
                 }
             }
-            // Exif with no entries is dropped; one of only an orientation,
-            // as ImageIO writes it, kept, its orientation recorded.
+            // Exif with no entries is dropped; other Exif ImageIO writes
+            // back as `exif` gives it, its orientation recorded.
             0xe1 if segment.get(4..10) == Some(b"Exif\0\0") => match exif(&segment[10..]) {
                 Some(Exif::Empty) => {}
-                Some(Exif::Orientation(o)) => {
+                Some(Exif::Tiff(tiff, o)) => {
                     orientation = o;
-                    out.extend_from_slice(segment);
+                    out.extend_from_slice(&[0xff, 0xe1]);
+                    out.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
+                    out.extend_from_slice(b"Exif\0\0");
+                    out.extend(tiff);
                 }
-                None => return Err("a JPEG with Exif other than an orientation (which Xcode rewrites) is not supported by this actool".into()),
+                None => return Err("a JPEG with Exif entries other than those established (which Xcode rewrites) is not supported by this actool".into()),
             },
             // Photoshop's (APP13) of only an empty IPTC record and its
             // digest is dropped (one probe, one of the corpus's).
@@ -286,26 +289,187 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32, u16), String> {
     Ok((out, w, h, orientation))
 }
 
+/// An IFD entry: tag, type, count and its value's bytes.
+type Entry = (u16, u16, u32, Vec<u8>);
+
 enum Exif {
     Empty,
-    Orientation(u16),
+    /// The TIFF as ImageIO writes it back, and the orientation.
+    Tiff(Vec<u8>, u16),
 }
 
-/// An Exif TIFF of no entries, or of only an orientation (one of the eight)
-/// as ImageIO writes it: big-endian, its first IFD at 8, no next IFD.
+/// An Exif TIFF as Xcode stores it: none if it has no entries, else as
+/// ImageIO writes it back (docs/clean-room/actool.md): big-endian, IFD0 at
+/// 8 then its values, the Exif IFD then its values, entries by tag, values
+/// of more than four bytes after their IFD in its order, padded to even.
+/// Only the entries probed are taken: the orientation, resolutions and
+/// their unit, YCbCr positioning (dropped), and the Exif IFD's versions,
+/// components, user comment, colour space and pixel dimensions (as LONGs);
+/// rationals only where ImageIO's conversion keeps them exact. Others, and
+/// a second IFD, are refused.
 fn exif(tiff: &[u8]) -> Option<Exif> {
-    let ifd = |o: usize| -> Option<usize> {
-        let b = tiff.get(o..o + 4)?;
-        Some(if tiff.starts_with(b"MM") { u32::from_be_bytes([b[0], b[1], b[2], b[3]]) } else { u32::from_le_bytes([b[0], b[1], b[2], b[3]]) } as usize)
+    let be = match tiff.get(..4)? {
+        b"MM\0\x2a" => true,
+        b"II\x2a\0" => false,
+        _ => return None,
     };
-    if !(tiff.starts_with(b"MM\0\x2a") || tiff.starts_with(b"II\x2a\0")) || ifd(4)? != 8 {
+    let u16_at = |o: usize| -> Option<u16> {
+        let b = tiff.get(o..o + 2)?;
+        Some(if be { u16::from_be_bytes([b[0], b[1]]) } else { u16::from_le_bytes([b[0], b[1]]) })
+    };
+    let u32_at = |o: usize| -> Option<u32> {
+        let b = tiff.get(o..o + 4)?;
+        Some(if be { u32::from_be_bytes([b[0], b[1], b[2], b[3]]) } else { u32::from_le_bytes([b[0], b[1], b[2], b[3]]) })
+    };
+    // An IFD's entries, their values' bytes in the file's order.
+    let read = |at: usize| -> Option<Vec<Entry>> {
+        let n = u16_at(at)? as usize;
+        if u32_at(at + 2 + 12 * n)? != 0 {
+            return None;
+        }
+        (0..n)
+            .map(|k| {
+                let e = at + 2 + 12 * k;
+                let (tag, typ, count) = (u16_at(e)?, u16_at(e + 2)?, u32_at(e + 4)?);
+                let size = match typ {
+                    3 => 2,
+                    4 => 4,
+                    5 => 8,
+                    7 => 1,
+                    _ => return None,
+                } * count as usize;
+                let at = if size <= 4 { e + 8 } else { u32_at(e + 8)? as usize };
+                Some((tag, typ, count, tiff.get(at..at + size)?.to_vec()))
+            })
+            .collect()
+    };
+    let short = |v: &[u8]| if be { u16::from_be_bytes([v[0], v[1]]) } else { u16::from_le_bytes([v[0], v[1]]) };
+    let long = |v: &[u8]| if be { u32::from_be_bytes([v[0], v[1], v[2], v[3]]) } else { u32::from_le_bytes([v[0], v[1], v[2], v[3]]) };
+    let ifd0 = read(u32_at(4)? as usize)?;
+    if ifd0.is_empty() {
+        return Some(Exif::Empty);
+    }
+    let mut orientation = 1;
+    let (mut first, mut second) = (Vec::new(), Vec::new());
+    let mut exif_ifd = None;
+    for (tag, typ, count, v) in ifd0 {
+        match (tag, typ, count) {
+            (0x112, 3, 1) => {
+                orientation = short(&v);
+                if !(1..=8).contains(&orientation) {
+                    return None;
+                }
+                first.push((tag, 3, 1, orientation.to_be_bytes().to_vec()));
+            }
+            (0x128, 3, 1) => first.push((tag, 3, 1, short(&v).to_be_bytes().to_vec())),
+            (0x11a | 0x11b, 5, 1) => first.push((tag, 5, 1, kept_rational(long(&v[..4]), long(&v[4..]))?)),
+            (0x213, 3, 1) => {}
+            (0x8769, 4, 1) => exif_ifd = Some(long(&v) as usize),
+            _ => return None,
+        }
+    }
+    if let Some(at) = exif_ifd {
+        for (tag, typ, count, v) in read(at)? {
+            match (tag, typ, count) {
+                (0x9000 | 0xa000 | 0x9101, 7, 4) | (0x9286, 7, _) => second.push((tag, 7, count, v)),
+                (0xa001, 3, 1) => second.push((tag, 3, 1, short(&v).to_be_bytes().to_vec())),
+                (0xa002 | 0xa003, 3, 1) => second.push((tag, 4, 1, u32::from(short(&v)).to_be_bytes().to_vec())),
+                (0xa002 | 0xa003, 4, 1) => second.push((tag, 4, 1, long(&v).to_be_bytes().to_vec())),
+                _ => return None,
+            }
+        }
+        if second.is_empty() {
+            return None;
+        }
+    }
+    if first.is_empty() && second.is_empty() {
         return None;
     }
-    match tiff.get(8..) {
-        Some([0, 0, ..]) => Some(Exif::Empty),
-        Some([0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0, rest @ ..]) if tiff.starts_with(b"MM") && (1..=8).contains(o) && rest.iter().all(|&b| b == 0) => Some(Exif::Orientation(u16::from(*o))),
-        _ => None,
+    first.sort_by_key(|e| e.0);
+    second.sort_by_key(|e| e.0);
+    let mut out = b"MM\0\x2a\0\0\0\x08".to_vec();
+    let exif_at = 8 + ifd_len(&first, !second.is_empty());
+    if !second.is_empty() {
+        first.push((0x8769, 4, 1, (exif_at as u32).to_be_bytes().to_vec()));
+        first.sort_by_key(|e| e.0);
     }
+    write_ifd(&mut out, &first);
+    if !second.is_empty() {
+        write_ifd(&mut out, &second);
+    }
+    Some(Exif::Tiff(out, orientation))
+}
+
+/// The length of an IFD and its values as `write_ifd` writes it, counting
+/// an Exif pointer still to be added.
+fn ifd_len(entries: &[Entry], pointer: bool) -> usize {
+    let n = entries.len() + pointer as usize;
+    2 + 12 * n + 4 + entries.iter().filter(|e| e.3.len() > 4).map(|e| e.3.len().div_ceil(2) * 2).sum::<usize>()
+}
+
+/// Appends an IFD of big-endian `entries` at the end of `out`, its values
+/// of more than four bytes after it.
+fn write_ifd(out: &mut Vec<u8>, entries: &[Entry]) {
+    let mut data_at = out.len() + 2 + 12 * entries.len() + 4;
+    let mut data = Vec::new();
+    out.extend_from_slice(&(entries.len() as u16).to_be_bytes());
+    for (tag, typ, count, v) in entries {
+        out.extend_from_slice(&tag.to_be_bytes());
+        out.extend_from_slice(&typ.to_be_bytes());
+        out.extend_from_slice(&count.to_be_bytes());
+        if v.len() <= 4 {
+            let mut inline = v.clone();
+            inline.resize(4, 0);
+            out.extend_from_slice(&inline);
+        } else {
+            out.extend_from_slice(&(data_at as u32).to_be_bytes());
+            data.extend_from_slice(v);
+            if v.len() % 2 == 1 {
+                data.push(0);
+            }
+            data_at += v.len().div_ceil(2) * 2;
+        }
+    }
+    out.extend_from_slice(&[0; 4]);
+    out.extend(data);
+}
+
+/// A rational as ImageIO writes it back, big-endian, where that is
+/// established: ImageIO takes its value and finds a fraction for it again
+/// (123456789/1000000 becomes 1355679/10981, a continued fraction's
+/// convergent within 1e-9), so only rationals whose continued fraction's
+/// earlier convergents are all far from the value (more than 1e-6) are
+/// taken, which it writes in lowest terms (25400/1000 as 127/5, seven
+/// probes). Zero denominators (0/1 for 72/0) and terms past a signed
+/// 32-bit integer (4294967295/2 is 2147483647/1) are not.
+fn kept_rational(num: u32, den: u32) -> Option<Vec<u8>> {
+    if den == 0 || num > i32::MAX as u32 || den > i32::MAX as u32 {
+        return None;
+    }
+    let (mut a, mut b) = (u64::from(num), u64::from(den));
+    let g = {
+        let (mut x, mut y) = (a, b);
+        while y != 0 {
+            (x, y) = (y, x % y);
+        }
+        x.max(1)
+    };
+    let value = num as f64 / den as f64;
+    // The continued fraction's convergents before the fraction itself.
+    let (mut h, mut h1, mut k, mut k1) = (1u64, 0u64, 0u64, 1u64);
+    while b != 0 {
+        let q = a / b;
+        (a, b) = (b, a % b);
+        (h, h1) = (q * h + h1, h);
+        (k, k1) = (q * k + k1, k);
+        if b != 0 && (h as f64 / k as f64 - value).abs() <= 1e-6 {
+            return None;
+        }
+    }
+    let (n, d) = (num as u64 / g, den as u64 / g);
+    let mut out = (n as u32).to_be_bytes().to_vec();
+    out.extend_from_slice(&(d as u32).to_be_bytes());
+    Some(out)
 }
 
 /// Photoshop image resources of only an empty IPTC record (0x404), its
