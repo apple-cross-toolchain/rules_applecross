@@ -767,9 +767,17 @@ tab's child loaded on its own, or one with none) is its first value and
 follows its bar in the objects, as a tab's child's (two probes, a corpus
 storyboard's); beside a title or a storyboard identifier it is refused.
 
-Bar button items in a tab or split view controller's children, beside a
-tab bar item or a gesture recognizer, and with images, are refused (46
-probes).
+A tab or split view controller's children's bar button items (a view
+controller child's, or a navigation child's root's) are in the parent's
+nib with their navigation items: listed after every child's parts and the
+roots' navigation items, child by child, and their actions on their
+controllers follow the scene outlet by selector, children sharing a
+selector in their order (seven probes, and 150 random storyboards). A
+child that also has a tab bar item has no nib of its own to refuse them
+in. Bar items with segues or custom views' actions, two actions of one
+child sharing a selector, and bar items beside a child's segues are
+refused, as are bar button items beside gesture recognizers and with
+images (46 probes).
 
 ## Page view controllers
 

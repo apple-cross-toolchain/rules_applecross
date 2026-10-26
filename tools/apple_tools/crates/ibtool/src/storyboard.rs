@@ -6094,8 +6094,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             bar_items = parts.bar_items;
             bar_actions = parts.actions;
             bar_segues = parts.segues;
-            if has_tab_item && !bar_items.is_empty() {
-                return fail("a controller with both a tab bar item and bar button items is not supported by this ibtool");
+            // In its own nib only; a tab's child held by its parent alone
+            // has none (one probe).
+            if has_tab_item && !bar_items.is_empty() && (is_initial || identified || segue_destination) {
+                return fail("a controller with both a tab bar item and bar button items in its own nib is not supported by this ibtool");
             }
         }
         let templates = segue::templates(&mut vnib, "controller", upstream_used, 1 + gesture, &view_segues, &own_segues, &bar_segues, &nib_names)?;

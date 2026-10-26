@@ -142,6 +142,22 @@ pub(super) fn parent_controller_nib(
     // to its root), after the children's parts.
     let mut template_objects: Vec<Value> = Vec::new();
     let mut template_outlets: Vec<(String, String)> = Vec::new();
+    // The children's bar button items, by child, after every child's
+    // parts, and their actions (selector, item, controller) after the scene
+    // outlet by selector (four probes, children and navigation roots).
+    let mut bar_items: Vec<(usize, Vec<String>)> = Vec::new();
+    let mut bar_actions: Vec<(String, String, String)> = Vec::new();
+    let mut take_bar = |i: usize, embedded: &mut Embedded, controller: &str| -> Result<(), String> {
+        if embedded.bar_items.is_empty() {
+            return Ok(());
+        }
+        if !embedded.templates.performs.is_empty() || embedded.bar_actions.iter().any(|a| a.2 != 0) {
+            return fail("a child's bar button items with segues or custom views' actions are not supported by this ibtool");
+        }
+        bar_items.push((i, std::mem::take(&mut embedded.bar_items)));
+        bar_actions.extend(std::mem::take(&mut embedded.bar_actions).into_iter().map(|(selector, item, _)| (selector, item, controller.to_string())));
+        Ok(())
+    };
     for &i in &columns {
         let (_, k) = &kids[i];
         let child_name = format!("child {i}");
@@ -161,10 +177,8 @@ pub(super) fn parent_controller_nib(
                     }
                     Kind::Split => (None, false),
                 };
-                let embedded = embedded_controller(&mut nib, r, &child_name, "controller", None, item, nib_names)?;
-                if !embedded.bar_items.is_empty() {
-                    return fail("a child controller's bar button items are not supported by this ibtool");
-                }
+                let mut embedded = embedded_controller(&mut nib, r, &child_name, "controller", None, item, nib_names)?;
+                take_bar(i, &mut embedded, &child_name)?;
                 if let Some(n) = &embedded.navigation_item {
                     own_parts.push(reference(n.clone()));
                 }
@@ -193,9 +207,7 @@ pub(super) fn parent_controller_nib(
                     }
                 };
                 let mut embedded = embedded_controller(&mut nib, r, &root_name, &child_name, Some(&format!("{child_name} bar")), None, nib_names)?;
-                if !embedded.bar_items.is_empty() {
-                    return fail("a child navigation controller's root's bar button items are not supported by this ibtool");
-                }
+                take_bar(i, &mut embedded, &root_name)?;
                 // Its root's segues (Xcode's master-detail template): the
                 // templates after the children's parts, their outlets to the
                 // root after the scene's (one corpus storyboard, two ways).
@@ -264,6 +276,14 @@ pub(super) fn parent_controller_nib(
     for &i in &listed {
         objects.append(&mut deeper[at(i)]);
     }
+    for &i in &listed {
+        for (_, names) in bar_items.iter().filter(|b| b.0 == i) {
+            objects.extend(names.iter().map(|n| reference(n.clone())));
+        }
+    }
+    if !bar_items.is_empty() && !template_objects.is_empty() {
+        return fail("children's bar button items beside a child's segues are not supported by this ibtool");
+    }
     objects.extend(template_objects);
     // The controller's storyboard outlet, then the others in preorder,
     // stably by their controllers' original classes.
@@ -276,6 +296,15 @@ pub(super) fn parent_controller_nib(
     connections.push(outlet(&mut nib, "sceneViewController", "owner", "controller"));
     for (template, root) in &template_outlets {
         connections.push(outlet(&mut nib, "viewController", template, root));
+    }
+    // Sharing a selector, children's actions keep the children's order (two
+    // probes); within one child it isn't established.
+    bar_actions.sort_by(|a, b| a.0.cmp(&b.0));
+    if bar_actions.windows(2).any(|w| w[0].0 == w[1].0 && w[0].2 == w[1].2) {
+        return fail("a child's bar button items' actions sharing a selector are not supported by this ibtool");
+    }
+    for (selector, item, controller) in &bar_actions {
+        connections.push(event_connection(&mut nib, selector, item, controller));
     }
     Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))?))
 }
