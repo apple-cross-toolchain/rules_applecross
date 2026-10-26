@@ -306,6 +306,11 @@ other values of the attributes these use, is refused. Observed:
   `UIViewInsetsLayoutMarginsFromSafeArea` 0, when turned off, comes after
   its compression resistance, before its semantic content attribute (two
   probes).
+- A `<device>` without an orientation is portrait (one probe). Without a
+  device, a root view without a frame is 1000x1000 at the origin, as a
+  subview without one is; an image view with `opaque="NO"` leaves
+  `UIOpaque` out, and `multipleTouchEnabled` is `UIMultipleTouchEnabled`
+  before its autoresizing keys (Flutter's accessibility launch screen).
 - With a `<device>`, the root view is laid out at the device's size (or
   its freeform size) at its frame's origin (a view below an opaque bar is
   at y 64; eight probes, with simulated bars changing nothing),
@@ -538,7 +543,18 @@ other values of the attributes these use, is refused. Observed:
   a matrix whose rows sum to 1, and the sRGB encoding (sign kept for
   values outside 0 to 1), to within a few float ulps (5e-7) but exactly
   for only a quarter of the components, which points at single-precision
-  arithmetic or tables not established here.
+  arithmetic or tables not established here. Xcode's values are those of
+  CoreGraphics' public conversion from generic RGB to Display P3 and on to
+  extended sRGB (`CGColor.converted(to:intent:options:)`, 900 of 900
+  components on this Mac; directly to extended sRGB gives 380). Each
+  conversion is single precision, per channel where the primaries agree,
+  and off the exact curves by up to about 8 ulps, without a table's
+  interpolation or a fixed-point grid; that arithmetic isn't reproduced
+  here.
+- A scene's gesture recognizer whose delegate is the controller has a
+  `delegate` outlet to it in the controller's nib, after the controller's
+  storyboard outlet (one probe; several, or one in an embedded controller,
+  are refused).
 - A scene's gesture recognizer (tap, pan or swipe) is in
   the controller's nib, after the storyboard placeholder, with
   `UIGestureRecognizer.allowedTouchTypes` 15 and
@@ -1244,7 +1260,9 @@ inside it. Observed with 15 probes and one corpus storyboard:
   breadth first each view's constraints and subviews (a table cell lists
   its content view's subviews first). A collection cell's content view's
   mask is `UIAutoresizingMask` after its `UIAutoresizeSubviews` when it has
-  one, and its `customSize` changes nothing (three probes). A control's
+  one, and its `customSize` changes nothing (three probes). A collection
+  cell's background colour is `UIBackgroundColor` after its `UISubviews`
+  (two probes). A control's
   action on the cell itself is an event connection after the cell's
   outlets, the cell its destination (one corpus storyboard).
 - An old-format content view (`<view key="contentView">`, no id) is not
