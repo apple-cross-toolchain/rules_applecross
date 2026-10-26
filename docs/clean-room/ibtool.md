@@ -1428,7 +1428,13 @@ alone, or `fixedFrame`, doesn't change it (ten probes: labels, buttons and
 switches, constrained or not, translating or not, and a corpus
 storyboard's switches, steppers and labels; 210 random storyboards of
 these views, which first showed image views, plain views and empty masks
-following it). A system font with `size="button"` (older
+following it). Text fields, text views, segmented controls and stack views
+follow it too, with hidden, tag and alpha in a view's usual places
+(`UIHidden` and `UITag` after `UIDeepDrawRect` and any `UIOpaque`,
+`UIAlpha` after the mask). A button's `buttonType="custom"`, a text
+field's `borderStyle="none"` and a stack view's `axis="horizontal"` are
+the defaults they name (one probe each, and 260 random storyboards of
+these views, all byte-identical or refused for several switches). A system font with `size="button"` (older
 documents) is 18 points (one probe). A system font of size 0, regular or bold, is 12
 points (14 probes).
 
