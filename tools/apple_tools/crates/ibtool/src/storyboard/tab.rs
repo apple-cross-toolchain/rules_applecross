@@ -121,11 +121,8 @@ pub(super) fn tab_bar(nib: &mut Nib, tab: Node, items: Vec<Value>) -> Result<Val
         return fail("tab bar colours other than the background are not supported by this ibtool");
     }
     let f = frame(bar)?;
-    if f.x != 0.0 {
-        return fail("tab bars not at x 0 are not supported by this ibtool");
-    }
-    // 0x54, centred 27 below its frame's top (three probes).
-    let mut values = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])), ("UICenter", doubles(&[0.0, f.y + 27.0]))];
+    // 0x54, centred at its frame's x and 27 below its top (five probes).
+    let mut values = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])), ("UICenter", doubles(&[f.x, f.y + 27.0]))];
     if let Some(c) = child(bar, "color", "backgroundColor") {
         values.push(("UIBackgroundColor", color(nib, c)?));
     }

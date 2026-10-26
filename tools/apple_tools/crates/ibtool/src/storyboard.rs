@@ -3421,8 +3421,10 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
 /// (19 probes); other equal lengths depend on the ids and the geometry in a
 /// way not established, and one centre half a point from another was drawn
 /// along the edge: refused, as are lengths within a point of each other,
-/// edges less than a point apart, and multipliers, relations, priorities
-/// and margins, which weren't probed.
+/// edges less than a point apart, and multipliers and margins, which
+/// weren't probed. Before the length come the priority, lowest first, and
+/// the relation: less than or equal, greater than or equal, then equal
+/// (100 probe scenes), and so for the same items twice or more (100 more).
 fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 4]), Node<'a, 'i>), siblings: &[Node<'a, 'i>], guides: &[(&str, Frame)]) -> Result<(), String> {
     let unstable = || fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
     // An attribute's axis (0 horizontal, 1 vertical) and where along it
@@ -3452,15 +3454,21 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
             let mut run = Vec::new();
             for t in &v[start..end] {
                 let c = of(t).1;
-                if ["multiplier", "relation", "priority"].iter().any(|a| c.attribute(*a).is_some()) {
+                if c.attribute("multiplier").is_some() {
                     return unstable();
                 }
+                let priority = c.attribute("priority").map_or(Ok(1000.0), str::parse::<f64>).map_err(|_| "a constraint's priority is not a number")?;
+                let relation = match c.attribute("relation") {
+                    Some("lessThanOrEqual") => 0,
+                    Some("greaterThanOrEqual") => 1,
+                    None => 2,
+                    Some(other) => return fail(format!("the constraint relation {other} is not supported by this ibtool")),
+                };
                 let constant = c.attribute("constant").map_or(Ok(0.0), str::parse::<f64>).map_err(|_| "a constraint's constant is not a number")?;
                 let (Some(f), Some(s)) = (item(c.attribute("firstItem"))?, item(c.attribute("secondItem"))?) else { return unstable() };
-                let second = c.attribute("secondItem").unwrap_or("");
                 let (a1, a2) = (c.attribute("firstAttribute").unwrap_or(""), c.attribute("secondAttribute").unwrap_or(""));
                 let (Some((axis, p1)), Some((axis2, p2))) = (edge(a1), edge(a2)) else { return unstable() };
-                if axis != axis2 || run.iter().any(|(_, _, s, _): &(f64, &str, &str, Frame)| *s == second) {
+                if axis != axis2 {
                     return unstable();
                 }
                 let ((a, al), (b, bl)) = (along(&f, axis), along(&s, axis));
@@ -3473,26 +3481,41 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
                 } else {
                     return unstable();
                 };
-                run.push((length, c.attribute("id").unwrap_or(""), second, s));
+                run.push(Tied { priority, relation, length, id: c.attribute("id").unwrap_or(""), frame: s });
             }
             let c = of(&v[start]).1;
             let centres = ["centerX", "centerY"].contains(&c.attribute("firstAttribute").unwrap_or("")) && c.attribute("firstAttribute") == c.attribute("secondAttribute");
             for (i, a) in run.iter().enumerate() {
                 for b in &run[..i] {
-                    let same = (a.3.x, a.3.y, a.3.w, a.3.h) == (b.3.x, b.3.y, b.3.w, b.3.h);
-                    if (a.0 - b.0).abs() < 1.0 && !(a.0 == b.0 && (same || (centres && (a.3.x, a.3.y) != (b.3.x, b.3.y)))) {
+                    let (fa, fb) = (a.frame, b.frame);
+                    let same = (fa.x, fa.y, fa.w, fa.h) == (fb.x, fb.y, fb.w, fb.h);
+                    let level = (a.priority, a.relation) == (b.priority, b.relation);
+                    if level && (a.length - b.length).abs() < 1.0 && !(a.length == b.length && (same || (centres && (fa.x, fa.y) != (fb.x, fb.y)))) {
                         return unstable();
                     }
                 }
             }
             let mut order: Vec<usize> = (0..run.len()).collect();
-            order.sort_by(|&i, &j| run[j].0.total_cmp(&run[i].0).then(run[j].3.y.total_cmp(&run[i].3.y)).then(run[j].3.x.total_cmp(&run[i].3.x)).then(run[i].1.cmp(run[j].1)));
-            let rank: Vec<&str> = order.iter().map(|&i| run[i].1).collect();
+            order.sort_by(|&i, &j| {
+                let (a, b) = (&run[i], &run[j]);
+                a.priority.total_cmp(&b.priority).then(a.relation.cmp(&b.relation)).then(b.length.total_cmp(&a.length)).then(b.frame.y.total_cmp(&a.frame.y)).then(b.frame.x.total_cmp(&a.frame.x)).then(a.id.cmp(b.id))
+            });
+            let rank: Vec<&str> = order.iter().map(|&i| run[i].id).collect();
             v[start..end].sort_by_key(|t| rank.iter().position(|id| of(t).1.attribute("id") == Some(*id)));
         }
         start = end;
     }
     Ok(())
+}
+
+/// A constraint in a tie, as `order_ties` orders it.
+struct Tied<'a> {
+    priority: f64,
+    /// Less than or equal 0, greater than or equal 1, equal 2.
+    relation: u8,
+    length: f64,
+    id: &'a str,
+    frame: Frame,
 }
 
 /// The order of a constraint between a root view and another item, from its
@@ -4272,6 +4295,8 @@ fn check_navigation_controller(nav: Node) -> Result<(), String> {
             ("automaticallyAdjustsScrollViewInsets", Some("NO")),
             ("modalPresentationStyle", None),
             ("extendedLayoutIncludesOpaqueBars", Some("YES")),
+            ("definesPresentationContext", Some("YES")),
+            ("providesPresentationContextTransitionStyle", Some("YES")),
             ("sceneMemberID", Some("viewController")),
         ],
     )?;
@@ -4283,6 +4308,18 @@ fn check_navigation_controller(nav: Node) -> Result<(), String> {
         return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
     }
     Ok(())
+}
+
+/// A navigation or tab bar controller's presentation context, right after
+/// its children: whether it defines one, then whether it provides its
+/// transition style (five probes).
+fn presentation_context(n: Node, values: &mut Vec<(&'static str, Value)>) {
+    if n.attribute("definesPresentationContext").is_some() {
+        values.push(("UIDefinesPresentationContext", Value::Bool(true)));
+    }
+    if n.attribute("providesPresentationContextTransitionStyle").is_some() {
+        values.push(("UIProvidesPresentationContextTransitionStyle", Value::Bool(true)));
+    }
 }
 
 /// A navigation controller's object (`name`), with its root (`root`) and
@@ -4318,6 +4355,7 @@ fn navigation_controller(
         }
     }
     values.push(("UIChildViewControllers", nib.array("NSMutableArray", vec![root.value])));
+    presentation_context(nav, &mut values);
     if let Some(style) = modal_presentation_style(nav)? {
         values.push(("UIModalPresentationStyle", Value::Int(style)));
     }
