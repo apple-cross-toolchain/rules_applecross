@@ -1,24 +1,13 @@
+load("@bazel_tools//tools/build_defs/repo:utils.bzl", "read_netrc", "read_user_netrc", "use_netrc")
 load(":xcode_versions.bzl", "XCODE_VERSIONS")
 
-def _read_netrc_token(rctx, host):
-    """Read a password for the given host from ~/.netrc."""
-    home = rctx.os.environ.get("HOME", "")
-    if not home:
-        return None
-    netrc_path = rctx.path(home + "/.netrc")
-    if not netrc_path.exists:
-        return None
-    content = rctx.read(netrc_path)
-    found_host = False
-    for line in content.split("\n"):
-        parts = line.strip().split(" ")
-        if not parts:
-            continue
-        if parts[0] == "machine" and len(parts) > 1 and parts[1] == host:
-            found_host = True
-        elif found_host and parts[0] == "password" and len(parts) > 1:
-            return parts[1]
-    return None
+def _download_auth(rctx, urls):
+    """Credentials for urls from the .netrc NETRC names, else ~/.netrc, as
+    http_archive reads them: Basic with a login, Bearer with only a password,
+    and a GitHub token for GitHub's release asset API."""
+    netrc_file = rctx.os.environ.get("NETRC", "")
+    netrc = read_netrc(rctx, netrc_file) if netrc_file else read_user_netrc(rctx)
+    return use_netrc(netrc, urls, {"api.github.com": "token <password>"})
 
 def _sdk_download(rctx, urls, sha256, strip_prefix):
     """Download and extract an SDK archive, with auth support for private hosts."""
@@ -26,34 +15,13 @@ def _sdk_download(rctx, urls, sha256, strip_prefix):
         "url": urls,
         "sha256": sha256 or "",
         "stripPrefix": strip_prefix or "",
+        "auth": _download_auth(rctx, urls),
     }
     if rctx.attr.apple_sdk_archive_type:
         kwargs["type"] = rctx.attr.apple_sdk_archive_type
-
-    # Build auth headers from ~/.netrc for any URL that needs them.
-    headers = {}
-    for u in urls:
-        if "api.github.com" in u:
-            # GitHub API release assets require this Accept header.
-            headers["Accept"] = "application/octet-stream"
-            token = _read_netrc_token(rctx, "api.github.com")
-            if token:
-                headers["Authorization"] = "token " + token
-            break
-
-    if not headers:
-        # Check ~/.netrc for a Bearer/token for the first URL's host.
-        for u in urls:
-            # Extract host from URL: "https://host/path" -> "host"
-            host = u.split("://")[-1].split("/")[0]
-            token = _read_netrc_token(rctx, host)
-            if token:
-                headers["Authorization"] = "Bearer " + token
-                break
-
-    if headers:
-        kwargs["headers"] = headers
-
+    if [u for u in urls if "api.github.com" in u]:
+        # GitHub's release asset API answers with the asset only when asked.
+        kwargs["headers"] = {"Accept": "application/octet-stream"}
     rctx.download_and_extract(**kwargs)
 
 def _repo_file(rctx, label):
@@ -233,6 +201,7 @@ def _stage_xcode_xip(rctx, cpu):
         url = rctx.attr.xcode_xip_urls,
         output = "_xip/Xcode.xip",
         sha256 = pinned.xip_sha256,
+        auth = _download_auth(rctx, rctx.attr.xcode_xip_urls),
     )
 
     rctx.report_progress("Extracting the Apple SDKs from Xcode {}".format(rctx.attr.xcode_version))
@@ -788,6 +757,7 @@ them, or a single archive.
     environ = [
         "DEVELOPER_DIR",
         "HOME",
+        "NETRC",
         "PATH",
         "RULES_APPLECROSS_BUILD_MACHINE_OS_BUILD",
         "RULES_APPLECROSS_LOCAL_XCODE",
