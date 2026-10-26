@@ -1074,7 +1074,11 @@ probes:
   `UIInsetsContentViewsToSafeArea`, the header and footer views,
   `UISeparatorColor` (four probes with a header, a footer or both), the
   prototypes,
-  `UISectionIndexBackgroundColor`, `UISeparatorInsetReference` 0.
+  `UISectionIndexBackgroundColor`, `UISeparatorInsetReference` 0; a
+  separator colour, a section index background and a separator inset go
+  together in that order (five probes, plain and static tables). A picker
+  view may be the header or footer view too, its outlets to the
+  controller as a search bar's (two probes).
 - Left out, the row height is 44, a plain table's section heights 22, and
   the estimates 0.
 - A table without user interaction has `UIUserInteractionDisabled` after
@@ -1104,9 +1108,11 @@ probes:
   then selector (five probes and a corpus storyboard). Its objects are the
   cell, its content view and the content view's subviews; then, breadth
   first, each view's constraints and its subviews, the content view's not
-  listed again. A switch's frame is its key-value pair, as in a
-  controller's view (six probes); several switches in one cell are
-  refused.
+  listed again. Its switches' frames and its views' runtime attributes are
+  its key-value pairs, ordered as a controller's view's: by the views'
+  places in its objects, counted from 1 and compared as decimal strings
+  (eleven probes, up to eleven views and two switches), and so are a
+  collection view cell's (two probes).
 - The cell: geometry from its frame in the document, `UISubviews` (the
   content view and a `_UITableViewCellSeparatorView`), its background,
   `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, its
@@ -1331,10 +1337,11 @@ static text 64, not enabled 256, header 65536, none 0) and
 probes). In `Base.lproj` the hint and label are `NSLocalizableString`s
 keyed `<id>.accessibilityHint` and `<id>.accessibilityLabel`, as titles
 are; the identifier stays a string (one probe). Runtime attributes, switches (their frame pair) and accessibility
-settings inside cells and table headers are refused, but for one switch's
-frame in a prototype table cell and a prototype cell's own accessibility
-configuration (three probes, a corpus storyboard: it is the cell nib's,
-for the cell) when its views have none. Several switches' frames in a
+settings inside table headers, and accessibility settings inside cells, are
+refused, but for a prototype cell's own accessibility configuration (three
+probes, a corpus storyboard: it is the cell nib's, for the cell) when its
+views have none; a prototype cell's runtime attributes and switches are its
+nib's pairs (see above). Several switches' frames in a
 controller's view are refused too: three in a corpus storyboard came
 third, first, second.
 

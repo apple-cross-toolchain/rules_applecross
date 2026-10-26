@@ -484,10 +484,11 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     if scene.actions.iter().any(|a| a.3 != "upstream") || scene.actions.len() > 1 || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
         return fail("actions other than one on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
-    // A cell's nib has no key-value pairs or accessibility configurations
-    // of its own here.
-    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
-        return fail("runtime attributes, switches and accessibility settings in a cell are not supported by this ibtool");
+    // A cell's nib holds its views' runtime attributes as key-value pairs,
+    // as a table cell's (see below); accessibility configurations are
+    // refused.
+    if !scene.accessibility.is_empty() {
+        return fail("accessibility settings in a cell are not supported by this ibtool");
     }
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
@@ -637,7 +638,14 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             ("UIEventMask", Value::Int(*mask)),
         ])));
     }
-    nib::archive(root_object(&mut nib, top, objects, connections))
+    // Pairs of several views by their places, as decimal strings.
+    let listed = |name: &String| objects.iter().position(|o| matches!(o, Value::Ref(r) if r == name)).map(|i| (i + 1).to_string());
+    if scene.pairs.iter().any(|p| listed(&p.0).is_none()) {
+        return fail("key-value pairs of a view a cell's objects don't list are not supported by this ibtool");
+    }
+    scene.pairs.sort_by_key(|p| listed(&p.0));
+    let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
+    nib::archive(root_object_with_pairs(&mut nib, top, objects, connections, pairs))
 }
 
 /// A section header's or footer's nib: the owner, the first responder and
