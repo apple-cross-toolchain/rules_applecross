@@ -361,7 +361,11 @@ other values of the attributes these use, is refused. Observed:
   `opaque="NO"`, a tint colour the mask, its own constraints the
   autoresizing key, a font replaces the default; the normal state's
   `UIButtonContent` holds `UITitle`, `UITitleColor`, `UIShadowColor` in
-  that order (twelve probes).
+  that order (twelve probes). The system image types are `UIButtonType`
+  detailDisclosure 2, infoLight 3, infoDark 4 and contactAdd 5, without a
+  font, their hugging written unless 750 both ways (missing counting as
+  250, so `{250, 250}` when not given: nine probes); their states, which Xcode drops (a title: one probe), and a
+  font are refused.
 - A multiplier other than 1 is `NSMultiplier` after `NSFirstAttribute`: a
   double holding the float nearest it (`1.2` as 1.2000000476837158, `2:3`
   and `2/3` as 2/3), four probes.

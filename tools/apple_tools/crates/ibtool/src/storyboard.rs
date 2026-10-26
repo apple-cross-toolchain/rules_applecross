@@ -3636,8 +3636,17 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some(other) => return fail(format!("contentVerticalAlignment=\"{other}\" on <button> is not supported by this ibtool")),
             };
             // `custom` is the type a button without one has (one probe).
+            // The system image types have no font (four probes); their
+            // states, which Xcode drops at least in part, are refused.
+            if matches!(n.attribute("buttonType"), Some("detailDisclosure" | "infoLight" | "infoDark" | "contactAdd")) && children(n, "state").next().is_some() {
+                return fail("states of a system image button are not supported by this ibtool");
+            }
             let button_type = match n.attribute("buttonType") {
                 Some("roundedRect" | "system") => Some(1),
+                Some("detailDisclosure") => Some(2),
+                Some("infoLight") => Some(3),
+                Some("infoDark") => Some(4),
+                Some("contactAdd") => Some(5),
                 None | Some("custom") => None,
                 Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
             };
@@ -3748,7 +3757,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // Hugging (each 250 unless given) and compression resistance
             // (each 750 unless given), when given (three probes).
             let given = |h: &str, v: &str| n.attribute(h).is_some() || n.attribute(v).is_some();
-            if given("horizontalHuggingPriority", "verticalHuggingPriority") {
+            // A system image button's, unless 750 both ways (three probes).
+            let image_type = matches!(button_type, Some(2..=5));
+            let both_750 = n.attribute("horizontalHuggingPriority") == Some("750") && n.attribute("verticalHuggingPriority") == Some("750");
+            if (image_type && !both_750) || (!image_type && given("horizontalHuggingPriority", "verticalHuggingPriority")) {
                 values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
             }
             if given("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority") {
@@ -3847,6 +3859,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     return fail("a tvOS button's font is not supported by this ibtool");
                 }
                 values.push(("UIFont", tvos_button_font(nib)));
+            } else if configuration.is_none() && matches!(button_type, Some(2..=5)) {
+                if given.is_some() {
+                    return fail("a system image button's font is not supported by this ibtool");
+                }
             } else if configuration.is_none() {
                 values.push(("UIFont", font(nib, given, Some(default_size))?));
             }
