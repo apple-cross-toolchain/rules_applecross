@@ -308,6 +308,14 @@ other values of the attributes these use, is refused. Observed:
   subviews, which join the queue (six probes nesting views two deep beside
   image views with their own constraints; depth first and level by level
   each fail one).
+- A subview's constraints may name, as their second item, a view deeper
+  than its own subviews (in plain, stack or scroll views): ordered as the
+  root view's nested ones are, first in their group. The objects list such
+  views not under their own superviews but after the last turn of their
+  holder's level of the breadth-first walk, in their constraints' order,
+  and they join the queue there; the root view's are its level's, as
+  above (twelve probes: depths two to four, siblings before and after,
+  views of other branches between). A deeper first item is refused.
 - A constraint a view's default variation excludes (`<variation
   key="default"><mask key="constraints"><exclude reference=…/>`,
   Interface Builder's Installed unchecked) is left out of the view's
