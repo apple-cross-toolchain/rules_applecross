@@ -64,9 +64,10 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
 fn only_attributes(n: Node, allowed: &[(&str, Option<&str>)]) -> Result<(), String> {
     // An object's name in Interface Builder's outline, and its warnings that
     // a view is misplaced or ambiguous; not compiled.
-    // A bar button item's custom view is keyed by the item, which compiles
-    // it.
-    let custom = n.parent_element().is_some_and(|p| p.has_tag_name("barButtonItem")) && n.attribute("key") == Some("customView");
+    // A bar button item's custom view, or a navigation item's title view,
+    // is keyed by the item, which compiles it.
+    let custom = n.parent_element().is_some_and(|p| p.has_tag_name("barButtonItem")) && n.attribute("key") == Some("customView")
+        || n.parent_element().is_some_and(|p| p.has_tag_name("navigationItem")) && n.attribute("key") == Some("titleView");
     for a in n.attributes().filter(|a| !matches!(a.name(), "userLabel" | "misplaced" | "ambiguous") && !(custom && a.name() == "key")) {
         match allowed.iter().find(|(name, _)| *name == a.name()) {
             Some((_, Some(v))) if *v != a.value() => {
@@ -621,11 +622,14 @@ fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &s
 /// `responder_actions`.
 fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str, responder: Option<&str>) -> Result<NavigationItem<'a, 'i>, String> {
     only_attributes(n, &[("key", Some("navigationItem")), ("title", None), ("largeTitleDisplayMode", None), ("id", None)])?;
+    let title_view = n.children().find(|c| c.is_element() && c.attribute("key") == Some("titleView"));
     for c in n.children().filter(|c| c.is_element()) {
         let single = c.has_tag_name("barButtonItem") && matches!(c.attribute("key"), Some("leftBarButtonItem" | "rightBarButtonItem" | "backBarButtonItem"));
         let list = matches!(c.tag_name().name(), "leftBarButtonItems" | "rightBarButtonItems");
-        if !single && !list {
-            return fail("navigation items with children other than back, left and right bar button items are not supported by this ibtool");
+        // No title is as none (two probes).
+        let no_title = c.has_tag_name("nil") && c.attribute("key") == Some("title");
+        if !single && !list && !no_title && Some(c) != title_view {
+            return fail("navigation items with children other than back, left and right bar button items and a title view are not supported by this ibtool");
         }
     }
     let mut values = Vec::new();
@@ -710,6 +714,27 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
     let mut take = |wanted: &str| arrays.iter().position(|a| a.0 == wanted).map(|i| arrays.remove(i).1);
     if let Some(entries) = take("UILeftBarButtonItems") {
         values.push(("UILeftBarButtonItems", nib.array("NSArray", entries)));
+    }
+    // A title view is compiled as a bar button item's custom view is, after
+    // the left items, and listed first after the item, before its bar
+    // button items (six probes: a label, a button, a plain view, beside
+    // either side's items and custom views). Beside a back item its place
+    // isn't established.
+    if let Some(v) = title_view {
+        if back {
+            return fail("a navigation item with both a title view and a back bar button item is not supported by this ibtool");
+        }
+        let other = |d: &Node| matches!(d.tag_name().name(), "subviews" | "constraints" | "connections" | "userDefinedRuntimeAttributes" | "accessibility");
+        if v.attribute("customClass").is_some() || v.descendants().any(|d| other(&d)) {
+            return fail("a title view with a custom class, subviews, constraints, connections, runtime attributes or accessibility is not supported by this ibtool");
+        }
+        let mut scene = Scene::new(vc_id, None, v, None);
+        let object = subview(nib, &mut scene, v)?;
+        if !scene.pairs.is_empty() || !scene.accessibility.is_empty() || !scene.actions.is_empty() || scene.subviews.len() > 1 {
+            return fail("a title view with runtime attributes, accessibility settings or actions is not supported by this ibtool");
+        }
+        values.push(("UITitleView", object));
+        bar_items.insert(0, view_name(attr(v, "id")?));
     }
     values.push(("UICenterItemGroups", nib.empty_array()));
     if let Some(entries) = take("UIRightBarButtonItems") {
@@ -3476,7 +3501,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("customModuleProvider", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
                 ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
-                ("showsTouchWhenHighlighted", Some("YES")),
+                ("showsTouchWhenHighlighted", Some("YES")), ("userInteractionEnabled", Some("NO")),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
             // the centre left out.
@@ -3578,6 +3603,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIOpaque", Value::Bool(true)));
             }
             hidden_and_tag(&mut values, n)?;
+            // Not taking touches, as a label's (two probes).
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.extend(mask_key(scene, n)?);
             alpha(&mut values, n)?;
@@ -3891,7 +3920,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if scroll && n.attribute("key").is_some() {
                     return fail("a scroll view as a table's header or footer view is not supported by this ibtool");
                 }
-                if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
+                // A navigation item's title view, or a bar button item's
+                // custom view, too (four probes).
+                let item = |tag: &str| n.parent_element().is_some_and(|p| p.has_tag_name(tag));
+                let keyed = match n.attribute("key") {
+                    None | Some("tableHeaderView" | "tableFooterView") => true,
+                    Some("titleView") => item("navigationItem"),
+                    Some("customView") => item("barButtonItem"),
+                    Some(_) => false,
+                };
+                if !keyed {
                     return fail(format!("key=\"{}\" on <view> is not supported by this ibtool", n.attribute("key").unwrap_or("")));
                 }
                 only_children(n, &[
