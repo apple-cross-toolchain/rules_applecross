@@ -759,6 +759,31 @@ probes). A view's, label's or table's `restorationIdentifier` is
 `UIRestorationIdentifier`, just before `UIViewSemanticContentAttribute`
 (four probes).
 
+A scroll view without content and frame layout guides (those are refused)
+is compiled as a plain view, `UIScrollView` (or swapped for its custom
+class), then after its large content properties
+`UIScrollViewIndicatorInsetAdjustmentBehavior` 1, `UIShowsHorizontalScrollIndicator`
+and `UIShowsVerticalScrollIndicator` false when hidden, `UIBouncesZoom`,
+`UIAlwaysBounceVertical`, `UIDirectionalLockEnabled`, the minimum and maximum
+zoom scales (floats) and `UIScrollViewContentInsetAdjustmentBehavior` 0
+(eight probes).
+
+Interface Builder's `misplaced` and `ambiguous` flags and placeholder
+constraints compile to nothing, though a view a placeholder constraint is
+on still doesn't translate its mask; a constraint's `identifier` is
+`NSLayoutIdentifier`, after its priority and before the legacy constant.
+The root view takes the margin keys a plain view does, after its layout
+guides, and `layoutMarginsFollowReadableWidth`
+(`UIViewLayoutMarginsFollowReadableWidth`, after the margins, for views
+too); it may be non-opaque, not clear its context
+(`UIClearsContextBeforeDrawing` after its mask) or have no background (15
+probes). A label's compression resistance is
+`UIViewContentCompressionResistancePriority` (`{h, v}`, each 750 unless
+given) after its hugging priorities; labels and buttons take user-defined
+runtime attributes as views do; a disabled slider is `UIDisabled` before its
+value; a stack view's standard spacing (`spacingType`) is archived as 0,
+whatever its spacing (eight probes).
+
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
 (`UIMultipleTouchEnabled`), in that order after `UIOpaque`; an `alpha`
