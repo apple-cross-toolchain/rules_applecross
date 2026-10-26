@@ -41,6 +41,8 @@ struct Options {
     launch_image: Option<String>,
     /// That set's `UILaunchImages`, for the partial Info.plist.
     launch_entries: std::cell::RefCell<Vec<Value>>,
+    /// The sticker icon set `--app-icon` names, for the partial Info.plist.
+    sticker_icon: std::cell::RefCell<Option<String>>,
 }
 
 /// Strict output, the default: byte-identical to Xcode's, or the build fails.
@@ -125,9 +127,11 @@ struct Scan {
     data_sets: Vec<(String, PathBuf)>,
     /// Launch image sets by name.
     launch_images: Vec<(String, PathBuf)>,
+    /// Messages extensions' sticker icon sets by name.
+    sticker_icons: Vec<(String, PathBuf)>,
 }
 
-fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
+pub(crate) fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
     contents[list].as_array().is_some_and(|items| items.iter().any(|i| !i[field].is_null()))
 }
 
@@ -196,6 +200,7 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             Some((stem, "brandassets")) if top => found.brand_assets.push((stem.to_string(), p)),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
             Some((stem, "launchimage")) if top => found.launch_images.push((stem.to_string(), p)),
+            Some((stem, "stickersiconset")) if top => found.sticker_icons.push((stem.to_string(), p)),
             // A complication set whose image sets name no files compiles to
             // nothing (two probes, watchOS); one with images is refused.
             Some((_, "complicationset")) if empty_complications(&p)? => {}
@@ -337,6 +342,9 @@ fn write_partial_info_plist(o: &Options, mut entries: Vec<(&str, Value)>, output
     if !launch.is_empty() {
         entries.push(("UILaunchImages", Value::Array(launch.clone())));
     }
+    if let Some(name) = o.sticker_icon.borrow().as_ref() {
+        entries.push(("MSMessagesExtensionStoreIconName", Value::string(name.clone())));
+    }
     if let Some(p) = &o.partial_info_plist {
         std::fs::write(p, cf::xml::to_bytes(&Value::dict(entries))).map_err(|e| e.to_string())?;
         outputs.push(p.clone());
@@ -391,6 +399,22 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         *o.launch_entries.borrow_mut() = compiled.entries;
     }
     let mut images = imageset::compile(&scan.image_sets, phone && pad, name_identifier)?;
+    // A sticker icon set compiles only when --app-icon names it (two
+    // probes), for iOS; its name goes in the partial Info.plist.
+    if let Some((name, dir)) = scan.sticker_icons.iter().find(|(n, _)| o.app_icon.as_deref() == Some(n.as_str())) {
+        if scan.icon_sets.iter().any(|(n, _)| n == name) {
+            return Err(format!("{name}: both a sticker icon set and an app icon set; this actool compiles one"));
+        }
+        let major = o.minimum_deployment_target.split('.').next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+        if platform != "ios" || major < 14 {
+            return Err(format!("{}: sticker icons below iOS 14, where Xcode keeps more of them, are not supported by this actool", dir.display()));
+        }
+        if let Some(sticker) = imageset::sticker_icon(name, dir, name_identifier(name))? {
+            images.facets.extend(sticker.facets);
+            images.renditions.extend(sticker.renditions);
+            *o.sticker_icon.borrow_mut() = Some(name.clone());
+        }
+    }
     let (color_facets, colors) = colorset::compile(&scan.color_sets, name_identifier)?;
     images.facets.extend(color_facets);
     images.renditions.extend(colors);
@@ -429,6 +453,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             }
             Some((name.clone(), IconSource::Single(format!("{name}1024x1024.png"), icon::render(doc)?, Vec::new())))
         }
+        (Some(name), None) if scan.sticker_icons.iter().any(|(n, _)| n == name) => None,
         (Some(name), None) => {
             let (_, dir) = scan.icon_sets.iter().find(|(n, _)| n == name).ok_or_else(|| format!("none of the input catalogs contains an app icon set named \"{name}\""))?;
             app_icon_set(dir, platform == "ios")?.map(|source| (name.clone(), source))
@@ -654,6 +679,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         k
     };
     let mac = matches!(kind, Kind::Mac);
+    let sticker = o.sticker_icon.borrow().as_deref().map(name_identifier);
     let catalog = car::Catalog {
         key_format,
         facets: icon_name
@@ -661,8 +687,13 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
             .into_iter()
             .chain(images.facets)
             .collect(),
-        // A catalog of data alone has no appearance table.
-        appearances: if mac || renditions.iter().all(car::Rendition::is_data) { Vec::new() } else { appearances(&renditions) },
+        // A catalog of data alone, or with a sticker icon, has no
+        // appearance table (one probe; an image set beside them brings one).
+        appearances: if mac || renditions.iter().all(|r| r.is_data() || sticker.is_some_and(|id| r.attrs.contains(&(car::ATTR_IDENTIFIER, id)))) {
+            Vec::new()
+        } else {
+            appearances(&renditions)
+        },
         schema_version: 2,
         key_semantics: if mac { 1 } else { 2 },
         renditions,

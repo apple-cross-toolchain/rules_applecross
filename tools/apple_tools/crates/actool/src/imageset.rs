@@ -575,6 +575,37 @@ struct SetImage {
     slicing: Option<car::Slicing>,
 }
 
+/// A Messages extension's sticker icon set (`.stickersiconset`) that
+/// `--app-icon` names: from iOS 14 Xcode keeps only its 1024x768 App Store
+/// image, as an image of the `marketing` idiom on its own (two probes, three
+/// of the corpus's). A set naming no files compiles to nothing. A catalog
+/// of only a sticker icon (and data) has no appearance table.
+pub fn sticker_icon(name: &str, dir: &std::path::Path, id: u16) -> Result<Option<Compiled>, String> {
+    let contents = read_json(&dir.join("Contents.json"))?;
+    if !crate::has_entries(&contents, "images", "filename") {
+        return Ok(None);
+    }
+    let store = contents["images"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|e| e["idiom"] == "ios-marketing" && e["size"] == "1024x768" && e["scale"] == "1x" && e["filename"].is_string())
+        .ok_or_else(|| format!("{}: a sticker icon set without its 1024x768 App Store image is not supported by this actool", dir.display()))?;
+    let filename = store["filename"].as_str().expect("checked");
+    let path = dir.join(filename);
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (img, extended) = image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    if extended.is_some() || (img.width, img.height) != (1024, 768) {
+        return Err(format!("{}: a sticker icon with colours outside sRGB, or not 1024x768, is not supported by this actool", path.display()));
+    }
+    // No template rendering intent (flags 0), unlike an image set's.
+    let image = SetImage { scale: 1, appearance: 0, idiom: car::IDIOM_MARKETING, identifier: id, flags: 0, filename: filename.to_string(), image: img, extended: None, slicing: None };
+    Ok(Some(Compiled {
+        facets: vec![Facet { name: name.to_string(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] }],
+        renditions: vec![standalone_rendition(&image).map_err(|e| format!("{}: {e}", path.display()))?],
+    }))
+}
+
 fn image_attrs(i: &SetImage) -> Vec<(u16, u16)> {
     let mut attrs = vec![(car::ATTR_SCALE, i.scale as u16), (car::ATTR_IDENTIFIER, i.identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
     if i.appearance != 0 {
