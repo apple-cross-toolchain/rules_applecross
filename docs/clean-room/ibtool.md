@@ -690,7 +690,9 @@ objects (its own nib's, or its navigation controller's).
   without a mask.
 - **Segues.** An item's segue is a template in the controller's nib, after
   its own and its view's in the templates array and objects, with a
-  `perform:` event connection from the item.
+  `perform:` event connection from the item. An item with both an action
+  and a segue compiles as with the segue alone: the action is dropped,
+  whichever comes first (two probes, two of the corpus's storyboards).
 - **Order.** These connections come after the templates' outlets, by
   selector: actions with one selector the right item's first, and the
   `perform:`s in the order of their templates' outlets.

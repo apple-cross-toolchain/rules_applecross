@@ -676,7 +676,7 @@ fn bar_button_item<'a, 'i>(
     }
     for c in children(b, "connections") {
         only_children(c, &["action", "segue"])?;
-        if children(c, "segue").count() + children(c, "action").count() > 1 {
+        if children(c, "segue").count() > 1 || children(c, "action").count() > 1 {
             return fail("a bar button item with more than one action or segue is not supported by this ibtool");
         }
         segues.extend(children(c, "segue").map(|sg| (sg, name.to_string())));
@@ -685,7 +685,11 @@ fn bar_button_item<'a, 'i>(
             if attr(a, "destination")? != vc_id {
                 return fail("a bar button item's actions on anything but its controller are not supported by this ibtool");
             }
-            actions.push((attr(a, "selector")?.to_string(), name.to_string()));
+            // Beside a segue, Xcode drops the action, whatever their order
+            // (two probes).
+            if children(c, "segue").next().is_none() {
+                actions.push((attr(a, "selector")?.to_string(), name.to_string()));
+            }
         }
     }
     let mut values = vec![("UIEnabled", Value::Bool(true))];
