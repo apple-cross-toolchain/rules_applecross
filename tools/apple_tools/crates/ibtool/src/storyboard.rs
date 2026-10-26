@@ -1228,7 +1228,8 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             let rect = nib.string(&format!("{{{{{}, {}}}, {{{}, {}}}}}", f.x, f.y, f.w, f.h));
             let value = Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(3)), ("NS.rectval", rect)]));
             let key_path = nib.string("frame");
-            scene.pairs.push(Value::New(Object::new("UINibKeyValuePair", vec![("UIObject", reference(name)), ("UIValue", value), ("UIKeyPath", key_path)])));
+            scene.pairs.push((name.to_string(), Value::New(Object::new("UINibKeyValuePair", vec![("UIObject", reference(name)), ("UIValue", value), ("UIKeyPath", key_path)]))));
+            scene.switch_frames.push(name.to_string());
             "UISwitch"
         }
         "slider" => {
@@ -1401,7 +1402,7 @@ fn accessibility(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Resul
         };
         values.push(("UIIsAccessibilityElement", nib.int_number(value)));
     }
-    scene.accessibility.push(Value::New(Object::new("UIRuntimeAccessibilityConfiguration", values)));
+    scene.accessibility.push((name.to_string(), Value::New(Object::new("UIRuntimeAccessibilityConfiguration", values))));
     Ok(())
 }
 
@@ -1458,10 +1459,12 @@ struct Scene<'a> {
     /// Views' outlets to other views: (label, the view, the destination).
     view_outlets: Vec<(String, String, String)>,
     /// Views' user-defined runtime attributes, as the nib's key-value
-    /// pairs, in document order.
-    pairs: Vec<Value>,
-    /// Views' accessibility configurations, in document order.
-    accessibility: Vec<Value>,
+    /// pairs, and their accessibility configurations, each with the view's
+    /// name: the nib lists them in the order of its objects.
+    pairs: Vec<(String, Value)>,
+    accessibility: Vec<(String, Value)>,
+    /// The switches whose frames are among the pairs.
+    switch_frames: Vec<String>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -1492,6 +1495,7 @@ impl<'a> Scene<'a> {
             view_outlets: Vec::new(),
             pairs: Vec::new(),
             accessibility: Vec::new(),
+            switch_frames: Vec::new(),
             guides: Vec::new(),
         }
     }
@@ -1657,6 +1661,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")),
                 ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
                 ("restorationIdentifier", None), ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
+                ("adjustsFontForContentSizeCategory", Some("YES")),
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
@@ -1667,12 +1672,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 "accessibility",
             ])?;
             let pairs = runtime_attributes(nib, n, &name)?;
-            scene.pairs.extend(pairs);
+            scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
             view_connections(scene, n, &name)?;
-            if child(n, "nil", "highlightedColor").is_none() {
-                return fail("labels with a highlighted colour are not supported by this ibtool");
-            }
+            let highlighted = match (child(n, "nil", "highlightedColor"), child(n, "color", "highlightedColor")) {
+                (Some(_), None) => None,
+                (None, Some(c)) => Some(c),
+                _ => return fail("a label needs one highlighted colour or nil"),
+            };
             // No text colour at all is a declared labelColor; a nil one is
             // the default.
             let (text_color, declared_color) = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
@@ -1741,6 +1748,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 _ => return fail("a label needs one text for this ibtool"),
             };
             values.push(("UIText", nib.text(id, "text", text)));
+            if n.attribute("adjustsFontForContentSizeCategory").is_some() {
+                values.push(("UIAdjustsFontForContentSizeCategory", Value::Bool(true)));
+            }
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             // A declared text colour, even labelColor, stays as it is when
             // the trait collection changes.
@@ -1749,6 +1759,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
             };
             values.push(("UITextColor", text_color));
+            if let Some(c) = highlighted {
+                values.push(("UIHighlightedColor", color(nib, c)?));
+            }
             values.push(("UIShadowOffset", doubles(&[0.0, -1.0])));
             if let Some(lines) = n.attribute("numberOfLines") {
                 values.push(("UINumberOfLines", Value::Int(lines.parse().map_err(|_| format!("not a number: {lines}"))?)));
@@ -1805,7 +1818,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some("always") => Some(3),
                 Some(other) => return fail(format!("clearButtonMode=\"{other}\" on <textField> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections"])?;
+            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
+            accessibility(nib, scene, n, &name)?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
             let trait_values = text_input_traits(nib, traits, false)?;
             for c in children(n, "connections") {
@@ -2035,6 +2049,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
                 ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")), ("enabled", Some("NO")),
+                ("clipsSubviews", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
@@ -2062,7 +2077,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             };
             only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints", "userDefinedRuntimeAttributes", "accessibility"])?;
             let pairs = runtime_attributes(nib, n, &name)?;
-            scene.pairs.extend(pairs);
+            scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
             ignored_autoresizing_mask(n)?;
             // Its states by UIControlState, in that order whatever the
@@ -2080,7 +2095,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if states.iter().any(|s| s.0 == value) {
                     return fail("a button with two of one state is not supported by this ibtool");
                 }
-                only_attributes(st, &[("key", None), ("title", None)])?;
+                only_attributes(st, &[("key", None), ("title", None), ("image", None)])?;
                 only_children(st, &["color"])?;
                 for c in children(st, "color") {
                     if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
@@ -2126,6 +2141,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
+            if n.attribute("clipsSubviews").is_some() {
+                if child(n, "color", "tintColor").is_some() {
+                    return fail("a clipping button with a tint colour is not supported by this ibtool");
+                }
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
             if let Some(c) = child(n, "color", "tintColor") {
                 values.push(("UITintColor", color(nib, c)?));
             }
@@ -2158,6 +2179,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                         return fail("a localizable button's title for a state other than normal is not supported by this ibtool");
                     }
                     content.push(("UITitle", nib.text(id, &format!("{key}Title"), title)));
+                }
+                if let Some(image) = st.attribute("image") {
+                    content.push(("UIImage", nib.image(image)));
                 }
                 if let Some(c) = child(*st, "color", "titleColor") {
                     content.push(("UITitleColor", color(nib, c)?));
@@ -2291,7 +2315,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ])?;
                 view_connections(scene, n, &name)?;
                 let pairs = runtime_attributes(nib, n, &name)?;
-                scene.pairs.extend(pairs);
+                scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
                 accessibility(nib, scene, n, &name)?;
             }
             let mut inner = Vec::new();
@@ -2391,10 +2415,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("image", None),
-                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+                ("id", None),
             ])?;
-            only_children(n, &["rect", "color", "constraints", "connections"])?;
+            only_children(n, &["rect", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
+            let pairs = runtime_attributes(nib, n, &name)?;
+            scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
+            accessibility(nib, scene, n, &name)?;
             if n.attribute("userInteractionEnabled").is_none() {
                 return fail("image views with user interaction are not supported by this ibtool");
             }
@@ -2434,7 +2462,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(image) = n.attribute("image") {
                 values.push(("UIImage", nib.image(image)));
             }
-            Object::new("UIImageView", values)
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UIImageView")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UIImageView")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UIImageView", values)
+            }
         }
         other => return fail(format!("<{other}> is not supported by this ibtool")),
     };
@@ -3331,7 +3366,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             only_attributes(view, &[
                 ("key", Some("view")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
-                ("clearsContextBeforeDrawing", Some("NO")), ("id", None),
+                ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
             ])?;
         }
         let view_id = attr(view, "id")?;
@@ -3488,9 +3523,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
 
             let mut values = Vec::new();
             geometry(&mut values, &f);
-            // The root view's runtime attributes come before its subviews'.
             let pairs = runtime_attributes(&mut nib, view, &root_name)?;
-            scene.pairs.extend(pairs);
+            scene.pairs.extend(pairs.into_iter().map(|p| (root_name.clone(), p)));
             let mut subview_values = Vec::new();
             for s in children(view, "subviews") {
                 for c in s.children().filter(|c| c.is_element()) {
@@ -3651,7 +3685,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             margins(&mut values, view)?;
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
-            top.push(Value::New(Object::new("UIView", values).named(root_name.clone())));
+            // A custom class is swapped in for the root view when it loads.
+            let root_object = if view.attribute("customClass").is_some() {
+                let class = runtime_class_name(view, module, "UIView")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UIView")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UIView", values)
+            };
+            top.push(Value::New(root_object.named(root_name.clone())));
 
             objects.push(reference(root_name.clone()));
             // The safe-area guide follows the root view.
@@ -3670,21 +3713,41 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // Then breadth first: each view in turn, from a queue, lists the
             // constraints it holds and then its subviews, which join the queue.
             let mut queue: std::collections::VecDeque<Option<&String>> = [None].into();
+            // The views in the objects' order: the root, then breadth first.
+            let mut order = vec![root_name.clone()];
             while let Some(v) = queue.pop_front() {
                 if let Some(v) = v {
                     objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
                 }
                 for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1)) {
                     objects.push(reference(s.clone()));
+                    order.push(s.clone());
                     queue.push_back(Some(s));
                 }
                 if v.is_none() {
                     for p in &pulled {
                         objects.push(reference(p.clone()));
+                        order.push(p.clone());
                         queue.push_back(Some(p));
                     }
                 }
             }
+            // Runtime attributes and accessibility configurations go in that
+            // order too, each view's as the document gives them (eight
+            // probes), but one corpus storyboard's views' attributes don't,
+            // for reasons not established: those of more than one view, or
+            // beside a switch's frame, are refused.
+            let distinct = |names: Vec<&String>| names.into_iter().collect::<std::collections::HashSet<_>>().len();
+            let user_views = distinct(scene.pairs.iter().map(|p| &p.0).filter(|n| !scene.switch_frames.contains(n)).collect());
+            if user_views > 1 || (user_views == 1 && !scene.switch_frames.is_empty()) {
+                return fail("user-defined runtime attributes of more than one view, or beside a switch, are not supported by this ibtool");
+            }
+            if distinct(scene.accessibility.iter().map(|a| &a.0).collect()) > 1 {
+                return fail("accessibility settings of more than one view are not supported by this ibtool");
+            }
+            let position = |name: &String| order.iter().position(|o| o == name).unwrap_or(usize::MAX);
+            scene.pairs.sort_by_key(|p| position(&p.0));
+            scene.accessibility.sort_by_key(|a| position(&a.0));
 
             // Outlets, `view` among them, then actions, each in byte order of
             // their names; actions with the same selector in document order.
@@ -3731,8 +3794,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     ("UIEventMask", Value::Int(*mask)),
                 ])));
             }
-            let pairs = std::mem::take(&mut scene.pairs);
-            let accessibility = std::mem::take(&mut scene.accessibility);
+            let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
+            let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
             (root_object_full(&mut nib, top, objects, connections, accessibility, pairs), upstream_used)
         };
 
