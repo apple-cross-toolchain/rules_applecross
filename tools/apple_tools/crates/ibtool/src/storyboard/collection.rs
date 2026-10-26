@@ -268,10 +268,16 @@ pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name
         only_children(c, &["outlet"])?;
         for o in children(c, "outlet") {
             only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
-            if attr(o, "destination")? != scene.vc_id {
-                return fail("a collection view's outlets to anything but its controller are not supported by this ibtool");
-            }
-            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string()));
+            // Or a custom object of the scene (a corpus storyboard).
+            let destination = attr(o, "destination")?;
+            let to = if custom_object(n, destination) {
+                view_name(destination)
+            } else if destination == scene.vc_id {
+                "upstream".into()
+            } else {
+                return fail("a collection view's outlets to anything but its controller or a custom object are not supported by this ibtool");
+            };
+            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string(), to));
         }
     }
     let mut layout = Vec::new();
