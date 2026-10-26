@@ -1181,7 +1181,14 @@ a clear background and stroke, corner radius 17 whatever the button's
 size, stroke width 1; image placement 2, image padding 0, title padding
 1), its title an `NSAttributedString` with the empty attributes,
 localizable as `<id>.configuration.title`, and an empty subtitle (four
-probes and one in `Base.lproj`; other styles and settings are refused).
+probes and one in `Base.lproj`). The gray, tinted and filled styles are
+`UIButtonConfigurationButtonStyle` 1, 2 and 3, their backgrounds an sRGB
+colour instead of the clear one: grey (120, 120 and 128 of 255) at alpha
+0.16, the tint blue (0, 136 of 255, 1) at 0.18, and that blue opaque; the
+stroke stays a clear colour of its own (four probes). A system symbol
+(`image`, `catalog="system"`) is `UIButtonConfigurationImage`, a symbol
+placeholder (two probes). Other settings and images are refused; 200
+random storyboards with configured buttons were byte-identical.
 
 Buttons take a custom class, swapped in after `UIButtonConfiguration`
 (two probes), and labels one swapped in last (two probes). Stack views and visual effect views take runtime
