@@ -110,7 +110,7 @@ fn prototypes<'a, 'i>(table: Node<'a, 'i>) -> Result<(Vec<(&'a str, Node<'a, 'i>
 #[allow(clippy::too_many_arguments)]
 fn table_values(
     nib: &mut Nib, scene: &mut Scene, name: &str, table: Node, f: &Frame, cells: &[(&str, Node, Option<String>)], mask_default: i64,
-    layout: Vec<(&'static str, Value)>,
+    layout: Vec<(&'static str, Value)>, refresh: Option<Value>,
 ) -> Result<Vec<(&'static str, Value)>, String> {
     let (style, ui_style) = match attr(table, "style")? {
         "plain" => (0, 0),
@@ -187,6 +187,9 @@ fn table_values(
         Some("YES") => values.push(("UIAlwaysBounceVertical", Value::Bool(true))),
         Some("NO") | None => {}
         Some(other) => return fail(format!("alwaysBounceVertical=\"{other}\" is not supported by this ibtool")),
+    }
+    if let Some(r) = refresh {
+        values.push(("UIRefreshControl", r));
     }
     match table.attribute("keyboardDismissMode") {
         None => {}
@@ -303,7 +306,7 @@ pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &st
     if let Some(own) = own_constraints(nib, scene, n, name)? {
         layout.push(("UIViewAutolayoutConstraints", own));
     }
-    let values = table_values(nib, scene, name, n, f, &cells, 36, layout)?;
+    let values = table_values(nib, scene, name, n, f, &cells, 36, layout, None)?;
     Ok(Object::new("UITableView", values))
 }
 
@@ -313,9 +316,10 @@ pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &st
 /// their placeholders' order, and for a static table the order the
 /// controller's nib lists them in (as placeholder indices).
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn table_view_nib(
     platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, table: Node, f: &Frame,
-    vc_outlets: &[(String, String)],
+    vc_outlets: &[(String, String)], refresh: Option<Node>,
 ) -> Result<(Object, bool, Vec<String>, Option<Vec<usize>>), String> {
     check_table(table)?;
     if table.attribute("key").is_none() {
@@ -336,7 +340,39 @@ pub(super) fn table_view_nib(
         }
     }
     let static_table = table.attribute("dataMode") == Some("static");
-    let upstream_used = !outlets.is_empty();
+    // A refresh control is the table's, its action on the controller.
+    let mut refresh_actions = Vec::new();
+    if let Some(r) = refresh {
+        only_attributes(r, &[
+            ("key", Some("refreshControl")), ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
+            ("enabled", Some("NO")), ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("id", None),
+        ])?;
+        only_children(r, &["rect", "autoresizingMask", "connections"])?;
+        for m in children(r, "autoresizingMask") {
+            if autoresizing_mask(m)? != 0 || m.has_children() {
+                return fail("a refresh control with an autoresizing mask is not supported by this ibtool");
+            }
+        }
+        for required in ["opaque", "multipleTouchEnabled", "contentMode", "enabled"] {
+            if r.attribute(required).is_none() {
+                return fail(format!("a refresh control without {required} is not supported by this ibtool"));
+            }
+        }
+        if table.attribute("dataMode") != Some("prototypes") || children(table, "view").next().is_some() || table.attribute("keyboardDismissMode").is_some() {
+            return fail("a refresh control in a static table, or with a header or footer view or a keyboard dismiss mode, is not supported by this ibtool");
+        }
+        for c in children(r, "connections") {
+            only_children(c, &["action"])?;
+            for a in children(c, "action") {
+                only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("valueChanged")), ("id", None)])?;
+                if attr(a, "destination")? != vc_id {
+                    return fail("a refresh control's actions on anything but its controller are not supported by this ibtool");
+                }
+                refresh_actions.push(attr(a, "selector")?.to_string());
+            }
+        }
+    }
+    let upstream_used = !outlets.is_empty() || !refresh_actions.is_empty();
 
     let (cells, mut segues) = prototypes(table)?;
     // A static table's cells' segues: their placeholders follow the
@@ -378,7 +414,21 @@ pub(super) fn table_view_nib(
 
     // The header and footer views, and the views in them.
     let mut scene = Scene::new(vc_id, module, table, Some(root_name.clone()));
-    let values = table_values(&mut nib, &mut scene, &root_name, table, f, &cells, 0, Vec::new())?;
+    let refresh_value = match refresh {
+        Some(r) => {
+            let mut values = Vec::new();
+            geometry(&mut values, &frame(r)?);
+            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIMultipleTouchEnabled", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+            values.push(("UIContentMode", Value::Int(4)));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.push(("UIDisabled", Value::Bool(true)));
+            values.push(("UIRefreshControlStyle", Value::Int(2)));
+            Some(Value::New(Object::new("UIRefreshControl", values).named("refresh control")))
+        }
+        None => None,
+    };
+    let values = table_values(&mut nib, &mut scene, &root_name, table, f, &cells, 0, Vec::new(), refresh_value)?;
     if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.gesture_views.is_empty() {
         return fail("actions, outlets to the controller, gestures and segues in a table's header or footer are not supported by this ibtool");
     }
@@ -387,6 +437,9 @@ pub(super) fn table_view_nib(
     }
     top.push(Value::New(Object::new("UITableView", values).named(root_name.clone())));
     objects.push(reference(root_name.clone()));
+    if refresh.is_some() {
+        objects.push(reference("refresh control"));
+    }
     // After the table (and a static table's data source), breadth first
     // through the table's views and the data source's sections and cells,
     // level by level, the table's first in each: (level, object).
@@ -504,6 +557,16 @@ pub(super) fn table_view_nib(
     outlets.sort_by(|a, b| a.0.cmp(&b.0));
     for (label, source, destination) in &outlets {
         connections.push(outlet(&mut nib, label, source, destination));
+    }
+    // The refresh control's value-changed actions, after the outlets.
+    for selector in refresh_actions {
+        let label = nib.string(&selector);
+        connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
+            ("UILabel", label),
+            ("UISource", reference("refresh control")),
+            ("UIDestination", reference("upstream")),
+            ("UIEventMask", Value::Int(4096)),
+        ])));
     }
     Ok((root_object(&mut nib, top, objects, connections), upstream_used, segues, listing))
 }

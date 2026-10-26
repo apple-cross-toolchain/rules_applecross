@@ -1902,6 +1902,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             Object::new("UITextField", values)
         }
         "tableView" => table::subview_table(nib, scene, n, &name, &f)?,
+        "collectionView" => collection::subview_collection(nib, scene, n, &name, &f)?,
         "textView" => {
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("textAlignment", None),
@@ -3345,7 +3346,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("the clearsSelectionOnViewWillAppear attribute of <viewController> is not supported by this ibtool");
         }
         let class_name = runtime_class_name(vc, module, original_class)?;
-        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems", "extendedEdge", "userDefinedRuntimeAttributes"])?;
+        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems", "extendedEdge", "userDefinedRuntimeAttributes", "refreshControl"])?;
+        if !is_table && children(vc, "refreshControl").next().is_some() {
+            return fail("a refresh control outside a table view controller is not supported by this ibtool");
+        }
         // Empty toolbar items change nothing compiled.
         if children(vc, "toolbarItems").any(|t| t.has_children()) {
             return fail("view controllers with toolbar items are not supported by this ibtool");
@@ -3468,7 +3472,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("a table or collection view controller's outlet collections are not supported by this ibtool");
         }
         let (view_root, upstream_used) = if is_table {
-            let (root, upstream_used, segues, listing) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
+            let (root, upstream_used, segues, listing) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets, child(vc, "refreshControl", "refreshControl"))?;
             scene.segues = segues;
             scene.segue_listing = listing;
             (root, upstream_used)

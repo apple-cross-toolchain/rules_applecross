@@ -813,6 +813,22 @@ may clip its subviews (`UIClipsToBounds`, after its mask; with a tint colour
 refused) and give a state an image (`UIImage`, an image placeholder, after
 its title) (eleven probes).
 
+A table view controller's refresh control (disabled, as Interface Builder
+writes it) is its table's `UIRefreshControl`, after
+`UIAlwaysBounceVertical`: a `UIRefreshControl` of its frame, multiple
+touches, content mode 4, `UIDisabled` and `UIRefreshControlStyle` 2, after
+the table in the objects, its value-changed actions event connections
+(mask 4096) after the outlets; in a static table, beside header and footer
+views, a keyboard dismiss mode or with an attributed title it is refused
+(two probes).
+
+A collection view in a view is compiled as a collection view controller's
+(mask 36 when none is given, its constraint keys after its clipping), its
+outlets the controller's, its flow layout listed as its child (after the
+collection view's siblings) and its automatic estimated item size a pair
+of the layout's; its cells' segues and constraints it holds are refused
+(three probes).
+
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
 (`UIMultipleTouchEnabled`), in that order after `UIOpaque`; an `alpha`
