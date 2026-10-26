@@ -735,6 +735,27 @@ document has them (12 probes). Labels, there and elsewhere, may:
   (`UIViewInsetsLayoutMarginsFromSafeArea` 0, after the hugging
   priorities).
 
+A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
+user interaction (`UIUserInteractionDisabled`) or multiple touches
+(`UIMultipleTouchEnabled`), in that order after `UIOpaque`; an `alpha`
+(`UIAlpha`, a float) and no `clearsContextBeforeDrawing`
+(`UIClearsContextBeforeDrawing` false), in that order after its mask and
+before its content mode; and, after its constraints, layout margins
+(`UIViewLayoutMargins` top, left, bottom, right, or leading and trailing
+with `UIViewLayoutMarginsAreDirectional`), `preservesSuperviewLayoutMargins`
+(`UIViewPreservesSuperviewMargins`, `UIViewPreservesSpecificSuperviewMargins`
+15) and no `insetsLayoutMarginsFromSafeArea`
+(`UIViewInsetsLayoutMarginsFromSafeArea` 0). `exclusiveTouch` is refused
+(13 probes).
+
+User-defined runtime attributes of a view, the root view or a controller
+are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
+document order, the root view's before its subviews'; a controller's are in
+its own nib. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
+boolean one of 0 or 1, a string the string, a colour the colour and a size an
+`NSValue` (`NS.special` 2, `NS.sizeval` `{w, h}`). Those of an embedded
+controller and of other kinds of view are refused (13 probes).
+
 A label that translates its autoresizing mask has the document's mask,
 left out when empty. A system font of size 0, regular or bold, is 12
 points (14 probes).

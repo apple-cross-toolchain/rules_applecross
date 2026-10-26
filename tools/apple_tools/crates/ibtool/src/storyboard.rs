@@ -1054,6 +1054,65 @@ fn subview_frame(n: Node) -> Result<Frame, String> {
     }
 }
 
+/// An object's user-defined runtime attributes (`name` the object's), as
+/// key-value pairs set when the nib loads: numbers, booleans (as 0 or 1),
+/// strings, colours and sizes.
+fn runtime_attributes(nib: &mut Nib, n: Node, name: &str) -> Result<Vec<Value>, String> {
+    let mut pairs = Vec::new();
+    for list in children(n, "userDefinedRuntimeAttributes") {
+        only_children(list, &["userDefinedRuntimeAttribute"])?;
+        for a in children(list, "userDefinedRuntimeAttribute") {
+            let key_path = attr(a, "keyPath")?;
+            let value = match attr(a, "type")? {
+                "number" => {
+                    only_attributes(a, &[("type", None), ("keyPath", None)])?;
+                    match (child(a, "integer", "value"), child(a, "real", "value")) {
+                        (Some(i), None) => {
+                            let v = attr(i, "value")?;
+                            nib.int_number(v.parse().map_err(|_| format!("not a number: {v}"))?)
+                        }
+                        (None, Some(r)) => nib.double_number(number(attr(r, "value")?)?),
+                        _ => return fail("a runtime attribute's number without one integer or real is not supported by this ibtool"),
+                    }
+                }
+                "boolean" => {
+                    only_attributes(a, &[("type", None), ("keyPath", None), ("value", None)])?;
+                    match attr(a, "value")? {
+                        "YES" => nib.int_number(1),
+                        "NO" => nib.int_number(0),
+                        other => return fail(format!("a runtime attribute's boolean {other} is not supported by this ibtool")),
+                    }
+                }
+                "string" => {
+                    only_attributes(a, &[("type", None), ("keyPath", None), ("value", None)])?;
+                    nib.string(attr(a, "value")?)
+                }
+                "color" => {
+                    only_attributes(a, &[("type", None), ("keyPath", None)])?;
+                    color(nib, child(a, "color", "value").ok_or("a runtime attribute's colour without a value")?)?
+                }
+                "size" => {
+                    only_attributes(a, &[("type", None), ("keyPath", None)])?;
+                    let s = child(a, "size", "value").ok_or("a runtime attribute's size without a value")?;
+                    let size = nib.string(&format!("{{{}, {}}}", number(attr(s, "width")?)?, number(attr(s, "height")?)?));
+                    Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", size)]))
+                }
+                other => return fail(format!("a runtime attribute of type {other} is not supported by this ibtool")),
+            };
+            let key_path = nib.string(key_path);
+            pairs.push(Value::New(Object::new("UINibKeyValuePair", vec![("UIObject", reference(name)), ("UIValue", value), ("UIKeyPath", key_path)])));
+        }
+    }
+    Ok(pairs)
+}
+
+/// An `<edgeInsets>` or `<directionalEdgeInsets>` as top, `left`, bottom,
+/// `right`.
+fn insets(n: Node, left: &str, right: &str) -> Result<[f64; 4], String> {
+    only_attributes(n, &[("key", None), ("top", None), (left, None), ("bottom", None), (right, None)])?;
+    Ok([number(attr(n, "top")?)?, number(attr(n, left)?)?, number(attr(n, "bottom")?)?, number(attr(n, right)?)?])
+}
+
 /// Bounds and centre, each left out when zero.
 fn geometry(values: &mut Vec<(&'static str, Value)>, f: &Frame) {
     if f.w != 0.0 || f.h != 0.0 {
@@ -1099,6 +1158,9 @@ struct Scene<'a> {
     gesture_views: Vec<String>,
     /// Views' outlets to other views: (label, the view, the destination).
     view_outlets: Vec<(String, String, String)>,
+    /// Views' user-defined runtime attributes, as the nib's key-value
+    /// pairs, in document order.
+    pairs: Vec<Value>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -1127,6 +1189,7 @@ impl<'a> Scene<'a> {
             gesture: None,
             gesture_views: Vec::new(),
             view_outlets: Vec::new(),
+            pairs: Vec::new(),
             guides: Vec::new(),
         }
     }
@@ -1756,12 +1819,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // within; without them the arrangement setting changes nothing.
             let margins = match child(n, "edgeInsets", "layoutMargins") {
                 Some(e) => {
-                    only_attributes(e, &[("key", None), ("top", None), ("left", None), ("bottom", None), ("right", None)])?;
                     if n.attribute("layoutMarginsRelativeArrangement").is_none() {
                         return fail("a stack view's edge insets without layout-margins-relative arrangement are not supported by this ibtool");
                     }
-                    let side = |k| e.attribute(k).map(number).transpose().map(|v| v.unwrap_or(0.0));
-                    Some([side("top")?, side("left")?, side("bottom")?, side("right")?])
+                    Some(insets(e, "left", "right")?)
                 }
                 None => None,
             };
@@ -1814,14 +1875,21 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 // A table's header and footer views are its subviews.
                 only_attributes(n, &[
                     ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", None), ("fixedFrame", Some("YES")),
-                    ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                    ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
+                    ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
+                    ("preservesSuperviewLayoutMargins", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                     ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                 ])?;
                 if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
                     return fail(format!("key=\"{}\" on <view> is not supported by this ibtool", n.attribute("key").unwrap_or("")));
                 }
-                only_children(n, &["rect", "autoresizingMask", "color", "subviews", "constraints", "connections"])?;
+                only_children(n, &[
+                    "rect", "autoresizingMask", "color", "subviews", "constraints", "connections", "edgeInsets", "directionalEdgeInsets",
+                    "userDefinedRuntimeAttributes",
+                ])?;
                 view_connections(scene, n, &name)?;
+                let pairs = runtime_attributes(nib, n, &name)?;
+                scene.pairs.extend(pairs);
             }
             let mut inner = Vec::new();
             for s in children(n, "subviews") {
@@ -1845,12 +1913,30 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("opaque").is_none() {
                 values.push(("UIOpaque", Value::Bool(true)));
             }
+            if n.attribute("hidden").is_some() {
+                values.push(("UIHidden", Value::Bool(true)));
+            }
+            if let Some(tag) = n.attribute("tag") {
+                values.push(("UITag", Value::Int(tag.parse().map_err(|_| format!("not a number: {tag}"))?)));
+            }
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
+            if n.attribute("multipleTouchEnabled").is_some() {
+                values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             let mask = match children(n, "autoresizingMask").next() {
                 Some(m) => autoresizing_mask(m)?,
                 None => 36,
             };
             values.push(("UIAutoresizingMask", Value::Int(mask)));
+            if let Some(alpha) = n.attribute("alpha") {
+                values.push(("UIAlpha", Value::Float(number(alpha)? as f32)));
+            }
+            if n.attribute("clearsContextBeforeDrawing").is_some() {
+                values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+            }
             let mode = content_mode(n.attribute("contentMode").unwrap_or("scaleToFill"))?;
             if mode != 0 {
                 values.push(("UIContentMode", Value::Int(mode)));
@@ -1863,6 +1949,26 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
+            }
+            // Layout margins: top, left, bottom, right (leading, trailing).
+            match (child(n, "edgeInsets", "layoutMargins"), child(n, "directionalEdgeInsets", "directionalLayoutMargins")) {
+                (None, None) => {}
+                (Some(m), None) => values.push(("UIViewLayoutMargins", doubles(&insets(m, "left", "right")?))),
+                (None, Some(m)) => {
+                    values.push(("UIViewLayoutMargins", doubles(&insets(m, "leading", "trailing")?)));
+                    values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
+                }
+                _ => return fail("a view with both layout margins and directional ones is not supported by this ibtool"),
+            }
+            if children(n, "edgeInsets").chain(children(n, "directionalEdgeInsets")).count() > 1 {
+                return fail("a view's other edge insets are not supported by this ibtool");
+            }
+            if n.attribute("preservesSuperviewLayoutMargins").is_some() {
+                values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
+                values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
+            }
+            if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+                values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -2776,7 +2882,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("the clearsSelectionOnViewWillAppear attribute of <viewController> is not supported by this ibtool");
         }
         let class_name = runtime_class_name(vc, module, original_class)?;
-        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems", "extendedEdge"])?;
+        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems", "extendedEdge", "userDefinedRuntimeAttributes"])?;
         // Empty toolbar items change nothing compiled.
         if children(vc, "toolbarItems").any(|t| t.has_children()) {
             return fail("view controllers with toolbar items are not supported by this ibtool");
@@ -2790,7 +2896,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("a table or collection view controller with layout guides is not supported by this ibtool");
         }
         if !is_list {
-            only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints", "connections"])?;
+            only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints", "connections", "userDefinedRuntimeAttributes"])?;
             only_attributes(view, &[("key", Some("view")), ("contentMode", Some("scaleToFill")), ("id", None)])?;
         }
         let view_id = attr(view, "id")?;
@@ -2924,6 +3030,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
 
             let mut values = Vec::new();
             geometry(&mut values, &f);
+            // The root view's runtime attributes come before its subviews'.
+            let pairs = runtime_attributes(&mut nib, view, &root_name)?;
+            scene.pairs.extend(pairs);
             let mut subview_values = Vec::new();
             for s in children(view, "subviews") {
                 for c in s.children().filter(|c| c.is_element()) {
@@ -3132,7 +3241,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     ("UIEventMask", Value::Int(*mask)),
                 ])));
             }
-            (root_object(&mut nib, top, objects, connections), upstream_used)
+            let pairs = std::mem::take(&mut scene.pairs);
+            (root_object_with_pairs(&mut nib, top, objects, connections, pairs), upstream_used)
         };
 
         // The view controller's nib: the scene's placeholders and a class
@@ -3262,7 +3372,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         objects.extend(templates.objects);
         objects.extend(bar_items.iter().map(|b| reference(b.clone())));
         top.push(controller);
-        let vc_root = root_object(&mut vnib, top, objects, connections);
+        // The controller's runtime attributes are its own nib's.
+        let pairs = runtime_attributes(&mut vnib, vc, "controller")?;
+        if !pairs.is_empty() && embedded {
+            return fail("an embedded controller's runtime attributes are not supported by this ibtool");
+        }
+        let vc_root = root_object_with_pairs(&mut vnib, top, objects, connections, pairs);
         if embedded {
             roots.insert(vc_id, RootController {
                 vc,
