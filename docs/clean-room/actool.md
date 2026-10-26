@@ -158,6 +158,19 @@ icon set gives, which iOS before 26 draws icons from; how iOS 26 draws it
 (presumably as an icon set's, without glass) has not been checked. Xcode's flattened image is square and opaque, as this
 one is.
 
+## Dark and tinted app icons
+
+A single 1024 px iOS icon may have dark and tinted images (`appearances`
+luminosity dark or tinted): per idiom, each is a rendition of the 1024 px
+image keyed by its appearance (dark 1, tinted 10, named
+`ISAppearanceTintable` in the appearance table), its MLEC versions saying
+whether it is opaque (2 and 3, or 0 and 1, as other iOS icons'), and stored
+as GA8 when its every pixel is grey (2 bytes a pixel, rows 32-byte aligned,
+coded as BGRA ones are; a coloured tinted image stays BGRA). The bundle's
+icons and the partial Info.plist are the plain icon's. Other appearances are
+refused (four probes and Chromium's legacy icons, equivalent but for the
+appearance blocks' order).
+
 ## App icon sets with an image per size
 
 Each image is a rendition (part 220) of its scale, idiom, subtype and

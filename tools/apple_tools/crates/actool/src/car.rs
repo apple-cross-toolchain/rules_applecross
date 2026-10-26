@@ -437,14 +437,14 @@ impl MlecVersions {
 }
 
 pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], versions: MlecVersions) -> Vec<u8> {
-    let t = icon_image_tlvs(width, height);
+    let t = icon_image_tlvs(width, height, stride(width as usize));
     let payload = lzfse_bitmap(&padded(bgra, width as usize, height as usize), stride(width as usize), height as usize, versions);
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
 }
 
 /// An iOS icon under 40 pixels wide, its bitmap run-length coded.
 pub fn icon_image_rle_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], opaque: bool) -> Vec<u8> {
-    let t = icon_image_tlvs(width, height);
+    let t = icon_image_tlvs(width, height, stride(width as usize));
     let payload = rle_bitmap(bgra, width as usize, height as usize, opaque);
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
 }
@@ -511,9 +511,24 @@ pub fn rle_bitmap(bgra: &[u8], width: usize, height: usize, opaque: bool) -> Vec
     out
 }
 
+/// A grey icon image: premultiplied grey and alpha (GA8, colour space 2),
+/// each row 32-byte aligned, coded as a BGRA one is.
+pub fn icon_image_gray_csi(name: &str, width: u32, height: u32, scale: u32, ga: &[u8], versions: MlecVersions) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
+    let row = (w * 2).div_ceil(32) * 32;
+    let mut rows = vec![0u8; row * h];
+    for y in 0..h {
+        rows[y * row..y * row + w * 2].copy_from_slice(&ga[y * w * 2..(y + 1) * w * 2]);
+    }
+    let t = icon_image_tlvs(width, height, row);
+    let payload = lzfse_bitmap(&rows, row, h, versions);
+    let (pixel_format, color_space) = Pixels::Gray.format();
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
+}
+
 /// An icon image's TLVs: slices, metrics, composition, 0x3ee and the
 /// bytes per row.
-fn icon_image_tlvs(width: u32, height: u32) -> Vec<u8> {
+fn icon_image_tlvs(width: u32, height: u32, bytes_per_row: usize) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, width, height] {
@@ -530,7 +545,7 @@ fn icon_image_tlvs(width: u32, height: u32) -> Vec<u8> {
     composition.extend_from_slice(&1.0f32.to_le_bytes());
     tlv(&mut t, 0x3ec, &composition);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    tlv(&mut t, 0x3ef, &(stride(width as usize) as u32).to_le_bytes());
+    tlv(&mut t, 0x3ef, &(bytes_per_row as u32).to_le_bytes());
     t
 }
 
