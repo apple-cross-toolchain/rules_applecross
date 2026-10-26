@@ -1965,6 +1965,10 @@ struct Scene<'a> {
     /// Subviews with a safe-area guide no constraint uses, once per
     /// placeholder guide the objects list in their turn.
     unused_guides: Vec<String>,
+    /// Subviews' safe-area guides that constraints use, (guide id, view),
+    /// and the views' `UIViewLayoutGuides` once a constraint defines them.
+    safe_areas: Vec<(String, String)>,
+    layout_guides: Vec<(String, Value)>,
     /// Scroll views' content and frame layout guides: (id, identifier,
     /// scroll view), archived where a constraint first uses them.
     scroll_guides: Vec<(String, &'static str, String)>,
@@ -2012,6 +2016,8 @@ impl<'a> Scene<'a> {
             pairs: Vec::new(),
             effect_contents: Vec::new(),
             unused_guides: Vec::new(),
+            safe_areas: Vec::new(),
+            layout_guides: Vec::new(),
             scroll_guides: Vec::new(),
             defined_guides: Vec::new(),
             toolbar_items: Vec::new(),
@@ -2346,15 +2352,22 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         }
         // A scroll view's own guide as the second item, ordered as a
         // sibling (three probes).
-        let own_guide = |item: &str| scene.scroll_guides.iter().any(|g| g.0 == item && g.2 == name);
+        let own_guide = |item: &str| scene.scroll_guides.iter().any(|g| g.0 == item && g.2 == name) || scene.safe_areas.iter().any(|g| g.0 == item && g.1 == name);
         let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, false)?;
-        let v = direct.iter().find(|v| v.attribute("id") == Some(key.0)).ok_or_else(|| format!("a subview's constraints on {} are not supported by this ibtool", key.0))?;
+        // Its own safe-area guide, either item, counts as at the origin, as
+        // the root view's (two probes).
+        let own_safe_area = |item: &str| scene.safe_areas.iter().any(|g| g.0 == item && g.1 == name);
         for item in [first, second] {
-            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) {
+            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) && !own_safe_area(item) {
                 return fail(format!("a subview's constraints on {item} are not supported by this ibtool"));
             }
         }
-        let f = subview_frame(*v)?;
+        let f = if own_safe_area(key.0) {
+            Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+        } else {
+            let v = direct.iter().find(|v| v.attribute("id") == Some(key.0)).ok_or_else(|| format!("a subview's constraints on {} are not supported by this ibtool", key.0))?;
+            subview_frame(*v)?
+        };
         others.push(((f.x * f.x + f.y * f.y, f.x), key, c, first, second));
     }
     sizes.sort_by_key(|f| (f.0, f.1.attribute("id")));
@@ -2375,7 +2388,25 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
             return fail("a variation of a scroll view's constraints on its own guides is not supported by this ibtool");
         }
         candidates.push((c, constraint_name(c)?, vec![item_name(first), item_name(second)]));
+        // Its own safe-area guide, defined where a constraint first uses it.
+        let guide_name = format!("{name} safe area guide");
+        let safe_area_item = |nib: &mut Nib, scene: &mut Scene, item: &str| -> Option<Value> {
+            if !scene.safe_areas.iter().any(|g| g.0 == item && g.1 == name) {
+                return None;
+            }
+            if scene.layout_guides.iter().any(|g| g.0 == *name) {
+                return Some(reference(guide_name.clone()));
+            }
+            scene.layout_guides.push((name.to_string(), reference(guide_name.clone())));
+            Some(named_safe_area_guide(nib, name, &guide_name))
+        };
+        let first_value = match safe_area_item(nib, scene, first) {
+            Some(v) => v,
+            None => item(first),
+        };
+        let guide_second = safe_area_item(nib, scene, second);
         let second = match scene.scroll_guides.iter().find(|g| g.0 == second && g.2 == name).cloned() {
+            _ if guide_second.is_some() => guide_second.expect("checked"),
             Some((guide, _, _)) if scene.defined_guides.contains(&guide) => reference(format!("scroll guide {guide}")),
             Some((guide, identifier, owner)) => {
                 scene.defined_guides.push(guide.clone());
@@ -2383,7 +2414,7 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
             }
             None => item(second),
         };
-        made.push((c, document_constraint(nib, c, item(first), Some(second))?));
+        made.push((c, document_constraint(nib, c, first_value, Some(second))?));
     }
     for (c, m) in made {
         let constraint_name = constraint_name(c)?;
@@ -4101,8 +4132,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 for g in children(n, "viewLayoutGuide").filter(|g| !(scroll && matches!(g.attribute("key"), Some("contentLayoutGuide" | "frameLayoutGuide")))) {
                     only_attributes(g, &[("key", Some("safeArea")), ("id", None)])?;
                     let id = attr(g, "id")?;
-                    if scroll || n.document().descendants().any(|d| d != g && d.attributes().any(|a| a.value() == id)) {
-                        return fail("a subview's safe-area guide in use, or a scroll view's, is not supported by this ibtool");
+                    // One in use is archived as the root view's, its
+                    // placeholder listed all the same (two probes); only its
+                    // own constraints may use it.
+                    let users: Vec<Node> = n.document().descendants().filter(|d| d != &g && d.attributes().any(|a| a.value() == id)).collect();
+                    if !users.is_empty() {
+                        let own = |c: &Node| c.has_tag_name("constraint") && c.parent().and_then(|cs| cs.parent()) == Some(n);
+                        if !users.iter().all(own) {
+                            return fail("a subview's safe-area guide used beyond its own constraints is not supported by this ibtool");
+                        }
+                        scene.safe_areas.push((id.to_string(), name.clone()));
                     }
                     scene.unused_guides.push(name.clone());
                 }
@@ -4161,6 +4200,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
+            }
+            // Its own safe-area guide in use, defined by a constraint above.
+            if let Some(at) = scene.layout_guides.iter().position(|g| g.0 == name) {
+                let (_, guide) = scene.layout_guides.remove(at);
+                values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![guide])));
             }
             // Its hugging and compression resistance when given, after its
             // constraint keys (two probes); beside margins or a restoration
@@ -4665,8 +4709,15 @@ fn constraint(first: Value, first_attr: i64, second: Option<(Value, i64)>, const
 /// first uses it: owned by the view, with the system constraints that pin
 /// its edges to the view's.
 fn safe_area_guide(nib: &mut Nib, root: &str) -> Value {
+    named_safe_area_guide(nib, root, "safe area guide")
+}
+
+/// The safe-area guide of the view `owner`, named `guide`: a subview's is
+/// archived as the root view's (two probes).
+fn named_safe_area_guide(nib: &mut Nib, owner: &str, guide: &str) -> Value {
+    let root = owner;
     let identifier = nib.string("UIViewSafeAreaLayoutGuide");
-    let me = || reference("safe area guide");
+    let me = || reference(guide.to_string());
     let view = || reference(root.to_string());
     // NSLayoutAttribute: left 1, right 2, top 3, bottom 4.
     let pins = [("top", me(), 3, view()), ("left", me(), 1, view()), ("bottom", view(), 4, me()), ("right", view(), 2, me())];
@@ -4692,7 +4743,7 @@ fn safe_area_guide(nib: &mut Nib, root: &str) -> Value {
         ("UILayoutGuideShouldBeArchived", Value::Bool(true)),
         ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(true)),
         ("UILayoutGuideSystemConstraints", system),
-    ]).named("safe area guide"))
+    ]).named(guide))
 }
 
 /// A constraint's multiplier, as Xcode archives it: a float's value (a
