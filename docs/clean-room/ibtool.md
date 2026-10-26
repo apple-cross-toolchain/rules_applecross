@@ -784,6 +784,24 @@ runtime attributes as views do; a disabled slider is `UIDisabled` before its
 value; a stack view's standard spacing (`spacingType`) is archived as 0,
 whatever its spacing (eight probes).
 
+A button's states are its `UIButtonStatefulContent`, keyed by
+UIControlState in that order whatever the document's (normal 0, which it
+needs, highlighted 1, disabled 2, selected 4), each a `UIButtonContent` of
+its title and colours (six probes; a localizable build's titles for other
+states than normal are refused).
+
+A label's, plain view's or button's `<accessibility>` is a
+`UIRuntimeAccessibilityConfiguration` in the nib's
+`UINibAccessibilityConfigurationsKey`, in document order:
+`UIAccessibileObject` (sic), then those given of `UIAccessibilityHint`,
+`UIAccessibilityIdentifier`, `UIAccessibilityLabel`, `UIAccessibilityTraits`
+(an `NSNumber` of UIAccessibilityTraits' bits: button 1, link 2, image 4,
+static text 64, not enabled 256, header 65536, none 0) and
+`UIIsAccessibilityElement` (0 or 1); equal numbers are one object (14
+probes). Runtime attributes, switches (their frame pair) and accessibility
+settings inside cells and table headers are refused: those nibs aren't
+built with them.
+
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
 (`UIMultipleTouchEnabled`), in that order after `UIOpaque`; an `alpha`

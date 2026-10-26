@@ -1354,6 +1354,57 @@ fn alpha(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String>
     Ok(())
 }
 
+/// A view's `<accessibility>`, as its nib's configuration of the view
+/// (`name`): hint, identifier, label, traits (UIAccessibilityTraits) and
+/// whether it is an element, those given.
+fn accessibility(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Result<(), String> {
+    let Some(a) = child(n, "accessibility", "accessibilityConfiguration") else { return Ok(()) };
+    if children(n, "accessibility").count() > 1 {
+        return fail("two accessibility configurations are not supported by this ibtool");
+    }
+    only_attributes(a, &[("key", None), ("hint", None), ("identifier", None), ("label", None)])?;
+    only_children(a, &["accessibilityTraits", "bool"])?;
+    if nib.localizable && (a.attribute("hint").is_some() || a.attribute("label").is_some()) {
+        return fail("a localizable accessibility label or hint is not supported by this ibtool");
+    }
+    let mut values = vec![("UIAccessibileObject", reference(name))];
+    for (attribute, key) in [("hint", "UIAccessibilityHint"), ("identifier", "UIAccessibilityIdentifier"), ("label", "UIAccessibilityLabel")] {
+        if let Some(v) = a.attribute(attribute) {
+            values.push((key, nib.string(v)));
+        }
+    }
+    if let Some(t) = child(a, "accessibilityTraits", "traits") {
+        let mut traits = 0;
+        for at in t.attributes().filter(|at| at.name() != "key") {
+            if at.value() != "YES" {
+                return fail(format!("accessibility trait {}=\"{}\" is not supported by this ibtool", at.name(), at.value()));
+            }
+            traits |= match at.name() {
+                "none" => 0,
+                "button" => 1,
+                "link" => 2,
+                "image" => 4,
+                "staticText" => 64,
+                "notEnabled" => 256,
+                "header" => 65536,
+                other => return fail(format!("the accessibility trait {other} is not supported by this ibtool")),
+            };
+        }
+        values.push(("UIAccessibilityTraits", nib.int_number(traits)));
+    }
+    for b in children(a, "bool") {
+        only_attributes(b, &[("key", Some("isElement")), ("value", None)])?;
+        let value = match attr(b, "value")? {
+            "YES" => 1,
+            "NO" => 0,
+            other => return fail(format!("isElement=\"{other}\" is not supported by this ibtool")),
+        };
+        values.push(("UIIsAccessibilityElement", nib.int_number(value)));
+    }
+    scene.accessibility.push(Value::New(Object::new("UIRuntimeAccessibilityConfiguration", values)));
+    Ok(())
+}
+
 /// An `<edgeInsets>` or `<directionalEdgeInsets>` as top, `left`, bottom,
 /// `right`.
 fn insets(n: Node, left: &str, right: &str) -> Result<[f64; 4], String> {
@@ -1409,6 +1460,8 @@ struct Scene<'a> {
     /// Views' user-defined runtime attributes, as the nib's key-value
     /// pairs, in document order.
     pairs: Vec<Value>,
+    /// Views' accessibility configurations, in document order.
+    accessibility: Vec<Value>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -1438,6 +1491,7 @@ impl<'a> Scene<'a> {
             gesture_views: Vec::new(),
             view_outlets: Vec::new(),
             pairs: Vec::new(),
+            accessibility: Vec::new(),
             guides: Vec::new(),
         }
     }
@@ -1608,9 +1662,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
                 ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections", "string", "userDefinedRuntimeAttributes"])?;
+            only_children(n, &[
+                "rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections", "string", "userDefinedRuntimeAttributes",
+                "accessibility",
+            ])?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs);
+            accessibility(nib, scene, n, &name)?;
             view_connections(scene, n, &name)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
@@ -2002,21 +2060,39 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 None => None,
                 Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints", "userDefinedRuntimeAttributes"])?;
+            only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints", "userDefinedRuntimeAttributes", "accessibility"])?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs);
+            accessibility(nib, scene, n, &name)?;
             ignored_autoresizing_mask(n)?;
-            let states: Vec<Node> = children(n, "state").collect();
-            if states.len() != 1 || states[0].attribute("key") != Some("normal") {
-                return fail("buttons other than one with a normal state are not supported by this ibtool");
-            }
-            only_attributes(states[0], &[("key", None), ("title", None)])?;
-            only_children(states[0], &["color"])?;
-            for c in children(states[0], "color") {
-                if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
-                    return fail("button state colours other than title and title shadow colours are not supported by this ibtool");
+            // Its states by UIControlState, in that order whatever the
+            // document's: normal 0, highlighted 1, disabled 2, selected 4.
+            let mut states: Vec<(i64, &str, Node)> = Vec::new();
+            for st in children(n, "state") {
+                let key = attr(st, "key")?;
+                let value = match key {
+                    "normal" => 0,
+                    "highlighted" => 1,
+                    "disabled" => 2,
+                    "selected" => 4,
+                    other => return fail(format!("a button's {other} state is not supported by this ibtool")),
+                };
+                if states.iter().any(|s| s.0 == value) {
+                    return fail("a button with two of one state is not supported by this ibtool");
                 }
+                only_attributes(st, &[("key", None), ("title", None)])?;
+                only_children(st, &["color"])?;
+                for c in children(st, "color") {
+                    if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
+                        return fail("button state colours other than title and title shadow colours are not supported by this ibtool");
+                    }
+                }
+                states.push((value, key, st));
             }
+            if !states.iter().any(|s| s.0 == 0) {
+                return fail("a button without a normal state is not supported by this ibtool");
+            }
+            states.sort_by_key(|s| s.0);
             for c in children(n, "color") {
                 if !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor")) {
                     return fail("button colours other than background and tint colours are not supported by this ibtool");
@@ -2071,19 +2147,27 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(h) = horizontal {
                 values.push(("UIContentHorizontalAlignment", Value::Int(h)));
             }
-            let state = nib.int_number(0);
-            let mut content = Vec::new();
-            if let Some(title) = states[0].attribute("title") {
-                content.push(("UITitle", nib.text(id, "normalTitle", title)));
+            let mut stateful = Vec::new();
+            for (value, key, st) in &states {
+                stateful.push(nib.int_number(*value));
+                let mut content = Vec::new();
+                if let Some(title) = st.attribute("title") {
+                    // A localizable build's keys for other states' titles
+                    // aren't established.
+                    if nib.localizable && *value != 0 {
+                        return fail("a localizable button's title for a state other than normal is not supported by this ibtool");
+                    }
+                    content.push(("UITitle", nib.text(id, &format!("{key}Title"), title)));
+                }
+                if let Some(c) = child(*st, "color", "titleColor") {
+                    content.push(("UITitleColor", color(nib, c)?));
+                }
+                if let Some(c) = child(*st, "color", "titleShadowColor") {
+                    content.push(("UIShadowColor", color(nib, c)?));
+                }
+                stateful.push(Value::New(Object::new("UIButtonContent", content)));
             }
-            if let Some(c) = child(states[0], "color", "titleColor") {
-                content.push(("UITitleColor", color(nib, c)?));
-            }
-            if let Some(c) = child(states[0], "color", "titleShadowColor") {
-                content.push(("UIShadowColor", color(nib, c)?));
-            }
-            let content = Value::New(Object::new("UIButtonContent", content));
-            values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", vec![state, content])));
+            values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", stateful)));
             values.push(("UIAdjustsImageWhenHighlighted", Value::Bool(true)));
             values.push(("UIAdjustsImageWhenDisabled", Value::Bool(true)));
             if let Some(t) = button_type {
@@ -2203,11 +2287,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 only_children(n, &[
                     "rect", "autoresizingMask", "color", "subviews", "constraints", "connections", "edgeInsets", "directionalEdgeInsets",
-                    "userDefinedRuntimeAttributes",
+                    "userDefinedRuntimeAttributes", "accessibility",
                 ])?;
                 view_connections(scene, n, &name)?;
                 let pairs = runtime_attributes(nib, n, &name)?;
                 scene.pairs.extend(pairs);
+                accessibility(nib, scene, n, &name)?;
             }
             let mut inner = Vec::new();
             for s in children(n, "subviews") {
@@ -2670,6 +2755,12 @@ fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections:
 /// A nib's root object with key-value pairs: values set by key path when
 /// the nib loads.
 fn root_object_with_pairs(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections: Vec<Value>, pairs: Vec<Value>) -> Object {
+    root_object_full(nib, top, objects, connections, Vec::new(), pairs)
+}
+
+/// A nib's root object with accessibility configurations and key-value
+/// pairs.
+fn root_object_full(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections: Vec<Value>, accessibility: Vec<Value>, pairs: Vec<Value>) -> Object {
     let top = nib.array("NSArray", top);
     let objects = nib.array("NSArray", objects);
     // No connections are the nib's one empty array.
@@ -2679,7 +2770,7 @@ fn root_object_with_pairs(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, c
         ("UINibObjectsKey", objects),
         ("UINibConnectionsKey", connections),
         ("UINibVisibleWindowsKey", nib.empty_array()),
-        ("UINibAccessibilityConfigurationsKey", nib.empty_array()),
+        ("UINibAccessibilityConfigurationsKey", if accessibility.is_empty() { nib.empty_array() } else { nib.array("NSArray", accessibility) }),
         ("UINibTraitStorageListsKey", nib.empty_array()),
         ("UINibKeyValuePairsKey", if pairs.is_empty() { nib.empty_array() } else { nib.array("NSArray", pairs) }),
         ("IBUINibLNEVersionKey", Value::Int(1)),
@@ -3641,7 +3732,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 ])));
             }
             let pairs = std::mem::take(&mut scene.pairs);
-            (root_object_with_pairs(&mut nib, top, objects, connections, pairs), upstream_used)
+            let accessibility = std::mem::take(&mut scene.accessibility);
+            (root_object_full(&mut nib, top, objects, connections, accessibility, pairs), upstream_used)
         };
 
         // The view controller's nib: the scene's placeholders and a class
