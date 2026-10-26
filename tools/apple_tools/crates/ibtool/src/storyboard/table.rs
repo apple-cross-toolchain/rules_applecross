@@ -528,9 +528,18 @@ pub(super) fn table_view_nib(
     if scene.segues != header_segues {
         return fail("segues in a table's header or footer other than its containers' are not supported by this ibtool");
     }
-    if !scene.actions.is_empty() || !scene.control_outlets.is_empty() || !scene.gesture_views.is_empty() {
-        return fail("actions, outlets to the controller, gestures and segues in a table's header or footer are not supported by this ibtool");
+    if !scene.actions.is_empty() || !scene.gesture_views.is_empty() {
+        return fail("actions, gestures and segues in a table's header or footer are not supported by this ibtool");
     }
+    // A header or footer view's outlets to the controller (a search bar's
+    // or text field's delegate), before the table's own of one name, as
+    // the document has them (a corpus storyboard).
+    if scene.control_outlets.iter().any(|o| o.2 != "upstream") {
+        return fail("a header or footer view's outlets to custom objects are not supported by this ibtool");
+    }
+    let header_outlets = std::mem::take(&mut scene.control_outlets);
+    let at = vc_outlets.len();
+    outlets.splice(at..at, header_outlets);
     if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
         return fail("runtime attributes, switches and accessibility settings in a table's header or footer are not supported by this ibtool");
     }
