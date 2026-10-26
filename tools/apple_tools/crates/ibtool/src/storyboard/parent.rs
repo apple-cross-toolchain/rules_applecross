@@ -74,7 +74,12 @@ pub(super) fn parent_controller_nib(
         ("sceneMemberID", Some("viewController")),
     ];
     if kind == Kind::Tab {
-        allowed.extend([("title", None), ("automaticallyAdjustsScrollViewInsets", Some("NO"))]);
+        allowed.extend([
+            ("title", None),
+            ("automaticallyAdjustsScrollViewInsets", Some("NO")),
+            ("definesPresentationContext", Some("YES")),
+            ("providesPresentationContextTransitionStyle", Some("YES")),
+        ]);
     }
     only_attributes(node, &allowed)?;
     let id = attr(node, "id")?;
@@ -225,6 +230,7 @@ pub(super) fn parent_controller_nib(
     if !kids.is_empty() {
         values.push(("UIChildViewControllers", nib.array("NSMutableArray", child_values)));
     }
+    presentation_context(node, &mut values);
     if node.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
     }

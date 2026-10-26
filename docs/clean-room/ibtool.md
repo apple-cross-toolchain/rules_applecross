@@ -238,10 +238,14 @@ other values of the attributes these use, is refused. Observed:
     and edges less than a point apart (a centre half a point from another
     was drawn along the edge).
 
-  Multipliers, relations, priorities, margins and baselines in such ties
-  weren't probed and are refused. Two constraints with the same
-  items and attributes are refused as well,
-  as are constraints from a legacy guide (but the bottom guide as the first
+  - Before the length come the priority, lowest first (required ones
+    last), and the relation: less than or equal, greater than or equal,
+    then equal (100 probe scenes). The same items and attributes twice or
+    more tie as any others do: second items with the same frame, so equal
+    lengths go by id (100 more).
+
+  Multipliers, margins and baselines in such ties weren't probed and are
+  refused, as are constraints from a legacy guide (but the bottom guide as the first
   item of a sibling constraint, placed at the root view's foot, three
   probes) or between one and the root view
   (their frames aren't in the document), constraints between the root
@@ -623,7 +627,9 @@ when it is initial or identified. Observed with 25 probes:
   and a class swapper for the controller (`UINavigationController`, or the
   custom class's runtime name): `UITitle`, `UIStoryboardIdentifier`,
   `UIRestorationIdentifier`, `UIChildViewControllers` (the root),
-  `UIModalPresentationStyle` (UIKit's order: full screen 0, page sheet 1,
+  `UIDefinesPresentationContext` and
+  `UIProvidesPresentationContextTransitionStyle` true when it says so
+  (three probes), `UIModalPresentationStyle` (UIKit's order: full screen 0, page sheet 1,
   form sheet 2, current context 3, over full screen 5, over current
   context 6, popover 7; none when automatic: eight probes),
   `UIKeyAutomaticallyAdjustsScrollViewInsets` 0 when it says NO,
@@ -730,7 +736,9 @@ rest are refused for other elements):
   child itself. Then the owner, the first responder, the scene's own
   storyboard placeholder and the controller (`UITabBarController`, or a
   class swapper): `UITitle`, its identifiers, `UIChildViewControllers` (the
-  children, when it has any), `UIKeyAutomaticallyAdjustsScrollViewInsets`,
+  children, when it has any), the presentation context flags as a
+  navigation controller's (two probes),
+  `UIKeyAutomaticallyAdjustsScrollViewInsets`,
   `UITabBar`, `UICustomizableViewControllers` and `UIViewControllers` (the
   children both times), the class names.
 - The objects list continues with the tab bar and the children, then each
@@ -755,9 +763,9 @@ rest are refused for other elements):
   controller's own
   nib carries its declared item the same way, after its title, and lists it
   after the navigation item.
-- The bar is laid out by Xcode: bounds 0x54 centred 27 below its frame's
-  top (at x 0; a mask of flexible width and top margin changes nothing:
-  four probes and a corpus storyboard), its background colour if any, opaque, mask 10, hugging `{250, 250}`,
+- The bar is laid out by Xcode: bounds 0x54 centred at its frame's x and
+  27 below its top (a mask of flexible width and top margin changes
+  nothing: six probes and two corpus storyboards), its background colour if any, opaque, mask 10, hugging `{250, 250}`,
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off, `UIDelegate`
   the controller, `UIItems` (an `NSArray` of the children's items),
   `UIBarTranslucence` 1, or 2 when `translucent="NO"`.
