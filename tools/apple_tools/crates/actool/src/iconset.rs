@@ -380,6 +380,11 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
     let mut out = Vec::new();
     for i in images.as_array().map(Vec::as_slice).unwrap_or_default() {
         let Some(filename) = i["filename"].as_str() else { continue };
+        // An image whose file is missing is left out, without a word (two
+        // probes).
+        if !icon_dir.join(filename).is_file() {
+            continue;
+        }
         // An image the set has but no slot uses (a file name, perhaps marked
         // unassigned): Xcode ignores it.
         if i.as_object().is_some_and(|o| o.keys().all(|k| k == "filename" || (k == "unassigned" && i["unassigned"] == true))) {

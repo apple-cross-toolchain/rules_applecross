@@ -156,6 +156,11 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
         if name == "Contents.json" || name.starts_with('.') || p.is_file() {
             continue;
         }
+        // It ignores image, colour and data sets without a Contents.json too
+        // (three probes); an app icon set without one is an empty set.
+        if [".imageset", ".colorset", ".dataset"].iter().any(|e| name.ends_with(e)) && !p.join("Contents.json").is_file() {
+            continue;
+        }
         match name.rsplit_once('.') {
             Some((stem, "imageset")) => found.image_sets.push((format!("{prefix}{stem}"), p)),
             Some((_, "colorset")) if !has_entries(&read_json(&p.join("Contents.json"))?, "colors", "color") => {}
@@ -217,6 +222,10 @@ fn platform_name(platform: &str) -> Result<&'static str, String> {
 }
 
 fn icon_images(icon_dir: &Path) -> Result<Vec<IconImage>, String> {
+    // A set without a Contents.json has no images (one probe).
+    if !icon_dir.join("Contents.json").is_file() {
+        return Ok(Vec::new());
+    }
     let contents = read_json(&icon_dir.join("Contents.json"))?;
     // No images list is as an empty one (one probe).
     Ok(contents["images"]
@@ -224,6 +233,8 @@ fn icon_images(icon_dir: &Path) -> Result<Vec<IconImage>, String> {
         .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
+        // An image whose file is missing is left out (two probes).
+        .filter(|i| i["filename"].as_str().is_some_and(|f| icon_dir.join(f).is_file()))
         .filter_map(|i| {
             Some(IconImage {
                 filename: i["filename"].as_str()?.to_string(),
