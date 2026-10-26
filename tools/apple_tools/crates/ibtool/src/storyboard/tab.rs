@@ -40,9 +40,16 @@ pub(super) fn tab_bar_item(nib: &mut Nib, controller: Node, name: &str) -> Resul
         item,
         &[("key", Some("tabBarItem")), ("title", None), ("image", None), ("selectedImage", None), ("systemItem", None), ("tag", None), ("id", None)],
     )?;
-    if item.has_children() {
-        return fail("a tab bar item's insets or other children are not supported by this ibtool");
-    }
+    only_children(item, &["inset"])?;
+    let insets = match children(item, "inset").collect::<Vec<_>>()[..] {
+        [] => None,
+        [i] if i.attribute("key") == Some("imageInsets") => {
+            only_attributes(i, &[("key", None), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
+            let edge = |a: &str| number(attr(i, a)?);
+            Some(doubles(&[edge("minY")?, edge("minX")?, edge("maxY")?, edge("maxX")?]))
+        }
+        _ => return fail("a tab bar item's insets other than its image insets are not supported by this ibtool"),
+    };
     let mut values = Vec::new();
     if let Some(system) = item.attribute("systemItem") {
         // UITabBarSystemItem, as UIKit's header lists it.
@@ -66,6 +73,10 @@ pub(super) fn tab_bar_item(nib: &mut Nib, controller: Node, name: &str) -> Resul
     }
     if let Some(image) = item.attribute("selectedImage") {
         values.push(("UISelectedTemplateImage", nib.image(image)));
+    }
+    // Image insets, top, left, bottom and right, last.
+    if let Some(insets) = insets {
+        values.push(("UIImageInsets", insets));
     }
     Ok((Value::New(Object::new("UITabBarItem", values).named(name)), true))
 }

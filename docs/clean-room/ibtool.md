@@ -514,8 +514,15 @@ when it is initial or identified. Observed with 25 probes:
   `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1;
   `largeTitles` is `UIBarPrefersLargeTitles` after the large content
   properties, the layout the same (two probes).
-  Other bar settings, other segues and controllers nothing loads are
-  refused.
+- The bar's appearance: a background colour before `UIDeepDrawRect`;
+  `translucent="NO"` adds `UIOpaque` after it and makes
+  `UIBarTranslucence` 2; its tint (or the document's) after the mask;
+  after the large content properties `UIBarStyle` 1 for black, then
+  `UIBarPrefersLargeTitles`, then `UIBarLargeTitleTextAttributes`; its
+  bar tint `UIBarTintColor` after `UIIsLocked`; `UITitleTextAttributes`
+  after `UIDelegate`. Text attributes are a dictionary of `NSColor` (the
+  text colour) then `NSFont` (ten probes). Other bar settings, other
+  segues and controllers nothing loads are refused.
 
 A navigation item's left and right bar button items are its
 `UILeftBarButtonItem` and `UIRightBarButtonItem`, after its title, and each
@@ -574,7 +581,9 @@ rest are refused for other elements):
   keeps its implied one. A child with no `<tabBarItem>` gets one Xcode
   implies: `UIEnabled` and `UISpringLoaded`, both true. A declared item has
   `UISystemItem` (UIKit's `UITabBarSystemItem` order), `UIEnabled`, `UITag`,
-  `UITitle`, `UIImage`, `UISelectedTemplateImage`. A view controller's own
+  `UITitle`, `UIImage`, `UISelectedTemplateImage`, then `UIImageInsets`
+  (top, left, bottom, right from its `imageInsets`; four probes). A view
+  controller's own
   nib carries its declared item the same way, after its title, and lists it
   after the navigation item.
 - The bar is laid out by Xcode: bounds 0x54 centred at (0, 27), its

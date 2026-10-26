@@ -3357,9 +3357,18 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
     let bar = children(nav, "navigationBar").next().ok_or("a navigation controller without a navigation bar")?;
     only_attributes(
         bar,
-        &[("key", Some("navigationBar")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("largeTitles", Some("YES")), ("id", None)],
+        &[
+            ("key", Some("navigationBar")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("largeTitles", Some("YES")),
+            ("barStyle", Some("black")), ("translucent", Some("NO")), ("id", None),
+        ],
     )?;
-    only_children(bar, &["rect", "autoresizingMask"])?;
+    only_children(bar, &["rect", "autoresizingMask", "color", "textAttributes"])?;
+    if let Some(c) = children(bar, "color").find(|c| !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor" | "barTintColor"))) {
+        return fail(format!("a navigation bar's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
+    }
+    if let Some(t) = children(bar, "textAttributes").find(|t| !matches!(t.attribute("key"), Some("titleTextAttributes" | "largeTitleTextAttributes"))) {
+        return fail(format!("a navigation bar's {} are not supported by this ibtool", t.attribute("key").unwrap_or("unkeyed text attributes")));
+    }
     for m in children(bar, "autoresizingMask") {
         if autoresizing_mask(m)? != 0 || m.has_children() {
             return fail("navigation bars with an autoresizing mask are not supported by this ibtool");
@@ -3369,14 +3378,22 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
     if f.x != 0.0 {
         return fail("navigation bars not at x 0 are not supported by this ibtool");
     }
-    let mut values = vec![
-        ("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])),
-        ("UICenter", doubles(&[f.x, f.y + 27.0])),
-        ("UIDeepDrawRect", Value::Bool(true)),
-        ("UIAutoresizeSubviews", Value::Bool(true)),
-        ("UIAutoresizingMask", Value::Int(2)),
-    ];
-    if let Some(tint) = document_tint(bar)? {
+    let opaque = bar.attribute("translucent").is_some();
+    let mut values = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])), ("UICenter", doubles(&[f.x, f.y + 27.0]))];
+    if let Some(c) = child(bar, "color", "backgroundColor") {
+        values.push(("UIBackgroundColor", color(nib, c)?));
+    }
+    values.push(("UIDeepDrawRect", Value::Bool(true)));
+    if opaque {
+        values.push(("UIOpaque", Value::Bool(true)));
+    }
+    values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+    values.push(("UIAutoresizingMask", Value::Int(2)));
+    let tint = match child(bar, "color", "tintColor") {
+        Some(own) => Some(own),
+        None => document_tint(bar)?,
+    };
+    if let Some(tint) = tint {
         values.push(("UITintColor", color(nib, tint)?));
     }
     let hugging = nib.string("{250, 250}");
@@ -3390,16 +3407,46 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
+    if bar.attribute("barStyle").is_some() {
+        values.push(("UIBarStyle", Value::Int(1)));
+    }
     if bar.attribute("largeTitles").is_some() {
         values.push(("UIBarPrefersLargeTitles", Value::Bool(true)));
     }
-    let items = nib.array("NSMutableArray", vec![reference(item)]);
+    if let Some(t) = child(bar, "textAttributes", "largeTitleTextAttributes") {
+        values.push(("UIBarLargeTitleTextAttributes", text_attributes(nib, t)?));
+    }
     values.push(("UIIsLocked", Value::Bool(true)));
+    if let Some(c) = child(bar, "color", "barTintColor") {
+        values.push(("UIBarTintColor", color(nib, c)?));
+    }
+    let items = nib.array("NSMutableArray", vec![reference(item)]);
     values.push(("UIItems", items));
     values.push(("UIDelegate", reference(delegate)));
+    if let Some(t) = child(bar, "textAttributes", "titleTextAttributes") {
+        values.push(("UITitleTextAttributes", text_attributes(nib, t)?));
+    }
     values.push(("UIBarPosition", Value::Int(2)));
-    values.push(("UIBarTranslucence", Value::Int(1)));
+    values.push(("UIBarTranslucence", Value::Int(if opaque { 2 } else { 1 })));
     Ok(Value::New(Object::new("UINavigationBar", values).named(name)))
+}
+
+/// A bar's `<textAttributes>`: a dictionary of its text colour (`NSColor`)
+/// and font (`NSFont`), in that order.
+fn text_attributes(nib: &mut Nib, t: Node) -> Result<Value, String> {
+    only_attributes(t, &[("key", None)])?;
+    only_children(t, &["color", "fontDescription"])?;
+    let mut entries = Vec::new();
+    if let Some(c) = children(t, "color").next() {
+        if c.attribute("key") != Some("textColor") || children(t, "color").count() > 1 {
+            return fail("text attributes other than one text colour and a font are not supported by this ibtool");
+        }
+        entries.extend([nib.string("NSColor"), color(nib, c)?]);
+    }
+    if let Some(f) = child(t, "fontDescription", "fontDescription") {
+        entries.extend([nib.string("NSFont"), font(nib, Some(f), None)?]);
+    }
+    Ok(nib.array("NSDictionary", entries))
 }
 
 /// A navigation controller's attributes, checked.
