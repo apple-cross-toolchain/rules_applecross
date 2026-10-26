@@ -1293,6 +1293,14 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     Ok(Object::new(class, values))
 }
 
+/// A view's `UIRestorationIdentifier`, just before
+/// `UIViewSemanticContentAttribute`.
+fn restoration_identifier(nib: &mut Nib, values: &mut Vec<(&'static str, Value)>, n: Node) {
+    if let Some(r) = n.attribute("restorationIdentifier") {
+        values.push(("UIRestorationIdentifier", nib.string(r)));
+    }
+}
+
 /// A view's `UIHidden` and `UITag`, after `UIOpaque`.
 fn hidden_and_tag(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
     if n.attribute("hidden").is_some() {
@@ -1502,7 +1510,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
             sizes.push((rank, c));
             continue;
         }
-        let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?)?;
+        let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, false)?;
         if others.iter().any(|(_, k, ..)| *k == key) {
             return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
         }
@@ -1555,6 +1563,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")),
                 ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
+                ("restorationIdentifier", None),
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
@@ -1614,6 +1623,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
                 values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
             }
+            restoration_identifier(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             // Long text is a <string> rather than an attribute.
@@ -1918,10 +1928,28 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // `fixedFrame` is Interface Builder's alone, and a system button
             // is archived as a rounded-rect one; a custom one has no type.
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", Some("center")),
-                ("contentVerticalAlignment", Some("center")), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")),
+                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
+                ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")), ("enabled", Some("NO")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
+            // UIControlContentHorizontalAlignment and its vertical one,
+            // the centre left out.
+            let horizontal = match n.attribute("contentHorizontalAlignment") {
+                None | Some("center") => None,
+                Some("left") => Some(1),
+                Some("right") => Some(2),
+                Some("fill") => Some(3),
+                Some("leading") => Some(4),
+                Some("trailing") => Some(5),
+                Some(other) => return fail(format!("contentHorizontalAlignment=\"{other}\" on <button> is not supported by this ibtool")),
+            };
+            let vertical = match n.attribute("contentVerticalAlignment") {
+                None | Some("center") => None,
+                Some("top") => Some(1),
+                Some("bottom") => Some(2),
+                Some("fill") => Some(3),
+                Some(other) => return fail(format!("contentVerticalAlignment=\"{other}\" on <button> is not supported by this ibtool")),
+            };
             let button_type = match n.attribute("buttonType") {
                 Some("roundedRect" | "system") => Some(1),
                 None => None,
@@ -1984,6 +2012,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
+            if n.attribute("enabled").is_some() {
+                values.push(("UIDisabled", Value::Bool(true)));
+            }
+            if let Some(v) = vertical {
+                values.push(("UIContentVerticalAlignment", Value::Int(v)));
+                values.push(("UIContentVerticalAlignment2", Value::Int(v)));
+            }
+            if let Some(h) = horizontal {
+                values.push(("UIContentHorizontalAlignment", Value::Int(h)));
+            }
             let state = nib.int_number(0);
             let mut content = Vec::new();
             if let Some(title) = states[0].attribute("title") {
@@ -2033,14 +2071,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 (Some(other), _) => return fail(format!("stack view alignment {other} is not supported by this ibtool here")),
             };
             // Edge insets are its layout margins, which it then arranges
-            // within; without them the arrangement setting changes nothing.
+            // within, whatever its arrangement setting says; without them the
+            // setting changes nothing.
             let margins = match child(n, "edgeInsets", "layoutMargins") {
-                Some(e) => {
-                    if n.attribute("layoutMarginsRelativeArrangement").is_none() {
-                        return fail("a stack view's edge insets without layout-margins-relative arrangement are not supported by this ibtool");
-                    }
-                    Some(insets(e, "left", "right")?)
-                }
+                Some(e) => Some(insets(e, "left", "right")?),
                 None => None,
             };
             let mut arranged = Vec::new();
@@ -2094,7 +2128,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", None), ("fixedFrame", Some("YES")),
                     ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
                     ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
-                    ("preservesSuperviewLayoutMargins", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
+                    ("preservesSuperviewLayoutMargins", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("restorationIdentifier", None),
                     ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                 ])?;
                 if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
@@ -2180,6 +2214,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
                 values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
             }
+            restoration_identifier(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             // A custom class is swapped in for the view when it loads.
@@ -2300,10 +2335,12 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
 /// Where Xcode puts a root view's constraint (docs/clean-room/ibtool.md):
 /// grouped by the item other than the root view, or the first item between
 /// siblings, the groups by where their item is (below); in a group,
-/// constraints with the root view first, by their two attributes in one
-/// order, then those between siblings, by first and second attribute in
-/// another. Equal keys are refused: Xcode's order for them isn't stable.
-fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str) -> Result<(&'a str, u8, (usize, usize)), String> {
+/// constraints to a view deeper than the root's subviews (`nested` second
+/// items) first, then those with the root view, by their two attributes in
+/// one order, then those between siblings; those to deeper views and between
+/// siblings by first and second attribute in another. Equal keys are
+/// refused: Xcode's order for them isn't stable.
+fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: bool) -> Result<(&'a str, u8, (usize, usize)), String> {
     // Margins and baselines placed by two probes of every attribute.
     const WITH_ROOT: [&str; 19] = [
         "centerXWithinMargins", "centerX", "centerYWithinMargins", "centerY", "rightMargin", "leftMargin", "right", "left", "trailingMargin",
@@ -2325,9 +2362,9 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
     }
     let (group, kind, attributes) = if first == root || second == root {
         let (r1, r2) = (rank(&WITH_ROOT, a1)?, rank(&WITH_ROOT, a2)?);
-        (if first == root { second } else { first }, 0, (r1.min(r2), r1.max(r2)))
+        (if first == root { second } else { first }, 1, (r1.min(r2), r1.max(r2)))
     } else {
-        (first, 1, (rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?))
+        (first, if nested { 0 } else { 2 }, (rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?))
     };
     Ok((group, kind, attributes))
 }
@@ -2514,6 +2551,21 @@ fn proxy(nib: &mut Nib, id: &str, name: &str) -> Value {
 fn outlet(nib: &mut Nib, label: &str, source: &str, destination: &str) -> Value {
     let label = nib.string(label);
     Value::New(Object::new("UIRuntimeOutletConnection", vec![("UILabel", label), ("UISource", reference(source)), ("UIDestination", reference(destination))]))
+}
+
+/// An outlet collection: `destinations` in a mutable array, the class the
+/// property is filled with, and whether it adds to an existing collection.
+fn outlet_collection(nib: &mut Nib, label: &str, source: &str, destinations: Vec<Value>, class: &str, adds: bool) -> Value {
+    let label = nib.string(label);
+    let collection = nib.array("NSMutableArray", destinations);
+    let class = nib.string(class);
+    Value::New(Object::new("UIRuntimeOutletCollectionConnection", vec![
+        ("UILabel", label),
+        ("UISource", reference(source)),
+        ("UIDestination", collection),
+        ("runtimeCollectionClassName", class),
+        ("addsContentToExistingCollection", Value::Bool(adds)),
+    ]))
 }
 
 /// A navigation item's bar button items' actions and segues' `perform:`,
@@ -3149,12 +3201,28 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // Outlets from the view controller into its view, and its own
         // segues.
         let mut vc_outlets = Vec::new();
+        // Outlet collections: (property, collection class, views), by first
+        // appearance, the views in document order.
+        let mut vc_collections: Vec<(String, String, Vec<String>)> = Vec::new();
         let own_segues: Vec<Node> = children(vc, "connections").flat_map(|c| children(c, "segue")).collect();
         for c in children(vc, "connections") {
-            only_children(c, &["outlet", "segue"])?;
+            only_children(c, &["outlet", "outletCollection", "segue"])?;
             for o in children(c, "outlet") {
                 only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
                 vc_outlets.push((attr(o, "property")?.to_string(), view_name(attr(o, "destination")?)));
+            }
+            for o in children(c, "outletCollection") {
+                only_attributes(o, &[("property", None), ("destination", None), ("collectionClass", None), ("id", None)])?;
+                let (property, class) = (attr(o, "property")?, o.attribute("collectionClass").unwrap_or("NSArray"));
+                if !matches!(class, "NSArray" | "NSMutableArray") {
+                    return fail(format!("an outlet collection of class {class} is not supported by this ibtool"));
+                }
+                let destination = view_name(attr(o, "destination")?);
+                match vc_collections.iter_mut().find(|c| c.0 == property) {
+                    Some(c) if c.1 == class => c.2.push(destination),
+                    Some(_) => return fail("an outlet collection of two classes is not supported by this ibtool"),
+                    None => vc_collections.push((property.to_string(), class.to_string(), vec![destination])),
+                }
             }
         }
 
@@ -3189,6 +3257,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
             (false, _, _, _) => frame(view)?,
         };
+        if is_list && !vc_collections.is_empty() {
+            return fail("a table or collection view controller's outlet collections are not supported by this ibtool");
+        }
         let (view_root, upstream_used) = if is_table {
             let (root, upstream_used, segues, listing) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
             scene.segues = segues;
@@ -3226,7 +3297,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // The view's nib, in encoding order.
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
             let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+            if !vc_collections.is_empty() && !scene.gesture_views.is_empty() {
+                return fail("outlet collections beside a gesture recognizer are not supported by this ibtool");
+            }
             let upstream_used = !vc_outlets.is_empty()
+                || !vc_collections.is_empty()
                 || view.descendants().any(|d| d.has_tag_name("action") || (d.has_tag_name("outlet") && d.attribute("destination") == Some(vc_id)));
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
@@ -3305,7 +3380,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 if Some(id) == bottom_guide {
                     return Ok((f.h * f.h, 0.0));
                 }
-                let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("constraints between the root view and a nested view ({id}) are not supported by this ibtool"))?;
+                let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("root view constraints on a nested view ({id}), between it and the root view or as their first item, are not supported by this ibtool"))?;
                 let f = subview_frame(*v)?;
                 Ok((f.x * f.x + f.y * f.y, f.x))
             };
@@ -3336,7 +3411,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                             return fail(format!("constraints on {id} are not supported by this ibtool"));
                         }
                     }
-                    let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?)?;
+                    let nested = second != view_id && Some(second) != safe_area_id && !legacy(second) && !direct.iter().any(|v| v.attribute("id") == Some(second));
+                    let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?, nested)?;
                     if xml_constraints.iter().any(|(_, k, ..)| *k == key) {
                         return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
                     }
@@ -3344,6 +3420,19 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
             }
             xml_constraints.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
+            // Views deeper than the root's subviews that its constraints name,
+            // in their order: the objects list them after the root's
+            // subviews, not under their own superviews (six probes).
+            let mut pulled: Vec<String> = Vec::new();
+            for (_, _, _, first, second) in &xml_constraints {
+                for id in std::iter::once(*first).chain(*second) {
+                    let name = view_name(id);
+                    let nested = scene.subviews.iter().any(|s| s.1 == name && s.0.is_some());
+                    if nested && !pulled.contains(&name) {
+                        pulled.push(name);
+                    }
+                }
+            }
             let mut constraint_values: Vec<Value> = guide_constraints.iter().map(|n| reference(n.clone())).collect();
             let mut constraint_names = Vec::new();
             // The safe-area guide is archived where a constraint first uses it.
@@ -3402,9 +3491,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 if let Some(v) = v {
                     objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
                 }
-                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v) {
+                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1)) {
                     objects.push(reference(s.clone()));
                     queue.push_back(Some(s));
+                }
+                if v.is_none() {
+                    for p in &pulled {
+                        objects.push(reference(p.clone()));
+                        queue.push_back(Some(p));
+                    }
                 }
             }
 
@@ -3425,18 +3520,19 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // A view's gesture recognizers are an outlet collection, before
             // the outlets.
             outlets.splice(0..0, scene.gesture_views.iter().map(|v| ("gestureRecognizers", v.as_str(), "")));
+            // The controller's outlet collections, before its outlets.
+            for (label, class, views) in &vc_collections {
+                for v in views {
+                    if *v != root_name && !scene.subviews.iter().any(|s| s.1 == *v) {
+                        return fail("an outlet collection of anything but the controller's views is not supported by this ibtool");
+                    }
+                }
+                let views = views.iter().map(|v| reference(v.clone())).collect();
+                connections.push(outlet_collection(&mut nib, label, "upstream", views, class, false));
+            }
             for (label, source, destination) in outlets {
                 if destination.is_empty() {
-                    let label = nib.string(label);
-                    let collection = nib.array("NSMutableArray", vec![reference("gesture")]);
-                    let class = nib.string("NSArray");
-                    connections.push(Value::New(Object::new("UIRuntimeOutletCollectionConnection", vec![
-                        ("UILabel", label),
-                        ("UISource", reference(source)),
-                        ("UIDestination", collection),
-                        ("runtimeCollectionClassName", class),
-                        ("addsContentToExistingCollection", Value::Bool(true)),
-                    ])));
+                    connections.push(outlet_collection(&mut nib, label, source, vec![reference("gesture")], "NSArray", true));
                 } else {
                     connections.push(outlet(&mut nib, label, source, destination));
                 }
