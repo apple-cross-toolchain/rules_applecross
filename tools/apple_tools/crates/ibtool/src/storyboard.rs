@@ -1498,11 +1498,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     if tag == "slider" || tag == "pageControl" || (h, v) != default {
         values.push(("UIViewContentHuggingPriority", nib.string(&format!("{{{h}, {v}}}"))));
     }
-    let resistance = (n.attribute("horizontalCompressionResistancePriority"), n.attribute("verticalCompressionResistancePriority"));
-    if resistance != (None, None) {
-        let (h, v) = (resistance.0.unwrap_or("750"), resistance.1.unwrap_or("750"));
-        values.push(("UIViewContentCompressionResistancePriority", nib.string(&format!("{{{h}, {v}}}"))));
-    }
+    compression_resistance(nib, &mut values, n);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     let class = match tag {
@@ -1720,6 +1716,15 @@ fn hidden_and_tag(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<()
         values.push(("UITag", Value::Int(tag.parse().map_err(|_| format!("not a number: {tag}"))?)));
     }
     Ok(())
+}
+
+/// A view's compression resistance, each 750 unless given, if either is.
+fn compression_resistance(nib: &mut Nib, values: &mut Vec<(&'static str, Value)>, n: Node) {
+    let resistance = (n.attribute("horizontalCompressionResistancePriority"), n.attribute("verticalCompressionResistancePriority"));
+    if resistance != (None, None) {
+        let (h, v) = (resistance.0.unwrap_or("750"), resistance.1.unwrap_or("750"));
+        values.push(("UIViewContentCompressionResistancePriority", nib.string(&format!("{{{h}, {v}}}"))));
+    }
 }
 
 /// A view's `UIAlpha`, after its autoresizing mask.
@@ -2337,7 +2342,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("textAlignment", None), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("text", None), ("enabled", Some("NO")),
                 ("hidden", Some("YES")), ("restorationIdentifier", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("horizontalHuggingPriority", None),
-                ("verticalHuggingPriority", None), ("tag", None), ("alpha", None),
+                ("verticalHuggingPriority", None), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
+                ("verticalCompressionResistancePriority", None),
             ])?;
             // `none` is the style a text field without one has (one probe).
             let border = match n.attribute("borderStyle") {
@@ -2411,6 +2417,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
             }
+            // Then its compression resistance (one probe); beside a
+            // restoration identifier it isn't established.
+            if n.attribute("restorationIdentifier").is_some() && (n.attribute("horizontalCompressionResistancePriority").is_some() || n.attribute("verticalCompressionResistancePriority").is_some()) {
+                return fail("a text field's compression resistance beside a restoration identifier is not supported by this ibtool");
+            }
+            compression_resistance(nib, &mut values, n);
             restoration_identifier(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -3709,6 +3721,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     // Its placeholder intrinsic size is Interface Builder's
                     // alone (one probe).
                     ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
+                    ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("horizontalCompressionResistancePriority", None),
+                    ("verticalCompressionResistancePriority", None),
                 ])?;
                 if scroll && n.attribute("key").is_some() {
                     return fail("a scroll view as a table's header or footer view is not supported by this ibtool");
@@ -3795,6 +3809,21 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
+            }
+            // Its hugging and compression resistance when given, after its
+            // constraint keys (two probes); beside margins or a restoration
+            // identifier they aren't established.
+            let priorities = ["horizontalHuggingPriority", "verticalHuggingPriority", "horizontalCompressionResistancePriority", "verticalCompressionResistancePriority"];
+            if priorities.iter().any(|p| n.attribute(*p).is_some()) {
+                if n.attribute("restorationIdentifier").is_some() || n.attribute("preservesSuperviewLayoutMargins").is_some()
+                    || n.attribute("layoutMarginsFollowReadableWidth").is_some() || children(n, "edgeInsets").next().is_some() || children(n, "directionalEdgeInsets").next().is_some() || scroll
+                {
+                    return fail("a view's hugging or compression resistance beside margins, a restoration identifier or scrolling is not supported by this ibtool");
+                }
+                if n.attribute("horizontalHuggingPriority").is_some() || n.attribute("verticalHuggingPriority").is_some() {
+                    values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+                }
+                compression_resistance(nib, &mut values, n);
             }
             margins(&mut values, n)?;
             restoration_identifier(nib, &mut values, n);

@@ -1152,7 +1152,11 @@ refused). A button may be hidden, tagged (both after `UIOpaque`) and
 have an alpha (after its mask), as a plain view (two probes), and given
 hugging (each 250 unless given) or compression resistance (each 750
 unless given) priorities, written when given, before its semantic content
-attribute (three probes). A selected button has `UISelected` before
+attribute (three probes). A plain view's and a text field's are written
+the same way, after their constraint keys and hugging, as `{h, v}` (three
+probes and 100 random storyboards); beside a plain view's margins,
+scrolling or a restoration identifier, or a text field's restoration
+identifier, they are refused. A selected button has `UISelected` before
 `UIDisabled`, and a line break mode other than middle truncation is
 `UILineBreakMode` (word wrap 0, tail truncation 4) after its stateful
 content (four probes). A button may have no states at all, and then no
