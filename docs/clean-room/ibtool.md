@@ -495,7 +495,11 @@ other values of the attributes these use, is refused. Observed:
   its controller nib, and after `UIParentViewController` as a navigation
   controller's root (seven probes).
 - The safe-area guide in the objects is an unowned `UILayoutGuide` with an
-  empty identifier. When a constraint uses the guide, the root view also
+  empty identifier. A subview's own safe-area guide that no constraint
+  uses is the same, listed first in the subview's turn in the objects'
+  breadth-first order, before the constraints it holds and its subviews
+  (two probes). One in use gives the subview its own archived guide, as
+  the root view's below (one probe), which this ibtool refuses. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
   the order above): identifier `UIViewSafeAreaLayoutGuide`, locked,
   archived and allowing negative dimensions, with four system constraints
