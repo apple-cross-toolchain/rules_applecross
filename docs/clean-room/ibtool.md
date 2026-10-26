@@ -296,12 +296,13 @@ other values of the attributes these use, is refused. Observed:
   Where the root's size isn't its frame's, a subview whose mask has a
   flexible left or top margin or a sizable width or height is refused; the
   rest are compiled, with or without a device (eight probes).
-- An image view (`userInteractionEnabled="NO"`; scale to fill, aspect fit,
+- An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`; scale to fill, aspect fit,
   aspect fill or centre) archives as a label's geometry and flags (a
   background colour first, hidden and tag after `UIOpaque`, alpha after
   the mask), then `UIContentMode` unless scale to fill, `UIClipsToBounds`,
   `UITintColor`, the autoresizing key, its own constraints, its hugging
-  (none without priorities; a missing one is 250), and `UIImage`:
+  (none without priorities; a missing one is 250), its compression
+  resistance if given (each 750 unless given), and `UIImage`:
   a `UIImageNibPlaceholder` per image name (width and height 1, the name,
   nil symbol, configuration and catalog), shared by the views using it;
   no image, no key. snag's launch screen is byte-identical.
@@ -459,7 +460,7 @@ other values of the attributes these use, is refused. Observed:
   Display P3 and calibrated RGB are converted to extended sRGB in floats,
   through a matrix this ibtool doesn't reproduce exactly (it fits 24
   colours to 2e-7): refused.
-- A scene's gesture recognizer (tap, pan or swipe; one per scene) is in
+- A scene's gesture recognizer (tap, pan or swipe) is in
   the controller's nib, after the storyboard placeholder, with
   `UIGestureRecognizer.allowedTouchTypes` 15 and
   `requiresExclusiveTouchType`, then a tap's `_imp` `UITapRecognizer`
@@ -473,8 +474,17 @@ other values of the attributes these use, is refused. Observed:
   it (plain views, labels, image views, the root view) has a
   `gestureRecognizers` `UIRuntimeOutletCollectionConnection` to the
   placeholder (an `NSMutableArray`, `runtimeCollectionClassName`
-  `NSArray`, appending), before the outlets (13 probes). Two or more
-  recognizers in a scene are ordered in a way not established: refused.
+  `NSArray`, appending), before the outlets (13 probes).
+- Several recognizers in a scene: their placeholders are numbered from 1
+  through the views that have them from the last in the document (the
+  root view, whose connections follow its subviews, first), each view's in
+  its document order, and the controller's own placeholder follows them.
+  A view with several has one collection connection holding them all; the
+  root view's comes first, then the others in document order. The
+  controller's nib lists the recognizers in reverse document order,
+  `UITopLevelObjectsToKeepAliveFromStoryboard` in document order, and
+  their actions by selector, one selector's in document order (ten
+  probes). A recognizer of two views is refused.
 
 ## Navigation controllers
 

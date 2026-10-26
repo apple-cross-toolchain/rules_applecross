@@ -740,13 +740,27 @@ fn view_connections(scene: &mut Scene, n: Node, name: &str) -> Result<(), String
         }
         for o in children(c, "outletCollection") {
             only_attributes(o, &[("property", Some("gestureRecognizers")), ("destination", None), ("appends", Some("YES")), ("id", None)])?;
-            if scene.gesture.as_deref() != Some(attr(o, "destination")?) {
-                return fail("an outlet collection to anything but the scene's gesture recognizer is not supported by this ibtool");
+            let destination = attr(o, "destination")?;
+            if !scene.gestures.iter().any(|g| g == destination) {
+                return fail("an outlet collection to anything but the scene's gesture recognizers is not supported by this ibtool");
             }
-            scene.gesture_views.push(name.to_string());
+            if scene.gesture_views.iter().any(|(_, gs)| gs.iter().any(|g| g == destination)) {
+                return fail("a gesture recognizer of two views, or listed twice, is not supported by this ibtool");
+            }
+            match scene.gesture_views.iter_mut().find(|(v, _)| v == name) {
+                Some((_, gs)) => gs.push(destination.to_string()),
+                None => scene.gesture_views.push((name.to_string(), vec![destination.to_string()])),
+            }
         }
     }
     Ok(())
+}
+
+/// The scene's gesture recognizers in their placeholders' order: the views
+/// that have them from the last in the document, each view's in its order
+/// (seven probes).
+fn gesture_order(views: &[(String, Vec<String>)]) -> Vec<&String> {
+    views.iter().rev().flat_map(|(_, gs)| gs).collect()
 }
 
 /// A scene's gesture recognizer (tap, pan or swipe), with the selectors of
@@ -1539,10 +1553,10 @@ struct Scene<'a> {
     containers: Vec<(String, String)>,
     /// Controls' outlets to the controller: (label, the control).
     control_outlets: Vec<(String, String)>,
-    /// The scene's gesture recognizer's id, and the views whose
-    /// `gestureRecognizers` it is.
-    gesture: Option<String>,
-    gesture_views: Vec<String>,
+    /// The scene's gesture recognizers' ids, and the views whose
+    /// `gestureRecognizers` they are, with each view's recognizers.
+    gestures: Vec<String>,
+    gesture_views: Vec<(String, Vec<String>)>,
     /// Views' outlets to other views: (label, the view, the destination).
     view_outlets: Vec<(String, String, String)>,
     /// Views' user-defined runtime attributes, as the nib's key-value
@@ -1577,7 +1591,7 @@ impl<'a> Scene<'a> {
             segue_listing: None,
             containers: Vec::new(),
             control_outlets: Vec::new(),
-            gesture: None,
+            gestures: Vec::new(),
             gesture_views: Vec::new(),
             view_outlets: Vec::new(),
             pairs: Vec::new(),
@@ -2734,16 +2748,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("image", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
-                ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("id", None),
+                ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
+                ("verticalCompressionResistancePriority", None), ("id", None),
             ])?;
             only_children(n, &["rect", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
-            if n.attribute("userInteractionEnabled").is_none() {
-                return fail("image views with user interaction are not supported by this ibtool");
-            }
+
             let content_mode = match attr(n, "contentMode")? {
                 "scaleToFill" => 0,
                 "scaleAspectFit" => 1,
@@ -2762,7 +2775,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIOpaque", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
-            values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             alpha(&mut values, n)?;
@@ -2783,6 +2798,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if n.attribute("horizontalHuggingPriority").is_some() || n.attribute("verticalHuggingPriority").is_some() {
                 values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            }
+            // Compression resistance, each 750 unless given (one probe).
+            let resistance = (n.attribute("horizontalCompressionResistancePriority"), n.attribute("verticalCompressionResistancePriority"));
+            if resistance != (None, None) {
+                let (h, v) = (resistance.0.unwrap_or("750"), resistance.1.unwrap_or("750"));
+                values.push(("UIViewContentCompressionResistancePriority", nib.string(&format!("{{{h}, {v}}}"))));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -3840,18 +3861,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let root_name = view_name(view_id);
 
         let mut scene = Scene::new(vc_id, module, view, None);
-        // One gesture recognizer, which the view nib reaches through the
-        // first placeholder.
+        // The gesture recognizers, which the view nib reaches through the
+        // first placeholders.
         let recognizers: Vec<Node> = objects_node.children().filter(|c| c.tag_name().name().ends_with("GestureRecognizer")).collect();
-        if recognizers.len() > 1 {
-            return fail("more than one gesture recognizer in a scene is not supported by this ibtool");
-        }
-        let recognizer = recognizers.first().copied();
-        if recognizer.is_some() && is_list {
+        if !recognizers.is_empty() && is_list {
             return fail("a gesture recognizer in a table or collection view controller's scene is not supported by this ibtool");
         }
-        scene.gesture = recognizer.map(|r| attr(r, "id")).transpose()?.map(str::to_string);
-        let gesture = usize::from(recognizer.is_some());
+        scene.gestures = recognizers.iter().map(|r| attr(*r, "id").map(str::to_string)).collect::<Result<_, _>>()?;
+        let gesture = recognizers.len();
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -3989,10 +4006,6 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 || view.descendants().any(|d| (d.has_tag_name("action") || d.has_tag_name("outlet")) && d.attribute("destination") == Some(vc_id));
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
-            if gesture == 1 {
-                top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "gesture"));
-                objects.push(reference("gesture"));
-            }
             if upstream_used {
                 top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", 1 + gesture), "upstream"));
                 objects.push(reference("upstream"));
@@ -4011,9 +4024,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // Each control's segue has a placeholder of its own, after the
             // controller's.
             view_connections(&mut scene, view, &root_name)?;
-            if recognizer.is_some() && scene.gesture_views.is_empty() {
+            let numbered = gesture_order(&scene.gesture_views);
+            if numbered.len() != gesture {
                 return fail("a gesture recognizer no view has is not supported by this ibtool");
             }
+            let gesture_proxies: Vec<Value> =
+                numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1), &format!("gesture {g}"))).collect();
+            top.splice(2..2, gesture_proxies);
+            objects.splice(2..2, numbered.iter().map(|g| reference(format!("gesture {g}"))));
             for i in 0..scene.segues.len() {
                 let n = i + 1 + gesture + usize::from(upstream_used);
                 let name = format!("upstream segue {i}");
@@ -4248,7 +4266,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             outlets.sort_by(|a, b| a.0.cmp(b.0));
             // A view's gesture recognizers are an outlet collection, before
             // the outlets.
-            outlets.splice(0..0, scene.gesture_views.iter().map(|v| ("gestureRecognizers", v.as_str(), "")));
+            // The root view's first, as the objects list it (one probe).
+            let mut gesture_sources: Vec<&str> = scene.gesture_views.iter().map(|(v, _)| v.as_str()).collect();
+            gesture_sources.sort_by_key(|v| *v != root_name);
+            outlets.splice(0..0, gesture_sources.into_iter().map(|v| ("gestureRecognizers", v, "")));
             // The controller's outlet collections, before its outlets.
             for (label, class, views) in &vc_collections {
                 for v in views {
@@ -4260,8 +4281,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 connections.push(outlet_collection(&mut nib, label, "upstream", views, class, false));
             }
             for (label, source, destination) in outlets {
-                if destination.is_empty() {
-                    connections.push(outlet_collection(&mut nib, label, source, vec![reference("gesture")], "NSArray", true));
+                if label == "gestureRecognizers" {
+                    let gestures = &scene.gesture_views.iter().find(|(v, _)| v == source).expect("listed above").1;
+                    let gestures = gestures.iter().map(|g| reference(format!("gesture {g}"))).collect();
+                    connections.push(outlet_collection(&mut nib, label, source, gestures, "NSArray", true));
                 } else {
                     connections.push(outlet(&mut nib, label, source, destination));
                 }
@@ -4334,20 +4357,26 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         let templates = segue::templates(&mut vnib, "controller", upstream_used, 1 + gesture, &view_segues, &own_segues, &bar_segues, &nib_names)?;
         let mut external = templates.external;
-        let recognizer = match recognizer {
-            Some(r) => {
-                if embedded_here {
-                    return fail("a gesture recognizer in an embedded controller's scene is not supported by this ibtool");
-                }
-                if extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
-                    return fail("a gesture recognizer with these controller settings is not supported by this ibtool");
-                }
-                let (object, selectors) = gesture_recognizer(&mut vnib, r, vc_id)?;
-                external.splice(0..0, [vnib.string("UpstreamPlaceholder-1"), reference("gesture")]);
-                Some((Value::New(object.named("gesture")), selectors))
+        // The recognizers: the nib's objects in reverse document order,
+        // kept alive in document order, mapped to their placeholders.
+        if !recognizers.is_empty() {
+            if embedded_here {
+                return fail("a gesture recognizer in an embedded controller's scene is not supported by this ibtool");
             }
-            None => None,
-        };
+            if extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+                return fail("a gesture recognizer with these controller settings is not supported by this ibtool");
+            }
+        }
+        let mut gesture_objects = Vec::new();
+        for r in recognizers.iter().rev() {
+            let (object, selectors) = gesture_recognizer(&mut vnib, *r, vc_id)?;
+            gesture_objects.push((Value::New(object.named(format!("gesture {}", attr(*r, "id")?))), attr(*r, "id")?, selectors));
+        }
+        let mut placeholders = Vec::new();
+        for (i, g) in gesture_order(&scene.gesture_views).iter().enumerate() {
+            placeholders.extend([vnib.string(&format!("UpstreamPlaceholder-{}", i + 1)), reference(format!("gesture {g}"))]);
+        }
+        external.splice(0..0, placeholders);
         let external = vnib.array("NSDictionary", external);
         swapper.push(("UIExternalObjectsTableForViewLoading", external));
         swapper.push(("UINibName", vnib.string(&view_nib_name)));
@@ -4362,8 +4391,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if let Some(array) = templates.array {
             swapper.push(("UIStoryboardSegueTemplates", array));
         }
-        if recognizer.is_some() {
-            swapper.push(("UITopLevelObjectsToKeepAliveFromStoryboard", vnib.array("NSArray", vec![reference("gesture")])));
+        if !recognizers.is_empty() {
+            let alive = recognizers.iter().map(|r| attr(*r, "id").map(|id| reference(format!("gesture {id}")))).collect::<Result<_, _>>()?;
+            swapper.push(("UITopLevelObjectsToKeepAliveFromStoryboard", vnib.array("NSArray", alive)));
         }
         if let Some(edges) = extended_edges(vc)? {
             swapper.push(("UIKeyEdgesForExtendedLayout", Value::Int(edges)));
@@ -4388,16 +4418,21 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, "controller"));
         let mut top = vec![owner, responder, storyboard];
-        if recognizer.is_some() && !bar_items.is_empty() {
+        if !recognizers.is_empty() && !bar_items.is_empty() {
             return fail("a gesture recognizer with bar button items is not supported by this ibtool");
         }
         let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard")];
-        if let Some((object, selectors)) = recognizer {
+        // Their actions by selector, those with one selector in document
+        // order (two probes).
+        let mut gesture_actions: Vec<(String, &str)> =
+            gesture_objects.iter().rev().flat_map(|(_, id, selectors)| selectors.iter().map(|s| (s.clone(), *id))).collect();
+        gesture_actions.sort_by(|a, b| a.0.cmp(&b.0));
+        for (object, id, _) in gesture_objects {
             top.push(object);
-            objects.push(reference("gesture"));
-            for selector in selectors {
-                connections.push(event_connection(&mut vnib, &selector, "gesture", "controller"));
-            }
+            objects.push(reference(format!("gesture {id}")));
+        }
+        for (selector, id) in gesture_actions {
+            connections.push(event_connection(&mut vnib, &selector, &format!("gesture {id}"), "controller"));
         }
         objects.push(reference("controller"));
         if child(vc, "navigationItem", "navigationItem").is_some() {
