@@ -177,7 +177,12 @@ other values of the attributes these use, is refused. Observed:
   others, each with a `_UILayoutSupportConstraint` (width, priority 999),
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:
   leading, top, height; bottom: leading, height, view bottom to guide
-  bottom), which the root view's constraints list first.
+  bottom), which the root view's constraints list first. A root view with
+  neither a safe-area guide nor legacy ones (the document not using safe
+  areas) gets the legacy guides as if listed when the document uses Auto
+  Layout (three probes, one of the corpus's), and no guides without it
+  (one of the corpus's). There a subview without an autoresizing mask has
+  mask 40, not 36 (one probe), which this ibtool refuses.
 - The document's constraints follow, whatever their order or ids in the
   document. They are grouped by item: a constraint with the root view by
   its other item, one between siblings (subviews, the safe-area guide) by

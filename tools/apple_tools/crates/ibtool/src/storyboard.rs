@@ -4841,8 +4841,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // So does one with legacy guides, beside them, listed or not (three
         // probes: a launch screen with both, and with each alone).
         let has_safe_area = safe_area.is_some() || uses_safe_areas;
-        if !is_list && !has_safe_area && scene.guides.is_empty() {
-            return fail("a view needs either a safe-area layout guide or legacy top and bottom layout guides for this ibtool");
+        // A view with neither gets the legacy guides, as if the document
+        // listed them, when it uses Auto Layout (two probes, one of the
+        // corpus's), and none without (one of the corpus's).
+        let autolayout = view.document().root_element().attribute("useAutolayout") == Some("YES");
+        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout {
+            scene.guides = vec![("implicit top guide", "top"), ("implicit bottom guide", "bottom")];
+        }
+        // Without Auto Layout a subview's default mask isn't the usual one
+        // (40, not 36: one probe), so one without a mask is refused.
+        if !autolayout && view.descendants().any(|d| d.is_element() && d.parent().is_some_and(|p| p.has_tag_name("subviews")) && child(d, "autoresizingMask", "autoresizingMask").is_none()) {
+            return fail("a subview without an autoresizing mask in a document without Auto Layout is not supported by this ibtool");
         }
         let safe_area_listed_id = safe_area.and_then(|g| g.attribute("id"));
         if !scene.guides.is_empty()
