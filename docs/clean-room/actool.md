@@ -689,6 +689,19 @@ for a black drawing). Matching those needs CoreGraphics' rasterizer and
 antialiasing, which this actool doesn't reproduce: PDF image sets are
 refused, with or without `preserves-vector-representation`.
 
+## Data sets
+
+A data set's file (one, universal, with its `universal-type-identifier`) is
+a rendition keyed as an image set's at scale 1, with a facet as an image
+set's: layout 1000, flags 0, no size, scale 100, pixel format `DATA`
+(stored `ATAD`), colour space 0, named `CoreStructuredImage`. Its TLVs are
+the composition, 0x3ed (the identifier's length with its NUL, 0, then the
+identifier and a NUL) and 0x3ee 1, and its payload the file as `RAWD`
+(version 0, length, bytes), whatever its size. A catalog of data alone has
+no appearance table. Without a type identifier Xcode looks one up for the
+file's extension (`.drawing` is `com.apple.drawing`), which this actool
+refuses, as it does several files or other idioms (eight probes).
+
 ## Launch images
 
 A launch image set (`.launchimage`) compiles to nothing unless

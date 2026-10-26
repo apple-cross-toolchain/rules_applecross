@@ -8,6 +8,7 @@ mod bom;
 mod car;
 mod colorset;
 mod colour;
+mod dataset;
 mod directions;
 mod dmp2;
 mod icon;
@@ -117,6 +118,8 @@ struct Scan {
     image_sets: Vec<(String, PathBuf)>,
     /// Colour sets with colours, by name.
     color_sets: Vec<(String, PathBuf)>,
+    /// Data sets by name.
+    data_sets: Vec<(String, PathBuf)>,
     /// Launch image sets by name.
     launch_images: Vec<(String, PathBuf)>,
 }
@@ -152,6 +155,7 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             Some((stem, "imageset")) => found.image_sets.push((format!("{prefix}{stem}"), p)),
             Some((_, "colorset")) if !has_entries(&read_json(&p.join("Contents.json"))?, "colors", "color") => {}
             Some((stem, "colorset")) => found.color_sets.push((format!("{prefix}{stem}"), p)),
+            Some((stem, "dataset")) => found.data_sets.push((format!("{prefix}{stem}"), p)),
             Some((stem, "appiconset")) if top => found.icon_sets.push((stem.to_string(), p)),
             Some((stem, "brandassets")) if top => found.brand_assets.push((stem.to_string(), p)),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
@@ -313,8 +317,11 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     let (color_facets, colors) = colorset::compile(&scan.color_sets, name_identifier)?;
     images.facets.extend(color_facets);
     images.renditions.extend(colors);
+    let (data_facets, data) = dataset::compile(&scan.data_sets, name_identifier)?;
+    images.facets.extend(data_facets);
+    images.renditions.extend(data);
     if !images.is_empty() && platform != "ios" {
-        return Err("image sets and colour sets are supported by this actool for iOS only".into());
+        return Err("image, colour and data sets are supported by this actool for iOS only".into());
     }
     if !images.is_empty() && (!scan.brand_assets.is_empty() || !scan.solid_stacks.is_empty()) {
         return Err("image sets alongside image stacks are not supported by this actool".into());
@@ -544,7 +551,8 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
             .into_iter()
             .chain(images.facets)
             .collect(),
-        appearances: if mac { Vec::new() } else { appearances(&renditions) },
+        // A catalog of data alone has no appearance table.
+        appearances: if mac || renditions.iter().all(car::Rendition::is_data) { Vec::new() } else { appearances(&renditions) },
         schema_version: 2,
         key_semantics: if mac { 1 } else { 2 },
         renditions,
