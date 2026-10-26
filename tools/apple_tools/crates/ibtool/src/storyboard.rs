@@ -839,7 +839,13 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
                     ("italicSystem", None) => "italic",
                     (kind, _) => return fail(format!("a {kind} font with a weight is not supported by this ibtool")),
                 };
-                (None, None, number(attr(n, "pointSize")?)?, face)
+                // No size is 12 points (two probes).
+                let size = match (number(attr(n, "pointSize")?)?, face) {
+                    (0.0, "regular" | "bold") => 12.0,
+                    (0.0, _) => return fail(format!("a {face} system font without a size is not supported by this ibtool")),
+                    (size, _) => size,
+                };
+                (None, None, size, face)
             }
         }
         None => (None, None, default_size.ok_or("a font is required")?, "regular"),
@@ -988,6 +994,9 @@ struct Scene<'a> {
     /// The ids of the segues controls trigger, in depth-first order; each is
     /// a `perform:` action on a placeholder of its own.
     segues: Vec<String>,
+    /// The order the controller's nib lists them in, as indices into
+    /// `segues`, when not theirs: a static table's cells' segues.
+    segue_listing: Option<Vec<usize>>,
     /// Container views' `containerView` outlets: (the placeholder of the
     /// view's embed segue, the view).
     containers: Vec<(String, String)>,
@@ -1021,6 +1030,7 @@ impl<'a> Scene<'a> {
             parent,
             actions: Vec::new(),
             segues: Vec::new(),
+            segue_listing: None,
             containers: Vec::new(),
             control_outlets: Vec::new(),
             gesture: None,
@@ -1029,6 +1039,13 @@ impl<'a> Scene<'a> {
             guides: Vec::new(),
         }
     }
+}
+
+/// A scene's segues as its controller's nib lists them, each with its
+/// placeholder's index.
+fn listed_segues<'a, 'i>(scene: &Scene, vc: Node<'a, 'i>) -> Vec<(usize, Node<'a, 'i>)> {
+    let order: Vec<usize> = scene.segue_listing.clone().unwrap_or_else(|| (0..scene.segues.len()).collect());
+    order.into_iter().filter_map(|i| vc.descendants().find(|d| d.attribute("id") == Some(scene.segues[i].as_str())).map(|n| (i, n))).collect()
 }
 
 fn hugging(nib: &mut Nib, n: Node) -> Result<Value, String> {
@@ -1050,10 +1067,8 @@ fn text_alignment(s: Option<&str>) -> Result<i64, String> {
     })
 }
 
-/// Whether a view is archived as not translating its autoresizing mask:
-/// when the document says so and a constraint is on it.
-/// A label's or button's autoresizing mask, which Xcode leaves out when
-/// the view doesn't translate it into constraints.
+/// A button's autoresizing mask, which Xcode leaves out when the view
+/// doesn't translate it into constraints.
 fn ignored_autoresizing_mask(n: Node) -> Result<(), String> {
     if children(n, "autoresizingMask").next().is_some() && n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
         return fail(format!("<autoresizingMask> inside a <{}> that translates it is not supported by this ibtool", n.tag_name().name()));
@@ -1061,6 +1076,8 @@ fn ignored_autoresizing_mask(n: Node) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether a view is archived as not translating its autoresizing mask:
+/// when the document says so and a constraint is on it.
 fn does_not_translate(scene: &Scene, n: Node) -> bool {
     n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| scene.constrained.contains(&id))
 }
@@ -1176,7 +1193,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
     let object = match n.tag_name().name() {
         "label" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
+                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")),
+                ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
@@ -1184,7 +1202,6 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             ])?;
             only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections"])?;
             view_connections(scene, n, &name)?;
-            ignored_autoresizing_mask(n)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
             }
@@ -1200,8 +1217,20 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("userInteractionEnabled").is_some() {
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             }
+            if n.attribute("multipleTouchEnabled").is_some() {
+                values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            // A label that translates its autoresizing mask has the
+            // document's, none when empty; otherwise flexible right and
+            // bottom margins.
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) if n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() => autoresizing_mask(m)?,
+                _ => 36,
+            };
+            if mask != 0 {
+                values.push(("UIAutoresizingMask", Value::Int(mask)));
+            }
             let mode = content_mode(n.attribute("contentMode").unwrap_or("left"))?;
             if mode != 0 {
                 values.push(("UIContentMode", Value::Int(mode)));
@@ -1215,7 +1244,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
-            values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            // A label in a cell's style has no hugging priorities.
+            match (n.attribute("horizontalHuggingPriority"), n.attribute("verticalHuggingPriority")) {
+                (None, None) => {}
+                _ => values.push(("UIViewContentHuggingPriority", hugging(nib, n)?)),
+            }
+            if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+                values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+            }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIText", nib.text(id, "text", attr(n, "text")?)));
@@ -2106,8 +2142,9 @@ struct RootController<'a, 'i> {
     /// UIViewController or UITableViewController.
     original_class: &'static str,
     upstream_used: bool,
-    /// The ids of the segues its view's controls trigger, and its own.
-    view_segues: Vec<String>,
+    /// The segues its view's controls trigger, as listed with their
+    /// placeholders' indices, and its own.
+    view_segues: Vec<(usize, Node<'a, 'i>)>,
     own_segues: Vec<Node<'a, 'i>>,
 }
 
@@ -2181,8 +2218,7 @@ fn embedded_controller(
         )),
         (None, None) => None,
     };
-    let view_segues: Vec<Node> = root.view_segues.iter().filter_map(|id| vc.descendants().find(|d| d.attribute("id") == Some(id.as_str()))).collect();
-    let mut templates = segue::templates(nib, name, root.upstream_used, 1, &view_segues, &root.own_segues, nib_names)?;
+    let mut templates = segue::templates(nib, name, root.upstream_used, 1, &root.view_segues, &root.own_segues, nib_names)?;
     // An empty table is one object however many controllers have one.
     let external = if templates.external.is_empty() {
         nib.shared("empty dictionary".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))
@@ -2707,8 +2743,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             (false, _, _, _) => frame(view)?,
         };
         let (view_root, upstream_used) = if is_table {
-            let (root, upstream_used, segues) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
+            let (root, upstream_used, segues, listing) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
             scene.segues = segues;
+            scene.segue_listing = listing;
             (root, upstream_used)
         } else if is_collection {
             let (root, upstream_used, segues) = collection::collection_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
@@ -2990,7 +3027,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let embedded = navs.iter().any(|n| n.2 == vc_id && n.3) || held_children.contains(vc_id) || in_held_nav(vc_id);
         let embedded_here = embedded;
         let swapped = is_initial || identified || vc.attribute("customClass").is_some();
-        let view_segues: Vec<Node> = scene.segues.iter().filter_map(|id| view.descendants().find(|d| d.attribute("id") == Some(id.as_str()))).collect();
+        let view_segues = listed_segues(&scene, vc);
 
         let mut vnib = Nib::new(platform, color_matched, localizable);
         let owner = proxy(&mut vnib, "IBFilesOwner", "owner");
@@ -3094,7 +3131,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 class_name: class_name.clone(),
                 original_class,
                 upstream_used,
-                view_segues: scene.segues.clone(),
+                view_segues: view_segues.clone(),
                 own_segues: own_segues.clone(),
             });
         }

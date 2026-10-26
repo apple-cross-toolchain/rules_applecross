@@ -692,6 +692,31 @@ placeholder. A plain view may be `opaque="NO"` (no `UIOpaque`) or clip its
 subviews (`UIClipsToBounds`, after its content mode), and its
 `fixedFrame` changes nothing (seven probes).
 
+A static cell's segue has a placeholder in the table's nib, after the
+controller's: section by section, each section's cells in reverse. The
+cell's `selectionSegueTemplate` outlets go in their placeholders' order.
+The controller's nib lists the templates in document order (its external
+objects in placeholder order). A static cell's outlets to its own views
+are the table nib's (16 probes).
+
+A cell may have a built-in style (`style="IBUITableViewCellStyle…"`):
+`UITableViewCellStyle` (Value1 1, Value2 2, Subtitle 3, the default left
+out) after its reuse identifier, and `UITextLabel` and
+`UIDetailTextLabel` referring to the content view's labels named by
+`textLabel` and `detailTextLabel`, which are `UITableViewLabel`s. The
+objects list the detail label before the text label wherever the
+document has them (12 probes). Labels, there and elsewhere, may:
+- have no hugging priorities, and then no `UIViewContentHuggingPriority`;
+- set `multipleTouchEnabled` (`UIMultipleTouchEnabled`, after
+  `UIUserInteractionDisabled`);
+- turn off `insetsLayoutMarginsFromSafeArea`
+  (`UIViewInsetsLayoutMarginsFromSafeArea` 0, after the hugging
+  priorities).
+
+A label that translates its autoresizing mask has the document's mask,
+left out when empty. A system font of size 0, regular or bold, is 12
+points (14 probes).
+
 ## Collection view controllers
 
 A `<collectionViewController>` whose collection view has a flow layout and

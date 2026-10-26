@@ -232,11 +232,11 @@ pub(super) struct Templates {
 }
 
 /// The templates of a controller (`controller`, its object's name in the
-/// nib) whose view triggers `view_segues` and which itself has
-/// `own_segues`.
+/// nib) whose view triggers `view_segues` (as listed, each with its
+/// placeholder's index) and which itself has `own_segues`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn templates(
-    nib: &mut Nib, controller: &str, upstream_used: bool, first: usize, view_segues: &[Node], own_segues: &[Node], names: &HashMap<String, String>,
+    nib: &mut Nib, controller: &str, upstream_used: bool, first: usize, view_segues: &[(usize, Node)], own_segues: &[Node], names: &HashMap<String, String>,
 ) -> Result<Templates, String> {
     // `first` is the controller's placeholder's number (a gesture
     // recognizer's comes before it).
@@ -245,14 +245,18 @@ pub(super) fn templates(
         external.push(nib.string(&format!("UpstreamPlaceholder-{first}")));
         external.push(reference(controller));
     }
-    let mut view_classes = Vec::new();
-    for (i, s) in view_segues.iter().enumerate() {
+    // The external objects in placeholder order, the rest as listed.
+    let mut by_placeholder: Vec<&(usize, Node)> = view_segues.iter().collect();
+    by_placeholder.sort_by_key(|s| s.0);
+    let mut classes = HashMap::new();
+    for (i, s) in by_placeholder {
         let name = format!("segue {i}");
         external.push(nib.string(&format!("UpstreamPlaceholder-{}", i + first + usize::from(upstream_used))));
         let t = template(nib, *s, names)?;
-        view_classes.push((t.class, name.clone()));
+        classes.insert(*i, t.class);
         external.push(Value::New(t.named(name)));
     }
+    let view_classes: Vec<(&'static str, String)> = view_segues.iter().map(|(i, _)| (classes[i], format!("segue {i}"))).collect();
     let mut outlets: Vec<(&'static str, String)> = Vec::new();
     let mut array = Vec::new();
     let mut objects = Vec::new();
@@ -266,7 +270,7 @@ pub(super) fn templates(
         array.push(Value::New(t.named(name.clone())));
         objects.push(reference(name));
     }
-    for i in 0..view_segues.len() {
+    for (i, _) in view_segues {
         array.push(reference(format!("segue {i}")));
         objects.push(reference(format!("segue {i}")));
     }
