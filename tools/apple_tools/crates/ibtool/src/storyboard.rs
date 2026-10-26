@@ -576,9 +576,18 @@ struct NavigationItem<'a, 'i> {
     bar_items: Vec<String>,
     actions: Vec<(String, String)>,
     segues: Vec<(Node<'a, 'i>, String)>,
+    /// Actions on the first responder, when allowed.
+    responder_actions: Vec<(String, String)>,
 }
 
 fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str) -> Result<NavigationItem<'a, 'i>, String> {
+    navigation_item_with(nib, n, name, vc_id, None)
+}
+
+/// A navigation item whose bar button items may also act on the first
+/// responder (`responder`, its id): those actions come back in
+/// `responder_actions`.
+fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str, responder: Option<&str>) -> Result<NavigationItem<'a, 'i>, String> {
     only_attributes(n, &[("key", Some("navigationItem")), ("title", None), ("largeTitleDisplayMode", None), ("id", None)])?;
     for c in n.children().filter(|c| c.is_element()) {
         let single = c.has_tag_name("barButtonItem") && matches!(c.attribute("key"), Some("leftBarButtonItem" | "rightBarButtonItem"));
@@ -608,6 +617,7 @@ fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &s
     // rest defined there (a single item or a list: two probes).
     let mut bar_items = Vec::new();
     let mut actions = Vec::new();
+    let mut responder_actions = Vec::new();
     let mut segues = Vec::new();
     let mut arrays: Vec<(&str, Vec<Value>)> = Vec::new();
     for (key, list, single, array) in [
@@ -625,7 +635,7 @@ fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &s
         let mut entries = Vec::new();
         for (i, b) in items.iter().enumerate() {
             let item_name = if i == 0 { format!("{name} {key}") } else { format!("{name} {key} {i}") };
-            let object = Value::New(bar_button_item(nib, *b, &item_name, vc_id, &mut actions, &mut segues)?.named(item_name.clone()));
+            let object = Value::New(bar_button_item(nib, *b, &item_name, vc_id, &mut actions, &mut segues, responder, &mut responder_actions)?.named(item_name.clone()));
             if i == 0 {
                 values.push((single, object));
                 entries.push(reference(item_name.clone()));
@@ -660,14 +670,16 @@ fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &s
         Some(other) => return fail(format!("largeTitleDisplayMode {other} is not supported by this ibtool")),
     };
     values.push(("UILargeTitleDisplayMode", Value::Int(mode)));
-    Ok(NavigationItem { value: Value::New(Object::new("UINavigationItem", values).named(name)), bar_items, actions, segues })
+    Ok(NavigationItem { value: Value::New(Object::new("UINavigationItem", values).named(name)), bar_items, actions, segues, responder_actions })
 }
 
 /// A bar button item with a title or a system item, and its actions on the
 /// controller (selector, `name`) and its segue (with `name`) pushed to
 /// `actions` and `segues`.
+#[allow(clippy::too_many_arguments)]
 fn bar_button_item<'a, 'i>(
     nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
+    responder: Option<&str>, responder_actions: &mut Vec<(String, String)>,
 ) -> Result<Object, String> {
     only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("id", None)])?;
     only_children(b, &["connections", "color", "inset"])?;
@@ -685,13 +697,16 @@ fn bar_button_item<'a, 'i>(
         segues.extend(children(c, "segue").map(|sg| (sg, name.to_string())));
         for a in children(c, "action") {
             only_attributes(a, &[("selector", None), ("destination", None), ("id", None)])?;
-            if attr(a, "destination")? != vc_id {
+            let destination = attr(a, "destination")?;
+            let to_responder = responder == Some(destination);
+            if destination != vc_id && !to_responder {
                 return fail("a bar button item's actions on anything but its controller are not supported by this ibtool");
             }
             // Beside a segue, Xcode drops the action, whatever their order
             // (two probes).
             if children(c, "segue").next().is_none() {
-                actions.push((attr(a, "selector")?.to_string(), name.to_string()));
+                let target = if to_responder { &mut *responder_actions } else { &mut *actions };
+                target.push((attr(a, "selector")?.to_string(), name.to_string()));
             }
         }
     }
@@ -2553,6 +2568,69 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UISelectedSegmentIndex", Value::Int(selected as i64)));
             Object::new("UISegmentedControl", values)
         }
+        "navigationBar" => {
+            // A navigation bar in a view: a view's keys, hugging
+            // `{250, 250}`, zero directional margins, then its items
+            // (navigation items as a controller's, each referring back to
+            // it, defined here and listed with their bar button items in its
+            // turn among the objects), `UIBarPosition` 2 and, not
+            // translucent, `UIBarTranslucence` 2 (two probes). Its items'
+            // actions on the controller or first responder are event
+            // connections without a mask.
+            only_attributes(n, &[
+                ("contentMode", Some("scaleToFill")), ("translucent", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "items", "constraints"])?;
+            if !scene.lists_toolbar_items {
+                return fail("a navigation bar in a table, a cell or a collection view is not supported by this ibtool");
+            }
+            if n.attribute("translucent").is_none() || n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
+                return fail("a translucent navigation bar, or one translating its mask, is not supported by this ibtool");
+            }
+            let mut items = Vec::new();
+            let mut names = Vec::new();
+            for list in children(n, "items") {
+                only_children(list, &["navigationItem"])?;
+                for i in children(list, "navigationItem") {
+                    let item_name = format!("bar item {}", attr(i, "id")?);
+                    let parts = navigation_item_with(nib, i, &item_name, scene.vc_id, first_responder(n))?;
+                    if !parts.segues.is_empty() {
+                        return fail("a navigation bar's bar button items' segues are not supported by this ibtool");
+                    }
+                    let Value::New(mut o) = parts.value else { unreachable!() };
+                    o.values.push(("UINavigationBar", reference(name.clone())));
+                    items.push(Value::New(o));
+                    names.push(item_name);
+                    names.extend(parts.bar_items);
+                    for (selector, source) in parts.actions {
+                        scene.actions.push((selector, source, 0, "upstream".into()));
+                    }
+                    for (selector, source) in parts.responder_actions {
+                        scene.actions.push((selector, source, 0, "responder".into()));
+                    }
+                }
+            }
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIOpaque", Value::Bool(true)));
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            values.push(("UIViewLayoutMargins", doubles(&[0.0; 4])));
+            values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.push(("UIItems", nib.array("NSMutableArray", items)));
+            values.push(("UIBarPosition", Value::Int(2)));
+            values.push(("UIBarTranslucence", Value::Int(2)));
+            scene.toolbar_items.push((name.clone(), names));
+            Object::new("UINavigationBar", values)
+        }
         "toolbar" => {
             // A toolbar: a view's keys, hugging `{250, 250}`, then its items
             // (as a navigation item's, defined here and listed in its turn
@@ -2576,15 +2654,19 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 for b in children(list, "barButtonItem") {
                     let (mut actions, mut segues) = (Vec::new(), Vec::new());
                     let item_name = format!("toolbar item {}", attr(b, "id")?);
-                    let object = bar_button_item(nib, b, &item_name, scene.vc_id, &mut actions, &mut segues)?;
+                    let mut responder_actions = Vec::new();
+                    let object = bar_button_item(nib, b, &item_name, scene.vc_id, &mut actions, &mut segues, first_responder(n), &mut responder_actions)?;
                     if !segues.is_empty() {
                         return fail("a toolbar item's segues are not supported by this ibtool");
                     }
-                    // Its actions on the controller are event connections
-                    // without a mask, sorting before the controls' (one
-                    // probe).
+                    // Its actions on the controller or the first responder
+                    // are event connections without a mask, sorting before
+                    // the controls' (two probes).
                     for (selector, source) in actions {
                         scene.actions.push((selector, source, 0, "upstream".into()));
+                    }
+                    for (selector, source) in responder_actions {
+                        scene.actions.push((selector, source, 0, "responder".into()));
                     }
                     items.push(Value::New(object.named(item_name.clone())));
                     names.push(item_name);
@@ -4139,6 +4221,14 @@ fn control_event(event: &str) -> Result<i64, String> {
 
 /// The placeholder a control's action goes to: the scene's view controller
 /// (upstream) or its first responder.
+/// The id of the first responder placeholder of `n`'s scene.
+fn first_responder<'a>(n: Node<'a, '_>) -> Option<&'a str> {
+    n.ancestors()
+        .find(|a| a.has_tag_name("scene"))
+        .and_then(|sc| sc.descendants().find(|d| d.has_tag_name("placeholder") && d.attribute("placeholderIdentifier") == Some("IBFirstResponder")))
+        .and_then(|r| r.attribute("id"))
+}
+
 fn action_target(scene: &Scene, a: Node) -> Result<&'static str, String> {
     let destination = attr(a, "destination")?;
     if destination == scene.vc_id {
