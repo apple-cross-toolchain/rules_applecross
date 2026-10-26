@@ -4450,9 +4450,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // A document using safe areas gives every root view a safe-area
         // guide, the same whether or not its view lists one (three probes).
         let uses_safe_areas = view.document().root_element().attribute("useSafeAreas") == Some("YES");
-        let has_safe_area = safe_area.is_some() || (uses_safe_areas && scene.guides.is_empty());
-        if !is_list && has_safe_area == !scene.guides.is_empty() {
+        // So does one with legacy guides, beside them, listed or not (three
+        // probes: a launch screen with both, and with each alone).
+        let has_safe_area = safe_area.is_some() || uses_safe_areas;
+        if !is_list && !has_safe_area && scene.guides.is_empty() {
             return fail("a view needs either a safe-area layout guide or legacy top and bottom layout guides for this ibtool");
+        }
+        let safe_area_listed_id = safe_area.and_then(|g| g.attribute("id"));
+        if !scene.guides.is_empty()
+            && safe_area_listed_id.is_some_and(|id| view.descendants().any(|c| c.has_tag_name("constraint") && (c.attribute("firstItem") == Some(id) || c.attribute("secondItem") == Some(id))))
+        {
+            return fail("constraints on a safe-area guide beside legacy layout guides are not supported by this ibtool");
         }
 
         // Outlets from the view controller into its view, and its own

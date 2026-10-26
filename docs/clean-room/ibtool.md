@@ -67,7 +67,10 @@ Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
 guides (in a document using safe areas, a root view that lists neither
-has the safe-area guide all the same: four probes), alone or in a navigation, tab bar or split view controller (and table and collection view
+has the safe-area guide all the same: four probes; so does one with
+legacy guides, beside them, whether it lists the safe area or not, the
+safe-area guide following the root view in the objects as without them:
+three probes, constraints on that guide beside legacy ones refused), alone or in a navigation, tab bar or split view controller (and table and collection view
 controllers). Subviews: labels (the system font in any weight, bold or
 italic, a font Xcode finds for iOS, or the iOS text styles and, on tvOS,
 Title1; the default or an sRGB, grey or system text colour), text fields
