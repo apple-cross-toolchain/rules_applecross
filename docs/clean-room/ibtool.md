@@ -1407,10 +1407,14 @@ inside it. Observed with 15 probes and one corpus storyboard:
   objects listing an unowned safe-area guide after it, then its subviews
   breadth first. The flow layout's non-zero `headerReferenceSize` and
   `footerReferenceSize` are `UIHeaderReferenceSize` and
-  `UIFooterReferenceSize` after its item size (five probes). Their
-  constraints, outlets, actions, colours, custom classes and masks are
-  refused, as are reference sizes beside a section inset or horizontal
-  scrolling.
+  `UIFooterReferenceSize` after its item size (five probes). A header's
+  background colour is `UIBackgroundColor` after its subviews, its tint
+  `UITintColor` after clipping, then its constraints (its own, listed
+  before its subviews as a container's); a custom class makes it a
+  `UIClassSwapper` with `UIClassName` and `UIOriginalClassName` after its
+  reuse identifier; its outlets to its subviews are a cell's, by name (five
+  probes). Its actions, other colours and masks are refused, as are
+  reference sizes beside a section inset or horizontal scrolling.
 - A custom layout (`<collectionViewLayout>` with a custom class) is a
   `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
   root or in a view (three probes).
