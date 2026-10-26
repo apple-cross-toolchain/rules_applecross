@@ -44,9 +44,47 @@ pub(super) fn collection_view_nib(
     }
     let upstream_used = !outlets.is_empty();
 
-    // Each prototype is a nib of its own, in byte order of the reuse
-    // identifiers. A cell's segue is a placeholder of the collection
-    // view's nib, after the controller's, in document order.
+    let (cells, segues) = prototypes(cv)?;
+
+    let mut nib = Nib::new(platform, color_matched, localizable);
+    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+    let mut top = vec![owner, responder];
+    let mut objects = vec![reference("owner"), reference("responder")];
+    if upstream_used {
+        top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
+        objects.push(reference("upstream"));
+    }
+    for i in 0..segues.len() {
+        let name = format!("upstream segue {i}");
+        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1 + usize::from(upstream_used)), &name));
+        objects.push(reference(name));
+    }
+
+    let (values, estimated) = collection_values(&mut nib, module, cv, f, &cells, 0, Vec::new(), "layout")?;
+    top.push(Value::New(Object::new("UICollectionView", values).named(root_name.clone())));
+    objects.push(reference(root_name.clone()));
+    objects.push(reference("layout"));
+
+    // Outlets, `view` among them, in byte order of their names.
+    outlets.push(("view".to_string(), "owner", root_name.clone()));
+    outlets.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut connections = Vec::new();
+    for (label, source, destination) in &outlets {
+        let source = if *source == "collection" { root_name.as_str() } else { source };
+        connections.push(outlet(&mut nib, label, source, destination));
+    }
+    let pairs = if estimated { vec![estimated_item_size(&mut nib, "layout")] } else { Vec::new() };
+    Ok((root_object_with_pairs(&mut nib, top, objects, connections, pairs), upstream_used, segues))
+}
+
+/// A collection view's prototype cells with their reuse identifiers, in
+/// byte order of those, with the placeholder of each one's segue; and the
+/// segues' ids. Each prototype is a nib of its own; a cell's segue is a
+/// placeholder of the collection view's nib, after the controller's, in
+/// document order.
+#[allow(clippy::type_complexity)]
+fn prototypes<'a, 'i>(cv: Node<'a, 'i>) -> Result<(Vec<(&'a str, Node<'a, 'i>, Option<String>)>, Vec<String>), String> {
     let mut cells: Vec<(&str, Node, Option<String>)> = Vec::new();
     let mut segues = Vec::new();
     for c in children(cv, "cells") {
@@ -65,26 +103,31 @@ pub(super) fn collection_view_nib(
         }
     }
     cells.sort_by(|a, b| a.0.cmp(b.0));
+    Ok((cells, segues))
+}
 
-    let mut nib = Nib::new(platform, color_matched, localizable);
-    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
-    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
-    let mut top = vec![owner, responder];
-    let mut objects = vec![reference("owner"), reference("responder")];
-    if upstream_used {
-        top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
-        objects.push(reference("upstream"));
-    }
-    for i in 0..segues.len() {
-        let name = format!("upstream segue {i}");
-        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1 + usize::from(upstream_used)), &name));
-        objects.push(reference(name));
-    }
+/// The estimated item size an automatic one is set to as the nib loads:
+/// the largest size, a key-value pair of the layout (`layout`).
+fn estimated_item_size(nib: &mut Nib, layout: &str) -> Value {
+    let size = nib.string("{1.7976931348623157e+308, 1.7976931348623157e+308}");
+    let value = Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", size)]));
+    let key_path = nib.string("estimatedItemSize");
+    Value::New(Object::new("UINibKeyValuePair", vec![("UIObject", reference(layout)), ("UIValue", value), ("UIKeyPath", key_path)]))
+}
 
+/// A collection view's values, from its geometry to its prefetching:
+/// `mask_default` when it gives no autoresizing mask, `layout_keys` (a
+/// subview's constraint values) after its clipping, its flow layout named
+/// `layout`; and whether that estimates its items' sizes automatically.
+#[allow(clippy::too_many_arguments)]
+fn collection_values(
+    nib: &mut Nib, module: Option<&str>, cv: Node, f: &Frame, cells: &[(&str, Node, Option<String>)], mask_default: i64,
+    layout_keys: Vec<(&'static str, Value)>, layout: &str,
+) -> Result<(Vec<(&'static str, Value)>, bool), String> {
     let mut values = Vec::new();
     geometry(&mut values, f);
     if let Some(c) = child(cv, "color", "backgroundColor") {
-        values.push(("UIBackgroundColor", color(&mut nib, c)?));
+        values.push(("UIBackgroundColor", color(nib, c)?));
     }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     values.push(("UIOpaque", Value::Bool(true)));
@@ -94,26 +137,27 @@ pub(super) fn collection_view_nib(
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     let mask = match children(cv, "autoresizingMask").next() {
         Some(m) => autoresizing_mask(m)?,
-        None => 0,
+        None => mask_default,
     };
     values.push(("UIAutoresizingMask", Value::Int(mask)));
     if cv.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }
+    values.extend(layout_keys);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
     values.push(("UIBouncesZoom", Value::Bool(true)));
     values.push(("UIDelegate", Value::Nil));
     values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
-    let (layout, estimated) = flow_layout(cv)?;
-    values.push(("UICollectionLayout", Value::New(layout.named("layout"))));
+    let (flow, estimated) = flow_layout(cv)?;
+    values.push(("UICollectionLayout", Value::New(flow.named(layout))));
     values.push(("UIAllowsUserInitiatedMultipleSelection", Value::Bool(true)));
     if !cells.is_empty() {
         // A cell's external objects: its own nib's placeholder for its
         // segue's.
         let mut external = Vec::new();
-        for (reuse, _, placeholder) in &cells {
+        for (reuse, _, placeholder) in cells {
             external.push(nib.string(reuse));
             let objects = match placeholder {
                 Some(p) => vec![nib.string("UpstreamPlaceholder-1"), reference(p.clone())],
@@ -123,8 +167,8 @@ pub(super) fn collection_view_nib(
         }
         values.push(("UICollectionViewCellPrototypeNibExternalObjects", nib.array("NSMutableDictionary", external)));
         let mut nibs = Vec::new();
-        for (reuse, c, placeholder) in &cells {
-            let bytes = cell_nib(platform, color_matched, localizable, module, *c, placeholder.is_some())?;
+        for (reuse, c, placeholder) in cells {
+            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, module, *c, placeholder.is_some())?;
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -132,28 +176,55 @@ pub(super) fn collection_view_nib(
         values.push(("UICollectionViewCellNibDict", nib.array("NSMutableDictionary", nibs)));
     }
     values.push(("UICollectionViewPrefetchingEnabled", Value::Bool(true)));
-    top.push(Value::New(Object::new("UICollectionView", values).named(root_name.clone())));
-    objects.push(reference(root_name.clone()));
-    objects.push(reference("layout"));
+    Ok((values, estimated))
+}
 
-    // Outlets, `view` among them, in byte order of their names.
-    outlets.push(("view".to_string(), "owner", root_name.clone()));
-    outlets.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut connections = Vec::new();
-    for (label, source, destination) in &outlets {
-        let source = if *source == "collection" { root_name.as_str() } else { source };
-        connections.push(outlet(&mut nib, label, source, destination));
+/// A collection view as a subview of a controller's view: its cells' nibs
+/// inside it as in a collection view controller's, its outlets to the
+/// controller, its flow layout listed as its child. Its cells' segues are
+/// not supported.
+pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame) -> Result<Object, String> {
+    only_attributes(n, &[
+        ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("dataMode", Some("prototypes")),
+        ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+    ])?;
+    only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "cells", "connections", "constraints"])?;
+    for c in children(n, "color") {
+        if c.attribute("key") != Some("backgroundColor") {
+            return fail(format!("a collection view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
+        }
     }
-    // An automatic estimated item size is set as the largest size when
-    // the nib loads.
-    let mut pairs = Vec::new();
+    let (cells, segues) = prototypes(n)?;
+    if !segues.is_empty() {
+        return fail("segues from the cells of a collection view in a view are not supported by this ibtool");
+    }
+    for c in children(n, "connections") {
+        only_children(c, &["outlet"])?;
+        for o in children(c, "outlet") {
+            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
+            if attr(o, "destination")? != scene.vc_id {
+                return fail("a collection view's outlets to anything but its controller are not supported by this ibtool");
+            }
+            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string()));
+        }
+    }
+    let mut layout = Vec::new();
+    if does_not_translate(scene, n) {
+        layout.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+    }
+    // Where the layout goes among constraints it holds isn't established.
+    if children(n, "constraints").next().is_some() {
+        return fail("constraints held by a collection view in a view are not supported by this ibtool");
+    }
+    let layout_name = format!("{name} layout");
+    let (values, estimated) = collection_values(nib, scene.module, n, f, &cells, 36, layout, &layout_name)?;
+    // The objects list its layout as its child.
+    scene.subviews.push((Some(name.to_string()), layout_name.clone()));
     if estimated {
-        let size = nib.string("{1.7976931348623157e+308, 1.7976931348623157e+308}");
-        let value = Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", size)]));
-        let key_path = nib.string("estimatedItemSize");
-        pairs.push(Value::New(Object::new("UINibKeyValuePair", vec![("UIObject", reference("layout")), ("UIValue", value), ("UIKeyPath", key_path)])));
+        let pair = estimated_item_size(nib, &layout_name);
+        scene.pairs.push((layout_name, pair));
     }
-    Ok((root_object_with_pairs(&mut nib, top, objects, connections, pairs), upstream_used, segues))
+    Ok(Object::new("UICollectionView", values))
 }
 
 /// The collection view's flow layout, and whether it estimates its items'
