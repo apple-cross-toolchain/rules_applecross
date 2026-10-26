@@ -593,10 +593,10 @@ fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &s
 fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str, responder: Option<&str>) -> Result<NavigationItem<'a, 'i>, String> {
     only_attributes(n, &[("key", Some("navigationItem")), ("title", None), ("largeTitleDisplayMode", None), ("id", None)])?;
     for c in n.children().filter(|c| c.is_element()) {
-        let single = c.has_tag_name("barButtonItem") && matches!(c.attribute("key"), Some("leftBarButtonItem" | "rightBarButtonItem"));
+        let single = c.has_tag_name("barButtonItem") && matches!(c.attribute("key"), Some("leftBarButtonItem" | "rightBarButtonItem" | "backBarButtonItem"));
         let list = matches!(c.tag_name().name(), "leftBarButtonItems" | "rightBarButtonItems");
         if !single && !list {
-            return fail("navigation items with children other than left and right bar button items are not supported by this ibtool");
+            return fail("navigation items with children other than back, left and right bar button items are not supported by this ibtool");
         }
     }
     let mut values = Vec::new();
@@ -625,6 +625,18 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
     let mut actions = Vec::new();
     let mut responder_actions = Vec::new();
     let mut segues = Vec::new();
+    // Its back item, as any other, comes first, before the other items in
+    // its values and the objects, wherever the document has it (six
+    // probes); one with connections or a custom view is refused.
+    if let Some(b) = child(n, "barButtonItem", "backBarButtonItem") {
+        if b.children().any(|c| c.is_element() && (c.has_tag_name("connections") || c.attribute("key") == Some("customView"))) {
+            return fail("a back bar button item with connections or a custom view is not supported by this ibtool");
+        }
+        let back_name = format!("{name} backBarButtonItem");
+        let object = bar_button_item(nib, b, &back_name, vc_id, &mut Vec::new(), &mut Vec::new(), None, &mut Vec::new())?;
+        values.push(("UIBackBarButtonItem", Value::New(object.named(back_name.clone()))));
+        bar_items.push(back_name);
+    }
     let mut arrays: Vec<(&str, Vec<Value>)> = Vec::new();
     for (key, list, single, array) in [
         ("leftBarButtonItem", "leftBarButtonItems", "UILeftBarButtonItem", "UILeftBarButtonItems"),
@@ -657,7 +669,8 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
             arrays.push((array, entries));
         }
     }
-    if bar_items.len() > 2 {
+    let back = child(n, "barButtonItem", "backBarButtonItem").is_some();
+    if bar_items.len() - usize::from(back) > 2 {
         let mut selectors: Vec<&String> = actions.iter().map(|a| &a.0).collect();
         selectors.sort();
         if selectors.windows(2).any(|w| w[0] == w[1]) {
@@ -2653,8 +2666,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 only_children(list, &["navigationItem"])?;
                 for i in children(list, "navigationItem") {
                     let item_name = format!("bar item {}", attr(i, "id")?);
-                    if i.descendants().any(|d| d.attribute("key") == Some("customView")) {
-                        return fail("a navigation bar's bar button items' custom views are not supported by this ibtool");
+                    if i.descendants().any(|d| matches!(d.attribute("key"), Some("customView" | "backBarButtonItem"))) {
+                        return fail("a navigation bar's back bar button items and custom views are not supported by this ibtool");
                     }
                     let parts = navigation_item_with(nib, i, &item_name, scene.vc_id, first_responder(n))?;
                     if !parts.segues.is_empty() {
