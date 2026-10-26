@@ -308,7 +308,8 @@ other values of the attributes these use, is refused. Observed:
   resistance if given (each 750 unless given), and `UIImage`:
   a `UIImageNibPlaceholder` per image name (width and height 1, the name,
   nil symbol, configuration and catalog), shared by the views using it;
-  no image, no key. snag's launch screen is byte-identical.
+  no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
+  when set (one probe). snag's launch screen is byte-identical.
 - A controller's `title` is its swapper's `UITitle`, first;
   `useStoryboardIdentifierAsRestorationIdentifier` adds
   `UIRestorationIdentifier` (the identifier's string) after
@@ -376,7 +377,8 @@ other values of the attributes these use, is refused. Observed:
   to no, whatever the document says, and `UITextInlinePredictionType` 1
   last (45 probes; `asciiCapableNumberPad` is not compiled and refused).
 - A text view (`UITextView`) is a scroll view: after its view values,
-  `UIScrollViewIndicatorInsetAdjustmentBehavior` 1, then `UIBounceEnabled`,
+  `UIScrollViewIndicatorInsetAdjustmentBehavior` 1, its `UIIndicatorStyle`
+  (black 1, white 2: three probes), then `UIBounceEnabled`,
   `UIShowsHorizontalScrollIndicator`, `UIShowsVerticalScrollIndicator`
   (each false when turned off), `UIScrollDisabled`, `UIBouncesZoom` (left
   out when off) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
@@ -610,7 +612,9 @@ rest are refused for other elements):
   keeps its implied one. A child with no `<tabBarItem>` gets one Xcode
   implies: `UIEnabled` and `UISpringLoaded`, both true. A declared item has
   `UISystemItem` (UIKit's `UITabBarSystemItem` order), `UIEnabled`, `UITag`,
-  `UITitle`, `UIImage`, `UISelectedTemplateImage`, then `UIImageInsets`
+  `UITitle`, `UIImage`, `UISelectedTemplateImage`, then `UIImageInsets`;
+  a `largeContentSizeImage` is `_UIBarItemLargeContentSizeImageCodingKey`,
+  the item's first key (two probes)
   (top, left, bottom, right from its `imageInsets`; four probes). A view
   controller's own
   nib carries its declared item the same way, after its title, and lists it
@@ -889,8 +893,8 @@ hugging (each 250 unless given) or compression resistance (each 750
 unless given) priorities, written when given, before its semantic content
 attribute (three probes).
 
-A label's, plain view's, button's or control's (a switch or slider: two
-probes) `<accessibility>` is a
+A label's, plain view's, button's, text view's or control's (a switch or
+slider: three probes) `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
 `UINibAccessibilityConfigurationsKey` (one view's in a nib; more are
 refused, as runtime attributes are):
@@ -1035,7 +1039,8 @@ Switches, sliders, steppers and activity indicators (29 probes):
   always written), its compression resistance if either is given (each
   750 unless given), `UIViewSemanticContentAttribute` and the large
   content properties, before its own values (nine probes). Their
-  value-changed actions are event connections with mask 4096.
+  actions are event connections with their UIControlEvents mask, as a
+  button's (value changed 4096; a slider's touch up inside 64: one probe).
 - **A switch.** `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
   `UISwitchOnTintColor`. Its frame is also a key-value pair, `frame`
   (`NS.special` 3, `{{x, y}, {w, h}}`), however it is laid out.

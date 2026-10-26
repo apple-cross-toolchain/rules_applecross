@@ -38,7 +38,10 @@ pub(super) fn tab_bar_item(nib: &mut Nib, controller: Node, name: &str) -> Resul
     };
     only_attributes(
         item,
-        &[("key", Some("tabBarItem")), ("title", None), ("image", None), ("selectedImage", None), ("systemItem", None), ("tag", None), ("id", None)],
+        &[
+            ("key", Some("tabBarItem")), ("title", None), ("image", None), ("selectedImage", None), ("largeContentSizeImage", None), ("systemItem", None),
+            ("tag", None), ("id", None),
+        ],
     )?;
     only_children(item, &["inset"])?;
     let insets = match children(item, "inset").collect::<Vec<_>>()[..] {
@@ -51,6 +54,13 @@ pub(super) fn tab_bar_item(nib: &mut Nib, controller: Node, name: &str) -> Resul
         _ => return fail("a tab bar item's insets other than its image insets are not supported by this ibtool"),
     };
     let mut values = Vec::new();
+    // Its large content size image comes first (two probes).
+    if let Some(image) = item.attribute("largeContentSizeImage") {
+        if item.attribute("systemItem").is_some() {
+            return fail("a system tab bar item with a large content size image is not supported by this ibtool");
+        }
+        values.push(("_UIBarItemLargeContentSizeImageCodingKey", nib.image(image)));
+    }
     if let Some(system) = item.attribute("systemItem") {
         // UITabBarSystemItem, as UIKit's header lists it.
         const SYSTEM_ITEMS: [&str; 12] =
