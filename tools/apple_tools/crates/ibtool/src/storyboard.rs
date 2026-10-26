@@ -4912,6 +4912,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // Outlets from the view controller into its view, and its own
         // segues.
         let mut vc_outlets = Vec::new();
+        // Outlets to the scene's gesture recognizers, (property, id).
+        let mut gesture_outlets: Vec<(String, String)> = Vec::new();
         // Outlet collections: (property, collection class, views), by first
         // appearance, the views in document order.
         let mut vc_collections: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -4933,9 +4935,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                         constraint_name(c)?
                     }
                     // Xcode puts one to a gesture recognizer in the
-                    // controller's nib, beside the recognizer (one probe).
+                    // controller's nib, beside the recognizer (three probes).
                     Some(g) if g.tag_name().name().ends_with("GestureRecognizer") => {
-                        return fail("a controller's outlet to a gesture recognizer is not supported by this ibtool");
+                        gesture_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
+                        continue;
                     }
                     _ => view_name(destination),
                 };
@@ -4993,6 +4996,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         };
         if is_list && !vc_collections.is_empty() {
             return fail("a table or collection view controller's outlet collections are not supported by this ibtool");
+        }
+        if is_list && !gesture_outlets.is_empty() {
+            return fail("a table or collection view controller's outlets to gesture recognizers are not supported by this ibtool");
         }
         let (view_root, upstream_used) = if is_table {
             let (root, upstream_used, segues, listing) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets, child(vc, "refreshControl", "refreshControl"))?;
@@ -5500,6 +5506,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 return fail("a gesture recognizer with these controller settings is not supported by this ibtool");
             }
         }
+        // A view whose collection names its recognizers in another order
+        // than the document's has them defined otherwise (one probe), not
+        // established beside other views' (seven).
+        let position = |id: &String| recognizers.iter().position(|r| r.attribute("id") == Some(id.as_str()));
+        if scene.gesture_views.iter().any(|(_, gs)| gs.windows(2).any(|w| position(&w[0]) > position(&w[1]))) {
+            return fail("a view's gesture recognizers in another order than the document's are not supported by this ibtool");
+        }
         let mut gesture_objects = Vec::new();
         for r in recognizers.iter().rev() {
             let (object, selectors) = gesture_recognizer(&mut vnib, module, *r, vc_id)?;
@@ -5582,6 +5595,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         };
         let controller = Value::New(controller.named("controller"));
         let mut connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard")];
+        // Its outlets to its recognizers by name, after its storyboard
+        // outlet and before their delegates' (three probes).
+        gesture_outlets.sort();
+        for (property, id) in &gesture_outlets {
+            if !recognizers.iter().any(|r| r.attribute("id") == Some(id.as_str())) {
+                return fail("a controller's outlet to another scene's gesture recognizer is not supported by this ibtool");
+            }
+            connections.push(outlet(&mut vnib, property, "controller", &format!("gesture {id}")));
+        }
         // A recognizer's delegate outlet to the controller after its
         // storyboard outlet (one probe); several are not established.
         let delegates: Vec<&Node> = recognizers.iter().filter(|r| gesture_delegate(**r)).collect();
