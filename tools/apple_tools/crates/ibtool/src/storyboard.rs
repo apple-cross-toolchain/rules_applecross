@@ -1414,17 +1414,20 @@ fn layout_margins(n: Node) -> Result<Option<([f64; 4], bool)>, String> {
 /// its superview's and whether it insets them from the safe area, after its
 /// constraints (and a root view's layout guides).
 fn margins(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
-    if let Some((m, directional)) = layout_margins(n)? {
+    // The margins, whether they follow the readable width, then whether
+    // they are directional (two probes and a corpus storyboard).
+    let margins = layout_margins(n)?;
+    if let Some((m, _)) = margins {
         values.push(("UIViewLayoutMargins", doubles(&m)));
-        if directional {
-            values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
-        }
     }
     if children(n, "edgeInsets").chain(children(n, "directionalEdgeInsets")).count() > 1 {
         return fail("a view's other edge insets are not supported by this ibtool");
     }
     if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
         values.push(("UIViewLayoutMarginsFollowReadableWidth", Value::Bool(true)));
+    }
+    if margins.is_some_and(|(_, directional)| directional) {
+        values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
     }
     if n.attribute("preservesSuperviewLayoutMargins").is_some() {
         values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
@@ -1821,6 +1824,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIBackgroundColor", color(nib, c)?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            // An opaque label, which older documents have (one probe).
+            if n.attribute("opaque").is_none() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
             hidden_and_tag(&mut values, n)?;
             if n.attribute("userInteractionEnabled").is_some() {
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
@@ -2422,9 +2429,6 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 (None, None) => None,
                 _ => return fail("a text view with two texts is not supported by this ibtool"),
             };
-            if text.is_some() && nib.localizable {
-                return fail("a text view's text in a localizable storyboard is not supported by this ibtool");
-            }
             let traits = children(n, "textInputTraits").next().ok_or("text view without text input traits")?;
             if traits.attribute("secureTextEntry").is_some() {
                 return fail("a secure text view is not supported by this ibtool");
@@ -2488,8 +2492,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // (AppKit's NSTextAlignment: right 1, center 2; left left out),
             // which the view's own values then refer to.
             if let Some(text) = text {
-                let string = nib.string(&text);
-                values.push(("UIText", string));
+                // In `Base.lproj` its text is localizable as `<id>.text`, the
+                // attributed text's string its development value (one probe).
+                values.push(("UIText", nib.text(attr(n, "id")?, "text", &text)));
                 let string = nib.string(&text);
                 let mut attributes = Vec::new();
                 if let Some(c) = text_color {
@@ -2770,7 +2775,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("layoutMarginsFollowReadableWidth", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "subviews", "edgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
+            only_children(n, &["rect", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             let vertical = n.attribute("axis").is_some();
@@ -2796,9 +2801,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // Edge insets are its layout margins, which it then arranges
             // within, whatever its arrangement setting says; without them the
             // setting changes nothing.
-            let margins = match child(n, "edgeInsets", "layoutMargins") {
-                Some(e) => Some(insets(e, "left", "right")?),
-                None => None,
+            // Plain or directional (one probe), as other views' are.
+            let (margins, directional) = match layout_margins(n)? {
+                Some((m, d)) => (Some(m), d),
+                None => (None, false),
             };
             let mut arranged = Vec::new();
             for s in children(n, "subviews") {
@@ -2829,6 +2835,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIViewLayoutMargins", doubles(&margins.unwrap_or([0.0; 4]))));
             if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
                 values.push(("UIViewLayoutMarginsFollowReadableWidth", Value::Bool(true)));
+            }
+            if directional {
+                values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
