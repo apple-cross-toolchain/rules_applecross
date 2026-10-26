@@ -2557,7 +2557,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // A toolbar: a view's keys, hugging `{250, 250}`, then its items
             // (as a navigation item's, defined here and listed in its turn
             // among the objects), `UIBarPosition` 1 and `UIBarTranslucence`
-            // 1 (two probes). Items with actions or segues are refused.
+            // 1 (two probes). Items with segues are refused.
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clearsContextBeforeDrawing", Some("NO")), ("contentMode", Some("scaleToFill")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
@@ -2577,8 +2577,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     let (mut actions, mut segues) = (Vec::new(), Vec::new());
                     let item_name = format!("toolbar item {}", attr(b, "id")?);
                     let object = bar_button_item(nib, b, &item_name, scene.vc_id, &mut actions, &mut segues)?;
-                    if !actions.is_empty() || !segues.is_empty() {
-                        return fail("a toolbar item's actions and segues are not supported by this ibtool");
+                    if !segues.is_empty() {
+                        return fail("a toolbar item's segues are not supported by this ibtool");
+                    }
+                    // Its actions on the controller are event connections
+                    // without a mask, sorting before the controls' (one
+                    // probe).
+                    for (selector, source) in actions {
+                        scene.actions.push((selector, source, 0, "upstream".into()));
                     }
                     items.push(Value::New(object.named(item_name.clone())));
                     names.push(item_name);
@@ -5622,12 +5628,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             scene.actions.sort_by(|a, b| (a.2, &a.0, visited(&a.1)).cmp(&(b.2, &b.0, visited(&b.1))));
             for (selector, source, mask, destination) in &scene.actions {
                 let label = nib.string(selector);
-                connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
-                    ("UILabel", label),
-                    ("UISource", reference(source.clone())),
-                    ("UIDestination", reference(destination.clone())),
-                    ("UIEventMask", Value::Int(*mask)),
-                ])));
+                let mut values = vec![("UILabel", label), ("UISource", reference(source.clone())), ("UIDestination", reference(destination.clone()))];
+                // A bar button item's action has no mask.
+                if *mask != 0 {
+                    values.push(("UIEventMask", Value::Int(*mask)));
+                }
+                connections.push(Value::New(Object::new("UIRuntimeEventConnection", values)));
             }
             let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
             let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
