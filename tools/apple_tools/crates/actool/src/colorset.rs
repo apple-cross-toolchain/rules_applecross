@@ -41,7 +41,7 @@ fn component(text: &str) -> Option<f64> {
 
 /// The value of an entry's appearances: luminosity (light or dark) and
 /// contrast (high).
-fn appearance(entry: &serde_json::Value) -> Option<u16> {
+pub fn appearance(entry: &serde_json::Value) -> Option<u16> {
     let mut luminosity = None;
     let mut high = false;
     for a in entry["appearances"].as_array().map(Vec::as_slice).unwrap_or_default() {
