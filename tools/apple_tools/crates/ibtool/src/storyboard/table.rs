@@ -382,6 +382,9 @@ pub(super) fn table_view_nib(
     if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.gesture_views.is_empty() {
         return fail("actions, outlets to the controller, gestures and segues in a table's header or footer are not supported by this ibtool");
     }
+    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
+        return fail("runtime attributes, switches and accessibility settings in a table's header or footer are not supported by this ibtool");
+    }
     top.push(Value::New(Object::new("UITableView", values).named(root_name.clone())));
     objects.push(reference(root_name.clone()));
     // After the table (and a static table's data source), breadth first
@@ -603,6 +606,11 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
     }
     if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
         return fail("actions, outlets and segues in a cell are not supported by this ibtool");
+    }
+    // A cell's nib has no key-value pairs or accessibility configurations
+    // of its own here.
+    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
+        return fail("runtime attributes, switches and accessibility settings in a cell are not supported by this ibtool");
     }
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
