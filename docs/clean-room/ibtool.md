@@ -635,7 +635,8 @@ other values of the attributes these use, is refused. Observed:
 - A view's or label's `contentMode` is `UIContentMode` after
   `UIAutoresizingMask`, UIViewContentMode's values, scaleToFill (0) left
   out; Xcode compiles `topLeft` as scaleToFill, so it is refused (18
-  probes). A label is `UIUserInteractionDisabled` only when it says so.
+  probes). A label is `UIUserInteractionDisabled` only when it says so, and
+  so is a button, after its hidden flag and tag (five probes).
 - A named colour (`<color name=...>`, defined by a `<namedColor>` in the
   document's resources) is `UIDynamicCatalogName`,
   `UIDynamicCatalogUseNibBundle` and its definition's components, unrounded
@@ -790,7 +791,7 @@ objects (its own nib's, or its navigation controller's).
   probes, a root and a pushed controller). One with connections or a
   custom view, or in a navigation bar inside a view, is refused.
 - **Custom views.** An item's custom view (`<button key="customView">`, a
-  segmented control) is its `UICustomView`, first among its values: the
+  segmented control, a plain view: two probes) is its `UICustomView`, first among its values: the
   view compiled as a subview, its document mask kept. The objects list the
   custom views after all the items, in the same order. Their actions on
   the controller keep their event masks and follow the items' actions and
@@ -864,6 +865,16 @@ are identified or a segue reaches them. Observed with 17 probes and 19
 storyboards from the corpus that use one (4 of them compile today; the
 rest are refused for other elements):
 
+- **Title views.** A navigation item's title view (`<label
+  key="titleView">`, a button, a plain view) is its `UITitleView`,
+  compiled as a custom view is, its document frame and mask kept, after
+  `UILeftBarButtonItems` and before `UICenterItemGroups`; the objects list
+  it right after the item, before the item's bar button items and their
+  custom views. `<nil key="title"/>` is as no title (eight probes: beside
+  left and right items and custom views, as a root controller's item and
+  in its own nib too). Beside a back item, and with connections,
+  subviews, constraints, runtime attributes or accessibility, it is
+  refused.
 - Top-level objects: a storyboard placeholder per controller the nib holds,
   in reverse: the last child's first, a navigation child's root before the
   child itself. Then the owner, the first responder, the scene's own
