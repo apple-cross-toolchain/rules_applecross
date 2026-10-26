@@ -543,7 +543,14 @@ other values of the attributes these use, is refused. Observed:
   a matrix whose rows sum to 1, and the sRGB encoding (sign kept for
   values outside 0 to 1), to within a few float ulps (5e-7) but exactly
   for only a quarter of the components, which points at single-precision
-  arithmetic or tables not established here.
+  arithmetic or tables not established here. Xcode's values are those of
+  CoreGraphics' public conversion from generic RGB to Display P3 and on to
+  extended sRGB (`CGColor.converted(to:intent:options:)`, 900 of 900
+  components on this Mac; directly to extended sRGB gives 380). Each
+  conversion is single precision, per channel where the primaries agree,
+  and off the exact curves by up to about 8 ulps, without a table's
+  interpolation or a fixed-point grid; that arithmetic isn't reproduced
+  here.
 - A scene's gesture recognizer whose delegate is the controller has a
   `delegate` outlet to it in the controller's nib, after the controller's
   storyboard outlet (one probe; several, or one in an embedded controller,
