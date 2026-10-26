@@ -224,9 +224,14 @@ other values of the attributes these use, is refused. Observed:
   firstBaseline, width, height between siblings. A margin's
   `NSFirstAttributeV2`/`NSSecondAttributeV2` is its own code (leftMargin
   13 ... centerYWithinMargins 20) and the legacy key its edge's; the
-  legacy `NSConstant` moves by the margin, 8: plus for a leading, left or
-  top margin as the second item, minus as the first, the other way for
-  trailing, right and bottom, nothing for centres. `relation` is
+  legacy `NSConstant` moves by the item's margin on that edge, the layout
+  margins its document gives it (leading as left and trailing as right,
+  plain or directional) or else 8: plus for a leading, left or top margin
+  as the second item, minus as the first, the other way for trailing,
+  right and bottom, nothing for centres (ten probes: root and nested
+  views, either kind of margins, either attribute naming, margins on the
+  subview). A centre within uneven margins is refused: Xcode moved one
+  by 2 where half the difference was 1.5. `relation` is
   `NSRelation` (greaterThanOrEqual 1, lessThanOrEqual -1) after the first
   attribute, before `NSMultiplier`; a `symbolic` constant is
   `NSSymbolicConstant` `NSSpace` before `NSShouldBeArchived`, the constant
@@ -507,7 +512,8 @@ alone in `UILeftBarButtonItems` and `UIRightBarButtonItems`, around
 `UIIsSystemItem` and `UISystemItem` (UIBarButtonSystemItem's numbering
 by the item's name, but `close` is 0) and for a space `UIHidesSharedBG`,
 then `UIStyle` (1 with no style, 2 for done, none for plain), then its
-`UITitle`. The items follow the controller's segue templates in its nib's
+`UITitle`, then its image (`UIImage`, a placeholder as an image view's);
+an item may have a title, an image or both (three probes). The items follow the controller's segue templates in its nib's
 objects (its own nib's, or its navigation controller's).
 - **Actions.** An item's action on its controller is an event connection
   without a mask.
@@ -775,7 +781,9 @@ A button may be disabled (`UIDisabled`) and aligned other than at the centre:
 `UIContentVerticalAlignment` and `UIContentVerticalAlignment2` (top 1,
 bottom 2, fill 3), then `UIContentHorizontalAlignment` (left 1, right 2,
 fill 3, leading 4, trailing 5), after its large content properties (ten
-probes). A view's, label's or table's `restorationIdentifier` is
+probes). Its content, title and image insets (`<inset>`, minimum and
+maximum x and y) are `UIContentEdgeInsets`, `UITitleEdgeInsets` and
+`UIImageEdgeInsets` (top, left, bottom, right) after its font (five probes). A view's, label's or table's `restorationIdentifier` is
 `UIRestorationIdentifier`, just before `UIViewSemanticContentAttribute`
 (four probes).
 
@@ -864,7 +872,8 @@ hugging `{250, 250}` and after its large content properties
 outlets like others (four probes). A visual effect view (non-opaque, with a
 blur effect) is a `UIVisualEffectView`: `UIDeepDrawRect`,
 `UIAutoresizeSubviews`, mask 36, `UIShouldNotAdaptToMaterials`, clipping,
-its not-translating key, then after its large content properties
+its not-translating key, no `insetsLayoutMarginsFromSafeArea`
+(`UIViewInsetsLayoutMarginsFromSafeArea` 0), then after its large content properties
 `UIVisualEffectViewEffect` (a `UIBlurEffect`: extra light 0, light 1, dark 2,
 and regular and prominent 1 and 0 with `UIBlurEffectAutomaticStyle` 4 and 5),
 `UIVisualEffectViewGroupName` nil and `UIVisualEffectViewContentView`, its
@@ -906,7 +915,8 @@ Switches, sliders, steppers and activity indicators (29 probes):
 - **A slider.** `UIValue` (a float), `UIMinValue` and `UIMaxValue` unless 0
   and 1, `UIContinuous` false, the minimum, maximum and thumb tint
   colours, and `UIBehavioralStyle` 0.
-- **A stepper.** A background colour before `UIDeepDrawRect`, a tint after
+- **A stepper.** Hugging `{250, 250}`, or none written when the document
+  gives 750. A background colour before `UIDeepDrawRect`, a tint after
   the alpha; then `UIDisabled`, `UIValue`, `UIMinimumValue`,
   `UIMaximumValue` and `UIStepValue` (doubles) unless 0, 0, 100 and 1 (a
   missing maximum is 0, so written), `UIContinuous` and `UIAutorepeat`
@@ -940,7 +950,9 @@ prototype cells compiles like a table view controller: the collection
 view is its view nib's root view, and each prototype is a nib of its own
 inside it. Observed with 15 probes and one corpus storyboard:
 
-- The collection view: geometry, background colour, opaque, multiple
+- The collection view: geometry, background colour (with `colorMatched`,
+  an opaque grey white is `systemBackgroundColor`, at the root or in a
+  view: nine probes), opaque, multiple
   touch, mask, clipping, then `UIScrollViewIndicatorInsetAdjustmentBehavior`
   1, `UIBouncesZoom`, `UIDelegate` archived as nil,
   `UIScrollViewContentInsetAdjustmentBehavior` 0, `UICollectionLayout`,
@@ -1042,7 +1054,9 @@ placeholder has a `containerView` outlet to the view, sorted by label
 with the view nib's outlets. The template is a
 `UIStoryboardEmbedSegueTemplate`: `UIIdentifier` if any,
 `UIDestinationViewControllerIdentifier`, `UIPerformOnViewLoad` true and
-`UIContainerView` archived as nil. The destination, a view or table view
+`UIContainerView` archived as nil. A custom class swaps the view as a
+plain view's does, and its placeholder's intrinsic size changes nothing
+(four probes). The destination, a view or table view
 controller, gets its own nib as other segue destinations do. Observed
 with 24 probes:
 
