@@ -178,6 +178,11 @@ fn table_values(
             inner.push(compiled?);
         }
     }
+    // These nibs don't list placeholder guides: a subview's own safe-area
+    // guide or a scroll view's guides are refused here.
+    if !scene.unused_guides.is_empty() {
+        return fail("a safe-area or scroll view guide in a cell, header or table is not supported by this ibtool");
+    }
     if !inner.is_empty() {
         values.push(("UISubviews", nib.array("NSMutableArray", inner)));
     }
@@ -800,6 +805,11 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
             }
             subviews.push(v);
         }
+    }
+    // These nibs don't list placeholder guides: a subview's own safe-area
+    // guide or a scroll view's guides are refused here.
+    if !scene.unused_guides.is_empty() {
+        return fail("a safe-area or scroll view guide in a cell, header or table is not supported by this ibtool");
     }
     for l in text_label.iter().chain(&detail_label) {
         if !scene.subviews.iter().any(|s| s.0.as_ref() == Some(&content_name) && s.1 == *l) {

@@ -1848,8 +1848,14 @@ struct Scene<'a> {
     /// Visual effect views and their content views, whose subviews the
     /// objects list before their constraints.
     effect_contents: Vec<String>,
-    /// Subviews with a safe-area guide no constraint uses.
+    /// Subviews with a safe-area guide no constraint uses, once per
+    /// placeholder guide the objects list in their turn.
     unused_guides: Vec<String>,
+    /// Scroll views' content and frame layout guides: (id, identifier,
+    /// scroll view), archived where a constraint first uses them.
+    scroll_guides: Vec<(String, &'static str, String)>,
+    /// The scroll guides already defined in the nib.
+    defined_guides: Vec<String>,
     /// Toolbars' items, by toolbar, listed in their turn among the objects.
     toolbar_items: Vec<(String, Vec<String>)>,
     /// Toolbar items' custom views, by item, listed in the item's turn as
@@ -1892,6 +1898,8 @@ impl<'a> Scene<'a> {
             pairs: Vec::new(),
             effect_contents: Vec::new(),
             unused_guides: Vec::new(),
+            scroll_guides: Vec::new(),
+            defined_guides: Vec::new(),
             toolbar_items: Vec::new(),
             item_views: Vec::new(),
             lists_toolbar_items: false,
@@ -2044,10 +2052,13 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
             sizes.push((rank, c));
             continue;
         }
+        // A scroll view's own guide as the second item, ordered as a
+        // sibling (three probes).
+        let own_guide = |item: &str| scene.scroll_guides.iter().any(|g| g.0 == item && g.2 == name);
         let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, false)?;
         let v = direct.iter().find(|v| v.attribute("id") == Some(key.0)).ok_or_else(|| format!("a subview's constraints on {} are not supported by this ibtool", key.0))?;
         for item in [first, second] {
-            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) {
+            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) {
                 return fail(format!("a subview's constraints on {item} are not supported by this ibtool"));
             }
         }
@@ -2065,7 +2076,15 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         made.push((c, document_constraint(nib, c, reference(name.to_string()), second)?));
     }
     for (_, _, c, first, second) in others {
-        made.push((c, document_constraint(nib, c, item(first), Some(item(second)))?));
+        let second = match scene.scroll_guides.iter().find(|g| g.0 == second && g.2 == name).cloned() {
+            Some((guide, _, _)) if scene.defined_guides.contains(&guide) => reference(format!("scroll guide {guide}")),
+            Some((guide, identifier, owner)) => {
+                scene.defined_guides.push(guide.clone());
+                scroll_guide(nib, &guide, identifier, &owner)
+            }
+            None => item(second),
+        };
+        made.push((c, document_constraint(nib, c, item(first), Some(second))?));
     }
     for (c, m) in made {
         let constraint_name = constraint_name(c)?;
@@ -2080,6 +2099,42 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         return Ok(None);
     }
     Ok(Some(nib.array("NSMutableArray", values)))
+}
+
+/// A scroll view's content or frame layout guide (`identifier`), defined
+/// where a constraint first uses it: owned and locked by the scroll view, not
+/// archived, and its system constraints to the scroll view (the content
+/// guide's minimum x and y, the frame guide's those and its width and
+/// height), each named after the guide and attribute (one probe).
+fn scroll_guide(nib: &mut Nib, id: &str, identifier: &str, owner: &str) -> Value {
+    let name = format!("scroll guide {id}");
+    let attributes: &[(i64, &str)] = if identifier.ends_with("contentLayoutGuide") { &[(1, "minX"), (3, "minY")] } else { &[(1, "minX"), (3, "minY"), (7, "width"), (8, "height")] };
+    let identifier_value = nib.string(identifier);
+    let mut system = Vec::new();
+    for (attribute, label) in attributes {
+        let label = nib.string(&format!("{identifier}-{label}"));
+        system.push(Value::New(Object::new("NSLayoutConstraint", vec![
+            ("NSFirstItem", reference(name.clone())),
+            ("NSFirstAttributeV2", Value::Int(*attribute)),
+            ("NSFirstAttribute", Value::Int(*attribute)),
+            ("NSSecondItem", reference(owner.to_string())),
+            ("NSSecondAttributeV2", Value::Int(*attribute)),
+            ("NSSecondAttribute", Value::Int(*attribute)),
+            ("NSShouldBeArchived", Value::Bool(false)),
+            ("NSLayoutIdentifier", label),
+        ])));
+    }
+    let system = nib.array("NSArray", system);
+    let class = if identifier.ends_with("contentLayoutGuide") { "_UIScrollViewLayoutGuide" } else { "UILayoutGuide" };
+    let guide = Object::new(class, vec![
+        ("UILayoutGuideOwningView", reference(owner.to_string())),
+        ("UILayoutGuideIdentifier", identifier_value),
+        ("UILayoutGuideOwningViewIsLocked", Value::Bool(true)),
+        ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
+        ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
+        ("UILayoutGuideSystemConstraints", system),
+    ]);
+    Value::New(guide.named(name))
 }
 
 fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
@@ -3668,7 +3723,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 // Its own safe-area guide, which no constraint uses, is only
                 // listed among the objects (two probes); one in use is
                 // refused.
-                for g in children(n, "viewLayoutGuide") {
+                // A scroll view's content and frame guides are placeholders
+                // in its turn whether or not constraints use them (three
+                // probes).
+                for g in children(n, "viewLayoutGuide").filter(|g| scroll && matches!(g.attribute("key"), Some("contentLayoutGuide" | "frameLayoutGuide"))) {
+                    only_attributes(g, &[("key", None), ("id", None)])?;
+                    let identifier = if g.attribute("key") == Some("contentLayoutGuide") { "UIScrollView-contentLayoutGuide" } else { "UIScrollView-frameLayoutGuide" };
+                    scene.scroll_guides.push((attr(g, "id")?.to_string(), identifier, name.clone()));
+                    scene.unused_guides.push(name.clone());
+                }
+                for g in children(n, "viewLayoutGuide").filter(|g| !(scroll && matches!(g.attribute("key"), Some("contentLayoutGuide" | "frameLayoutGuide")))) {
                     only_attributes(g, &[("key", Some("safeArea")), ("id", None)])?;
                     let id = attr(g, "id")?;
                     if scroll || n.document().descendants().any(|d| d != g && d.attributes().any(|a| a.value() == id)) {
@@ -5952,8 +6016,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             while let Some(v) = queue.pop_front() {
                 let subviews_first = v.is_some_and(|v| scene.effect_contents.contains(v));
                 let constraints = |v: &String| scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())).collect::<Vec<_>>();
-                // A subview's own safe-area guide comes first in its turn.
-                if v.is_some_and(|v| scene.unused_guides.contains(v)) {
+                // A subview's own safe-area guide (or a scroll view's guides)
+                // comes first in its turn.
+                for _ in scene.unused_guides.iter().filter(|g| Some(*g) == v) {
                     if subviews_first {
                         return fail("a visual effect view's safe-area guide is not supported by this ibtool");
                     }
