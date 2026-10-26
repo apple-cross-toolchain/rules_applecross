@@ -5082,12 +5082,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     return Ok((f.x * f.x + f.y * f.y, f.x));
                 }
                 // A view nested in plain views: its origin in the root view's
-                // coordinates (four probes).
+                // coordinates (four probes; a label or text field as a plain
+                // view, two).
                 let nested = || format!("root view constraints on a view nested in other than plain views ({id}) are not supported by this ibtool");
-                let mut v = view.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id)).ok_or_else(nested)?;
+                let leaf = view.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id)).ok_or_else(nested)?;
+                let mut v = leaf;
                 let (mut x, mut y) = (0.0, 0.0);
                 while v != view {
-                    if !v.has_tag_name("view") || v.parent().is_none_or(|p| !p.has_tag_name("subviews")) {
+                    let kind = if v == leaf { ["view", "label", "textField"].iter().any(|t| v.has_tag_name(*t)) } else { v.has_tag_name("view") };
+                    if !kind || v.parent().is_none_or(|p| !p.has_tag_name("subviews")) {
                         return fail(nested());
                     }
                     let parent = v.parent().and_then(|p| p.parent()).ok_or_else(nested)?;

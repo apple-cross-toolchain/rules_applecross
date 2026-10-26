@@ -189,8 +189,9 @@ other values of the attributes these use, is refused. Observed:
   labels at one frame told apart by id, and probes that tell the distance
   from x + y, the centre and y then x). A view nested in plain views, with
   the root view as its constraint's other item either way round, goes by
-  its origin in the root view's coordinates (four probes; one whose root
-  subview is resized where it is laid out is refused). In a group, constraints whose
+  its origin in the root view's coordinates (four probes; a label or text
+  field nested so goes the same way, two probes and one of the corpus's;
+  one whose root subview is resized where it is laid out is refused). In a group, constraints whose
   second item is deeper than the root's subviews come first, by first and
   then second attribute in the siblings' order below (eleven probes; a
   deeper view as the first item, which would group them by it, is refused),
