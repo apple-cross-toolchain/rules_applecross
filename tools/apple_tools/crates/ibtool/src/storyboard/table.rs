@@ -33,7 +33,7 @@ fn check_table(table: Node) -> Result<(), String> {
         ("keyboardDismissMode", None), ("dataMode", None), ("style", None), ("separatorStyle", None),
         ("allowsSelection", Some("NO")), ("allowsMultipleSelection", Some("YES")), ("allowsSelectionDuringEditing", Some("YES")),
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
-        ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("id", None),
+        ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("restorationIdentifier", None), ("id", None),
     ])?;
     only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "prototypes", "sections", "connections", "constraints"])?;
     for v in children(table, "view") {
@@ -175,6 +175,7 @@ fn table_values(
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }
     values.extend(layout);
+    restoration_identifier(nib, &mut values, table);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));

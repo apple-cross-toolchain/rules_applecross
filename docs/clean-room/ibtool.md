@@ -178,8 +178,11 @@ other values of the attributes these use, is refused. Observed:
   (seven devices, by bisection), so a subview at (0, 0) whose id sorts
   before the guide's comes first (two image views at different heights,
   labels at one frame told apart by id, and probes that tell the distance
-  from x + y, the centre and y then x). In a group, the constraints with the
-  root view come first, ordered by their two attributes as a pair (the
+  from x + y, the centre and y then x). In a group, constraints whose
+  second item is deeper than the root's subviews come first, by first and
+  then second attribute in the siblings' order below (eleven probes; a
+  deeper view as the first item, which would group them by it, is refused),
+  then the constraints with the root view, ordered by their two attributes as a pair (the
   lower rank, then the higher) in centerX, centerY, trailing, leading,
   width, bottom, top, height; then those between siblings, by first and
   then second attribute in centerX, trailing, leading, centerY, bottom,
@@ -409,8 +412,9 @@ other values of the attributes these use, is refused. Observed:
   center 3, trailing or bottom 4), a missing `spacing` 0;
   `baselineRelativeArrangement` sets `UIStackViewBaselineRelative`. Edge
   insets are its `UIViewLayoutMargins` and set
-  `UIStackViewLayoutMarginsRelative`; `layoutMarginsRelativeArrangement`
-  without them changes nothing (16 probes).
+  `UIStackViewLayoutMarginsRelative` whether or not
+  `layoutMarginsRelativeArrangement` does, which without them changes
+  nothing (18 probes).
 - A view's or label's `contentMode` is `UIContentMode` after
   `UIAutoresizingMask`, UIViewContentMode's values, scaleToFill (0) left
   out; Xcode compiles `topLeft` as scaleToFill, so it is refused (18
@@ -734,6 +738,26 @@ document has them (12 probes). Labels, there and elsewhere, may:
 - turn off `insetsLayoutMarginsFromSafeArea`
   (`UIViewInsetsLayoutMarginsFromSafeArea` 0, after the hugging
   priorities).
+
+The objects list a view deeper than the root's subviews that the root
+view's constraints name with the root's subviews, after them, in the order
+of those constraints, and not again under its own superview (ten probes).
+
+A controller's outlet collections (`<outletCollection>`, `collectionClass`
+NSArray by default or NSMutableArray) are `UIRuntimeOutletCollectionConnection`s
+from its placeholder, before its outlets, each property's in the order of
+its first entry: the views in a mutable array in document order,
+`runtimeCollectionClassName` the class and `addsContentToExistingCollection`
+false. Those of table and collection view controllers, and beside a gesture
+recognizer, are refused (six probes).
+
+A button may be disabled (`UIDisabled`) and aligned other than at the centre:
+`UIContentVerticalAlignment` and `UIContentVerticalAlignment2` (top 1,
+bottom 2, fill 3), then `UIContentHorizontalAlignment` (left 1, right 2,
+fill 3, leading 4, trailing 5), after its large content properties (ten
+probes). A view's, label's or table's `restorationIdentifier` is
+`UIRestorationIdentifier`, just before `UIViewSemanticContentAttribute`
+(four probes).
 
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
