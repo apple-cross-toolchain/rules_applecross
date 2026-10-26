@@ -1768,9 +1768,6 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
             continue;
         }
         let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, false)?;
-        if others.iter().any(|(_, k, ..)| *k == key) {
-            return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
-        }
         let v = direct.iter().find(|v| v.attribute("id") == Some(key.0)).ok_or_else(|| format!("a subview's constraints on {} are not supported by this ibtool", key.0))?;
         for item in [first, second] {
             if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) {
@@ -1782,6 +1779,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     }
     sizes.sort_by_key(|f| f.0);
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
+    order_ties(&mut others, |o| (o.1, o.2), &direct)?;
     let mut values = Vec::new();
     let item = |i: &str| reference(view_name(i));
     let mut made = Vec::new();
@@ -3268,6 +3266,57 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
     Ok((group, kind, attributes))
 }
 
+/// Puts constraints of the same key (the same first item and attributes,
+/// differing in their second items) in Xcode's order, for constraints of no
+/// constant, multiplier, relation or priority to sibling views: by id where
+/// the second items' frames are the same (three of the corpus's); for
+/// centres, by those frames from the bottom, then from the right (19
+/// probes). Others are refused: with a constant the order depends on the
+/// ids too, and other attributes are ordered otherwise (top to bottom by
+/// the bottom edge, leading to trailing by the trailing edge from the right,
+/// eight probes, neither settled).
+fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 4]), Node<'a, 'i>), siblings: &[Node<'a, 'i>]) -> Result<(), String> {
+    let unstable = || fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
+    let mut start = 0;
+    while start < v.len() {
+        let key = of(&v[start]).0;
+        let end = start + v[start..].iter().take_while(|t| of(t).0 == key).count();
+        if end - start > 1 {
+            let mut run = Vec::new();
+            for t in &v[start..end] {
+                let c = of(t).1;
+                if ["multiplier", "relation", "priority"].iter().any(|a| c.attribute(*a).is_some()) || c.attribute("constant").is_some_and(|k| k.parse::<f64>() != Ok(0.0)) {
+                    return unstable();
+                }
+                let second = c.attribute("secondItem").and_then(|id| siblings.iter().find(|s| s.attribute("id") == Some(id)));
+                let Some(second) = second else { return unstable() };
+                if run.iter().any(|(_, _, s): &(Frame, &str, &str)| Some(*s) == second.attribute("id")) {
+                    return unstable();
+                }
+                let f = frame(*second)?;
+                run.push((f, c.attribute("id").unwrap_or(""), second.attribute("id").unwrap_or("")));
+            }
+            let c = of(&v[start]).1;
+            let same = run.iter().all(|(f, ..)| (f.x, f.y, f.w, f.h) == (run[0].0.x, run[0].0.y, run[0].0.w, run[0].0.h));
+            let centres = ["centerX", "centerY"].contains(&c.attribute("firstAttribute").unwrap_or("")) && c.attribute("firstAttribute") == c.attribute("secondAttribute");
+            if !(same && c.attribute("firstAttribute") == c.attribute("secondAttribute")) && !centres {
+                return unstable();
+            }
+            for (i, (a, ..)) in run.iter().enumerate() {
+                if run[..i].iter().any(|(b, ..)| (b.x, b.y) == (a.x, a.y) && (b.w, b.h) != (a.w, a.h)) {
+                    return unstable();
+                }
+            }
+            let mut order: Vec<usize> = (0..run.len()).collect();
+            order.sort_by(|&i, &j| run[j].0.y.total_cmp(&run[i].0.y).then(run[j].0.x.total_cmp(&run[i].0.x)).then(run[i].1.cmp(run[j].1)));
+            let rank: Vec<&str> = order.iter().map(|&i| run[i].1).collect();
+            v[start..end].sort_by_key(|t| rank.iter().position(|id| of(t).1.attribute("id") == Some(*id)));
+        }
+        start = end;
+    }
+    Ok(())
+}
+
 /// The order of a constraint between a root view and another item, from its
 /// attributes and whether the root view is its first item: see
 /// `constraint_key`.
@@ -4657,13 +4706,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     }
                     let nested = second != view_id && Some(second) != safe_area_id && !legacy(second) && !direct.iter().any(|v| v.attribute("id") == Some(second));
                     let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?, nested)?;
-                    if xml_constraints.iter().any(|(_, k, ..)| *k == key) {
-                        return fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
-                    }
                     xml_constraints.push((place(key.0)?, key, c, first, Some(second)));
                 }
             }
             xml_constraints.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
+            order_ties(&mut xml_constraints, |o| (o.1, o.2), &direct)?;
             // Views deeper than the root's subviews that its constraints name,
             // in their order: the objects list them after the root's
             // subviews, not under their own superviews (six probes).

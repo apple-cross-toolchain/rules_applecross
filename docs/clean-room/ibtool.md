@@ -207,9 +207,21 @@ other values of the attributes these use, is refused. Observed:
   root view and the safe-area guide at once, in three document orders,
   eight random subsets and some 30 smaller probes; legacy guides as the
   second item of a sibling constraint fit too. Constraints with equal keys
-  (the same items and the same pair of attributes either way round, or
-  tied ones) come in an order that changes with the rest of the set, so
-  they are refused,
+  (the same first item and pair of attributes, their second items sibling
+  views) follow no single rule. Some cases are settled for constraints
+  with no constant, multiplier, relation or priority:
+  - Between centres (centerX or centerY both ways), the second items'
+    frames decide, whatever the ids, document and subview orders: the
+    lower one first, then the one further right (19 probes, and seven of
+    the corpus's storyboards).
+  - Between the same attribute, second items with the same frame come in
+    id order (three of the corpus's).
+
+  Others are refused. With a constant, the ids play a part too (22
+  probes). Top to bottom goes by the bottom edge from the top, then by id,
+  and leading to trailing by the trailing edge from the right, then by id
+  (ten probes, too few to settle either). Two constraints with the same
+  items and attributes are refused as well,
   as are constraints from a legacy guide (but the bottom guide as the first
   item of a sibling constraint, placed at the root view's foot, three
   probes) or between one and the root view
