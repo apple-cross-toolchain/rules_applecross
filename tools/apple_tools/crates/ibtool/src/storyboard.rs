@@ -6058,7 +6058,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 let mut v = leaf;
                 let (mut x, mut y) = (0.0, 0.0);
                 while v != view {
-                    let kind = if v == leaf { ["view", "label", "textField"].iter().any(|t| v.has_tag_name(*t)) } else { ["view", "stackView", "scrollView"].iter().any(|t| v.has_tag_name(*t)) };
+                    let kind = if v == leaf { ["view", "label", "textField", "containerView"].iter().any(|t| v.has_tag_name(*t)) } else { ["view", "stackView", "scrollView"].iter().any(|t| v.has_tag_name(*t)) };
                     if !kind || v.parent().is_none_or(|p| !p.has_tag_name("subviews")) {
                         return fail(nested());
                     }
@@ -6120,6 +6120,34 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
             }
             xml_constraints.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
+            // Xcode compares two views nested in one of the root's subviews
+            // by their places in the nearest view holding both, others by
+            // their places in the root view, which needn't be an order (13
+            // probes): where the two disagree, refused.
+            let node = |id: &str| view.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id));
+            for (i, a) in xml_constraints.iter().enumerate() {
+                for b in &xml_constraints[i + 1..] {
+                    let (Some(na), Some(nb)) = (node(a.1 .0), node(b.1 .0)) else { continue };
+                    let Some(common) = na.ancestors().find(|v| v.children().any(|c| c.has_tag_name("subviews")) && nb.ancestors().any(|w| w == *v)) else { continue };
+                    if common == view {
+                        continue;
+                    }
+                    let local = |n: Node| -> Result<(f64, f64), String> {
+                        let (mut x, mut y) = (0.0, 0.0);
+                        for v in n.ancestors().take_while(|v| *v != common).filter(|v| v.parent().is_some_and(|p| p.has_tag_name("subviews"))) {
+                            let f = frame(v)?;
+                            (x, y) = (x + f.x, y + f.y);
+                        }
+                        Ok((x * x + y * y, x))
+                    };
+                    let (la, lb) = (local(na)?, local(nb)?);
+                    let by_local = la.0.total_cmp(&lb.0).then(la.1.total_cmp(&lb.1));
+                    let by_root = a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1));
+                    if by_local != by_root {
+                        return fail("root view constraints on two views in one subview, whose places in it and in the root view disagree, are not supported by this ibtool");
+                    }
+                }
+            }
             // The guides as their ties measure them (docs/clean-room/ibtool.md).
             let mut tie_guides: Vec<(&str, Frame)> = safe_area_id.map(|id| (id, Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 })).into_iter().collect();
             for (id, kind) in &scene.guides {
