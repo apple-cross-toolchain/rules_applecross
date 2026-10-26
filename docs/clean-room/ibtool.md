@@ -193,6 +193,27 @@ other values of the attributes these use, is refused. Observed:
   (their frames aren't in the document), constraints between the root
   view and a nested view, between axes, and between a width and a
   height (Xcode drops some of those).
+- Margins, baselines, relations, priorities and symbolic constants (two
+  probes of every attribute against the root view and a sibling, and 28
+  smaller ones): the rank orders above extend to centerXWithinMargins,
+  centerX, centerYWithinMargins, centerY, rightMargin, leftMargin, right,
+  left, trailingMargin, leadingMargin, trailing, leading, width,
+  topMargin, bottomMargin, bottom, top, firstBaseline, height with the
+  root view, and centerXWithinMargins, centerX, rightMargin, leftMargin,
+  right, left, trailingMargin, leadingMargin, trailing, leading,
+  centerYWithinMargins, centerY, topMargin, bottomMargin, bottom, top,
+  firstBaseline, width, height between siblings. A margin's
+  `NSFirstAttributeV2`/`NSSecondAttributeV2` is its own code (leftMargin
+  13 ... centerYWithinMargins 20) and the legacy key its edge's; the
+  legacy `NSConstant` moves by the margin, 8: plus for a leading, left or
+  top margin as the second item, minus as the first, the other way for
+  trailing, right and bottom, nothing for centres. `relation` is
+  `NSRelation` (greaterThanOrEqual 1, lessThanOrEqual -1) after the first
+  attribute, before `NSMultiplier`; a `symbolic` constant is
+  `NSSymbolicConstant` `NSSpace` before `NSShouldBeArchived`, the constant
+  itself counting as 0; `priority` is `NSPriority` after
+  `NSShouldBeArchived` and before the legacy constant. Xcode compiles
+  `lastBaseline` against a view as no attribute (0): refused.
 - The nib's objects: the placeholders, the root view, the safe-area guide,
   its document constraints, the legacy guides, then breadth first: each
   view in turn from a queue lists the constraints it holds, then its
@@ -579,6 +600,19 @@ probes:
 Refused for now: static tables, cells with a style (Basic, Subtitle and
 the rest), actions in cells, tables as subviews, header and footer views,
 refresh controls, and other table and cell settings.
+
+A table view can also be a subview of a controller's view: the same values
+as a table view controller's (one probe), with a subview's mask (36) when
+it gives none and its `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`
+and own constraints after `UIClipsToBounds`; its outlets go to the
+controller's placeholder. Its cells' segues are refused.
+
+A controller's `<extendedEdge key="edgesForExtendedLayout">` is
+`UIKeyEdgesForExtendedLayout`, a UIRectEdge (top 1, left 2, bottom 4,
+right 8), left out for all four; it follows `UIStoryboardSegueTemplates`
+and precedes `UIKeyAutomaticallyAdjustsScrollViewInsets` (eight probes).
+Simulated metrics change nothing on table and collection view
+controllers either.
 
 ## Collection view controllers
 

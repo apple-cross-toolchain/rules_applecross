@@ -44,7 +44,7 @@ const EDITOR_ONLY: [&str; 8] = [
 
 fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
-        let editor_only = (n.has_tag_name("viewController") || n.has_tag_name("navigationController"))
+        let editor_only = matches!(n.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController" | "navigationController")
             && (EDITOR_ONLY.contains(&c.tag_name().name()) || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
         if !allowed.contains(&c.tag_name().name()) && !editor_only {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
@@ -529,6 +529,16 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
     })
 }
 
+/// A controller's `<extendedEdge key="edgesForExtendedLayout">` as a
+/// UIRectEdge (top 1, left 2, bottom 4, right 8), unless it is all of them,
+/// the default.
+fn extended_edges(vc: Node) -> Result<Option<i64>, String> {
+    let Some(e) = child(vc, "extendedEdge", "edgesForExtendedLayout") else { return Ok(None) };
+    only_attributes(e, &[("key", None), ("top", Some("YES")), ("left", Some("YES")), ("bottom", Some("YES")), ("right", Some("YES"))])?;
+    let mask = [("top", 1), ("left", 2), ("bottom", 4), ("right", 8)].iter().filter(|(k, _)| e.attribute(*k).is_some()).map(|(_, b)| b).sum();
+    Ok((mask != 15).then_some(mask))
+}
+
 /// A system colour by name, as the table above has it.
 fn system_color_named(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (_, c) = SYSTEM_COLORS.iter().find(|(n, _)| *n == name).ok_or_else(|| format!("system colour {name} is not supported by this ibtool"))?;
@@ -904,7 +914,10 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     let mut sizes = Vec::new();
     let mut others: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, &str)> = Vec::new();
     for c in children(cs, "constraint") {
-        only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None), ("constant", None), ("id", None)])?;
+        only_attributes(c, &[
+            ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
+            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("id", None),
+        ])?;
         let first = c.attribute("firstItem").unwrap_or(id);
         let a = attr(c, "firstAttribute")?;
         let Some(second) = c.attribute("secondItem") else {
@@ -950,18 +963,11 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     let item = |i: &str| reference(view_name(i));
     let mut made = Vec::new();
     for (rank, c) in sizes {
-        let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
-        let first = layout_attribute(attr(c, "firstAttribute")?)?;
-        made.push(if rank % 2 == 0 {
-            constraint(reference(name.to_string()), first, None, constant, None)
-        } else {
-            let second = Some((reference(name.to_string()), layout_attribute(attr(c, "secondAttribute")?)?));
-            multiplied(constraint(reference(name.to_string()), first, second, constant, None), multiplier(c)?)
-        });
+        let second = (rank % 2 == 1).then(|| reference(name.to_string()));
+        made.push(document_constraint(nib, c, reference(name.to_string()), second)?);
     }
     for (_, _, c, first, second) in others {
-        let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
-        made.push(multiplied(constraint(item(first), layout_attribute(attr(c, "firstAttribute")?)?, Some((item(second), layout_attribute(attr(c, "secondAttribute")?)?)), constant, None), multiplier(c)?));
+        made.push(document_constraint(nib, c, item(first), Some(item(second)))?);
     }
     for m in made {
         let constraint_name = nib.fresh();
@@ -1167,6 +1173,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             }
             Object::new("UITextField", values)
         }
+        "tableView" => table::subview_table(nib, scene, n, &name, &f)?,
         "textView" => {
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("textAlignment", None),
@@ -1616,12 +1623,20 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
 /// order, then those between siblings, by first and second attribute in
 /// another. Equal keys are refused: Xcode's order for them isn't stable.
 fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str) -> Result<(&'a str, u8, (usize, usize)), String> {
-    const WITH_ROOT: [&str; 8] = ["centerX", "centerY", "trailing", "leading", "width", "bottom", "top", "height"];
-    const SIBLINGS: [&str; 8] = ["centerX", "trailing", "leading", "centerY", "bottom", "top", "width", "height"];
-    let rank = |order: &[&str; 8], a: &str| order.iter().position(|o| *o == a).ok_or_else(|| format!("constraints on {a} are not supported by this ibtool"));
+    // Margins and baselines placed by two probes of every attribute.
+    const WITH_ROOT: [&str; 19] = [
+        "centerXWithinMargins", "centerX", "centerYWithinMargins", "centerY", "rightMargin", "leftMargin", "right", "left", "trailingMargin",
+        "leadingMargin", "trailing", "leading", "width", "topMargin", "bottomMargin", "bottom", "top", "firstBaseline", "height",
+    ];
+    const SIBLINGS: [&str; 19] = [
+        "centerXWithinMargins", "centerX", "rightMargin", "leftMargin", "right", "left", "trailingMargin", "leadingMargin", "trailing", "leading",
+        "centerYWithinMargins", "centerY", "topMargin", "bottomMargin", "bottom", "top", "firstBaseline", "width", "height",
+    ];
+    let rank = |order: &[&str; 19], a: &str| order.iter().position(|o| *o == a).ok_or_else(|| format!("constraints on {a} are not supported by this ibtool"));
     let axis = |a: &str| match a {
-        "leading" | "trailing" | "centerX" => 0,
-        "top" | "bottom" | "centerY" => 1,
+        "leading" | "trailing" | "centerX" | "left" | "right" | "leadingMargin" | "trailingMargin" | "leftMargin" | "rightMargin"
+        | "centerXWithinMargins" => 0,
+        "top" | "bottom" | "centerY" | "topMargin" | "bottomMargin" | "centerYWithinMargins" | "firstBaseline" => 1,
         _ => 2,
     };
     if a1 != a2 && (axis(a1) != axis(a2) || axis(a1) == 2) {
@@ -1634,6 +1649,70 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
         (first, 1, (rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?))
     };
     Ok((group, kind, attributes))
+}
+
+/// A constraint of the document's: its attributes (a margin's own code,
+/// then for the legacy keys the edge's, its constant moved by the margin
+/// of 8), relation, multiplier, constant (a symbolic one is `NSSpace`) and
+/// priority.
+fn document_constraint(nib: &mut Nib, c: Node, first: Value, second: Option<Value>) -> Result<Value, String> {
+    let (v1, l1, s1) = attribute_codes(attr(c, "firstAttribute")?)?;
+    let mut values = vec![("NSFirstItem", first), ("NSFirstAttributeV2", Value::Int(v1)), ("NSFirstAttribute", Value::Int(l1))];
+    match c.attribute("relation") {
+        None => {}
+        Some("greaterThanOrEqual") => values.push(("NSRelation", Value::Int(1))),
+        Some("lessThanOrEqual") => values.push(("NSRelation", Value::Int(-1))),
+        Some(other) => return fail(format!("constraint relation {other} is not supported by this ibtool")),
+    }
+    if let Some(m) = multiplier(c)? {
+        values.push(("NSMultiplier", Value::Double(m)));
+    }
+    let mut margin = -8.0 * s1 as f64;
+    if let Some(second) = second {
+        let (v2, l2, s2) = attribute_codes(attr(c, "secondAttribute")?)?;
+        values.extend([("NSSecondItem", second), ("NSSecondAttributeV2", Value::Int(v2)), ("NSSecondAttribute", Value::Int(l2))]);
+        margin += 8.0 * s2 as f64;
+    }
+    let symbolic = c.attribute("symbolic").is_some();
+    let constant = if symbolic { 0.0 } else { c.attribute("constant").map(number).transpose()?.unwrap_or(0.0) };
+    if constant != 0.0 {
+        values.push(("NSConstantV2", Value::Double(constant)));
+    }
+    if symbolic {
+        values.push(("NSSymbolicConstant", nib.string("NSSpace")));
+    }
+    values.push(("NSShouldBeArchived", Value::Bool(true)));
+    if let Some(p) = c.attribute("priority") {
+        let p: i64 = p.parse().map_err(|_| format!("constraint priority {p} is not supported by this ibtool"))?;
+        if p != 1000 {
+            values.push(("NSPriority", Value::Int(p)));
+        }
+    }
+    if constant + margin != 0.0 {
+        values.push(("NSConstant", Value::Double(constant + margin)));
+    }
+    Ok(Value::New(Object::new("NSLayoutConstraint", values)))
+}
+
+/// A layout attribute's code, its edge's code for the legacy keys, and its
+/// margin's direction (1 inward from the leading, left or top, -1 from the
+/// trailing, right or bottom, 0 without a margin).
+fn attribute_codes(name: &str) -> Result<(i64, i64, i64), String> {
+    Ok(match name {
+        "leftMargin" => (13, 1, 1),
+        "rightMargin" => (14, 2, -1),
+        "topMargin" => (15, 3, 1),
+        "bottomMargin" => (16, 4, -1),
+        "leadingMargin" => (17, 5, 1),
+        "trailingMargin" => (18, 6, -1),
+        "centerXWithinMargins" => (19, 9, 0),
+        "centerYWithinMargins" => (20, 10, 0),
+        "firstBaseline" => (12, 12, 0),
+        other => {
+            let code = layout_attribute(other)?;
+            (code, code, 0)
+        }
+    })
 }
 
 fn constraint(first: Value, first_attr: i64, second: Option<(Value, i64)>, constant: f64, priority: Option<i64>) -> Value {
@@ -1701,17 +1780,6 @@ fn multiplier(c: Node) -> Result<Option<f64>, String> {
     Ok(if value == 1.0 { None } else { Some(value as f32 as f64) })
 }
 
-/// `constraint` with `NSMultiplier`, after the first attribute.
-fn multiplied(c: Value, m: Option<f64>) -> Value {
-    match (c, m) {
-        (Value::New(mut o), Some(m)) => {
-            let at = o.values.iter().position(|(k, _)| *k == "NSFirstAttribute").unwrap() + 1;
-            o.values.insert(at, ("NSMultiplier", Value::Double(m)));
-            Value::New(o)
-        }
-        (c, _) => c,
-    }
-}
 
 /// A view controller's legacy top or bottom layout guide: a hidden view with
 /// a width constraint UIKit replaces, and the constraints that pin it.
@@ -1905,6 +1973,9 @@ fn embedded_controller(
     values.push(("UIParentViewController", reference(parent)));
     if let Some(array) = templates.array.take() {
         values.push(("UIStoryboardSegueTemplates", array));
+    }
+    if let Some(edges) = extended_edges(vc)? {
+        values.push(("UIKeyEdgesForExtendedLayout", Value::Int(edges)));
     }
     if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
@@ -2302,7 +2373,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("the clearsSelectionOnViewWillAppear attribute of <viewController> is not supported by this ibtool");
         }
         let class_name = runtime_class_name(vc, module, original_class)?;
-        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems"])?;
+        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems", "extendedEdge"])?;
         // Empty toolbar items change nothing compiled.
         if children(vc, "toolbarItems").any(|t| t.has_children()) {
             return fail("view controllers with toolbar items are not supported by this ibtool");
@@ -2490,7 +2561,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let mut xml_constraints: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
             for cs in children(view, "constraints") {
                 for c in children(cs, "constraint") {
-                    only_attributes(c, &[("firstItem", None), ("firstAttribute", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None), ("constant", None), ("id", None)])?;
+                    only_attributes(c, &[
+            ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
+            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("id", None),
+        ])?;
                     let first = c.attribute("firstItem").unwrap_or(view_id);
                     let second = c.attribute("secondItem").unwrap_or(view_id);
                     if c.attribute("secondItem").is_none() && c.attribute("secondAttribute").is_none() {
@@ -2535,13 +2609,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             for (_, _, c, first, second) in &xml_constraints {
                 let first = resolve(&mut nib, first)?;
                 let second = match second {
-                    Some(s) => Some((resolve(&mut nib, s)?, layout_attribute(attr(*c, "secondAttribute")?)?)),
+                    Some(s) => Some(resolve(&mut nib, s)?),
                     None => None,
                 };
-                let constant = c.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
                 let name = nib.fresh();
                 constraint_names.push(name.clone());
-                match multiplied(constraint(first, layout_attribute(attr(*c, "firstAttribute")?)?, second, constant, None), multiplier(*c)?) {
+                match document_constraint(&mut nib, *c, first, second)? {
                     Value::New(o) => constraint_values.push(Value::New(o.named(name))),
                     _ => unreachable!(),
                 }
@@ -2661,6 +2734,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         if let Some(array) = templates.array {
             swapper.push(("UIStoryboardSegueTemplates", array));
+        }
+        if let Some(edges) = extended_edges(vc)? {
+            swapper.push(("UIKeyEdgesForExtendedLayout", Value::Int(edges)));
         }
         if vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
             swapper.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
