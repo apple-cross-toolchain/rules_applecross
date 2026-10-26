@@ -1617,8 +1617,8 @@ struct Scene<'a> {
     /// pairs, and their accessibility configurations, each with the view's
     /// name: the nib lists them in the order of its objects.
     pairs: Vec<(String, Value)>,
-    /// Visual effect content views, whose subviews the objects list before
-    /// their constraints.
+    /// Visual effect views and their content views, whose subviews the
+    /// objects list before their constraints.
     effect_contents: Vec<String>,
     accessibility: Vec<(String, Value)>,
     /// The switches whose frames are among the pairs.
@@ -2141,9 +2141,6 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     return fail("a visual effect view's content view with another autoresizing mask is not supported by this ibtool");
                 }
             }
-            if children(n, "constraints").next().is_some() {
-                return fail("constraints held by a visual effect view are not supported by this ibtool");
-            }
             // Its content view is its child, holding its subviews.
             let content_name = view_name(attr(content, "id")?);
             scene.subviews.push((Some(name.clone()), content_name.clone()));
@@ -2186,6 +2183,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            // Its own constraints, listed after its content view (one probe).
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+                scene.effect_contents.push(name.clone());
             }
             if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
                 values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
