@@ -384,7 +384,12 @@ other values of the attributes these use, is refused. Observed:
   doesn't autoresize its subviews leaves `UIAutoresizeSubviews` out (one
   probe). A table view controller's `autoresizesArchivedViewToFullSize="NO"`
   is `UIAutoresizesArchivedViewToFullSize` false after its identifiers,
-  before its segues (two probes). A navigation controller's
+  before its segues (two probes). A controller's size in a popover
+  (`<value key="contentSizeForViewInPopover" type="size">`) is
+  `UIPreferredContentSize`, a size, after its identifiers and segue
+  templates (three probes, AdaptivePopover); beside gesture recognizers,
+  presentation styles, extended edges, scroll view insets or table
+  selection settings, and in an embedded controller, it is refused. A navigation controller's
   `extendedLayoutIncludesOpaqueBars` is `UIKeyExtendedLayoutIncludesOpaqueBars`
   1 before `UIViewControllers` (one probe). A text view's custom class
   swaps in for it as a text field's does, and a segmented control's mask is
@@ -1235,6 +1240,18 @@ given) and, for a count-down timer, `UIDatePickerUseCurrentDateDuringDecoding`
 false (eight probes; Xcode lays the wheels style out at its own width, so
 it is refused).
 
+An ARKit SceneKit view is an `ARSCNView`: its background (white,
+`whiteColor`, unless the document gives one), opaque, multiple touch,
+`UIAutoresizeSubviews`, its mask as a label's, clipping, its constraint
+keys, semantic and large content properties, then SceneKit's defaults
+(`loops` true, `playing`, `autoenablesDefaultLighting`,
+`jitteringEnabled`, `temporalAntialiasingEnabled` and
+`allowsCameraControl` false, `backgroundColor` the document's background
+or nil, `ibSceneName` nil, `ibWantsMultisampling` false,
+`ibPreferredRenderingAPI` 0): two probes and API-Examples' ARKit
+storyboard. One as a controller's root view, which Xcode lists before the
+nib's placeholders, is refused.
+
 A map view is an `MKMapView`: opaque, multiple touch, mask 36, clipping,
 its constraint keys, zero `UIViewLayoutMargins`, then MapKit's keys
 (`MKDelegate` nil, `MKMapType` 0, zoom, scroll, pitch and rotation on,
@@ -1529,6 +1546,18 @@ the same. Observed with 55 probes:
   automatic -2), `UIModalTransitionStyle` (crossDissolve 2) or
   `UIAnimates` false; for push `UIDestinationContainmentContext` and
   `UISplitViewControllerIndex`, both 0.
+- A button's popover segue (`popoverPresentation`) is a
+  `UIStoryboardPopoverPresentationSegueTemplate`: its identifier and
+  destination, `UIPermittedArrowDirections` (up 1, down 2, left 4, right 8
+  from its `popoverArrowDirection`, 0 without one), then nil
+  `UIPassthroughViews`, `UIAnchorBarButtonItem` and `UIAnchorView`; its
+  anchor view is an `anchorView` outlet from its placeholder in the view's
+  nib, sorted with the outlets (popovers' in their placeholders' order).
+  Popovers' placeholders come first, in reverse document order, then the
+  other segues' in document order, the templates listed in document order
+  all the same (ten probes, CodeExamples' AdaptivePopover). Popovers from
+  bar button items, cells or the controller itself, without an anchor
+  view, not animating or beside container views are refused.
 - A control's segue (a button's, or a prototype cell's) is triggered from
   its view nib through a placeholder of its own: the view nib has
   `UpstreamPlaceholder-<n>` proxies, the controller's first if the view
