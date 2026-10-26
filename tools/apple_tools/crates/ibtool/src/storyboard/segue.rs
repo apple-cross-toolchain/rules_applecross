@@ -234,18 +234,21 @@ pub(super) struct Templates {
 /// The templates of a controller (`controller`, its object's name in the
 /// nib) whose view triggers `view_segues` and which itself has
 /// `own_segues`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn templates(
-    nib: &mut Nib, controller: &str, upstream_used: bool, view_segues: &[Node], own_segues: &[Node], names: &HashMap<String, String>,
+    nib: &mut Nib, controller: &str, upstream_used: bool, first: usize, view_segues: &[Node], own_segues: &[Node], names: &HashMap<String, String>,
 ) -> Result<Templates, String> {
+    // `first` is the controller's placeholder's number (a gesture
+    // recognizer's comes before it).
     let mut external = Vec::new();
     if upstream_used {
-        external.push(nib.string("UpstreamPlaceholder-1"));
+        external.push(nib.string(&format!("UpstreamPlaceholder-{first}")));
         external.push(reference(controller));
     }
     let mut view_classes = Vec::new();
     for (i, s) in view_segues.iter().enumerate() {
         let name = format!("segue {i}");
-        external.push(nib.string(&format!("UpstreamPlaceholder-{}", i + 1 + usize::from(upstream_used))));
+        external.push(nib.string(&format!("UpstreamPlaceholder-{}", i + first + usize::from(upstream_used))));
         let t = template(nib, *s, names)?;
         view_classes.push((t.class, name.clone()));
         external.push(Value::New(t.named(name)));
