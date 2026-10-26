@@ -1373,7 +1373,10 @@ its large content properties `UIBarStyle` 1 for black,
 `UISearchBarTranslucence` (1, or 2 when not translucent), `UIText` (empty
 when it has none), `UIPlaceholder`, `UIEnablesReturnKeyAutomatically` and
 `UISecureTextEntry` false and `UISearchBarStyle` 2 for minimal; its delegate
-outlet is an outlet like any other (six probes).
+outlet is an outlet like any other (six probes). As a table controller's
+header view, its delegate outlet to the controller is in the table's nib,
+before the table's own outlet of that name (two probes and a corpus
+storyboard).
 
 A segmented control (plain style, left and top content alignment) is a
 `UISegmentedControl`: its segments are its `UISubviews`, in order but for
