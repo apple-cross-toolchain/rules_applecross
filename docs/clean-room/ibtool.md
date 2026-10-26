@@ -804,17 +804,26 @@ objects (its own nib's, or its navigation controller's).
   views in a navigation bar in a view.
 
 A child navigation controller's root may have segues (Xcode's
-master-detail template): its templates follow the children's parts in the
-parent's objects, their `viewController` outlets to the root follow the
-scene outlet. A child navigation controller a segue shows (the detail) has
-a nib of its own too, as any controller a segue loads; one loaded
-otherwise as well is refused. Its bar's `multipleTouchEnabled` is
+master-detail template): its templates follow that child's deeper parts
+(its root's navigation item) in the parent's objects, before the next
+child's, and their `viewController` outlets to the root follow the scene
+outlet (a corpus tab bar controller and two probes with the segue on a
+later child). A child navigation controller a segue shows (the detail) has
+a nib of its own too, as any controller a segue loads; so does an
+identified one. In its parent's nib an identified child is swapped in for
+its class: `UIStoryboardIdentifier` (and `UIRestorationIdentifier`) after
+its title and tab bar item and before `UIParentViewController`, the class
+names last (ten probes, split and tab bar controllers, titled or not, and
+two corpus storyboards). An initial one is refused. An embedded
+controller's `autoresizesArchivedViewToFullSize="NO"` is
+`UIAutoresizesArchivedViewToFullSize` false after its parent (two probes
+and a corpus storyboard); beside gesture recognizers it is refused. Its bar's `multipleTouchEnabled` is
 `UIMultipleTouchEnabled` before the autoresizing keys and `clipsSubviews`
 `UIClipsToBounds` after them (two corpus storyboards, Swift and
 Objective-C). A navigation controller's tab bar item in its own nib (a
-tab's child loaded on its own, or one with none) is its first value and
-follows its bar in the objects, as a tab's child's (two probes, a corpus
-storyboard's); beside a title or a storyboard identifier it is refused.
+tab's child loaded on its own, or one with none) is its first value
+after its title, before its identifiers, and follows its bar in the
+objects, as a tab's child's (four probes, a corpus storyboard's).
 
 A tab or split view controller's children's bar button items (a view
 controller child's, or a navigation child's root's) are in the parent's

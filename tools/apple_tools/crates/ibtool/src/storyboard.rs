@@ -4945,6 +4945,14 @@ fn embedded_controller(
         }
     }
     values.push(("UIParentViewController", reference(parent)));
+    // Not resizing its archived view, after its parent (a corpus
+    // storyboard's split view child).
+    if vc.attribute("autoresizesArchivedViewToFullSize").is_some() {
+        if gesture_count > 0 {
+            return fail("an embedded controller not resizing its archived view, beside gesture recognizers, is not supported by this ibtool");
+        }
+        values.push(("UIAutoresizesArchivedViewToFullSize", Value::Bool(false)));
+    }
     if gesture_count > 0 {
         let alive = root.recognizers.iter().map(|r| attr(*r, "id").map(|id| reference(format!("{name} gesture {id}")))).collect::<Result<_, _>>()?;
         values.push(("UITopLevelObjectsToKeepAliveFromStoryboard", nib.array("NSArray", alive)));
@@ -5258,16 +5266,24 @@ fn navigation_controller(
     if let Some(title) = title {
         values.push(("UITitle", title));
     }
+    let identifiers = |nib: &mut Nib, values: &mut Vec<(&'static str, Value)>| {
+        if let Some(identifier) = nav.attribute("storyboardIdentifier") {
+            values.push(("UIStoryboardIdentifier", nib.string(identifier)));
+            if nav.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
+                values.push(("UIRestorationIdentifier", nib.string(identifier)));
+            }
+        }
+    };
     if let Some((item, parent)) = held {
         if let Some(item) = item {
             values.push(("UITabBarItem", item));
         }
+        // A child's identifiers come before its parent, as an embedded
+        // controller's (a corpus storyboard's split view child).
+        identifiers(nib, &mut values);
         values.push(("UIParentViewController", reference(parent)));
-    } else if let Some(identifier) = nav.attribute("storyboardIdentifier") {
-        values.push(("UIStoryboardIdentifier", nib.string(identifier)));
-        if nav.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
-            values.push(("UIRestorationIdentifier", nib.string(identifier)));
-        }
+    } else {
+        identifiers(nib, &mut values);
     }
     values.push(("UIChildViewControllers", nib.array("NSMutableArray", vec![root.value])));
     presentation_context(nav, &mut values);
@@ -5323,13 +5339,10 @@ fn navigation_controller_nib(
     nib_names: &HashMap<String, String>,
 ) -> Result<(String, Vec<u8>), String> {
     check_navigation_controller(nav)?;
-    // Its tab bar item, in its own nib too, is its first value and follows
-    // its bar in the objects (two probes); beside a title or an identifier
-    // its place isn't established.
+    // Its tab bar item, in its own nib too, is its first value after its
+    // title, before its identifiers, and follows its bar in the objects
+    // (four probes).
     let has_tab_item = child(nav, "tabBarItem", "tabBarItem").is_some();
-    if has_tab_item && (nav.attribute("title").is_some() || nav.attribute("storyboardIdentifier").is_some()) {
-        return fail("a navigation controller's tab bar item in its own nib beside a title or identifier is not supported by this ibtool");
-    }
     let nav_id = attr(nav, "id")?;
     let name = nav.attribute("storyboardIdentifier").map_or_else(|| format!("UINavigationController-{nav_id}"), str::to_string);
     let mut nib = Nib::new(platform, color_matched, localizable);
@@ -5352,7 +5365,8 @@ fn navigation_controller_nib(
     let item_outlets = std::mem::take(&mut embedded.item_outlets);
     let mut controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, title, None)?;
     if let (Some(item), Value::New(o)) = (tab_item, &mut controller) {
-        o.values.insert(0, ("UITabBarItem", item));
+        let at = usize::from(o.values.first().is_some_and(|v| v.0 == "UITitle"));
+        o.values.insert(at, ("UITabBarItem", item));
     }
     // The root's gesture recognizers follow the controller (two probes).
     let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
@@ -6749,7 +6763,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // A child navigation controller a segue loads has its own nib
         // besides its place in its parent's (Xcode's master-detail
         // template); one loaded otherwise too is not established.
-        if held_children.contains(attr(nav, "id")?) && (initial == Some(attr(nav, "id")?) || nav.attribute("storyboardIdentifier").is_some()) {
+        // An identified one is as its parent holds it (a corpus storyboard's
+        // split view child); an initial one isn't established.
+        if held_children.contains(attr(nav, "id")?) && initial == Some(attr(nav, "id")?) {
             return fail("a child navigation controller that is loaded on its own too is not supported by this ibtool");
         }
         let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
