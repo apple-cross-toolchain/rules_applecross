@@ -153,6 +153,9 @@ pub(super) fn parent_controller_nib(
                     Kind::Split => (None, false),
                 };
                 let embedded = embedded_controller(&mut nib, r, &child_name, "controller", None, item, nib_names)?;
+                if !embedded.bar_items.is_empty() {
+                    return fail("a child controller's bar button items are not supported by this ibtool");
+                }
                 if let Some(n) = &embedded.navigation_item {
                     own_parts.push(reference(n.clone()));
                 }
@@ -184,6 +187,9 @@ pub(super) fn parent_controller_nib(
                     }
                 };
                 let embedded = embedded_controller(&mut nib, r, &root_name, &child_name, Some(&format!("{child_name} bar")), None, nib_names)?;
+                if !embedded.bar_items.is_empty() {
+                    return fail("a child navigation controller's root's bar button items are not supported by this ibtool");
+                }
                 let root_item = embedded.navigation_item.clone();
                 child_values.push(navigation_controller(&mut nib, module, *nav, &child_name, embedded, &root_name, false, title, Some((item, "controller")))?);
                 own_parts.push(reference(format!("{child_name} bar")));

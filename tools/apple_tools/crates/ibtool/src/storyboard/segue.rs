@@ -222,21 +222,26 @@ pub(super) struct Templates {
     /// each control's segue template, in the view's order.
     pub external: Vec<Value>,
     /// `UIStoryboardSegueTemplates`: the controller's own segues, then its
-    /// controls', each in document order.
+    /// controls', then its bar button items', each in document order.
     pub array: Option<Value>,
     /// The templates, as the nib's objects list them.
     pub objects: Vec<Value>,
     /// The templates' names, in the order of their `viewController`
     /// outlets: the array's reversed, then (stably) by class name.
     pub outlets: Vec<String>,
+    /// The bar button items' `perform:` actions: (item, template), in the
+    /// order of the templates' outlets.
+    pub performs: Vec<(String, String)>,
 }
 
 /// The templates of a controller (`controller`, its object's name in the
 /// nib) whose view triggers `view_segues` (as listed, each with its
-/// placeholder's index) and which itself has `own_segues`.
+/// placeholder's index), which itself has `own_segues`, and whose bar
+/// button items trigger `bar_segues` (each with the item's name).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn templates(
-    nib: &mut Nib, controller: &str, upstream_used: bool, first: usize, view_segues: &[(usize, Node)], own_segues: &[Node], names: &HashMap<String, String>,
+    nib: &mut Nib, controller: &str, upstream_used: bool, first: usize, view_segues: &[(usize, Node)], own_segues: &[Node],
+    bar_segues: &[(Node, String)], names: &HashMap<String, String>,
 ) -> Result<Templates, String> {
     // `first` is the controller's placeholder's number (a gesture
     // recognizer's comes before it).
@@ -275,8 +280,20 @@ pub(super) fn templates(
         objects.push(reference(format!("segue {i}")));
     }
     outlets.extend(view_classes);
+    // A bar button item's template is in the controller's nib, the item
+    // performing it.
+    let mut performs = Vec::new();
+    for (i, (s, item)) in bar_segues.iter().enumerate() {
+        let name = format!("{controller} bar segue {i}");
+        let t = template(nib, *s, names)?;
+        outlets.push((t.class, name.clone()));
+        array.push(Value::New(t.named(name.clone())));
+        objects.push(reference(name.clone()));
+        performs.push((item.clone(), name));
+    }
     let array = if array.is_empty() { None } else { Some(nib.array("NSArray", array)) };
     outlets.reverse();
     outlets.sort_by(|a, b| a.0.cmp(b.0));
-    Ok(Templates { external, array, objects, outlets: outlets.into_iter().map(|e| e.1).collect() })
+    performs.sort_by_key(|(_, t)| outlets.iter().position(|o| o.1 == *t));
+    Ok(Templates { external, array, objects, outlets: outlets.into_iter().map(|e| e.1).collect(), performs })
 }

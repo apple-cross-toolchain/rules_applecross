@@ -523,10 +523,22 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
 
 /// A view controller's navigation item: its title, also as an attributed
 /// string without attributes, no items, and the large title mode.
-fn navigation_item(nib: &mut Nib, n: Node) -> Result<Value, String> {
+/// A navigation item (`name`) of controller `vc_id`: the object, its bar
+/// button items' names, their actions (selector, item) on the controller
+/// and their segues (with the item).
+struct NavigationItem<'a, 'i> {
+    value: Value,
+    bar_items: Vec<String>,
+    actions: Vec<(String, String)>,
+    segues: Vec<(Node<'a, 'i>, String)>,
+}
+
+fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str) -> Result<NavigationItem<'a, 'i>, String> {
     only_attributes(n, &[("key", Some("navigationItem")), ("title", None), ("largeTitleDisplayMode", None), ("id", None)])?;
-    if n.has_children() {
-        return fail("navigation items with bar button items or other children are not supported by this ibtool");
+    for c in n.children().filter(|c| c.is_element()) {
+        if !c.has_tag_name("barButtonItem") || !matches!(c.attribute("key"), Some("leftBarButtonItem" | "rightBarButtonItem")) {
+            return fail("navigation items with children other than a left and a right bar button item are not supported by this ibtool");
+        }
     }
     let mut values = Vec::new();
     // An empty title is left out.
@@ -544,7 +556,27 @@ fn navigation_item(nib: &mut Nib, n: Node) -> Result<Value, String> {
         let attributes = nib.shared("empty attributes".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]));
         values.push(("UIAttributedTitle", Value::New(Object::new("NSAttributedString", vec![("NSString", string), ("NSAttributes", attributes)]))));
     }
+    // Each bar button item, then the arrays of them around the center
+    // item groups.
+    let mut bar_items = Vec::new();
+    let mut actions = Vec::new();
+    let mut segues = Vec::new();
+    let mut arrays = Vec::new();
+    for (key, single, array) in [("leftBarButtonItem", "UILeftBarButtonItem", "UILeftBarButtonItems"), ("rightBarButtonItem", "UIRightBarButtonItem", "UIRightBarButtonItems")] {
+        if let Some(b) = child(n, "barButtonItem", key) {
+            let item_name = format!("{name} {key}");
+            values.push((single, Value::New(bar_button_item(nib, b, &item_name, vc_id, &mut actions, &mut segues)?.named(item_name.clone()))));
+            arrays.push((array, item_name.clone()));
+            bar_items.push(item_name);
+        }
+    }
+    if let Some((array, item)) = arrays.iter().find(|a| a.0 == "UILeftBarButtonItems") {
+        values.push((array, nib.array("NSArray", vec![reference(item.clone())])));
+    }
     values.push(("UICenterItemGroups", nib.empty_array()));
+    if let Some((array, item)) = arrays.iter().find(|a| a.0 == "UIRightBarButtonItems") {
+        values.push((array, nib.array("NSArray", vec![reference(item.clone())])));
+    }
     let mode = match n.attribute("largeTitleDisplayMode") {
         None | Some("automatic") => 0,
         Some("always") => 1,
@@ -552,7 +584,66 @@ fn navigation_item(nib: &mut Nib, n: Node) -> Result<Value, String> {
         Some(other) => return fail(format!("largeTitleDisplayMode {other} is not supported by this ibtool")),
     };
     values.push(("UILargeTitleDisplayMode", Value::Int(mode)));
-    Ok(Value::New(Object::new("UINavigationItem", values).named("navigation item")))
+    Ok(NavigationItem { value: Value::New(Object::new("UINavigationItem", values).named(name)), bar_items, actions, segues })
+}
+
+/// A bar button item with a title or a system item, and its actions on the
+/// controller (selector, `name`) and its segue (with `name`) pushed to
+/// `actions` and `segues`.
+fn bar_button_item<'a, 'i>(
+    nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
+) -> Result<Object, String> {
+    only_attributes(b, &[("key", None), ("title", None), ("style", None), ("systemItem", None), ("id", None)])?;
+    only_children(b, &["connections"])?;
+    for c in children(b, "connections") {
+        only_children(c, &["action", "segue"])?;
+        if children(c, "segue").count() + children(c, "action").count() > 1 {
+            return fail("a bar button item with more than one action or segue is not supported by this ibtool");
+        }
+        segues.extend(children(c, "segue").map(|sg| (sg, name.to_string())));
+        for a in children(c, "action") {
+            only_attributes(a, &[("selector", None), ("destination", None), ("id", None)])?;
+            if attr(a, "destination")? != vc_id {
+                return fail("a bar button item's actions on anything but its controller are not supported by this ibtool");
+            }
+            actions.push((attr(a, "selector")?.to_string(), name.to_string()));
+        }
+    }
+    let mut values = vec![("UIEnabled", Value::Bool(true))];
+    // UIBarButtonSystemItem, as probed.
+    if let Some(item) = b.attribute("systemItem") {
+        // Xcode archives close as done.
+        const ITEMS: [&str; 24] = [
+            "done", "cancel", "edit", "save", "add", "flexibleSpace", "fixedSpace", "compose", "reply", "action", "organize", "bookmarks", "search",
+            "refresh", "stop", "camera", "trash", "play", "pause", "rewind", "fastForward", "undo", "redo", "pageCurl",
+        ];
+        let code = match item {
+            "close" => 0,
+            _ => ITEMS.iter().position(|i| *i == item).ok_or_else(|| format!("bar button system item {item} is not supported by this ibtool"))? as i64,
+        };
+        values.push(("UIIsSystemItem", Value::Bool(true)));
+        values.push(("UISystemItem", Value::Int(code)));
+        // A space hides the bar's shared background.
+        if code == 5 || code == 6 {
+            if b.attribute("style") != Some("plain") {
+                return fail("a bar button space with a style is not supported by this ibtool");
+            }
+            values.push(("UIHidesSharedBG", Value::Bool(true)));
+        }
+    }
+    // No style is the legacy bordered one; plain is left out.
+    match b.attribute("style") {
+        None => values.push(("UIStyle", Value::Int(1))),
+        Some("plain") => {}
+        Some("done") => values.push(("UIStyle", Value::Int(2))),
+        Some(other) => return fail(format!("bar button style {other} is not supported by this ibtool")),
+    }
+    match (b.attribute("title"), b.attribute("systemItem")) {
+        (Some(title), None) => values.push(("UITitle", nib.text(attr(b, "id")?, "title", title))),
+        (None, Some(_)) => {}
+        _ => return fail("a bar button item needs a title or a system item for this ibtool"),
+    }
+    Ok(Object::new("UIBarButtonItem", values))
 }
 
 /// A text style's font as Xcode archives it: name, traits and the size
@@ -2108,6 +2199,27 @@ fn outlet(nib: &mut Nib, label: &str, source: &str, destination: &str) -> Value 
     Value::New(Object::new("UIRuntimeOutletConnection", vec![("UILabel", label), ("UISource", reference(source)), ("UIDestination", reference(destination))]))
 }
 
+/// A navigation item's bar button items' actions and segues' `perform:`,
+/// by selector: actions with one selector the right item's first (`items`
+/// in the left-right order), the `perform:`s in their templates' order.
+fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String)], performs: &[(String, String)], controller: &str) -> Vec<Value> {
+    let mut events: Vec<(&str, usize, &str, &str)> = Vec::new();
+    for (selector, item) in actions {
+        let from_right = items.len() - items.iter().position(|i| i == item).unwrap_or(0);
+        events.push((selector, from_right, item, controller));
+    }
+    events.extend(performs.iter().enumerate().map(|(i, (item, template))| ("perform:", i, item.as_str(), template.as_str())));
+    events.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    events.into_iter().map(|(selector, _, item, destination)| event_connection(nib, selector, item, destination)).collect()
+}
+
+/// An action without an event mask: a gesture recognizer's or a bar button
+/// item's.
+fn event_connection(nib: &mut Nib, selector: &str, source: &str, destination: &str) -> Value {
+    let label = nib.string(selector);
+    Value::New(Object::new("UIRuntimeEventConnection", vec![("UILabel", label), ("UISource", reference(source)), ("UIDestination", reference(destination))]))
+}
+
 fn root_object(nib: &mut Nib, top: Vec<Value>, objects: Vec<Value>, connections: Vec<Value>) -> Object {
     root_object_with_pairs(nib, top, objects, connections, Vec::new())
 }
@@ -2181,6 +2293,10 @@ struct Embedded {
     templates: segue::Templates,
     /// The name of the navigation item the document gives it, if any.
     navigation_item: Option<String>,
+    /// Its navigation item's bar button items, after the templates, and
+    /// their actions (selector, item), after the templates' outlets.
+    bar_items: Vec<String>,
+    bar_actions: Vec<(String, String)>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2202,23 +2318,32 @@ fn embedded_controller(
     };
     let explicit_item = child(vc, "navigationItem", "navigationItem");
     let item_name = format!("{name} navigation item");
+    let mut bar_items = Vec::new();
+    let mut bar_actions = Vec::new();
+    let mut bar_segues = Vec::new();
     let item = match (explicit_item, bar) {
-        (Some(i), _) => match navigation_item(nib, i)? {
-            Value::New(mut o) => {
-                if let Some(bar) = bar {
-                    o.values.push(("UINavigationBar", reference(bar)));
+        (Some(i), _) => {
+            let parts = navigation_item(nib, i, &item_name, attr(vc, "id")?)?;
+            bar_items = parts.bar_items;
+            bar_actions = parts.actions;
+            bar_segues = parts.segues;
+            match parts.value {
+                Value::New(mut o) => {
+                    if let Some(bar) = bar {
+                        o.values.push(("UINavigationBar", reference(bar)));
+                    }
+                    Some(Value::New(o))
                 }
-                Some(Value::New(o.named(item_name.clone())))
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
-        },
+        }
         (None, Some(bar)) => Some(Value::New(
             Object::new("UINavigationItem", vec![("UILargeTitleDisplayMode", Value::Int(0)), ("UINavigationBar", reference(bar))])
                 .named(format!("{name} implied navigation item")),
         )),
         (None, None) => None,
     };
-    let mut templates = segue::templates(nib, name, root.upstream_used, 1, &root.view_segues, &root.own_segues, nib_names)?;
+    let mut templates = segue::templates(nib, name, root.upstream_used, 1, &root.view_segues, &root.own_segues, &bar_segues, nib_names)?;
     // An empty table is one object however many controllers have one.
     let external = if templates.external.is_empty() {
         nib.shared("empty dictionary".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))
@@ -2264,7 +2389,7 @@ fn embedded_controller(
     } else {
         Object::new(root.original_class, values)
     };
-    Ok(Embedded { value: Value::New(controller.named(name)), templates, navigation_item: explicit_item.map(|_| item_name) })
+    Ok(Embedded { value: Value::New(controller.named(name)), templates, navigation_item: explicit_item.map(|_| item_name), bar_items, bar_actions })
 }
 
 /// A navigation controller's bar (`name`), at the height Xcode gives it
@@ -2426,6 +2551,9 @@ fn navigation_controller_nib(
     let explicit_item = embedded.navigation_item.clone();
     let templates_objects = std::mem::take(&mut embedded.templates.objects);
     let templates_outlets = std::mem::take(&mut embedded.templates.outlets);
+    let bar_items = std::mem::take(&mut embedded.bar_items);
+    let bar_actions = std::mem::take(&mut embedded.bar_actions);
+    let templates_performs = std::mem::take(&mut embedded.templates.performs);
     let controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, title, None)?;
     let mut objects = vec![
         reference("root storyboard"),
@@ -2440,6 +2568,7 @@ fn navigation_controller_nib(
         objects.push(reference(item));
     }
     objects.extend(templates_objects);
+    objects.extend(bar_items.iter().map(|b| reference(b.clone())));
     let mut connections = vec![
         outlet(&mut nib, "storyboard", "controller", "storyboard"),
         outlet(&mut nib, "storyboard", "root", "root storyboard"),
@@ -2448,6 +2577,7 @@ fn navigation_controller_nib(
     for t in &templates_outlets {
         connections.push(outlet(&mut nib, "viewController", t, "root"));
     }
+    connections.extend(bar_events(&mut nib, &bar_items, &bar_actions, &templates_performs, "root"));
     let top = vec![root_storyboard, owner, responder, storyboard, controller];
     Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))))
 }
@@ -3042,10 +3172,20 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if has_tab_item {
             swapper.push(("UITabBarItem", tab::tab_bar_item(&mut vnib, vc, "tab bar item")?.0));
         }
+        let mut bar_items = Vec::new();
+        let mut bar_actions = Vec::new();
+        let mut bar_segues = Vec::new();
         if let Some(item) = child(vc, "navigationItem", "navigationItem") {
-            swapper.push(("UINavigationItem", navigation_item(&mut vnib, item)?));
+            let parts = navigation_item(&mut vnib, item, "navigation item", vc_id)?;
+            swapper.push(("UINavigationItem", parts.value));
+            bar_items = parts.bar_items;
+            bar_actions = parts.actions;
+            bar_segues = parts.segues;
+            if has_tab_item && !bar_items.is_empty() {
+                return fail("a controller with both a tab bar item and bar button items is not supported by this ibtool");
+            }
         }
-        let templates = segue::templates(&mut vnib, "controller", upstream_used, 1 + gesture, &view_segues, &own_segues, &nib_names)?;
+        let templates = segue::templates(&mut vnib, "controller", upstream_used, 1 + gesture, &view_segues, &own_segues, &bar_segues, &nib_names)?;
         let mut external = templates.external;
         let recognizer = match recognizer {
             Some(r) => {
@@ -3099,18 +3239,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         for t in &templates.outlets {
             connections.push(outlet(&mut vnib, "viewController", t, "controller"));
         }
+        connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, "controller"));
         let mut top = vec![owner, responder, storyboard];
+        if recognizer.is_some() && !bar_items.is_empty() {
+            return fail("a gesture recognizer with bar button items is not supported by this ibtool");
+        }
         let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard")];
         if let Some((object, selectors)) = recognizer {
             top.push(object);
             objects.push(reference("gesture"));
             for selector in selectors {
-                let label = vnib.string(&selector);
-                connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
-                    ("UILabel", label),
-                    ("UISource", reference("gesture")),
-                    ("UIDestination", reference("controller")),
-                ])));
+                connections.push(event_connection(&mut vnib, &selector, "gesture", "controller"));
             }
         }
         objects.push(reference("controller"));
@@ -3121,6 +3260,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             objects.push(reference("tab bar item"));
         }
         objects.extend(templates.objects);
+        objects.extend(bar_items.iter().map(|b| reference(b.clone())));
         top.push(controller);
         let vc_root = root_object(&mut vnib, top, objects, connections);
         if embedded {
