@@ -98,11 +98,12 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             if appearance != 0 {
                 attrs.push((car::ATTR_APPEARANCE, appearance));
             }
-            // A system colour, as Xcode resolves it for the appearance.
+            // A system colour, as Xcode resolves it for the appearance; one
+            // for macOS too, building for iOS (Binder's accent colour).
             if let Some(reference) = color.get("reference") {
                 for (k, v) in color {
                     match (k.as_str(), v.as_str()) {
-                        ("reference", Some(_)) | ("platform", Some("universal" | "ios")) => {}
+                        ("reference", Some(_)) | ("platform", Some("universal" | "ios" | "osx")) => {}
                         _ => return unsupported(format!("a system colour's {k} {v}")),
                     }
                 }
