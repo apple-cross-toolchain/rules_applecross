@@ -670,9 +670,12 @@ fn bar_button_item<'a, 'i>(
     nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
 ) -> Result<Object, String> {
     only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("id", None)])?;
-    only_children(b, &["connections", "color"])?;
+    only_children(b, &["connections", "color", "inset"])?;
     if children(b, "color").any(|c| c.attribute("key") != Some("tintColor")) {
         return fail("bar button item colours other than a tint colour are not supported by this ibtool");
+    }
+    if children(b, "inset").any(|i| i.attribute("key") != Some("imageInsets")) {
+        return fail("bar button item insets other than its image insets are not supported by this ibtool");
     }
     for c in children(b, "connections") {
         only_children(c, &["action", "segue"])?;
@@ -733,6 +736,12 @@ fn bar_button_item<'a, 'i>(
         }
         (None, None, _) => {}
         _ => return fail("a bar button item with a system item and a title or an image is not supported by this ibtool"),
+    }
+    // Its image insets (top, left, bottom, right), before its tint (four
+    // probes).
+    if let Some(i) = child(b, "inset", "imageInsets") {
+        let side = |a: &str| i.attribute(a).map_or(Ok(0.0), number);
+        values.push(("UIImageInsets", doubles(&[side("minY")?, side("minX")?, side("maxY")?, side("maxX")?])));
     }
     // Its tint, last (two probes).
     if let Some(c) = child(b, "color", "tintColor") {
@@ -1886,9 +1895,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
                 (true, "height", "width") => 3,
                 _ => return fail("a constraint between an item and itself other than its own aspect ratio is not supported by this ibtool"),
             };
-            if sizes.iter().any(|(r, _)| *r == rank) {
-                return fail("two aspect ratios on a subview's same dimension are not supported by this ibtool");
-            }
+            // Two on one dimension go by id (three probes).
             sizes.push((rank, c));
             continue;
         }
@@ -1902,7 +1909,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
         let f = subview_frame(*v)?;
         others.push(((f.x * f.x + f.y * f.y, f.x), key, c, first, second));
     }
-    sizes.sort_by_key(|f| f.0);
+    sizes.sort_by_key(|f| (f.0, f.1.attribute("id")));
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
     order_ties(&mut others, |o| (o.1, o.2), &direct, &[])?;
     let mut values = Vec::new();

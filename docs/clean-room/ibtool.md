@@ -327,7 +327,9 @@ other values of the attributes these use, is refused. Observed:
   place as a label's (five probes), followed by its hugging when either
   priority is given (each 250 unless given; two probes). An aspect ratio
   the root view holds on one of its subviews is the subview's own, in its
-  constraints and in its turn among the objects (one probe).
+  constraints and in its turn among the objects (one probe). Two aspect
+  ratios on one dimension, its own and one the root view holds, go by id
+  (three probes and one of the corpus's).
 - A plain `<view>` subview archives its subviews, background colour, the
   flags, its autoresizing mask (36 without one), the autoresizing key
   (left out when it doesn't autoresize its subviews: one probe) and its
@@ -712,7 +714,9 @@ by the item's name, but `close` is 0) and for a space `UIHidesSharedBG`,
 then `UIStyle` (1 with no style, 2 for done, none for plain), then its
 `UITitle`, then its image (`UIImage`, a placeholder as an image view's);
 an item may have a title, an image, both or neither (five probes), then
-its tint (`UITintColor`; two probes). The items follow the controller's segue templates in its nib's
+its image insets (`UIImageInsets`, top, left, bottom, right: four probes;
+its landscape insets, which change nothing here, are refused), then its
+tint (`UITintColor`; two probes). The items follow the controller's segue templates in its nib's
 objects (its own nib's, or its navigation controller's).
 - **Actions.** An item's action on its controller is an event connection
   without a mask.
