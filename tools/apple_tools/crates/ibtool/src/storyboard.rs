@@ -341,6 +341,20 @@ impl Nib {
     }
 }
 
+/// The document's tint colour (`<color key="tintColor">` after its
+/// resources), which Xcode gives each controller's root view and each
+/// navigation bar without one of its own (five probes). Bars and
+/// controllers whose tint isn't established are refused beside it.
+fn document_tint<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> {
+    let root = n.document().root_element();
+    let Some(tint) = root.children().find(|c| c.has_tag_name("color") && c.attribute("key") == Some("tintColor")) else { return Ok(None) };
+    const UNKNOWN: [&str; 6] = ["tabBar", "toolbar", "splitViewController", "pageViewController", "searchBar", "segmentedControl"];
+    if let Some(d) = root.descendants().find(|d| UNKNOWN.contains(&d.tag_name().name())) {
+        return fail(format!("a document tint colour beside a <{}> is not supported by this ibtool", d.tag_name().name()));
+    }
+    Ok(Some(tint))
+}
+
 /// Whether a colour is an opaque white in a grey space, which some views'
 /// backgrounds take as a system colour.
 fn opaque_grey_white(n: Node) -> Result<bool, String> {
@@ -649,8 +663,8 @@ fn bar_button_item<'a, 'i>(
                 values.push(("UIImage", nib.image(image)));
             }
         }
-        (None, None, Some(_)) => {}
-        _ => return fail("a bar button item needs a title, an image or a system item for this ibtool"),
+        (None, None, _) => {}
+        _ => return fail("a bar button item with a system item and a title or an image is not supported by this ibtool"),
     }
     Ok(Object::new("UIBarButtonItem", values))
 }
@@ -1143,12 +1157,14 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     let mut allowed = vec![
         ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
         ("fixedFrame", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+        ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("horizontalCompressionResistancePriority", None),
+        ("verticalCompressionResistancePriority", None),
     ];
     let mut children_allowed = vec!["rect", "autoresizingMask", "constraints", "connections"];
     match tag {
         "switch" => {
             allowed.extend([
-                ("horizontalHuggingPriority", Some("750")), ("verticalHuggingPriority", Some("750")), ("contentHorizontalAlignment", Some("center")),
+                ("contentHorizontalAlignment", Some("center")),
                 ("contentVerticalAlignment", Some("center")), ("on", Some("YES")), ("enabled", Some("NO")),
             ]);
             children_allowed.push("color");
@@ -1162,7 +1178,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         }
         "stepper" => {
             allowed.extend([
-                ("horizontalHuggingPriority", Some("750")), ("verticalHuggingPriority", Some("750")), ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None),
+                ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None),
                 ("minimumValue", None), ("maximumValue", None), ("stepValue", None), ("continuous", Some("NO")), ("autorepeat", Some("NO")),
                 ("wraps", Some("YES")), ("enabled", Some("NO")),
             ]);
@@ -1170,7 +1186,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         }
         _ => {
             allowed.extend([
-                ("horizontalHuggingPriority", Some("750")), ("verticalHuggingPriority", Some("750")), ("hidesWhenStopped", Some("YES")),
+                ("hidesWhenStopped", Some("YES")),
                 ("animating", Some("YES")), ("style", None),
             ]);
             children_allowed.push("color");
@@ -1229,14 +1245,18 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     if let Some(own) = own_constraints(nib, scene, n, name)? {
         values.push(("UIViewAutolayoutConstraints", own));
     }
-    // A slider and a stepper hug at 250, which Xcode writes; the others,
-    // and a stepper given 750, at 750, which it doesn't.
-    let hugs = (n.attribute("horizontalHuggingPriority").is_some(), n.attribute("verticalHuggingPriority").is_some());
-    if hugs.0 != hugs.1 {
-        return fail(format!("one hugging priority on a {tag} is not supported by this ibtool"));
+    // Hugging (each 250 unless given) is written, but for a switch, stepper
+    // or activity indicator not when it is 750 both ways. Then compression
+    // resistance, each 750 unless given, if either is.
+    let priority = |k: &str| n.attribute(k).unwrap_or("250");
+    let (h, v) = (priority("horizontalHuggingPriority"), priority("verticalHuggingPriority"));
+    if tag == "slider" || (h, v) != ("750", "750") {
+        values.push(("UIViewContentHuggingPriority", nib.string(&format!("{{{h}, {v}}}"))));
     }
-    if tag == "slider" || (tag == "stepper" && !hugs.0) {
-        values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+    let resistance = (n.attribute("horizontalCompressionResistancePriority"), n.attribute("verticalCompressionResistancePriority"));
+    if resistance != (None, None) {
+        let (h, v) = (resistance.0.unwrap_or("750"), resistance.1.unwrap_or("750"));
+        values.push(("UIViewContentCompressionResistancePriority", nib.string(&format!("{{{h}, {v}}}"))));
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
@@ -1862,7 +1882,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
                 ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", None),
                 ("textAlignment", None), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("text", None), ("enabled", Some("NO")),
-                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("hidden", Some("YES")), ("restorationIdentifier", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             let border = match n.attribute("borderStyle") {
                 None => None,
@@ -1914,6 +1934,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 _ => return fail("a text field needs one text colour or nil"),
             };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             if n.attribute("clipsSubviews").is_some() {
@@ -1925,6 +1946,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
+            restoration_identifier(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             if n.attribute("enabled").is_some() {
@@ -2272,7 +2294,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
                 ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")), ("enabled", Some("NO")),
-                ("clipsSubviews", Some("YES")),
+                ("clipsSubviews", Some("YES")), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
@@ -2321,7 +2343,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if states.iter().any(|s| s.0 == value) {
                     return fail("a button with two of one state is not supported by this ibtool");
                 }
-                only_attributes(st, &[("key", None), ("title", None), ("image", None)])?;
+                only_attributes(st, &[("key", None), ("title", None), ("image", None), ("backgroundImage", None)])?;
                 only_children(st, &["color"])?;
                 for c in children(st, "color") {
                     if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
@@ -2378,8 +2400,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("opaque").is_none() {
                 values.push(("UIOpaque", Value::Bool(true)));
             }
+            hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
+            alpha(&mut values, n)?;
             if n.attribute("clipsSubviews").is_some() {
                 if child(n, "color", "tintColor").is_some() {
                     return fail("a clipping button with a tint colour is not supported by this ibtool");
@@ -2422,6 +2446,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if let Some(image) = st.attribute("image") {
                     content.push(("UIImage", nib.image(image)));
                 }
+                if let Some(image) = st.attribute("backgroundImage") {
+                    content.push(("UIBackgroundImage", nib.image(image)));
+                }
                 if let Some(c) = child(*st, "color", "titleColor") {
                     content.push(("UITitleColor", color(nib, c)?));
                 }
@@ -2458,6 +2485,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", Some("vertical")), ("distribution", None), ("alignment", None),
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
+                ("layoutMarginsFollowReadableWidth", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "subviews", "edgeInsets", "color", "constraints"])?;
@@ -2515,6 +2543,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIViewAutolayoutConstraints", own));
             }
             values.push(("UIViewLayoutMargins", doubles(&margins.unwrap_or([0.0; 4]))));
+            if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
+                values.push(("UIViewLayoutMarginsFollowReadableWidth", Value::Bool(true)));
+            }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIStackViewArrangedSubviews", nib.array("NSArray", refs)));
@@ -3338,17 +3369,22 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
     if f.x != 0.0 {
         return fail("navigation bars not at x 0 are not supported by this ibtool");
     }
-    let hugging = nib.string("{250, 250}");
     let mut values = vec![
         ("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])),
         ("UICenter", doubles(&[f.x, f.y + 27.0])),
         ("UIDeepDrawRect", Value::Bool(true)),
         ("UIAutoresizeSubviews", Value::Bool(true)),
         ("UIAutoresizingMask", Value::Int(2)),
+    ];
+    if let Some(tint) = document_tint(bar)? {
+        values.push(("UITintColor", color(nib, tint)?));
+    }
+    let hugging = nib.string("{250, 250}");
+    values.extend([
         ("UIViewContentHuggingPriority", hugging),
         ("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])),
         ("UIViewLayoutMarginsAreDirectional", Value::Bool(true)),
-    ];
+    ]);
     if bar.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
         values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
     }
@@ -3865,6 +3901,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 None => 0,
             };
             let background = child(view, "color", "backgroundColor");
+            if let Some(c) = children(view, "color").find(|c| !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor"))) {
+                return fail(format!("a root view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
+            }
+            let tint = match child(view, "color", "tintColor") {
+                Some(own) => Some(own),
+                None => document_tint(view)?,
+            };
 
             // The view's nib, in encoding order.
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
@@ -3928,7 +3971,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(mask)));
             if view.attribute("clearsContextBeforeDrawing").is_some() {
+                if tint.is_some() {
+                    return fail("a root view's tint colour beside clearsContextBeforeDrawing is not supported by this ibtool");
+                }
                 values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+            }
+            if let Some(tint) = tint {
+                values.push(("UITintColor", color(&mut nib, tint)?));
             }
 
             // The view's constraints: the guides' first, then the document's in

@@ -426,6 +426,15 @@ other values of the attributes these use, is refused. Observed:
 
 ## Stack views, content modes, named colours and gesture recognizers
 
+- The document's tint colour (a `<color key="tintColor">` after its
+  resources) is `UITintColor` on each controller's root view without one
+  of its own (after its mask), on a root table or collection view (after
+  its clipping) and on a navigation bar (after its mask); a root view's
+  own tint goes in the same place, and its colours other than background
+  and tint are refused. Beside tab bars, toolbars, split and page view
+  controllers, search bars and segmented controls the document's tint is
+  refused, not yet probed (five probes).
+
 - A stack view's `axis` is `UIStackViewAxis` (horizontal 0, vertical 1),
   `distribution` `UIStackViewDistribution` (fill 0, fillEqually 1,
   fillProportionally 2, equalSpacing 3, equalCentering 4), `alignment`
@@ -515,7 +524,7 @@ alone in `UILeftBarButtonItems` and `UIRightBarButtonItems`, around
 by the item's name, but `close` is 0) and for a space `UIHidesSharedBG`,
 then `UIStyle` (1 with no style, 2 for done, none for plain), then its
 `UITitle`, then its image (`UIImage`, a placeholder as an image view's);
-an item may have a title, an image or both (three probes). The items follow the controller's segue templates in its nib's
+an item may have a title, an image, both or neither (five probes). The items follow the controller's segue templates in its nib's
 objects (its own nib's, or its navigation controller's).
 - **Actions.** An item's action on its controller is an event connection
   without a mask.
@@ -785,9 +794,13 @@ bottom 2, fill 3), then `UIContentHorizontalAlignment` (left 1, right 2,
 fill 3, leading 4, trailing 5), after its large content properties (ten
 probes). Its content, title and image insets (`<inset>`, minimum and
 maximum x and y) are `UIContentEdgeInsets`, `UITitleEdgeInsets` and
-`UIImageEdgeInsets` (top, left, bottom, right) after its font (five probes). A view's, label's or table's `restorationIdentifier` is
-`UIRestorationIdentifier`, just before `UIViewSemanticContentAttribute`
-(four probes).
+`UIImageEdgeInsets` (top, left, bottom, right) after its font (five
+probes). A view's, label's, table's, text field's or table cell's
+`restorationIdentifier` is `UIRestorationIdentifier`, just before
+`UIViewSemanticContentAttribute` (six probes). A text field may also be
+hidden (`UIHidden`, after `UIDeepDrawRect`; one probe). A collection view
+in a view may page (`UIPagingEnabled`, after
+`UIScrollViewIndicatorInsetAdjustmentBehavior`; one probe).
 
 A scroll view without content and frame layout guides (those are refused)
 is compiled as a plain view, `UIScrollView` (or swapped for its custom
@@ -805,7 +818,7 @@ on still doesn't translate its mask; a constraint's `identifier` is
 The root view takes the margin keys a plain view does, after its layout
 guides, and `layoutMarginsFollowReadableWidth`
 (`UIViewLayoutMarginsFollowReadableWidth`, after the margins, for views
-too); it may be non-opaque, not clear its context
+and stack views too); it may be non-opaque, not clear its context
 (`UIClearsContextBeforeDrawing` after its mask) or have no background (15
 probes). A label's compression resistance is
 `UIViewContentCompressionResistancePriority` (`{h, v}`, each 750 unless
@@ -817,8 +830,10 @@ whatever its spacing (eight probes).
 A button's states are its `UIButtonStatefulContent`, keyed by
 UIControlState in that order whatever the document's (normal 0, which it
 needs, highlighted 1, disabled 2, selected 4), each a `UIButtonContent` of
-its title and colours (six probes; a localizable build's titles for other
-states than normal are refused).
+its title, image, background image (`UIBackgroundImage`) and colours (ten
+probes; a localizable build's titles for other states than normal are
+refused). A button may be hidden, tagged (both after `UIOpaque`) and
+have an alpha (after its mask), as a plain view (two probes).
 
 A label's, plain view's or button's `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
@@ -906,10 +921,12 @@ Title1 28, Title2 22, Title3 20), to a quarter point (19 probes).
 
 Switches, sliders, steppers and activity indicators (29 probes):
 - **Common.** Each is a non-opaque view: `UIDeepDrawRect`, hidden and tag,
-  `UIAutoresizeSubviews`, mask 36, alpha, the constraint keys, then (a
-  slider and a stepper only) hugging `{250, 250}`, `UIViewSemanticContentAttribute` and
-  the large content properties, before its own values. A switch's and an
-  activity indicator's hugging is 750, which Xcode doesn't write. Their
+  `UIAutoresizeSubviews`, mask 36, alpha, the constraint keys, then its
+  hugging (each priority 250 unless given; a switch's, stepper's or
+  activity indicator's left out when it is 750 both ways, a slider's
+  always written), its compression resistance if either is given (each
+  750 unless given), `UIViewSemanticContentAttribute` and the large
+  content properties, before its own values (nine probes). Their
   value-changed actions are event connections with mask 4096.
 - **A switch.** `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
   `UISwitchOnTintColor`. Its frame is also a key-value pair, `frame`
@@ -917,8 +934,7 @@ Switches, sliders, steppers and activity indicators (29 probes):
 - **A slider.** `UIValue` (a float), `UIMinValue` and `UIMaxValue` unless 0
   and 1, `UIContinuous` false, the minimum, maximum and thumb tint
   colours, and `UIBehavioralStyle` 0.
-- **A stepper.** Hugging `{250, 250}`, or none written when the document
-  gives 750. A background colour before `UIDeepDrawRect`, a tint after
+- **A stepper.** A background colour before `UIDeepDrawRect`, a tint after
   the alpha; then `UIDisabled`, `UIValue`, `UIMinimumValue`,
   `UIMaximumValue` and `UIStepValue` (doubles) unless 0, 0, 100 and 1 (a
   missing maximum is 0, so written), `UIContinuous` and `UIAutorepeat`
