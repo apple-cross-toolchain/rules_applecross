@@ -61,11 +61,6 @@ fn check_table(table: Node) -> Result<(), String> {
     if children(table, "inset").next().is_some() && child(table, "color", "sectionIndexBackgroundColor").is_some() {
         return fail("a table with both a separator inset and a section index background is not supported by this ibtool");
     }
-    if (header_or_footer(table, "tableHeaderView").is_some() || header_or_footer(table, "tableFooterView").is_some())
-        && child(table, "color", "separatorColor").is_some()
-    {
-        return fail("a table with both a header or footer view and a separator colour is not supported by this ibtool");
-    }
     if !matches!(table.attribute("dataMode"), Some("prototypes" | "static")) {
         return fail("a table's dataMode other than prototypes or static is not supported by this ibtool");
     }
@@ -224,7 +219,8 @@ fn table_values(
     values.push(("UIStyle", Value::Int(ui_style)));
     // The legacy keys are left out for none (0), the iOS 9 one for the
     // single line (1).
-    let separator = match attr(table, "separatorStyle")? {
+    // No separator style is the default (one probe).
+    let separator = match table.attribute("separatorStyle").unwrap_or("default") {
         "default" | "singleLine" => 1,
         "none" => 0,
         "singleLineEtched" => 2,

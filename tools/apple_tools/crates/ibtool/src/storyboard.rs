@@ -609,7 +609,10 @@ fn bar_button_item<'a, 'i>(
     nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
 ) -> Result<Object, String> {
     only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("id", None)])?;
-    only_children(b, &["connections"])?;
+    only_children(b, &["connections", "color"])?;
+    if children(b, "color").any(|c| c.attribute("key") != Some("tintColor")) {
+        return fail("bar button item colours other than a tint colour are not supported by this ibtool");
+    }
     for c in children(b, "connections") {
         only_children(c, &["action", "segue"])?;
         if children(c, "segue").count() + children(c, "action").count() > 1 {
@@ -665,6 +668,10 @@ fn bar_button_item<'a, 'i>(
         }
         (None, None, _) => {}
         _ => return fail("a bar button item with a system item and a title or an image is not supported by this ibtool"),
+    }
+    // Its tint, last (two probes).
+    if let Some(c) = child(b, "color", "tintColor") {
+        values.push(("UITintColor", color(nib, c)?));
     }
     Ok(Object::new("UIBarButtonItem", values))
 }
@@ -1989,7 +1996,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
                 ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "view", "blurEffect", "constraints"])?;
+            only_children(n, &["rect", "view", "blurEffect", "constraints", "userDefinedRuntimeAttributes"])?;
+            let pairs = runtime_attributes(nib, n, &name)?;
+            scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             if n.attribute("opaque").is_none() {
                 return fail("an opaque visual effect view is not supported by this ibtool");
             }
@@ -2294,7 +2303,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
                 ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")), ("enabled", Some("NO")),
-                ("clipsSubviews", Some("YES")), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
+                ("clipsSubviews", Some("YES")), ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("customClass", None), ("customModule", None),
+                ("customModuleProvider", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
@@ -2479,7 +2489,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
             }
             values.push(("UIButtonConfiguration", Value::Nil));
-            Object::new("UIButton", values)
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UIButton")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UIButton")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UIButton", values)
+            }
         }
         "stackView" => {
             only_attributes(n, &[
@@ -2488,7 +2505,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("layoutMarginsFollowReadableWidth", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "subviews", "edgeInsets", "color", "constraints"])?;
+            only_children(n, &["rect", "subviews", "edgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
+            let pairs = runtime_attributes(nib, n, &name)?;
+            scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             let vertical = n.attribute("axis").is_some();
             let distribution = match n.attribute("distribution") {
                 None | Some("fill") => 0,
