@@ -1969,6 +1969,10 @@ struct Scene<'a> {
     /// and the views' `UIViewLayoutGuides` once a constraint defines them.
     safe_areas: Vec<(String, String)>,
     layout_guides: Vec<(String, Value)>,
+    /// Views deeper than a holder's subviews that its constraints name,
+    /// (holder, view) in their constraints' order: the objects list them
+    /// after the holder's level (see the view nib's objects).
+    held_pulled: Vec<(String, String)>,
     /// Scroll views' content and frame layout guides: (id, identifier,
     /// scroll view), archived where a constraint first uses them.
     scroll_guides: Vec<(String, &'static str, String)>,
@@ -2018,6 +2022,7 @@ impl<'a> Scene<'a> {
             unused_guides: Vec::new(),
             safe_areas: Vec::new(),
             layout_guides: Vec::new(),
+            held_pulled: Vec::new(),
             scroll_guides: Vec::new(),
             defined_guides: Vec::new(),
             toolbar_items: Vec::new(),
@@ -2353,12 +2358,22 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         // A scroll view's own guide as the second item, ordered as a
         // sibling (three probes).
         let own_guide = |item: &str| scene.scroll_guides.iter().any(|g| g.0 == item && g.2 == name) || scene.safe_areas.iter().any(|g| g.0 == item && g.1 == name);
-        let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, false)?;
+        // A second item deeper than its subviews, in plain, stack or scroll
+        // views, as the root view's (eight probes), in a controller's view.
+        let deeper = |item: &str| {
+            !direct.iter().any(|v| v.attribute("id") == Some(item))
+                && container.descendants().find(|d| d.is_element() && d.attribute("id") == Some(item)).is_some_and(|leaf| {
+                    leaf.parent().is_some_and(|p| p.has_tag_name("subviews"))
+                        && leaf.ancestors().skip(1).take_while(|a| *a != container).filter(|a| !a.has_tag_name("subviews")).all(|a| matches!(a.tag_name().name(), "view" | "stackView" | "scrollView"))
+                })
+        };
+        let nested = second != id && deeper(second) && nib.variations.is_some();
+        let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, nested)?;
         // Its own safe-area guide, either item, counts as at the origin, as
         // the root view's (two probes).
         let own_safe_area = |item: &str| scene.safe_areas.iter().any(|g| g.0 == item && g.1 == name);
         for item in [first, second] {
-            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) && !own_safe_area(item) {
+            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) && !own_safe_area(item) && !(item == second && nested) {
                 return fail(format!("a subview's constraints on {item} are not supported by this ibtool"));
             }
         }
@@ -2373,6 +2388,14 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     sizes.sort_by_key(|f| (f.0, f.1.attribute("id")));
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
     order_ties(&mut others, |o| (o.1, o.2), &direct, &[])?;
+    for (_, key, _, _, second) in &others {
+        if key.1 == 0 {
+            let view = view_name(second);
+            if !scene.held_pulled.iter().any(|p| p.1 == view) {
+                scene.held_pulled.push((name.to_string(), view));
+            }
+        }
+    }
     let mut values = Vec::new();
     let item = |i: &str| if i == id && n != container { reference(name.to_string()) } else { reference(view_name(i)) };
     let item_name = |i: &str| if i == id { name.to_string() } else { view_name(i) };
@@ -6670,10 +6693,38 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             objects.extend(scene.guides.iter().map(|g| reference(format!("guide {}", g.1))));
             // Then breadth first: each view in turn, from a queue, lists the
             // constraints it holds and then its subviews, which join the queue.
-            let mut queue: std::collections::VecDeque<Option<&String>> = [None].into();
+            // Level by level: after a level's last turn, the views deeper
+            // than their holders' subviews that the level's holders'
+            // constraints name, in their order, which then join the queue
+            // (eight probes: a holder's level, not its turn; the root's
+            // are its level's).
+            if scene.held_pulled.iter().any(|p| pulled.contains(&p.1)) {
+                return fail("a view both the root view's and a subview's constraints pull is not supported by this ibtool");
+            }
+            let held_pulled: Vec<(String, String)> = std::mem::take(&mut scene.held_pulled);
+            let mut queue: std::collections::VecDeque<(usize, Option<&String>)> = [(0, None)].into();
+            let mut level = 0;
+            let mut level_holders: Vec<&String> = Vec::new();
             // The views in the objects' order: the root, then breadth first.
             let mut order = vec![root_name.clone()];
-            while let Some(v) = queue.pop_front() {
+            loop {
+                if queue.front().map(|e| e.0) != Some(level) {
+                    for h in std::mem::take(&mut level_holders) {
+                        for (_, view) in held_pulled.iter().filter(|p| &p.0 == h) {
+                            objects.push(reference(view.clone()));
+                            order.push(view.clone());
+                            queue.push_back((level + 1, Some(view)));
+                        }
+                    }
+                    match queue.front() {
+                        Some(e) => level = e.0,
+                        None => break,
+                    }
+                }
+                let Some((depth, v)) = queue.pop_front() else { break };
+                if let Some(v) = v {
+                    level_holders.push(v);
+                }
                 let subviews_first = v.is_some_and(|v| scene.effect_contents.contains(v));
                 let constraints = |v: &String| scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())).collect::<Vec<_>>();
                 // A subview's own safe-area guide (or a scroll view's guides)
@@ -6689,15 +6740,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
                 if let Some((_, items)) = v.and_then(|v| scene.toolbar_items.iter().find(|t| &t.0 == v)) {
                     objects.extend(items.iter().map(|i| reference(i.clone())));
-                    queue.extend(items.iter().map(Some));
+                    queue.extend(items.iter().map(|i| (depth + 1, Some(i))));
                 }
                 if let Some((_, view)) = v.and_then(|v| scene.item_views.iter().find(|t| &t.0 == v)) {
                     objects.push(reference(view.clone()));
                 }
-                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1)) {
+                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1) && !held_pulled.iter().any(|p| p.1 == s.1)) {
                     objects.push(reference(s.clone()));
                     order.push(s.clone());
-                    queue.push_back(Some(s));
+                    queue.push_back((depth + 1, Some(s)));
                 }
                 if let Some(v) = v.filter(|_| subviews_first) {
                     objects.extend(constraints(v));
@@ -6706,7 +6757,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     for p in &pulled {
                         objects.push(reference(p.clone()));
                         order.push(p.clone());
-                        queue.push_back(Some(p));
+                        queue.push_back((depth + 1, Some(p)));
                     }
                 }
             }
