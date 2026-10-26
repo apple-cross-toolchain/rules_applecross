@@ -1022,6 +1022,9 @@ inside it. Observed with 15 probes and one corpus storyboard:
   when it is not 50x50. `automaticEstimatedItemSize` is not a value of
   the layout but a key-value pair of the nib (`UINibKeyValuePairsKey`):
   `estimatedItemSize` set to an `NSValue` size of the largest doubles.
+- A custom layout (`<collectionViewLayout>` with a custom class) is a
+  `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
+  root or in a view (three probes).
 - A cell's nib: the cell (`UICollectionViewCell`, or swapped in) holding
   its content view, a plain `UIView`; the cell's `UIReuseIdentifier`,
   nil `UISystemBackgroundView` and `UIContentConfigurationView`, and
