@@ -816,6 +816,12 @@ fn view_connections(scene: &mut Scene, n: Node, name: &str) -> Result<(), String
     Ok(())
 }
 
+/// Whether a gesture recognizer's delegate is its scene's controller (the
+/// only delegate `gesture_recognizer` accepts).
+fn gesture_delegate(r: Node) -> bool {
+    children(r, "connections").flat_map(|c| children(c, "outlet")).next().is_some()
+}
+
 /// The scene's gesture recognizers in their placeholders' order: the views
 /// that have them from the last in the document, each view's in its order
 /// (seven probes).
@@ -879,7 +885,11 @@ fn gesture_recognizer(nib: &mut Nib, r: Node, vc_id: &str) -> Result<(Object, Ve
     };
     let mut selectors = Vec::new();
     for c in children(r, "connections") {
-        only_children(c, &["action"])?;
+        only_children(c, &["action", "outlet"])?;
+        // Its delegate, the scene's controller: see `gesture_delegate`.
+        for o in children(c, "outlet") {
+            only_attributes(o, &[("property", Some("delegate")), ("destination", Some(vc_id)), ("id", None)])?;
+        }
         for a in children(c, "action") {
             only_attributes(a, &[("selector", None), ("destination", None), ("id", None)])?;
             if attr(a, "destination")? != vc_id {
@@ -3932,6 +3942,9 @@ fn embedded_controller(
         let mut defined = Vec::new();
         for r in &root.recognizers {
             let id = attr(*r, "id")?;
+            if gesture_delegate(*r) {
+                return fail("an embedded controller's gesture recognizer's delegate is not supported by this ibtool");
+            }
             let (object, selectors) = gesture_recognizer(nib, *r, attr(vc, "id")?)?;
             defined.push((id, format!("{name} gesture {id}"), object, selectors));
         }
@@ -4366,7 +4379,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     let device = children(root, "device").next();
     let has_device = device.is_some();
     let device_size = match device {
-        Some(d) => device_size(platform, attr(d, "id")?, attr(d, "orientation")?)?,
+        // No orientation is portrait (one probe).
+        Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or("portrait"))?,
         None => None,
     };
     let generic_canvas = if has_device {
@@ -5292,7 +5306,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             Object::new(original_class, swapper)
         };
         let controller = Value::New(controller.named("controller"));
-        let mut connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard"), outlet(&mut vnib, "sceneViewController", "owner", "controller")];
+        let mut connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard")];
+        // A recognizer's delegate outlet to the controller after its
+        // storyboard outlet (one probe); several are not established.
+        let delegates: Vec<&Node> = recognizers.iter().filter(|r| gesture_delegate(**r)).collect();
+        if delegates.len() > 1 {
+            return fail("several gesture recognizers' delegates are not supported by this ibtool");
+        }
+        for r in delegates {
+            connections.push(outlet(&mut vnib, "delegate", &format!("gesture {}", attr(*r, "id")?), "controller"));
+        }
+        connections.push(outlet(&mut vnib, "sceneViewController", "owner", "controller"));
         for t in &templates.outlets {
             connections.push(outlet(&mut vnib, "viewController", t, "controller"));
         }

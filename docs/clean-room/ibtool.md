@@ -306,6 +306,7 @@ other values of the attributes these use, is refused. Observed:
   `UIViewInsetsLayoutMarginsFromSafeArea` 0, when turned off, comes after
   its compression resistance, before its semantic content attribute (two
   probes).
+- A `<device>` without an orientation is portrait (one probe).
 - With a `<device>`, the root view is laid out at the device's size (or
   its freeform size) at its frame's origin (a view below an opaque bar is
   at y 64; eight probes, with simulated bars changing nothing),
@@ -539,6 +540,10 @@ other values of the attributes these use, is refused. Observed:
   values outside 0 to 1), to within a few float ulps (5e-7) but exactly
   for only a quarter of the components, which points at single-precision
   arithmetic or tables not established here.
+- A scene's gesture recognizer whose delegate is the controller has a
+  `delegate` outlet to it in the controller's nib, after the controller's
+  storyboard outlet (one probe; several, or one in an embedded controller,
+  are refused).
 - A scene's gesture recognizer (tap, pan or swipe) is in
   the controller's nib, after the storyboard placeholder, with
   `UIGestureRecognizer.allowedTouchTypes` 15 and
