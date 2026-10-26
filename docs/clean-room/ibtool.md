@@ -324,10 +324,14 @@ other values of the attributes these use, is refused. Observed:
   ordered as a root view's are, by its subviews' frames in it. A ratio is
   a two-item constraint with its multiplier and constant as any other
   (17 probes, on labels and containers). A text field's are in the same
-  place as a label's (five probes).
+  place as a label's (five probes), followed by its hugging when either
+  priority is given (each 250 unless given; two probes). An aspect ratio
+  the root view holds on one of its subviews is the subview's own, in its
+  constraints and in its turn among the objects (one probe).
 - A plain `<view>` subview archives its subviews, background colour, the
-  flags, its autoresizing mask (36 without one), the autoresizing key and
-  its constraints. With a custom class it is a `UIClassSwapper` with the
+  flags, its autoresizing mask (36 without one), the autoresizing key
+  (left out when it doesn't autoresize its subviews: one probe) and its
+  constraints. With a custom class it is a `UIClassSwapper` with the
   same values, then `UIClassName` (the runtime name, as a controller's)
   and `UIOriginalClassName` `UIView`. A text field with a custom class is
   swapped in the same way, `UIOriginalClassName` `UITextField` (three
@@ -1059,7 +1063,10 @@ attribute (three probes). A selected button has `UISelected` before
 content (four probes). A button may have no states at all, and then no
 `UIButtonStatefulContent`, or only others than normal (two probes); a
 content mode other than scale to fill is `UIContentMode` after its mask
-(one probe).
+(one probe). Showing touches when highlighted is
+`UIShowsTouchWhenHighlighted` after its stateful content, before
+`UIAdjustsImageWhenHighlighted` (two probes; beside a line break mode it is
+refused, and an info button differs in its hugging and font).
 
 A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
