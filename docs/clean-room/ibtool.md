@@ -182,16 +182,30 @@ other values of the attributes these use, is refused. Observed:
   second item is deeper than the root's subviews come first, by first and
   then second attribute in the siblings' order below (eleven probes; a
   deeper view as the first item, which would group them by it, is refused),
-  then the constraints with the root view, ordered by their two attributes as a pair (the
-  lower rank, then the higher) in centerX, centerY, trailing, leading,
-  width, bottom, top, height; then those between siblings, by first and
+  then the constraints with the root view, by kind and then by first and
+  second attribute: those with a horizontal centre (either attribute,
+  `centerXWithinMargins` before `centerX`), then a vertical centre, then
+  between left and right edges (right margin, left margin, right, left),
+  then horizontal edges with a leading or trailing one (trailing margin,
+  leading margin, trailing, leading, each tied with its right or left
+  counterpart; between a leading and a trailing edge, the one whose root
+  view's edge is the trailing one first), then the rest (width, top margin,
+  bottom margin, bottom, top, first baseline, height). Measured with all
+  272 combinations of horizontal and vertical edges and centres, both ways
+  round, between the root view and a subview at once, in three document
+  orders and a random subset, 40 random sets of eight, and 30 more of ten
+  (ten in a nested view, whose own constraints go the same way). A left or
+  right edge tied to a leading or trailing one is refused: Xcode rewrites
+  it (a right margin to a trailing edge becomes a trailing margin). Then
+  those between siblings, by first and
   then second attribute in centerX, trailing, leading, centerY, bottom,
   top, width, height. Measured with 176 constraints on two labels, the
   root view and the safe-area guide at once, in three document orders,
   eight random subsets and some 30 smaller probes; legacy guides as the
   second item of a sibling constraint fit too. Constraints with equal keys
-  (the same items and the same pair of attributes either way round) come
-  in an order that changes with the rest of the set, so they are refused,
+  (the same items and the same pair of attributes either way round, or
+  tied ones) come in an order that changes with the rest of the set, so
+  they are refused,
   as are constraints from a legacy guide (but the bottom guide as the first
   item of a sibling constraint, placed at the root view's foot, three
   probes) or between one and the root view
@@ -277,9 +291,11 @@ other values of the attributes these use, is refused. Observed:
   flexible left or top margin or a sizable width or height is refused; the
   rest are compiled, with or without a device (eight probes).
 - An image view (`userInteractionEnabled="NO"`; scale to fill, aspect fit,
-  aspect fill or centre) archives as a label's geometry and flags, then
-  `UIContentMode` unless scale to fill, `UIClipsToBounds`, `UITintColor`,
-  the autoresizing key, its own constraints, its hugging, and `UIImage`:
+  aspect fill or centre) archives as a label's geometry and flags (a
+  background colour first, hidden and tag after `UIOpaque`, alpha after
+  the mask), then `UIContentMode` unless scale to fill, `UIClipsToBounds`,
+  `UITintColor`, the autoresizing key, its own constraints, its hugging
+  (none without priorities; a missing one is 250), and `UIImage`:
   a `UIImageNibPlaceholder` per image name (width and height 1, the name,
   nil symbol, configuration and catalog), shared by the views using it;
   no image, no key. snag's launch screen is byte-identical.
@@ -409,12 +425,14 @@ other values of the attributes these use, is refused. Observed:
   `distribution` `UIStackViewDistribution` (fill 0, fillEqually 1,
   fillProportionally 2, equalSpacing 3, equalCentering 4), `alignment`
   `UIStackViewAlignment` (fill 0, leading or top 1, firstBaseline 2,
-  center 3, trailing or bottom 4), a missing `spacing` 0;
+  center 3, trailing or bottom 4, lastBaseline 5, whichever the axis), a
+  missing `spacing` 0;
   `baselineRelativeArrangement` sets `UIStackViewBaselineRelative`. Edge
   insets are its `UIViewLayoutMargins` and set
   `UIStackViewLayoutMarginsRelative` whether or not
   `layoutMarginsRelativeArrangement` does, which without them changes
-  nothing (18 probes).
+  nothing. A background colour comes after its subviews, its own
+  constraints after the not-translating key (25 probes).
 - A view's or label's `contentMode` is `UIContentMode` after
   `UIAutoresizingMask`, UIViewContentMode's values, scaleToFill (0) left
   out; Xcode compiles `topLeft` as scaleToFill, so it is refused (18
@@ -723,7 +741,9 @@ controller's: section by section, each section's cells in reverse. The
 cell's `selectionSegueTemplate` outlets go in their placeholders' order.
 The controller's nib lists the templates in document order (its external
 objects in placeholder order). A static cell's outlets to its own views
-are the table nib's (16 probes).
+are the table nib's, collected in that same order (cells in reverse within
+each section), which decides between outlets of the same name: one corpus
+storyboard and two probes, its cells swapped (18 probes).
 
 A cell may have a built-in style (`style="IBUITableViewCellStyle…"`):
 `UITableViewCellStyle` (Value1 1, Value2 2, Subtitle 3, the default left
@@ -843,8 +863,8 @@ hugging `{250, 250}` and after its large content properties
 `UIAllowSelectingCells` true; its data source and delegate outlets are
 outlets like others (four probes). A visual effect view (non-opaque, with a
 blur effect) is a `UIVisualEffectView`: `UIDeepDrawRect`,
-`UIAutoresizeSubviews`, mask 36, `UIShouldNotAdaptToMaterials`, its
-not-translating key, then after its large content properties
+`UIAutoresizeSubviews`, mask 36, `UIShouldNotAdaptToMaterials`, clipping,
+its not-translating key, then after its large content properties
 `UIVisualEffectViewEffect` (a `UIBlurEffect`: extra light 0, light 1, dark 2,
 and regular and prominent 1 and 0 with `UIBlurEffectAutomaticStyle` 4 and 5),
 `UIVisualEffectViewGroupName` nil and `UIVisualEffectViewContentView`, its
@@ -865,16 +885,18 @@ with `UIViewLayoutMarginsAreDirectional`), `preservesSuperviewLayoutMargins`
 (`UIViewInsetsLayoutMarginsFromSafeArea` 0). `exclusiveTouch` is refused
 (13 probes).
 
-Labels take `hidden`, `tag` and `alpha` as plain views do, and their text
+Labels take `hidden`, `tag` and `alpha` as plain views do; a missing
+hugging priority is 250, and without either there is no
+`UIViewContentHuggingPriority` (three probes); their text
 may be a `<string key="text">` rather than an attribute. A minimum scale
 factor with a text style font scales the style's default size (Body and
 Headline 17, Callout 16, Subhead 15, Footnote 13, Caption1 12, Caption2 11,
 Title1 28, Title2 22, Title3 20), to a quarter point (19 probes).
 
-Switches, sliders and activity indicators (23 probes):
+Switches, sliders, steppers and activity indicators (29 probes):
 - **Common.** Each is a non-opaque view: `UIDeepDrawRect`, hidden and tag,
   `UIAutoresizeSubviews`, mask 36, alpha, the constraint keys, then (a
-  slider only) hugging `{250, 250}`, `UIViewSemanticContentAttribute` and
+  slider and a stepper only) hugging `{250, 250}`, `UIViewSemanticContentAttribute` and
   the large content properties, before its own values. A switch's and an
   activity indicator's hugging is 750, which Xcode doesn't write. Their
   value-changed actions are event connections with mask 4096.
@@ -884,6 +906,11 @@ Switches, sliders and activity indicators (23 probes):
 - **A slider.** `UIValue` (a float), `UIMinValue` and `UIMaxValue` unless 0
   and 1, `UIContinuous` false, the minimum, maximum and thumb tint
   colours, and `UIBehavioralStyle` 0.
+- **A stepper.** A background colour before `UIDeepDrawRect`, a tint after
+  the alpha; then `UIDisabled`, `UIValue`, `UIMinimumValue`,
+  `UIMaximumValue` and `UIStepValue` (doubles) unless 0, 0, 100 and 1 (a
+  missing maximum is 0, so written), `UIContinuous` and `UIAutorepeat`
+  false, `UIWraps` true.
 - **An activity indicator.** `UIActivityIndicatorViewStyle-Modern` and
   `UIActivityIndicatorViewStyle` (medium 100 and 1, large 101 and 0,
   whiteLarge 0 and 0, white 1 and 1, gray 2 and 2), `UIAnimating`,
