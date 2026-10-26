@@ -99,6 +99,9 @@ struct IconImage {
     idiom: String,
     platform: Option<String>,
     size: String,
+    /// Its appearance: none, or `luminosity` dark or tinted, or something
+    /// else (`None`).
+    appearance: Option<u16>,
 }
 
 pub(crate) fn read_json(path: &Path) -> Result<serde_json::Value, String> {
@@ -224,14 +227,27 @@ fn icon_images(icon_dir: &Path) -> Result<Vec<IconImage>, String> {
                 idiom: i["idiom"].as_str().unwrap_or("universal").to_string(),
                 platform: i["platform"].as_str().map(String::from),
                 size: i["size"].as_str().unwrap_or("").to_string(),
+                appearance: match i["appearances"].as_array().map(Vec::as_slice) {
+                    None | Some([]) => Some(0),
+                    Some([a]) => match (a["appearance"].as_str(), a["value"].as_str()) {
+                        (Some("luminosity"), Some("dark")) => Some(1),
+                        (Some("luminosity"), Some("tinted")) => Some(TINTED),
+                        _ => None,
+                    },
+                    Some(_) => None,
+                },
             })
         })
         .collect())
 }
 
+/// The appearance value of an app icon's tinted image.
+const TINTED: u16 = 10;
+
 enum IconSource {
-    /// A single universal 1024 px image (its file name), scaled for each size.
-    Single(String, image::Rgba),
+    /// A single universal 1024 px image (its file name), scaled for each
+    /// size, and its dark and tinted images (appearance, file name, image).
+    Single(String, image::Rgba, Vec<(u16, String, image::Rgba)>),
     /// An image per size.
     PerSize(Vec<iconset::Slot>),
 }
@@ -246,20 +262,33 @@ fn app_icon_set(icon_dir: &Path, ios: bool) -> Result<Option<IconSource>, String
     }
     let universal: Vec<&IconImage> = images.iter().filter(|i| i.idiom == "universal" && i.platform.as_deref() == Some("ios") && i.size == "1024x1024").collect();
     let others = images.iter().filter(|i| !(ios && i.idiom == "mac")).count();
-    if universal.len() != 1 || others != 1 {
+    let any: Vec<&&IconImage> = universal.iter().filter(|i| i.appearance == Some(0)).collect();
+    if any.len() != 1 || others != universal.len() || universal.iter().any(|i| i.appearance.is_none()) {
         let contents = read_json(&icon_dir.join("Contents.json"))?;
         return Ok(Some(IconSource::PerSize(iconset::slots(icon_dir, &contents["images"])?)));
     }
-    let icon = universal[0];
-    let bytes = std::fs::read(&icon.file).map_err(|e| format!("{}: {e}", icon.file.display()))?;
-    let src = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", icon.file.display()))?;
+    let read = |icon: &IconImage| -> Result<image::Rgba, String> {
+        let bytes = std::fs::read(&icon.file).map_err(|e| format!("{}: {e}", icon.file.display()))?;
+        let src = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", icon.file.display()))?;
+        if src.width != 1024 || src.height != 1024 {
+            return Err(format!("{}: is {}x{} but should be 1024x1024", icon.file.display(), src.width, src.height));
+        }
+        Ok(src)
+    };
+    let icon = any[0];
+    let src = read(icon)?;
     if src.is_gray() {
         return Err(format!("{}: a greyscale icon, which Xcode stores as GA8, is not supported by this actool", icon.file.display()));
     }
-    if src.width != 1024 || src.height != 1024 {
-        return Err(format!("{}: is {}x{} but should be 1024x1024", icon.file.display(), src.width, src.height));
+    let mut variants = Vec::new();
+    for i in universal.iter().filter(|i| i.appearance != Some(0)) {
+        let appearance = i.appearance.expect("checked above");
+        if variants.iter().any(|v: &(u16, String, image::Rgba)| v.0 == appearance) {
+            return Err(format!("{}: two app icon images for one appearance", icon_dir.display()));
+        }
+        variants.push((appearance, i.filename.clone(), read(i)?));
     }
-    Ok(Some(IconSource::Single(icon.filename.clone(), src)))
+    Ok(Some(IconSource::Single(icon.filename.clone(), src, variants)))
 }
 
 fn write_partial_info_plist(o: &Options, mut entries: Vec<(&str, Value)>, outputs: &mut Vec<PathBuf>) -> Result<(), String> {
@@ -347,7 +376,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             if o.target_devices.iter().any(|d| d == "mac") {
                 return document_mac_icon(o, &out_dir, platform, name, &icon::render(doc)?, outputs, images);
             }
-            Some((name.clone(), IconSource::Single(format!("{name}1024x1024.png"), icon::render(doc)?)))
+            Some((name.clone(), IconSource::Single(format!("{name}1024x1024.png"), icon::render(doc)?, Vec::new())))
         }
         (Some(name), None) => {
             let (_, dir) = scan.icon_sets.iter().find(|(n, _)| n == name).ok_or_else(|| format!("none of the input catalogs contains an app icon set named \"{name}\""))?;
@@ -363,8 +392,8 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         write_partial_info_plist(o, Vec::new(), &mut outputs)?;
         return Ok(outputs);
     };
-    let (filename, src) = match source {
-        IconSource::Single(filename, src) => (filename, src),
+    let (filename, src, variants) = match source {
+        IconSource::Single(filename, src, variants) => (filename, src, variants),
         IconSource::PerSize(slots) => return per_size_icon(o, &out_dir, platform, &icon_name, &slots, phone, pad, outputs, images),
     };
 
@@ -402,11 +431,33 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     };
     let multi = |idiom| rendition(idiom, car::PART_MULTISIZED_IMAGE, 0, &multi_csi);
     let img = |idiom| rendition(idiom, car::PART_ICON_IMAGE, 1, &image_csi);
+    // Dark and tinted images are the 1024 px image's for their appearance,
+    // a grey one stored as GA8 (as image sets' are).
+    let variant_csis: Vec<(u16, Vec<u8>)> = variants
+        .iter()
+        .map(|(appearance, file, image)| {
+            // Their MLEC versions say whether they are opaque, as other iOS
+            // icons' do (a translucent dark image, Chromium's).
+            let versions = car::MlecVersions::opacity(image.data.chunks_exact(4).all(|p| p[3] == 255));
+            let csi = if image.is_gray() {
+                let ga: Vec<u8> = image.premultiplied_bgra().chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect();
+                car::icon_image_gray_csi(file, 1024, 1024, 1, &ga, versions)
+            } else {
+                car::icon_image_csi(file, 1024, 1024, 1, &image.to_bgra().data, versions)
+            };
+            (*appearance, csi)
+        })
+        .collect();
     let mut renditions = Vec::new();
     for (wanted, idiom) in [(phone, car::IDIOM_PHONE), (pad, car::IDIOM_PAD)] {
         if wanted {
             renditions.push(img(idiom));
             renditions.push(multi(idiom));
+            for (appearance, csi) in &variant_csis {
+                let mut r = rendition(idiom, car::PART_ICON_IMAGE, 1, csi);
+                r.attrs.push((car::ATTR_APPEARANCE, *appearance));
+                renditions.push(r);
+            }
         }
     }
     if renditions.is_empty() {
@@ -503,7 +554,8 @@ fn appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
             }
         }
     }
-    let mut table: Vec<(String, u16)> = values.into_iter().map(|v| (colorset::APPEARANCES[v as usize].to_string(), v)).collect();
+    let name = |v: u16| if v == TINTED { "ISAppearanceTintable".to_string() } else { colorset::APPEARANCES[v as usize].to_string() };
+    let mut table: Vec<(String, u16)> = values.into_iter().map(|v| (name(v), v)).collect();
     table.sort();
     table
 }
