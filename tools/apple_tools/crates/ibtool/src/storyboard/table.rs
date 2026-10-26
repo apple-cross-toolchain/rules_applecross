@@ -18,6 +18,19 @@ fn table_background(nib: &mut Nib, n: Node, plain: bool) -> Result<Value, String
     if plain && white {
         return Ok(nib.system_color("tableBackgroundColor", &SystemColor::Gray([1.0, 1.0])));
     }
+    // A grouped or inset grouped table's sRGB background of the grouped
+    // background colour's own value, at 10 digits, is that system colour;
+    // a plain table's, a near value and other colours are not (six probes,
+    // one corpus storyboard).
+    const GROUPED: [f64; 4] = [0.9490196078, 0.9490196078, 0.968627451, 1.0];
+    if !plain && nib.color_matched && n.attribute("customColorSpace") == Some("sRGB") {
+        let c = ["red", "green", "blue", "alpha"].map(|a| n.attribute(a).map(number));
+        if let [Some(Ok(r)), Some(Ok(g)), Some(Ok(b)), Some(Ok(a))] = c {
+            if [r, g, b, a].map(significant_10) == GROUPED {
+                return Ok(nib.system_color("systemGroupedBackgroundColor", &SystemColor::Rgb(GROUPED)));
+            }
+        }
+    }
     color(nib, n)
 }
 
@@ -554,6 +567,9 @@ pub(super) fn table_view_nib(
                     only_children(cs, &["tableViewCell"])?;
                     for cell in children(cs, "tableViewCell") {
                         let (cell_value, cell_parts) = cell_object(&mut nib, module, cell)?;
+                        if !cell_parts.scene.actions.is_empty() || !cell_parts.scene.pairs.is_empty() {
+                            return fail("actions and switches in a static table's cells are not supported by this ibtool");
+                        }
                         // Its segue's placeholder and its outlets into its
                         // views, among the outlets.
                         let (segue, cell_outlets) = cell_connections(cell)?;
@@ -737,7 +753,9 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
     let content_name = view_name(content_id);
 
     // The content view and its subviews, compiled as a container's are.
-    let mut scene = Scene::new("", module, content, Some(content_name.clone()));
+    // Its controls' actions may target the cell, as the scene's do its
+    // controller.
+    let mut scene = Scene::new(cell_id, module, content, Some(content_name.clone()));
     let cf = frame(content)?;
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
@@ -769,12 +787,14 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
         }
         scene.subviews.sort_by_key(|s| Some(&s.1) != detail_label.as_ref());
     }
-    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
-        return fail("actions, outlets and segues in a cell are not supported by this ibtool");
+    if scene.actions.iter().any(|a| a.3 != "upstream") || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
+        return fail("actions other than on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
-    // A cell's nib has no key-value pairs or accessibility configurations
-    // of its own here.
-    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
+    // A prototype's nib holds one switch's frame as a key-value pair, as a
+    // controller's view does (five probes); other runtime attributes,
+    // several switches and accessibility configurations are refused.
+    let one_switch = scene.switch_frames.len() == 1 && scene.pairs.iter().all(|p| scene.switch_frames.contains(&p.0));
+    if (!scene.pairs.is_empty() && !one_switch) || !scene.accessibility.is_empty() {
         return fail("runtime attributes, switches and accessibility settings in a cell are not supported by this ibtool");
     }
     if !subviews.is_empty() {
@@ -921,7 +941,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
 
     let (cell_value, parts) = cell_object(&mut nib, module, cell)?;
-    let CellParts { name: cell_name, content: content_name, scene } = parts;
+    let CellParts { name: cell_name, content: content_name, mut scene } = parts;
     let mut top = vec![owner, responder];
     top.extend(upstream);
     top.push(cell_value);
@@ -961,8 +981,25 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         outlets.push((label, destination));
     }
     outlets.sort_by(|a, b| a.0.cmp(b.0));
-    let connections = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
-    nib::archive(root_object(&mut nib, top, objects, connections))
+    let mut connections: Vec<Value> = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
+    // Its controls' actions on the cell after its outlets, by mask and then
+    // selector (five probes, one corpus storyboard).
+    let mut actions: Vec<_> = scene.actions.iter().collect();
+    actions.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
+    if actions.windows(2).any(|w| (w[0].2, &w[0].0) == (w[1].2, &w[1].0)) {
+        return fail("actions in a cell sharing a selector are not supported by this ibtool");
+    }
+    for (selector, source, mask, _) in actions {
+        let label = nib.string(selector);
+        connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
+            ("UILabel", label),
+            ("UISource", reference(source.clone())),
+            ("UIDestination", reference(cell_name.clone())),
+            ("UIEventMask", Value::Int(*mask)),
+        ])));
+    }
+    let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
+    nib::archive(root_object_with_pairs(&mut nib, top, objects, connections, pairs))
 }
 
 /// A cell's own connections: its selection segue's id, if it has one, and
