@@ -3913,7 +3913,8 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
             return fail("navigation bars with an autoresizing mask are not supported by this ibtool");
         }
     }
-    let f = frame(bar)?;
+    // Without a frame it is at the origin (one probe).
+    let f = if child(bar, "rect", "frame").is_some() { frame(bar)? } else { Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 } };
     if f.x != 0.0 {
         return fail("navigation bars not at x 0 are not supported by this ibtool");
     }

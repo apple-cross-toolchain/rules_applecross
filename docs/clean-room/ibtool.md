@@ -576,7 +576,8 @@ when it is initial or identified. Observed with 25 probes:
   storyboard). A table view controller root is a `UITableViewController`, with
   `UIClearsSelectionOnViewWillAppear` last (four probes).
 - The bar is laid out by Xcode, not the document: bounds 0x54 centred 27
-  below its frame's top, mask 2, hugging `{250, 250}`, zero layout margins
+  below its frame's top (the root view's top without a frame, one probe
+  and one corpus storyboard), mask 2, hugging `{250, 250}`, zero layout margins
   (directional), `UIViewInsetsLayoutMarginsFromSafeArea` 0 when the
   document turns it off, `UIIsLocked`, `UIItems` (the root's item),
   `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1;
