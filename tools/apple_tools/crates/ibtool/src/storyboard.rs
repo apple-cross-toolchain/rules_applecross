@@ -1166,6 +1166,7 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
     Ok(nib.shared(key, || Object::new("UIFont", values).with_fallback("NSFont")))
 }
 
+#[derive(Clone, Copy)]
 struct Frame {
     x: f64,
     y: f64,
@@ -1748,12 +1749,17 @@ fn does_not_translate(scene: &Scene, n: Node) -> bool {
 
 /// The ids of the views the constraints in `view` are on: their items, the
 /// views whose own constraints name no first item, and a stack view's
-/// arranged subviews, which it constrains.
+/// arranged subviews, which it constrains to itself (and so the stack view
+/// too, two probes).
 fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
     let mut ids = Vec::new();
     for stack in view.descendants().filter(|d| d.has_tag_name("stackView")) {
         for s in children(stack, "subviews") {
+            let before = ids.len();
             ids.extend(s.children().filter(|c| c.is_element()).filter_map(|c| c.attribute("id")));
+            if ids.len() > before {
+                ids.extend(stack.attribute("id"));
+            }
         }
     }
     for c in view.descendants().filter(|d| d.has_tag_name("constraint")) {
@@ -1823,7 +1829,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     }
     sizes.sort_by_key(|f| f.0);
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
-    order_ties(&mut others, |o| (o.1, o.2), &direct)?;
+    order_ties(&mut others, |o| (o.1, o.2), &direct, &[])?;
     let mut values = Vec::new();
     let item = |i: &str| reference(view_name(i));
     let mut made = Vec::new();
@@ -3400,16 +3406,43 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
 }
 
 /// Puts constraints of the same key (the same first item and attributes,
-/// differing in their second items) in Xcode's order, for constraints of no
-/// constant, multiplier, relation or priority to sibling views: by id where
-/// the second items' frames are the same (three of the corpus's); for
-/// centres, by those frames from the bottom, then from the right (19
-/// probes). Others are refused: with a constant the order depends on the
-/// ids too, and other attributes are ordered otherwise (top to bottom by
-/// the bottom edge, leading to trailing by the trailing edge from the right,
-/// eight probes, neither settled).
-fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 4]), Node<'a, 'i>), siblings: &[Node<'a, 'i>]) -> Result<(), String> {
+/// differing in their second items, all siblings or the `guides`, as their
+/// ties measure them) in Xcode's order: by the length of the line Interface
+/// Builder draws for each, the longest first.
+/// An alignment (both attributes the same edge or centre) without a constant,
+/// or any constraint whose edges meet in the frames, is drawn along the edge
+/// across both views, as long as their frames' span across it; any other
+/// constraint between the two edges, as long as the distance between them
+/// (whatever its constant). Probes of 380 scenes, with random frames and
+/// constants, ids and document and subview orders, and edges 0 to 10 apart.
+/// Equal lengths are ordered by id where the second items' frames are the
+/// same, and centres by those frames from the bottom, then from the right
+/// (19 probes); other equal lengths depend on the ids and the geometry in a
+/// way not established, and one centre half a point from another was drawn
+/// along the edge: refused, as are lengths within a point of each other,
+/// edges less than a point apart, and multipliers, relations, priorities
+/// and margins, which weren't probed.
+fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 4]), Node<'a, 'i>), siblings: &[Node<'a, 'i>], guides: &[(&str, Frame)]) -> Result<(), String> {
     let unstable = || fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
+    // An attribute's axis (0 horizontal, 1 vertical) and where along it
+    // (0 the frame's start, 1 its end).
+    let edge = |a: &str| match a {
+        "leading" | "left" => Some((0, 0.0)),
+        "trailing" | "right" => Some((0, 1.0)),
+        "centerX" => Some((0, 0.5)),
+        "top" => Some((1, 0.0)),
+        "bottom" => Some((1, 1.0)),
+        "centerY" => Some((1, 0.5)),
+        _ => None,
+    };
+    let along = |f: &Frame, axis: usize| if axis == 0 { (f.x, f.w) } else { (f.y, f.h) };
+    let item = |id: Option<&str>| -> Result<Option<Frame>, String> {
+        let Some(id) = id else { return Ok(None) };
+        if let Some((_, f)) = guides.iter().find(|g| g.0 == id) {
+            return Ok(Some(*f));
+        }
+        siblings.iter().find(|s| s.attribute("id") == Some(id)).map(|s| frame(*s)).transpose()
+    };
     let mut start = 0;
     while start < v.len() {
         let key = of(&v[start]).0;
@@ -3418,30 +3451,41 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
             let mut run = Vec::new();
             for t in &v[start..end] {
                 let c = of(t).1;
-                if ["multiplier", "relation", "priority"].iter().any(|a| c.attribute(*a).is_some()) || c.attribute("constant").is_some_and(|k| k.parse::<f64>() != Ok(0.0)) {
+                if ["multiplier", "relation", "priority"].iter().any(|a| c.attribute(*a).is_some()) {
                     return unstable();
                 }
-                let second = c.attribute("secondItem").and_then(|id| siblings.iter().find(|s| s.attribute("id") == Some(id)));
-                let Some(second) = second else { return unstable() };
-                if run.iter().any(|(_, _, s): &(Frame, &str, &str)| Some(*s) == second.attribute("id")) {
+                let constant = c.attribute("constant").map_or(Ok(0.0), str::parse::<f64>).map_err(|_| "a constraint's constant is not a number")?;
+                let (Some(f), Some(s)) = (item(c.attribute("firstItem"))?, item(c.attribute("secondItem"))?) else { return unstable() };
+                let second = c.attribute("secondItem").unwrap_or("");
+                let (a1, a2) = (c.attribute("firstAttribute").unwrap_or(""), c.attribute("secondAttribute").unwrap_or(""));
+                let (Some((axis, p1)), Some((axis2, p2))) = (edge(a1), edge(a2)) else { return unstable() };
+                if axis != axis2 || run.iter().any(|(_, _, s, _): &(f64, &str, &str, Frame)| *s == second) {
                     return unstable();
                 }
-                let f = frame(*second)?;
-                run.push((f, c.attribute("id").unwrap_or(""), second.attribute("id").unwrap_or("")));
+                let ((a, al), (b, bl)) = (along(&f, axis), along(&s, axis));
+                let gap = (a + p1 * al - (b + p2 * bl)).abs();
+                let length = if (a1 == a2 && constant == 0.0) || gap == 0.0 {
+                    let ((a, al), (b, bl)) = (along(&f, 1 - axis), along(&s, 1 - axis));
+                    (a + al).max(b + bl) - a.min(b)
+                } else if gap >= 1.0 {
+                    gap
+                } else {
+                    return unstable();
+                };
+                run.push((length, c.attribute("id").unwrap_or(""), second, s));
             }
             let c = of(&v[start]).1;
-            let same = run.iter().all(|(f, ..)| (f.x, f.y, f.w, f.h) == (run[0].0.x, run[0].0.y, run[0].0.w, run[0].0.h));
             let centres = ["centerX", "centerY"].contains(&c.attribute("firstAttribute").unwrap_or("")) && c.attribute("firstAttribute") == c.attribute("secondAttribute");
-            if !(same && c.attribute("firstAttribute") == c.attribute("secondAttribute")) && !centres {
-                return unstable();
-            }
-            for (i, (a, ..)) in run.iter().enumerate() {
-                if run[..i].iter().any(|(b, ..)| (b.x, b.y) == (a.x, a.y) && (b.w, b.h) != (a.w, a.h)) {
-                    return unstable();
+            for (i, a) in run.iter().enumerate() {
+                for b in &run[..i] {
+                    let same = (a.3.x, a.3.y, a.3.w, a.3.h) == (b.3.x, b.3.y, b.3.w, b.3.h);
+                    if (a.0 - b.0).abs() < 1.0 && !(a.0 == b.0 && (same || (centres && (a.3.x, a.3.y) != (b.3.x, b.3.y)))) {
+                        return unstable();
+                    }
                 }
             }
             let mut order: Vec<usize> = (0..run.len()).collect();
-            order.sort_by(|&i, &j| run[j].0.y.total_cmp(&run[i].0.y).then(run[j].0.x.total_cmp(&run[i].0.x)).then(run[i].1.cmp(run[j].1)));
+            order.sort_by(|&i, &j| run[j].0.total_cmp(&run[i].0).then(run[j].3.y.total_cmp(&run[i].3.y)).then(run[j].3.x.total_cmp(&run[i].3.x)).then(run[i].1.cmp(run[j].1)));
             let rank: Vec<&str> = order.iter().map(|&i| run[i].1).collect();
             v[start..end].sort_by_key(|t| rank.iter().position(|id| of(t).1.attribute("id") == Some(*id)));
         }
@@ -5000,7 +5044,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
             }
             xml_constraints.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
-            order_ties(&mut xml_constraints, |o| (o.1, o.2), &direct)?;
+            // The guides as their ties measure them (docs/clean-room/ibtool.md).
+            let mut tie_guides: Vec<(&str, Frame)> = safe_area_id.map(|id| (id, Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 })).into_iter().collect();
+            for (id, kind) in &scene.guides {
+                let y = if *kind == "bottom" { f.h } else { 0.0 };
+                tie_guides.push((id, Frame { x: 0.0, y, w: f.w, h: if *kind == "bottom" { 0.0 } else { 1.0 } }));
+            }
+            order_ties(&mut xml_constraints, |o| (o.1, o.2), &direct, &tie_guides)?;
             // Views deeper than the root's subviews that its constraints name,
             // in their order: the objects list them after the root's
             // subviews, not under their own superviews (six probes).
@@ -5118,7 +5168,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             scene.accessibility.sort_by_key(|a| position(&a.0));
 
             // Outlets, `view` among them, then actions, each in byte order of
-            // their names; actions with the same selector in document order.
+            // their names.
             let mut connections = Vec::new();
             let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
             outlets.push(("view", "owner", &root_name));
@@ -5156,8 +5206,25 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     connections.push(outlet(&mut nib, label, source, destination));
                 }
             }
-            // By event, then selector.
-            scene.actions.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
+            // By event, then selector; those with one selector in the order
+            // Xcode visits their controls: the root view's subviews in
+            // document order, then, from the last visited, each one's own
+            // the same way (a stack).
+            let mut visit: Vec<String> = Vec::new();
+            let mut stack = vec![view];
+            while let Some(v) = stack.pop() {
+                for s in children(v, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
+                    visit.push(view_name(attr(s, "id")?));
+                    stack.push(s);
+                }
+            }
+            let visited = |name: &String| visit.iter().position(|v| v == name);
+            for (i, a) in scene.actions.iter().enumerate() {
+                if scene.actions[..i].iter().any(|b| (b.2, &b.0) == (a.2, &a.0)) && scene.actions[..=i].iter().any(|b| (b.2, &b.0) == (a.2, &a.0) && visited(&b.1).is_none()) {
+                    return fail("actions with one selector from controls outside the root view are not supported by this ibtool");
+                }
+            }
+            scene.actions.sort_by(|a, b| (a.2, &a.0, visited(&a.1)).cmp(&(b.2, &b.0, visited(&b.1))));
             for (selector, source, mask, destination) in &scene.actions {
                 let label = nib.string(selector);
                 connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
