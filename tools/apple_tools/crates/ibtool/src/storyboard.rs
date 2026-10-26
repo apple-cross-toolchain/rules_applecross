@@ -1961,6 +1961,13 @@ fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
 /// aspect ratio; then, for a container, those between it
 /// and its subviews or among them, ordered as a root view's are.
 fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Result<Option<Value>, String> {
+    held_constraints(nib, scene, n, n, name)
+}
+
+/// The constraints `n` holds, compiled as those of the view `name` whose
+/// subviews are `container`'s: an old-format collection view cell holds
+/// those of the content view Xcode makes for it.
+fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, name: &str) -> Result<Option<Value>, String> {
     let id = attr(n, "id")?;
     // Its aspect ratios its superview holds are its own, as Xcode moves them
     // (one probe).
@@ -1978,7 +1985,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     for cs in children(n, "constraints") {
         only_children(cs, &["constraint"])?;
     }
-    let direct: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
+    let direct: Vec<Node> = children(container, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
     let mut sizes = Vec::new();
     let mut others: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, &str)> = Vec::new();
     for c in own.into_iter().chain(held) {
@@ -2029,7 +2036,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
     order_ties(&mut others, |o| (o.1, o.2), &direct, &[])?;
     let mut values = Vec::new();
-    let item = |i: &str| reference(view_name(i));
+    let item = |i: &str| if i == id && n != container { reference(name.to_string()) } else { reference(view_name(i)) };
     let mut made = Vec::new();
     for (rank, c) in sizes {
         let second = (rank % 2 == 1).then(|| reference(name.to_string()));
