@@ -5083,13 +5083,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
                 // A view nested in plain views: its origin in the root view's
                 // coordinates (four probes; a label or text field as a plain
-                // view, two).
+                // view, two; plain views in stack and scroll views, their
+                // document frames summed the same way, whatever the scroll
+                // view's content, five).
                 let nested = || format!("root view constraints on a view nested in other than plain views ({id}) are not supported by this ibtool");
                 let leaf = view.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id)).ok_or_else(nested)?;
                 let mut v = leaf;
                 let (mut x, mut y) = (0.0, 0.0);
                 while v != view {
-                    let kind = if v == leaf { ["view", "label", "textField"].iter().any(|t| v.has_tag_name(*t)) } else { v.has_tag_name("view") };
+                    let kind = if v == leaf { ["view", "label", "textField"].iter().any(|t| v.has_tag_name(*t)) } else { ["view", "stackView", "scrollView"].iter().any(|t| v.has_tag_name(*t)) };
                     if !kind || v.parent().is_none_or(|p| !p.has_tag_name("subviews")) {
                         return fail(nested());
                     }

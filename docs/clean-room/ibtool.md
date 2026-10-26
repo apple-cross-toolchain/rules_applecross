@@ -190,8 +190,11 @@ other values of the attributes these use, is refused. Observed:
   from x + y, the centre and y then x). A view nested in plain views, with
   the root view as its constraint's other item either way round, goes by
   its origin in the root view's coordinates (four probes; a label or text
-  field nested so goes the same way, two probes and one of the corpus's;
-  one whose root subview is resized where it is laid out is refused). In a group, constraints whose
+  field nested so goes the same way, two probes and one of the corpus's,
+  and so do views in stack and scroll views, their document frames summed
+  whatever the scroll view's content, five probes and one of the corpus's;
+  one whose root subview is resized where it is laid out is refused, as
+  are container views). In a group, constraints whose
   second item is deeper than the root's subviews come first, by first and
   then second attribute in the siblings' order below (eleven probes; a
   deeper view as the first item, which would group them by it, is refused),
