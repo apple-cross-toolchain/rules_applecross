@@ -1249,7 +1249,9 @@ inside it. Observed with 15 probes and one corpus storyboard:
   breadth first each view's constraints and subviews (a table cell lists
   its content view's subviews first). A collection cell's content view's
   mask is `UIAutoresizingMask` after its `UIAutoresizeSubviews` when it has
-  one, and its `customSize` changes nothing (three probes). A control's
+  one, and its `customSize` changes nothing (three probes). A collection
+  cell's background colour is `UIBackgroundColor` after its `UISubviews`
+  (two probes). A control's
   action on the cell itself is an event connection after the cell's
   outlets, the cell its destination (one corpus storyboard).
 - An old-format content view (`<view key="contentView">`, no id) is not

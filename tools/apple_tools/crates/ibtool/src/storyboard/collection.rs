@@ -342,7 +342,10 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "connections"])?;
+    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections"])?;
+    if let Some(c) = children(cell, "color").find(|c| c.attribute("key") != Some("backgroundColor")) {
+        return fail(format!("a collection view cell's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
+    }
     // A custom size is Interface Builder's alone (one probe).
     for size in children(cell, "size") {
         if size.attribute("key") != Some("customSize") {
@@ -454,6 +457,10 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let mut values = Vec::new();
     geometry(&mut values, &f);
     values.push(("UISubviews", nib.array("NSMutableArray", vec![content_view])));
+    // Its background colour after its subviews (two probes).
+    if let Some(c) = child(cell, "color", "backgroundColor") {
+        values.push(("UIBackgroundColor", color(&mut nib, c)?));
+    }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
