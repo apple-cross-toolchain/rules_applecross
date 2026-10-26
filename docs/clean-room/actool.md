@@ -369,7 +369,12 @@ An image of more than 4 MiB (4 bytes a pixel) is `MLEC` with flags 1 (3
 when opaque), method 11 and a count of `KCBC` chunks: each `KCBC`, two zero
 words, its rows and its length, then the `01`, `04`, length, zero header and
 a `dmp2` stream of those rows alone (mode chosen per chunk). A chunk is as
-many rows as fit 4 MiB: 1441 px wide, 727, 727 and 706 rows.
+many rows as fit 4 MiB: 1441 px wide, 727, 727 and 706 rows. A GA8 image is
+chunked as its BGRA rows would be (4 MiB of 4 bytes a pixel), the header's
+second word 2; its mode 3 strips are 2 MiB of unrounded 2-byte rows, so a
+chunk's rows are one strip, and its mode 2 strips are a colour image's
+(three probes of over 4 MiB, 1100 to 1501 pixels wide, and Chrome's
+862-pixel menu shadow in strips of 809 rows).
 
 Mode 4 has a second form, also a candidate in the competition for the
 smallest: at most 256 premultiplied colours without their alpha, the

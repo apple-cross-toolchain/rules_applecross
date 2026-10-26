@@ -77,8 +77,12 @@ fn striped(mode: u8, width: usize, height: usize, row_bytes: usize, strip: impl 
     striped_bpp(mode, width, height, row_bytes, 4, strip)
 }
 
-fn striped_bpp(mode: u8, width: usize, height: usize, row_bytes: usize, bpp: u8, mut strip: impl FnMut(usize, usize) -> Vec<u8>) -> Vec<u8> {
-    let rows = strip_rows(row_bytes, height);
+fn striped_bpp(mode: u8, width: usize, height: usize, row_bytes: usize, bpp: u8, strip: impl FnMut(usize, usize) -> Vec<u8>) -> Vec<u8> {
+    striped_rows(mode, width, height, strip_rows(row_bytes, height), bpp, strip)
+}
+
+/// [`striped_bpp`] with the rows per strip given.
+fn striped_rows(mode: u8, width: usize, height: usize, rows: usize, bpp: u8, mut strip: impl FnMut(usize, usize) -> Vec<u8>) -> Vec<u8> {
     let mut s = header_bpp(mode, width, rows, bpp);
     let mut y = 0;
     while y < height {
@@ -301,7 +305,10 @@ fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String
         return Ok(raw(width, height, ga, 2));
     }
     let row = 2 * width;
-    let lzfse_only = striped_bpp(3, width, height, row, 2, |y, h| ga[y * row..(y + h) * row].to_vec());
+    // Mode 3's strips are 2 MiB of its rows unrounded: a chunk's rows, all
+    // of them (three probes of over 4 MiB as BGRA).
+    let rows = std::cmp::min(height, (1 << 21) / row);
+    let lzfse_only = striped_rows(3, width, height, rows, 2, |y, h| ga[y * row..(y + h) * row].to_vec());
     let mut ambiguous = false;
     let predictive = striped_bpp(2, width, height, 3 * width + 1, 2, |y, h| {
         let rows = &ga[y * row..(y + h) * row];
@@ -317,13 +324,15 @@ fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
     let (chosen, lzvn_input) = if !ambiguous && predictive.len() < lzfse_only.len() {
+        // Mode 2's strips go as a colour image's (one probe: 809 rows of
+        // 862 pixels).
         let input = (strip_rows(3 * width + 1, height) == height).then(|| {
             let v: Vec<[i32; 3]> = ga.chunks_exact(2).map(|p| [p[0] as i32, 0, 0]).collect();
             transform_values(width, height, ga.chunks_exact(2).map(|p| p[1]).collect(), v, 1).0
         });
         (predictive, input)
     } else {
-        (lzfse_only, (strip_rows(row, height) == height).then(|| ga.to_vec()))
+        (lzfse_only, (rows == height).then(|| ga.to_vec()))
     };
     smallest_or_raw(width, height, ga, 2, chosen, lzvn_input)
 }
@@ -387,17 +396,39 @@ pub fn encode16(width: usize, height: usize, halves: &[u16], alpha: &[u8], opaqu
 }
 
 /// The `MLEC` payload of a GA8 image: pixels of premultiplied grey and
-/// alpha, at most 4 MiB as BGRA (larger ones' chunks aren't established).
+/// alpha. One of more than 4 MiB as BGRA is in `KCBC` chunks of as many
+/// rows as fit 4 MiB as BGRA, as a colour image is (two probes, opaque and
+/// translucent).
 pub fn encode_gray(width: usize, height: usize, ga: &[u8], opaque: bool) -> Result<Vec<u8>, String> {
-    if width * height * 4 > 1 << 22 {
-        return Err(format!("a {width}x{height} greyscale image is too large for this actool"));
+    if width > 0xffff || height > 0xffff {
+        return Err(format!("a {width}x{height} image is too large for this actool"));
     }
-    let stream = stream_gray(width, height, ga)?;
+    let chunk_rows = (1 << 22) / (4 * width);
     let mut out = b"MLEC".to_vec();
-    le32(&mut out, if opaque { 2 } else { 0 });
+    if height <= chunk_rows {
+        let stream = stream_gray(width, height, ga)?;
+        le32(&mut out, if opaque { 2 } else { 0 });
+        le32(&mut out, 11);
+        le32(&mut out, 16 + stream.len() as u32);
+        body_bpp(&mut out, &stream, 2);
+        return Ok(out);
+    }
+    let row = 2 * width;
+    let chunks: Vec<(usize, usize)> = (0..height).step_by(chunk_rows).map(|y| (y, chunk_rows.min(height - y))).collect();
+    le32(&mut out, if opaque { 3 } else { 1 });
     le32(&mut out, 11);
-    le32(&mut out, 16 + stream.len() as u32);
-    body_bpp(&mut out, &stream, 2);
+    le32(&mut out, chunks.len() as u32);
+    for (y, h) in chunks {
+        let stream = stream_gray(width, h, &ga[y * row..(y + h) * row])?;
+        let mut data = Vec::new();
+        body_bpp(&mut data, &stream, 2);
+        out.extend(b"KCBC");
+        le32(&mut out, 0);
+        le32(&mut out, 0);
+        le32(&mut out, h as u32);
+        le32(&mut out, data.len() as u32);
+        out.extend(data);
+    }
     Ok(out)
 }
 
