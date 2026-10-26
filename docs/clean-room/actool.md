@@ -357,7 +357,15 @@ log2(1 + |r|) over the row's residuals, ties going to 0, 2, 3, 1, 4 in
 that order. That matches 6,667 of 6,670 probe rows; the other three are
 ties broken the other way, two between different residuals with equal
 integer costs and one between identical residuals, so the tie rule is not
-fully established.
+fully established. In 346 of the corpus's images (up to 300 px) the order
+settles 684 of 693 tied rows of non-zero cost, and no other fixed order,
+nor one starting from the row above's predictor, settles more. All nine
+others tie with predictor 1: Xcode picks it over 2 or 3 where they leave
+the same residuals (five rows; the same image gives the same choice each
+time, and the residuals are those of the code it picks), so the choice depends on
+something besides the row's residuals. Costs from unpremultiplied pixels
+contradict other rows, and other left-or-up rules in predictor 1's cost
+explain at most two.
 
 A greyscale image (GA8, below) is the same with 2-byte pixels: the stream
 header's last byte and the body header's second word are 2, mode 3 holds
@@ -831,6 +839,14 @@ catalogs, four of them from the corpus:
 
 Refused: other system versions and subtypes, tvOS launch images, extents
 other than full screen, and images other than PNGs.
+
+## Complications
+
+A watch complication set (`.complicationset`) whose image sets name no
+files, as Xcode's watch app template makes it, compiles to nothing for
+watchOS and iOS alike: no Assets.car, and an empty partial Info.plist for
+a catalog of nothing else (two of the corpus's catalogs). Complication sets
+with images are refused.
 
 ## Image stacks
 
