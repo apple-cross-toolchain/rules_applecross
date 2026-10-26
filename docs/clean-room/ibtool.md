@@ -381,7 +381,9 @@ other values of the attributes these use, is refused. Observed:
   (each false when turned off), `UIScrollDisabled`, `UIBouncesZoom` (left
   out when off) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
   that doesn't scroll doesn't clip. Its text (a `<string key="text">` or
-  the older `text` attribute) is `UIText` and `UIAttributedText`, an
+  the older `text` attribute) is `UIText` (in `Base.lproj` localizable as
+  `<id>.text`, the attributed string sharing its development value: one
+  probe) and `UIAttributedText`, an
   `NSAttributedString` whose attributes are `NSColor` (the text colour, if
   any: none given is nil), `NSFont` and `NSParagraphStyle` (an `NSMutableParagraphStyle` with
   `NSAlignment` in AppKit's order, right 1 and center 2, left left out,
@@ -453,8 +455,10 @@ other values of the attributes these use, is refused. Observed:
   insets are its `UIViewLayoutMargins` and set
   `UIStackViewLayoutMarginsRelative` whether or not
   `layoutMarginsRelativeArrangement` does, which without them changes
-  nothing. A background colour comes after its subviews, its own
-  constraints after the not-translating key (25 probes).
+  nothing; directional margins add `UIViewLayoutMarginsAreDirectional`
+  after them and after `UIViewLayoutMarginsFollowReadableWidth`. A
+  background colour comes after its subviews, its own constraints after
+  the not-translating key (26 probes).
 - A view's or label's `contentMode` is `UIContentMode` after
   `UIAutoresizingMask`, UIViewContentMode's values, scaleToFill (0) left
   out; Xcode compiles `topLeft` as scaleToFill, so it is refused (18
@@ -1002,13 +1006,16 @@ user interaction (`UIUserInteractionDisabled`) or multiple touches
 (`UIClearsContextBeforeDrawing` false), in that order after its mask and
 before its content mode; and, after its constraints, layout margins
 (`UIViewLayoutMargins` top, left, bottom, right, or leading and trailing
-with `UIViewLayoutMarginsAreDirectional`), `preservesSuperviewLayoutMargins`
+with `UIViewLayoutMarginsAreDirectional`, which follows
+`UIViewLayoutMarginsFollowReadableWidth` when both are given: two probes
+and a corpus storyboard), `preservesSuperviewLayoutMargins`
 (`UIViewPreservesSuperviewMargins`, `UIViewPreservesSpecificSuperviewMargins`
 15) and no `insetsLayoutMarginsFromSafeArea`
 (`UIViewInsetsLayoutMarginsFromSafeArea` 0). `exclusiveTouch` is refused
 (13 probes).
 
-Labels take `hidden`, `tag` and `alpha` as plain views do, and a
+Labels take `hidden`, `tag` and `alpha` as plain views do, `UIOpaque`
+after `UIDeepDrawRect` unless `opaque="NO"` (one probe), and a
 background colour before `UIDeepDrawRect` (other colours than text,
 highlighted and background are refused); without a `baselineAdjustment`
 (older documents) they have `UIBaselineAdjustment` 1 after the number of
