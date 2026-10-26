@@ -565,7 +565,10 @@ when it is initial or identified. Observed with 25 probes:
 A navigation item's left and right bar button items are its
 `UILeftBarButtonItem` and `UIRightBarButtonItem`, after its title, and each
 alone in `UILeftBarButtonItems` and `UIRightBarButtonItems`, around
-`UICenterItemGroups`. An item is `UIEnabled`, then for a system item
+`UICenterItemGroups`; with a list on a side (`<leftBarButtonItems>`), the
+first is that side's single item and the rest are defined in its array,
+the objects listing the left side's then the right side's in order (three
+probes; list items sharing a selector are refused). An item is `UIEnabled`, then for a system item
 `UIIsSystemItem` and `UISystemItem` (UIBarButtonSystemItem's numbering
 by the item's name, but `close` is 0) and for a space `UIHidesSharedBG`,
 then `UIStyle` (1 with no style, 2 for done, none for plain), then its
@@ -912,7 +915,8 @@ content mode other than scale to fill is `UIContentMode` after its mask
 A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
-`UINibAccessibilityConfigurationsKey`, several views' in the objects'
+`UINibAccessibilityConfigurationsKey`, several views' (the root view's
+too, first: one probe) in the objects'
 order (siblings either way round, a container and its subview with its
 configuration before or after its subviews, a nested label after a
 sibling: six probes):
