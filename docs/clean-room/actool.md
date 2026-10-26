@@ -863,6 +863,21 @@ catalogs, four of them from the corpus:
 Refused: other system versions and subtypes, tvOS launch images, extents
 other than full screen, and images other than PNGs.
 
+## Sticker icons
+
+A Messages extension's icon set (`.stickersiconset`) compiles only when
+`--app-icon` names it; otherwise the catalog is as without it. Named, for
+iOS 14 on, Xcode keeps only its 1024x768 App Store image (`ios-marketing`):
+an image rendition of the `marketing` idiom (6), its file's name, flags 0
+(no template rendering intent, unlike an image set's), stored on its own,
+the set's name as an image's facet. The partial Info.plist gets
+`MSMessagesExtensionStoreIconName`, the set's name. A catalog of only
+the icon has no appearance table; an image set beside it brings one. A set
+naming no files, as Xcode's template makes it, compiles to nothing, the
+Info.plist key included. iOS 11 keeps three of the images, which this
+actool refuses, as it does targets below 14 (four probes, three of the
+corpus's catalogs).
+
 ## Complications
 
 A watch complication set (`.complicationset`) whose image sets name no
