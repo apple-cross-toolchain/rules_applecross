@@ -2232,16 +2232,17 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UILineBreakMode", Value::Int(mode)));
             }
             values.push(("UITextAlignment", Value::Int(text_alignment(n.attribute("textAlignment"))?)));
-            // A preferred maximum width, a float, after the alignment (one
-            // probe); beside a scale factor or letter spacing it is refused.
-            if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
-                if minimum.is_some() || n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
-                    return fail("a label's preferredMaxLayoutWidth beside a minimum scale or letter spacing is not supported by this ibtool");
-                }
-                values.push(("UIPreferredMaxLayoutWidth", Value::Float(number(w)? as f32)));
-            }
             if let Some((_, scale)) = minimum {
                 values.push(("UIMinimumScaleFactor", Value::Float(scale)));
+            }
+            // A preferred maximum width, a float, after the alignment and
+            // any scale factor (one probe, one corpus storyboard); beside
+            // letter spacing it is refused.
+            if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
+                if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
+                    return fail("a label's preferredMaxLayoutWidth beside letter spacing is not supported by this ibtool");
+                }
+                values.push(("UIPreferredMaxLayoutWidth", Value::Float(number(w)? as f32)));
             }
             if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
                 values.push(("UIAdjustsLetterSpacingToFit", Value::Bool(true)));
