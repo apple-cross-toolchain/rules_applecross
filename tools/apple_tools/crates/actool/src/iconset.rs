@@ -49,6 +49,7 @@ fn idiom_value(idiom: &str) -> u16 {
         "iphone" => car::IDIOM_PHONE,
         "watch" => car::IDIOM_WATCH,
         "ios-marketing" => car::IDIOM_MARKETING,
+        "car" => car::IDIOM_CAR,
         "mac" => 0,
         _ => car::IDIOM_PAD,
     }
@@ -161,8 +162,17 @@ pub(crate) fn place_n<T: Copy>(atlas: &mut [T], width: usize, n: usize, ah: u32,
 /// whose renditions have no idiom or subtype.
 pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool) -> Result<Compiled, String> {
     let wanted = |s: &&Slot| {
-        (s.idiom == "iphone" && phone) || (s.idiom == "ipad" && pad) || (s.idiom == "watch" && watch) || (s.idiom == "mac" && mac) || (s.idiom == "ios-marketing" && (phone || pad))
+        (s.idiom == "iphone" && phone)
+            || (s.idiom == "ipad" && pad)
+            || (s.idiom == "watch" && watch)
+            || (s.idiom == "mac" && mac)
+            || (s.idiom == "ios-marketing" && (phone || pad))
+            || (s.idiom == "car" && phone)
     };
+    // CarPlay icons go with an iPhone build; without one isn't established.
+    if !phone && slots.iter().any(|s| s.idiom == "car") {
+        return Err(format!("{name}: CarPlay icons without --target-device iphone are not supported by this actool"));
+    }
     let version = car::MlecVersions::for_platform(if mac { "macosx" } else { "" });
     // Rendition keys: macOS catalogs have no idiom or subtype attribute.
     let group_attrs = |idiom: u16, subtype: u16| if mac { Vec::new() } else { vec![(car::ATTR_IDIOM, idiom), (car::ATTR_SUBTYPE, subtype)] };
@@ -370,12 +380,18 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
     let mut out = Vec::new();
     for i in images.as_array().ok_or("app icon set has no images list")? {
         let Some(filename) = i["filename"].as_str() else { continue };
+        // An image the set has but no slot uses (a file name, perhaps marked
+        // unassigned): Xcode ignores it.
+        if i.as_object().is_some_and(|o| o.keys().all(|k| k == "filename" || (k == "unassigned" && i["unassigned"] == true))) {
+            continue;
+        }
         let idiom = match i["idiom"].as_str() {
             Some("iphone") => "iphone",
             Some("ipad") => "ipad",
             Some("watch") => "watch",
             Some("mac") => "mac",
             Some("ios-marketing") => "ios-marketing",
+            Some("car") => "car",
             other => return Err(format!("{filename}: the {} idiom is not supported by this actool in a multi-size icon set", other.unwrap_or("missing"))),
         };
         let size = i["size"].as_str().and_then(|s| s.split_once('x')).and_then(|(w, h)| (w == h).then(|| w.parse::<f64>().ok()).flatten()).ok_or_else(|| format!("{filename}: unsupported size"))?;
@@ -397,6 +413,7 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             "iphone" => PHONE.contains(&(size, scale)),
             "ipad" => PAD.contains(&(size, scale)),
             "ios-marketing" => (size, scale) == (1024.0, 1),
+            "car" => size == 60.0 && (scale == 2 || scale == 3),
             _ => true,
         };
         if !known {
