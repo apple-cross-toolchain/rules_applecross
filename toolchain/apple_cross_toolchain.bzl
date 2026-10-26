@@ -1,3 +1,5 @@
+load(":xcode_versions.bzl", "XCODE_VERSIONS")
+
 def _read_netrc_token(rctx, host):
     """Read a password for the given host from ~/.netrc."""
     home = rctx.os.environ.get("HOME", "")
@@ -190,6 +192,89 @@ def _local_developer_dir(rctx):
 
     return developer_dir
 
+def _readtapi(rctx, cpu):
+    """LLVM's llvm-readtapi for this host, which stubs Mach-O binaries."""
+    clang = _LLVM_PREBUILT_MACOS if rctx.os.name.startswith("mac") else _LLVM_PREBUILT[cpu]
+    return str(rctx.path(Label(clang)).dirname) + "/llvm-readtapi"
+
+def _pinned_xcode(rctx):
+    """The XCODE_VERSIONS entry xcode_version names, or None."""
+    if not rctx.attr.xcode_version:
+        return None
+    pinned = XCODE_VERSIONS.get(rctx.attr.xcode_version)
+    if not pinned:
+        fail("xcode_version {} is not one of the Xcode releases rules_applecross knows: {}".format(
+            rctx.attr.xcode_version,
+            ", ".join(sorted(XCODE_VERSIONS.keys())),
+        ))
+    return pinned
+
+def _apple_sdk_sha256(rctx):
+    """The SDK archive's SHA-256: apple_sdk_sha256, else xcode_version's."""
+    pinned = _pinned_xcode(rctx)
+    if not pinned or not pinned.sdk_sha256:
+        return rctx.attr.apple_sdk_sha256
+    if rctx.attr.apple_sdk_sha256 and rctx.attr.apple_sdk_sha256 != pinned.sdk_sha256:
+        fail("apple_sdk_sha256 {} is not the SHA-256 of Xcode {}'s SDK archive, {}".format(
+            rctx.attr.apple_sdk_sha256,
+            rctx.attr.xcode_version,
+            pinned.sdk_sha256,
+        ))
+    return pinned.sdk_sha256
+
+def _stage_xcode_xip(rctx, cpu):
+    """Stages the SDK tree out of an Xcode .xip from xcode_xip_urls."""
+    pinned = _pinned_xcode(rctx)
+    if not pinned:
+        fail("xcode_xip_urls needs xcode_version, which pins the .xip's SHA-256")
+
+    rctx.report_progress("Downloading Xcode {}".format(rctx.attr.xcode_version))
+    rctx.download(
+        url = rctx.attr.xcode_xip_urls,
+        output = "_xip/Xcode.xip",
+        sha256 = pinned.xip_sha256,
+    )
+
+    rctx.report_progress("Extracting the Apple SDKs from Xcode {}".format(rctx.attr.xcode_version))
+    for command in (
+        ["extract_xip.py", "_xip/Xcode.xip", "_xip/stage"],
+        [
+            "link_local_xcode.py",
+            "--move",
+            "_xip/stage/Xcode.app/Contents/Developer",
+            str(rctx.path("Xcode.app")),
+            _readtapi(rctx, cpu),
+        ],
+    ):
+        result = rctx.execute(
+            [_python3(rctx), str(_toolchain_path(rctx, "repo_tools/" + command[0]))] + command[1:],
+            # Decompressing the whole archive and stubbing the frameworks each
+            # take minutes on a slow host.
+            timeout = 3600,
+        )
+        if result.return_code != 0:
+            fail("Failed to stage the Apple SDKs from Xcode {}'s .xip:\n{}".format(
+                rctx.attr.xcode_version,
+                result.stderr or result.stdout,
+            ))
+    rctx.delete("_xip")
+
+def _check_pinned_xcode(rctx, xcode_version, xcode_build):
+    """Fails unless the staged tree is the Xcode xcode_version pins."""
+    pinned = _pinned_xcode(rctx)
+    if not pinned:
+        return
+    if xcode_version != rctx.attr.xcode_version or xcode_build != pinned.build:
+        fail(("xcode_version is {} ({}), but the Apple SDKs staged for @{} are from Xcode {} ({}). " +
+              "On a Mac with another Xcode, --repo_env=RULES_APPLECROSS_LOCAL_XCODE=0 " +
+              "stages the pinned one instead.").format(
+            rctx.attr.xcode_version,
+            pinned.build,
+            rctx.name,
+            xcode_version,
+            xcode_build,
+        ))
+
 def _link_local_xcode(rctx, developer_dir, cpu):
     """Links a cross-compilable SDK tree to a locally installed Xcode."""
 
@@ -210,9 +295,7 @@ def _link_local_xcode(rctx, developer_dir, cpu):
             str(_toolchain_path(rctx, "repo_tools/link_local_xcode.py")),
             developer_dir,
             str(rctx.path("Xcode.app")),
-        ] + ([] if rctx.os.name.startswith("mac") else [
-            str(rctx.path(Label(_LLVM_PREBUILT[cpu])).dirname) + "/llvm-readtapi",
-        ]),
+        ] + ([] if rctx.os.name.startswith("mac") else [_readtapi(rctx, cpu)]),
         # Generating the framework stubs dominates, and a cold filesystem makes
         # the scan that finds them much slower than the default 600s allows.
         timeout = 3600,
@@ -298,6 +381,7 @@ _RULE_INPUT_FILES = [
     "wrapped_clang.cc",
     "repo_tools/ensure_clang_resource_libs.py",
     "repo_tools/normalize_sdk_modulemaps.py",
+    "repo_tools/extract_xip.py",
     "repo_tools/link_local_xcode.py",
     "repo_tools/patch_swiftinterfaces.py",
     "repo_tools/read_xcode_versions.py",
@@ -404,12 +488,14 @@ def _materialize_apple_sdks(rctx, cpu):
                 **kwargs
             )
     elif rctx.attr.apple_sdk_urls:
-        _sdk_download(rctx, rctx.attr.apple_sdk_urls, rctx.attr.apple_sdk_sha256, rctx.attr.apple_sdk_strip_prefix)
+        _sdk_download(rctx, rctx.attr.apple_sdk_urls, _apple_sdk_sha256(rctx), rctx.attr.apple_sdk_strip_prefix)
+    elif rctx.attr.xcode_xip_urls:
+        _stage_xcode_xip(rctx, cpu)
     else:
         fail(
             "No Apple SDK source is configured for @{}. Set apple_sdk_path or ".format(rctx.name) +
-            "apple_sdk_urls to a packaged SDK archive, or set local_xcode = True " +
-            "to read the SDKs from an Xcode install (macOS hosts only).",
+            "apple_sdk_urls to a packaged SDK archive, xcode_xip_urls to an Xcode .xip, " +
+            "or local_xcode = True to read the SDKs from an Xcode install.",
         )
 
 def _ported_tool_destination(name, destination):
@@ -547,6 +633,7 @@ def _apple_cross_toolchain_impl(rctx):
     # Describe the Xcode that produced this tree, so the generated xcode_config
     # reports the versions the SDKs actually have rather than a pinned guess.
     _xcode_version, _xcode_build, _sdk_versions = _read_xcode_versions(rctx)
+    _check_pinned_xcode(rctx, _xcode_version, _xcode_build)
     substitutions["%{xcode_version}"], substitutions["%{xcode_aliases}"] = _xcode_version_and_aliases(_xcode_version, _xcode_build)
     for _os_name, _sdk_name in _SDK_PLATFORM_FOR_OS.items():
         _sdk_version = _sdk_versions.get(_sdk_name)
@@ -652,8 +739,11 @@ force the archive source on a macOS host, or to "1" to make a missing Xcode a
 hard error rather than a silent fallback.
 """,
         ),
-        "apple_sdk_urls": attr.string_list(),
+        "apple_sdk_urls": attr.string_list(
+            doc = "URLs of a packaged SDK archive, tried in order. file:// URLs name a local copy.",
+        ),
         "apple_sdk_sha256": attr.string(
+            doc = "The archive's SHA-256. Defaults to xcode_version's, for the archive //tools:package_sdks makes.",
             mandatory = False,
         ),
         "apple_sdk_strip_prefix": attr.string(
@@ -662,6 +752,20 @@ hard error rather than a silent fallback.
         "apple_sdk_archive_type": attr.string(
             doc = "Archive type (e.g. 'tar.zst') when it can't be inferred from the archive name.",
             mandatory = False,
+        ),
+        "xcode_version": attr.string(
+            doc = """\
+An Xcode release from toolchain/xcode_versions.bzl, such as "27.0". It pins the
+SHA-256 of xcode_xip_urls' .xip and apple_sdk_urls' archive, and the staged SDKs
+must come from that release whatever their source.
+""",
+        ),
+        "xcode_xip_urls": attr.string_list(
+            doc = """\
+URLs of xcode_version's .xip, tried in order: a mirror, a bucket, or a file://
+URL to a local copy. The SDKs are extracted from it; the rest is discarded.
+Used when neither apple_sdk_path nor apple_sdk_urls is set.
+""",
         ),
         "ported_tools_archives": attr.string_dict(
             doc = """\

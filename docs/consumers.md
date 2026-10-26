@@ -3,6 +3,42 @@
 What a project needs beyond the README's setup to build its Apple apps on
 Linux, as found building Visor (an iOS and macOS app with Swift packages).
 
+## The Apple SDKs by Xcode version
+
+`xcode_version` names a release in
+[toolchain/xcode_versions.bzl](../toolchain/xcode_versions.bzl), which pins
+the SHA-256 of Apple's `.xip` and of the SDK archive made from it. Either can
+then come from wherever the project keeps a copy:
+
+```starlark
+apple_cross_toolchain.configure(
+    name = "apple_cross_toolchain",
+    xcode_version = "27.0",
+    # A packaged SDK archive: under a third of the .xip's size, and nothing to unpack.
+    apple_sdk_urls = ["https://storage.example.com/apple-sdks-27.0.tar.gz"],
+    # Or Apple's .xip itself, used when no SDK archive is configured.
+    xcode_xip_urls = ["file:///mnt/xcode/Xcode_27.xip"],
+    ...
+)
+```
+
+The URLs are tried in order, so a mirror can come before a local copy, and
+`file://` URLs name a copy on disk. Bazel checks every download against the
+pinned SHA-256 and keeps it in its repository cache, so a second clone or
+`bazel clean --expunge` reuses it. Hosts that need credentials take them the
+way any Bazel download does: `.netrc`, or `--credential_helper`.
+
+From a `.xip`, the rule extracts the SDKs, stubs their Mach-O binaries with
+this repository's LLVM and discards the rest, which takes a minute or two.
+`bazel run //tools:package_sdks -- Xcode_27.xip apple-sdks-27.0.tar.gz` makes
+the SDK archive from the same `.xip`. Its output is reproducible, so it
+matches the pinned SHA-256 whoever runs it. Both give the same tree.
+
+Whatever the source, a pinned `xcode_version` fails the build when the staged
+SDKs are from another Xcode release, a local Xcode included:
+`--repo_env=RULES_APPLECROSS_LOCAL_XCODE=0` makes a Mac with another Xcode
+use the pinned one.
+
 ## The Apple SDKs from a mounted Xcode
 
 Instead of an SDK archive, the toolchain can read a Mac's Xcode mounted

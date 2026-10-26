@@ -84,9 +84,17 @@ Supports:
 
 **[Please ensure you have read and understood the Xcode license terms before continuing.](https://www.apple.com/legal/sla/docs/xcode.pdf)**
 
-If you build on macOS, Xcode will be automatically detected and used. If you
-build on Linux, run the following command on a Mac to package an SDK tarball
-that can be used for your build:
+If you build on macOS, Xcode will be automatically detected and used. On
+Linux, `xcode_version` with `xcode_xip_urls` or `apple_sdk_urls` stages a
+pinned release from a `.xip` or an SDK archive you host
+([docs/consumers.md](docs/consumers.md#the-apple-sdks-by-xcode-version)).
+This makes that archive from a `.xip`, on any host:
+
+```
+bazel run //tools:package_sdks -- ~/Downloads/Xcode_27.xip apple-sdks-27.0.tar.gz
+```
+
+On a Mac, the following packages the selected Xcode instead:
 
 ```
 tools/package-sdks.sh

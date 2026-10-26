@@ -11,7 +11,11 @@ these paths as directory artifacts, so any extra or missing file changes the
 directory's digest, and a build from a local Xcode would stop sharing the remote
 cache with one from a packaged archive.
 
-Usage: link_local_xcode.py <developer-dir> <destination-Xcode.app> [<llvm-readtapi>]
+Usage: link_local_xcode.py [--move] <developer-dir> <destination-Xcode.app> [<llvm-readtapi>]
+
+With --move the selected content is moved out of <developer-dir> rather than
+linked to it, for a staging tree the caller owns and discards afterwards, such
+as one extract_xip.py unpacked. The tree is then self-contained.
 
 Stubs come from `xcrun tapi stubify` on macOS. A Linux host, reading an Xcode
 mounted into it, has no xcrun and names LLVM's llvm-readtapi instead.
@@ -106,8 +110,9 @@ def _includes(source):
 
 
 class Linker(object):
-    def __init__(self, source, xcode_app, readtapi=None):
+    def __init__(self, source, xcode_app, readtapi=None, move=False):
         self.readtapi = readtapi
+        self.move = move
         self.source = source
         self.xcode_app = xcode_app
         # Everything grafted from the install lands under Contents/Developer,
@@ -126,13 +131,15 @@ class Linker(object):
         return path
 
     def _link(self, rel):
-        """Symlink one source entry into the destination."""
+        """Symlink, or move, one source entry into the destination."""
         src = os.path.join(self.source, rel)
         dst = os.path.join(self.destination, rel)
         if os.path.lexists(dst):
             return
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.islink(src):
+        if self.move:
+            os.rename(src, dst)
+        elif os.path.islink(src):
             # Preserve the link itself. Its target is interpreted relative to a
             # directory that exists in both trees, so it keeps resolving.
             os.symlink(os.readlink(src), dst)
@@ -279,12 +286,13 @@ class Linker(object):
             self._graft(rel, excluded)
 
         self._real_dir(_TOOLCHAIN + "/usr/bin")
-        # Copied, not linked: xcrun follows the link and would run the
-        # install's own tools.
-        _copy_file(
-            os.path.join(self.source, _TOOLCHAIN, "ToolchainInfo.plist"),
-            os.path.join(self.destination, _TOOLCHAIN, "ToolchainInfo.plist"),
-        )
+        if not self.move:
+            # Copied, not linked: xcrun follows the link and would run the
+            # install's own tools.
+            _copy_file(
+                os.path.join(self.source, _TOOLCHAIN, "ToolchainInfo.plist"),
+                os.path.join(self.destination, _TOOLCHAIN, "ToolchainInfo.plist"),
+            )
         _copy_plists(self.source, self.xcode_app)
         _stubify(stub_targets, self.destination, self.readtapi)
         self._retarget_stub_aliases()
@@ -390,13 +398,17 @@ def _strip_reexports(path):
 
 
 def main() -> int:
-    if len(sys.argv) not in (3, 4):
-        print("usage: link_local_xcode.py <developer-dir> <destination-Xcode.app> [<llvm-readtapi>]",
+    args = sys.argv[1:]
+    move = args[:1] == ["--move"]
+    if move:
+        args = args[1:]
+    if len(args) not in (2, 3):
+        print("usage: link_local_xcode.py [--move] <developer-dir> <destination-Xcode.app> [<llvm-readtapi>]",
               file=sys.stderr)
         return 2
-    readtapi = os.path.abspath(sys.argv[3]) if len(sys.argv) == 4 else None
-    source = os.path.realpath(sys.argv[1])
-    destination = os.path.abspath(sys.argv[2])
+    readtapi = os.path.abspath(args[2]) if len(args) == 3 else None
+    source = os.path.realpath(args[0])
+    destination = os.path.abspath(args[1])
 
     if not os.path.isdir(os.path.join(source, "Platforms")):
         print("error: {} has no Platforms directory, so it is not a full Xcode "
@@ -407,9 +419,9 @@ def main() -> int:
             destination, source), file=sys.stderr)
         return 1
 
-    stubs = Linker(source, destination, readtapi).run()
-    print("linked {} from {} ({} stubs generated)".format(
-        destination, source, stubs), file=sys.stderr)
+    stubs = Linker(source, destination, readtapi, move).run()
+    print("{} {} from {} ({} stubs generated)".format(
+        "moved" if move else "linked", destination, source, stubs), file=sys.stderr)
     return 0
 
 
