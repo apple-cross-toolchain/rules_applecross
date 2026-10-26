@@ -711,6 +711,23 @@ without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were
 byte-identical.
 
+### Resizable images
+
+An image's `resizing` (three parts across or down, or nine) crops it to
+its caps and centre: the columns of the left cap and the centre's width
+after it, then those of the right cap; the rows likewise. Cap insets and
+the centre's size are in pixels. The rendition's 0x3e9 TLV then lists
+slices in place of the whole image. Three parts across go left to right,
+three down from the top, and nine by rows from the top, each row left to
+right. Each slice is x, y counted from the bottom, width and height. The
+layout is 20 for three parts across, 23 down and 30 for nine, one more
+when the centre stretches rather than tiles; the metrics have the
+cropped size. A resizable image is packed into an atlas by its cropped
+size as any other, its link carrying the slices and, in its `KLNI`, its
+layout in place of 12 (16 probes, grey and colour, and Chrome's tab strip catalog, with a
+dark appearance). Resizable JPEGs and wide-gamut images, other keys and
+caps that don't fit are refused.
+
 ### JPEG images
 
 A JPEG in an image set is stored as a file, not decoded: a rendition keyed
