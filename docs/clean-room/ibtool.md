@@ -1185,6 +1185,15 @@ interest on, an `MKStandardMapConfiguration`, `MKPitchButtonVisibility` 1,
 no user tracking button); its delegate outlet is an outlet like others
 (six probes; other map types and settings are refused).
 
+A toolbar in a view is a `UIToolbar`: `UIDeepDrawRect`, mask 36,
+`UIClearsContextBeforeDrawing` false when it says so, its constraint keys,
+hugging `{250, 250}`, semantic content and large content properties, then
+`UIItems` (its bar button items, defined there as a navigation item's
+are), `UIBarPosition` 1 and `UIBarTranslucence` 1. The objects list its
+items in its turn, after its constraints, as its subviews would be (two
+probes). Items with actions or segues, opaque toolbars and toolbars in
+tables, cells or collection views are refused.
+
 A web view is a `WKWebView`: a background colour if any, opaque unless it
 says NO, mask 36, its constraint keys, semantic content and large content
 properties, then `configuration`, a `WKWebViewConfiguration` of WebKit's
