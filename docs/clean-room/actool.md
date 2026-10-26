@@ -770,6 +770,10 @@ other than full screen, and images other than PNGs.
 
 ## Image stacks
 
+An iOS build leaves tvOS brand assets and visionOS solid image stacks out
+unless `--app-icon` names them: the Assets.car is the same as without them
+(two probes; a catalog of nothing else compiles to nothing).
+
 tvOS brand assets' primary app icon (an `.imagestack` of
 `.imagestacklayer`s, one 1x tv image each, on a 400x240 stack) and
 visionOS's `.solidimagestack` (`.solidimagestacklayer`s, one 1024 px
