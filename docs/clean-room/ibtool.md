@@ -900,8 +900,10 @@ content (four probes).
 A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
-`UINibAccessibilityConfigurationsKey` (one view's in a nib; more are
-refused, as runtime attributes are):
+`UINibAccessibilityConfigurationsKey`, several views' in the objects'
+order (siblings either way round, a container and its subview with its
+configuration before or after its subviews, a nested label after a
+sibling: six probes):
 `UIAccessibileObject` (sic), then those given of `UIAccessibilityHint`,
 `UIAccessibilityIdentifier`, `UIAccessibilityLabel`, `UIAccessibilityTraits`
 (an `NSNumber` of UIAccessibilityTraits' bits: button 1, link 2, image 4,
@@ -1081,7 +1083,8 @@ boolean one of 0 or 1, a string the string, a colour the colour and a size an
 controller and of other kinds of view are refused (13 probes).
 
 A label that translates its autoresizing mask has the document's mask,
-left out when empty. A system font of size 0, regular or bold, is 12
+left out when empty. A system font with `size="button"` (older
+documents) is 18 points (one probe). A system font of size 0, regular or bold, is 12
 points (14 probes).
 
 ## Collection view controllers

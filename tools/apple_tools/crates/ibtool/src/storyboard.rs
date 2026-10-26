@@ -987,7 +987,7 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
                 only_attributes(n, &[("key", None), ("name", None), ("family", None), ("pointSize", None)])?;
                 (None, Some(name), number(attr(n, "pointSize")?)?, "regular")
             } else {
-                only_attributes(n, &[("key", None), ("type", None), ("weight", None), ("pointSize", None)])?;
+                only_attributes(n, &[("key", None), ("type", None), ("weight", None), ("pointSize", None), ("size", Some("button"))])?;
                 // The bold system font is the bold weight.
                 let face = match (attr(n, "type")?, n.attribute("weight")) {
                     ("system", weight) => weight.unwrap_or("regular"),
@@ -995,8 +995,14 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
                     ("italicSystem", None) => "italic",
                     (kind, _) => return fail(format!("a {kind} font with a weight is not supported by this ibtool")),
                 };
-                // No size is 12 points (two probes).
-                let size = match (number(attr(n, "pointSize")?)?, face) {
+                // No size is 12 points (two probes); the button size is 18
+                // (one probe).
+                let point_size = match (n.attribute("size"), n.attribute("pointSize")) {
+                    (Some(_), None) => 18.0,
+                    (None, _) => number(attr(n, "pointSize")?)?,
+                    (Some(_), Some(_)) => return fail("a font with both a size and a point size is not supported by this ibtool"),
+                };
+                let size = match (point_size, face) {
                     (0.0, "regular" | "bold") => 12.0,
                     (0.0, _) => return fail(format!("a {face} system font without a size is not supported by this ibtool")),
                     (size, _) => size,
@@ -4699,16 +4705,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             // Runtime attributes and accessibility configurations go in that
             // order too, each view's as the document gives them (eight
-            // probes), but one corpus storyboard's views' attributes don't,
-            // for reasons not established: those of more than one view, or
-            // beside a switch's frame, are refused.
+            // probes, and six of accessibility on several views), but one
+            // corpus storyboard's views' attributes don't, for reasons not
+            // established: attributes of more than one view, or beside a
+            // switch's frame, are refused.
             let distinct = |names: Vec<&String>| names.into_iter().collect::<std::collections::HashSet<_>>().len();
             let user_views = distinct(scene.pairs.iter().map(|p| &p.0).filter(|n| !scene.switch_frames.contains(n)).collect());
             if user_views > 1 || (user_views == 1 && !scene.switch_frames.is_empty()) {
                 return fail("user-defined runtime attributes of more than one view, or beside a switch, are not supported by this ibtool");
-            }
-            if distinct(scene.accessibility.iter().map(|a| &a.0).collect()) > 1 {
-                return fail("accessibility settings of more than one view are not supported by this ibtool");
             }
             let position = |name: &String| order.iter().position(|o| o == name).unwrap_or(usize::MAX);
             scene.pairs.sort_by_key(|p| position(&p.0));
