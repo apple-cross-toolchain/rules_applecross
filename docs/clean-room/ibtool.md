@@ -694,7 +694,9 @@ when it is initial or identified. Observed with 25 probes:
   properties, the layout the same (two probes).
 - The bar's appearance: a background colour before `UIDeepDrawRect`;
   `translucent="NO"` adds `UIOpaque` after it and makes
-  `UIBarTranslucence` 2; its tint (or the document's) after the mask;
+  `UIBarTranslucence` 2 (a translucent bar's `opaque="NO"` changes
+  nothing: one corpus storyboard; beside `translucent="NO"` it is
+  refused); its tint (or the document's) after the mask;
   after the large content properties `UIBarStyle` 1 for black, then
   `UIBarPrefersLargeTitles`, then `UIBarLargeTitleTextAttributes`; its
   bar tint `UIBarTintColor` after `UIIsLocked`; `UITitleTextAttributes`
@@ -925,8 +927,8 @@ probes:
   cell, its content view and the content view's subviews; then, breadth
   first, each view's constraints and its subviews, the content view's not
   listed again. A switch's frame is its key-value pair, as in a
-  controller's view (six probes); several switches, and actions or
-  switches in a static table's cells, are refused.
+  controller's view (six probes); several switches in one cell are
+  refused.
 - The cell: geometry from its frame in the document, `UISubviews` (the
   content view and a `_UITableViewCellSeparatorView`), its background,
   `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, its
@@ -990,6 +992,11 @@ constraints and deeper views, each cell's content view and its subviews
 walked together before the next cell's (one corpus storyboard). The connections begin with the owner's
 `staticDataSource` outlet to the data source; the controller's outlets
 may reach the cells' views (seven probes, and two corpus storyboards).
+The cells' controls' actions on the controller follow the outlets, by
+event mask and then selector, those sharing both in the cells' order
+whatever their ids; their switches' frame pairs are the table nib's, cell
+by cell (seven probes, one corpus storyboard). Two actions in one cell
+sharing a mask and selector are refused.
 Without `colorMatched`, a grey white background stays as it is rather
 than becoming the table's or text view's system background.
 
@@ -1254,7 +1261,7 @@ controller and the default data store, then its flags: data detectors
 configuration (`mediaTypesRequiringUserActionForPlayback` none, empty
 preferences) is compiled; others are refused.
 
-A picker view is a `UIPickerView`: the view keys (opaque, hidden, mask 36),
+A picker view is a `UIPickerView`: the view keys (opaque, hidden, the mask as a label's),
 hugging `{250, 250}` and after its large content properties
 `UIAllowSelectingCells` true; its data source and delegate outlets are
 outlets like others (four probes). A visual effect view (non-opaque, with a
@@ -1308,7 +1315,9 @@ Title1 28, Title2 22, Title3 20), to a quarter point (19 probes).
 Switches, sliders, steppers, activity indicators, progress views and page
 controls (42 probes):
 - **Common.** Each is a non-opaque view: `UIDeepDrawRect`, hidden and tag,
-  `UIAutoresizeSubviews`, mask 36, alpha, the constraint keys, then its
+  `UIAutoresizeSubviews`, the mask (below), a stepper's `UIClipsToBounds`
+  when it clips (one probe; beside an alpha it is refused), alpha, the
+  constraint keys, then its
   hugging (each priority 250 unless given; a switch's, stepper's or
   activity indicator's left out when it is 750 both ways, a slider's
   always written), its compression resistance if either is given (each
@@ -1371,8 +1380,15 @@ probes), and a size an
 `NSValue` (`NS.special` 2, `NS.sizeval` `{w, h}`). Those of an embedded
 controller and of other kinds of view are refused (13 probes).
 
-A label that translates its autoresizing mask has the document's mask,
-left out when empty. A system font with `size="button"` (older
+A label's, button's, picker view's or control's (a switch, slider,
+stepper, activity indicator, progress view or page control)
+`UIAutoresizingMask` is the document's mask (36 without one; a label's
+left out when empty) unless the view doesn't translate it: when it says
+`translatesAutoresizingMaskIntoConstraints="NO"` and a constraint is on
+it, the mask is 36. `translatesAutoresizingMaskIntoConstraints="NO"`
+alone, or `fixedFrame`, doesn't change it (ten probes: labels, buttons and
+switches, constrained or not, translating or not, and a corpus
+storyboard's switches, steppers and labels). A system font with `size="button"` (older
 documents) is 18 points (one probe). A system font of size 0, regular or bold, is 12
 points (14 probes).
 

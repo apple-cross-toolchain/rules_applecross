@@ -425,7 +425,10 @@ pub(super) fn table_view_nib(
             }
         }
     }
-    let upstream_used = !outlets.is_empty() || !refresh_actions.is_empty();
+    // A static cell's control's action is on the controller too.
+    let static_actions = table.attribute("dataMode") == Some("static")
+        && table.descendants().any(|d| d.has_tag_name("action") && d.ancestors().any(|a| a.has_tag_name("tableViewCell")));
+    let upstream_used = !outlets.is_empty() || !refresh_actions.is_empty() || static_actions;
 
     let (mut cells, mut segues) = prototypes(table)?;
     // The embed segues of container views in the header view: their
@@ -547,6 +550,8 @@ pub(super) fn table_view_nib(
     // A static table's sections and their cells, as its data source holds
     // them; its cells are in the table's nib.
     let mut connections = Vec::new();
+    let mut cell_actions = Vec::new();
+    let mut cell_pairs = Vec::new();
     if static_table {
         let mut sections = Vec::new();
         let mut section_names = Vec::new();
@@ -566,10 +571,7 @@ pub(super) fn table_view_nib(
                 for cs in children(sec, "cells") {
                     only_children(cs, &["tableViewCell"])?;
                     for cell in children(cs, "tableViewCell") {
-                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell)?;
-                        if !cell_parts.scene.actions.is_empty() || !cell_parts.scene.pairs.is_empty() {
-                            return fail("actions and switches in a static table's cells are not supported by this ibtool");
-                        }
+                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell, vc_id)?;
                         // Its segue's placeholder and its outlets into its
                         // views, among the outlets.
                         let (segue, cell_outlets) = cell_connections(cell)?;
@@ -640,6 +642,12 @@ pub(super) fn table_view_nib(
             }
         }
         connections.push(outlet(&mut nib, "staticDataSource", "owner", "static data source"));
+        // Its cells' controls' actions on the controller and their switches'
+        // frame pairs, cell by cell, are the table nib's (five probes).
+        for (i, p) in parts.iter_mut().enumerate() {
+            cell_actions.extend(std::mem::take(&mut p.scene.actions).into_iter().map(|a| (i, a)));
+            cell_pairs.extend(std::mem::take(&mut p.scene.pairs).into_iter().map(|p| p.1));
+        }
     }
 
     levels.sort_by_key(|l| l.0);
@@ -678,7 +686,23 @@ pub(super) fn table_view_nib(
             ("UIEventMask", Value::Int(4096)),
         ])));
     }
-    Ok((root_object(&mut nib, top, objects, connections), upstream_used, segues, listing))
+    // A static table's cells' actions after the outlets, by mask and then
+    // selector, those sharing them in the cells' order (two probes); two in
+    // one cell sharing them are refused.
+    cell_actions.sort_by(|a, b| (a.1 .2, &a.1 .0).cmp(&(b.1 .2, &b.1 .0)));
+    if cell_actions.windows(2).any(|w| (w[0].0, w[0].1 .2, &w[0].1 .0) == (w[1].0, w[1].1 .2, &w[1].1 .0)) {
+        return fail("actions in a static table's cell sharing a selector are not supported by this ibtool");
+    }
+    for (_, (selector, source, mask, _)) in &cell_actions {
+        let label = nib.string(selector);
+        connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
+            ("UILabel", label),
+            ("UISource", reference(source.clone())),
+            ("UIDestination", reference("upstream")),
+            ("UIEventMask", Value::Int(*mask)),
+        ])));
+    }
+    Ok((root_object_with_pairs(&mut nib, top, objects, connections, cell_pairs), upstream_used, segues, listing))
 }
 
 /// A table cell as a prototype's nib or a static table's row holds it,
@@ -691,7 +715,9 @@ struct CellParts<'a> {
 
 /// A cell: its object (named after its id), with its content view and the
 /// separator Xcode lays out at its foot.
-fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -> Result<(Value, CellParts<'a>), String> {
+/// Its controls' actions may target `target`: the cell itself in a
+/// prototype's nib, the controller in a static table's.
+fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, target: &'a str) -> Result<(Value, CellParts<'a>), String> {
     only_attributes(cell, &[
         ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
@@ -753,9 +779,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
     let content_name = view_name(content_id);
 
     // The content view and its subviews, compiled as a container's are.
-    // Its controls' actions may target the cell, as the scene's do its
-    // controller.
-    let mut scene = Scene::new(cell_id, module, content, Some(content_name.clone()));
+    let mut scene = Scene::new(target, module, content, Some(content_name.clone()));
     let cf = frame(content)?;
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
@@ -940,7 +964,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     // A cell's segue is its placeholder's.
     let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
 
-    let (cell_value, parts) = cell_object(&mut nib, module, cell)?;
+    let (cell_value, parts) = cell_object(&mut nib, module, cell, attr(cell, "id")?)?;
     let CellParts { name: cell_name, content: content_name, mut scene } = parts;
     let mut top = vec![owner, responder];
     top.extend(upstream);

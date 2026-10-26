@@ -1377,7 +1377,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             allowed.extend([
                 ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None),
                 ("minimumValue", None), ("maximumValue", None), ("stepValue", None), ("continuous", Some("NO")), ("autorepeat", Some("NO")),
-                ("wraps", Some("YES")), ("enabled", Some("NO")),
+                ("wraps", Some("YES")), ("enabled", Some("NO")), ("clipsSubviews", Some("YES")),
             ]);
             children_allowed.push("color");
         }
@@ -1462,7 +1462,15 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     hidden_and_tag(&mut values, n)?;
     values.dedup_by(|a, b| a.0 == "UIHidden" && b.0 == "UIHidden");
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-    values.push(("UIAutoresizingMask", Value::Int(36)));
+    values.push(("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)));
+    // A stepper's clipping right after its mask (one probe); beside an
+    // alpha it isn't established.
+    if n.attribute("clipsSubviews").is_some() {
+        if n.attribute("alpha").is_some() {
+            return fail("a clipping stepper with an alpha is not supported by this ibtool");
+        }
+        values.push(("UIClipsToBounds", Value::Bool(true)));
+    }
     alpha(&mut values, n)?;
     if tag == "stepper" {
         if let Some(c) = child(n, "color", "tintColor") {
@@ -1914,17 +1922,16 @@ fn text_alignment(s: Option<&str>) -> Result<i64, String> {
     })
 }
 
-/// A button's autoresizing mask, which Xcode leaves out when the view
-/// doesn't translate it into constraints. A bar button item's custom view
-/// translates the flexible right and bottom margins it is archived with
-/// anyway (one probe).
-fn ignored_autoresizing_mask(n: Node) -> Result<(), String> {
-    let custom = n.parent_element().is_some_and(|p| p.has_tag_name("barButtonItem"))
-        && children(n, "autoresizingMask").all(|m| autoresizing_mask(m).ok() == Some(36));
-    if !custom && children(n, "autoresizingMask").next().is_some() && n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
-        return fail(format!("<autoresizingMask> inside a <{}> that translates it is not supported by this ibtool", n.tag_name().name()));
+/// A view's autoresizing mask: flexible right and bottom margins (36) when
+/// it doesn't translate it into constraints, as `does_not_translate`
+/// decides, or has none; otherwise the document's, whether or not it says
+/// `translatesAutoresizingMaskIntoConstraints="NO"` (ten probes: labels,
+/// buttons and switches, constrained or not, translating or not).
+fn document_mask(scene: &Scene, n: Node) -> Result<i64, String> {
+    match children(n, "autoresizingMask").next() {
+        Some(m) if !does_not_translate(scene, n) => autoresizing_mask(m),
+        _ => Ok(36),
     }
-    Ok(())
 }
 
 /// Whether a view is archived as not translating its autoresizing mask:
@@ -2127,13 +2134,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            // A label that translates its autoresizing mask has the
-            // document's, none when empty; otherwise flexible right and
-            // bottom margins.
-            let mask = match children(n, "autoresizingMask").next() {
-                Some(m) if n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() => autoresizing_mask(m)?,
-                _ => 36,
-            };
+            // An empty mask is left out.
+            let mask = document_mask(scene, n)?;
             if mask != 0 {
                 values.push(("UIAutoresizingMask", Value::Int(mask)));
             }
@@ -2496,7 +2498,6 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             ])?;
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
             view_connections(scene, n, &name)?;
-            ignored_autoresizing_mask(n)?;
             for c in children(n, "color") {
                 if c.attribute("key") != Some("backgroundColor") {
                     return fail("picker view colours other than a background colour are not supported by this ibtool");
@@ -2507,7 +2508,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIOpaque", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            values.push(("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)));
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -3197,7 +3198,6 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
-            ignored_autoresizing_mask(n)?;
             // Its states by UIControlState, in that order whatever the
             // document's: normal 0, highlighted 1, disabled 2, selected 4.
             let mut states: Vec<(i64, &str, Node)> = Vec::new();
@@ -3258,7 +3258,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            values.push(("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)));
             alpha(&mut values, n)?;
             // A content mode other than scale to fill after the mask (one
             // probe).
@@ -4611,8 +4611,14 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
         &[
             ("key", Some("navigationBar")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("largeTitles", Some("YES")),
             ("barStyle", Some("black")), ("translucent", Some("NO")), ("id", None), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")),
+            ("opaque", Some("NO")),
         ],
     )?;
+    // A translucent bar's `opaque="NO"` changes nothing (one corpus
+    // storyboard); beside `translucent="NO"` it isn't established.
+    if bar.attribute("opaque").is_some() && bar.attribute("translucent").is_some() {
+        return fail("a non-opaque navigation bar that isn't translucent is not supported by this ibtool");
+    }
     only_children(bar, &["rect", "autoresizingMask", "color", "textAttributes"])?;
     if let Some(c) = children(bar, "color").find(|c| !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor" | "barTintColor"))) {
         return fail(format!("a navigation bar's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
