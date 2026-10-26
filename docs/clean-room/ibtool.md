@@ -532,7 +532,8 @@ alone in `UILeftBarButtonItems` and `UIRightBarButtonItems`, around
 by the item's name, but `close` is 0) and for a space `UIHidesSharedBG`,
 then `UIStyle` (1 with no style, 2 for done, none for plain), then its
 `UITitle`, then its image (`UIImage`, a placeholder as an image view's);
-an item may have a title, an image, both or neither (five probes). The items follow the controller's segue templates in its nib's
+an item may have a title, an image, both or neither (five probes), then
+its tint (`UITintColor`; two probes). The items follow the controller's segue templates in its nib's
 objects (its own nib's, or its navigation controller's).
 - **Actions.** An item's action on its controller is an event connection
   without a mask.
@@ -656,13 +657,16 @@ probes:
   0.0 and `UISectionHeaderTopPadding` -1.0 as doubles,
   `UIAllowsSelection` false, `UIAllowsMultipleSelection` or
   `UIAllowsSelectionDuringEditing` true when set,
-  `UIInsetsContentViewsToSafeArea`, `UISeparatorColor`, the prototypes,
+  `UIInsetsContentViewsToSafeArea`, the header and footer views,
+  `UISeparatorColor` (four probes with a header, a footer or both), the
+  prototypes,
   `UISectionIndexBackgroundColor`, `UISeparatorInsetReference` 0.
 - Left out, the row height is 44, a plain table's section heights 22, and
   the estimates 0.
 - The separator style: default and singleLine are `UISeparatorStyle` and
   `UISeparatorStyleIOS5AndLater` 1; none only
-  `UISeparatorStyleIOS9AndLater` 0; singleLineEtched all three, 2.
+  `UISeparatorStyleIOS9AndLater` 0; singleLineEtched all three, 2. A
+  table with no separator style has the default (one probe).
 - A plain table's white background, `systemBackgroundColor` or any opaque
   grey white (gamma 2.2, calibrated or device), is
   `tableBackgroundColor`; other colours, and every colour of a grouped
@@ -864,7 +868,9 @@ probes). Runtime attributes, switches (their frame pair) and accessibility
 settings inside cells and table headers are refused: those nibs aren't
 built with them.
 
-Image views take a custom class (swapped in, after their image), runtime
+Buttons take a custom class, swapped in after `UIButtonConfiguration`
+(two probes). Stack views and visual effect views take runtime
+attributes (two probes). Image views take a custom class (swapped in, after their image), runtime
 attributes and accessibility settings; text fields accessibility settings;
 the root view a custom class (swapped in, after its large content
 properties). A label may adjust its font for the content size category
