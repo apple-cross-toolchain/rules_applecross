@@ -63,7 +63,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
                 continue;
             }
             for k in entry.as_object().unwrap().keys() {
-                if !["filename", "idiom", "scale", "appearances"].contains(&k.as_str()) {
+                if !["filename", "idiom", "scale", "appearances", "resizing"].contains(&k.as_str()) {
                     return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
                 }
             }
@@ -97,6 +97,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             // A JPEG is stored on its own, as it is but for its comments.
             if jpeg {
+                if entry.get("resizing").is_some() {
+                    return Err(format!("{}: a resizable JPEG is not supported by this actool", dir.display()));
+                }
                 let (stored, width, height, orientation) = stored_jpeg(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
                 let mut attrs = vec![(car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
                 if appearance != 0 {
@@ -112,7 +115,15 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
             if extended.is_some() && img.is_gray() {
                 return Err(format!("{}: a grey image with colours outside sRGB is not supported by this actool", path.display()));
             }
-            images.push(SetImage { scale, appearance, idiom, identifier: id, flags, filename: filename.to_string(), image: img, extended });
+            let (img, slicing) = match entry.get("resizing") {
+                None => (img, None),
+                Some(_) if extended.is_some() => return Err(format!("{}: a resizable image with colours outside sRGB is not supported by this actool", path.display())),
+                Some(r) => {
+                    let (img, slicing) = resizing(r, &img).map_err(|e| format!("{}: {e}", path.display()))?;
+                    (img, Some(slicing))
+                }
+            };
+            images.push(SetImage { scale, appearance, idiom, identifier: id, flags, filename: filename.to_string(), image: img, extended, slicing });
         }
         if !scales.is_empty() {
             out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
@@ -318,6 +329,71 @@ fn is_empty_iptc(resources: &[u8]) -> bool {
     !ids.is_empty() && ids.iter().all(|id| [0x404, 0x425].contains(id))
 }
 
+/// A resizable image's image, cropped to its caps and centre, and its
+/// slicing: the slices of a three-part image left to right or top to
+/// bottom, of a nine-part one by rows from the top, their y from the
+/// bottom; layout 20 for three parts across, 23 down and 30 for nine, one
+/// more when the centre stretches rather than tiles (16 probes). Cap insets
+/// and the centre's size are in pixels.
+fn resizing(r: &serde_json::Value, img: &image::Rgba) -> Result<(image::Rgba, car::Slicing), String> {
+    let unsupported = || format!("the resizing {r} is not supported by this actool");
+    let o = r.as_object().ok_or_else(unsupported)?;
+    if o.keys().any(|k| !["mode", "center", "cap-insets"].contains(&k.as_str())) {
+        return Err(unsupported());
+    }
+    let (across, down, base) = match r["mode"].as_str() {
+        Some("3-part-horizontal") => (true, false, 20),
+        Some("3-part-vertical") => (false, true, 23),
+        Some("9-part") => (true, true, 30),
+        _ => return Err(unsupported()),
+    };
+    let center = r["center"].as_object().ok_or_else(unsupported)?;
+    let stretch = match center.get("mode").and_then(|m| m.as_str()) {
+        Some("tile") => 0,
+        Some("stretch") => 1,
+        _ => return Err(unsupported()),
+    };
+    let insets = r["cap-insets"].as_object().ok_or_else(unsupported)?;
+    let size = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_u64()).map(|v| v as usize).ok_or_else(unsupported);
+    let (mut wanted_center, mut wanted_insets) = (vec!["mode"], vec![]);
+    let (l, cw, rr) = if across {
+        wanted_center.push("width");
+        wanted_insets.extend(["left", "right"]);
+        (size(insets.get("left"))?, size(center.get("width"))?, size(insets.get("right"))?)
+    } else {
+        (0, img.width, 0)
+    };
+    let (t, ch, b) = if down {
+        wanted_center.push("height");
+        wanted_insets.extend(["top", "bottom"]);
+        (size(insets.get("top"))?, size(center.get("height"))?, size(insets.get("bottom"))?)
+    } else {
+        (0, img.height, 0)
+    };
+    if center.keys().any(|k| !wanted_center.contains(&k.as_str())) || insets.keys().any(|k| !wanted_insets.contains(&k.as_str())) {
+        return Err(unsupported());
+    }
+    if cw == 0 || ch == 0 || l + cw + rr > img.width || t + ch + b > img.height {
+        return Err(format!("the resizing {r} doesn't fit its {}x{} image", img.width, img.height));
+    }
+    // Columns and rows kept: the caps and the centre after the first cap.
+    let columns: Vec<usize> = (0..l + cw).chain(img.width - rr..img.width).collect();
+    let rows: Vec<usize> = (0..t + ch).chain(img.height - b..img.height).collect();
+    let mut data = Vec::with_capacity(columns.len() * rows.len() * 4);
+    for &y in &rows {
+        for &x in &columns {
+            let p = (y * img.width + x) * 4;
+            data.extend_from_slice(&img.data[p..p + 4]);
+        }
+    }
+    let cropped = image::Rgba { width: columns.len(), height: rows.len(), data };
+    let (w, h) = (cropped.width as u32, cropped.height as u32);
+    let xs: Vec<(u32, u32)> = if across { vec![(0, l as u32), (l as u32, cw as u32), ((l + cw) as u32, rr as u32)] } else { vec![(0, w)] };
+    let ys: Vec<(u32, u32)> = if down { vec![((b + ch) as u32, t as u32), (b as u32, ch as u32), (0, b as u32)] } else { vec![(0, h)] };
+    let slices = ys.iter().flat_map(|&(y, sh)| xs.iter().map(move |&(x, sw)| [x, y, sw, sh])).collect();
+    Ok((cropped, car::Slicing { layout: base + stretch, slices }))
+}
+
 struct SetImage {
     scale: u32,
     /// Its appearance's value (0 for any).
@@ -331,6 +407,8 @@ struct SetImage {
     /// The 16-bit rendition's pixels, for a wide-gamut profile's colours
     /// outside sRGB: premultiplied half floats, RGBA.
     extended: Option<Vec<u16>>,
+    /// A resizable image's slicing.
+    slicing: Option<car::Slicing>,
 }
 
 fn image_attrs(i: &SetImage) -> Vec<(u16, u16)> {
@@ -358,7 +436,7 @@ fn standalone16(i: &SetImage) -> Result<Rendition, String> {
     let alpha: Vec<u8> = i.image.data.chunks_exact(4).map(|p| p[3]).collect();
     let opaque = is_opaque(i);
     let data = dmp2::encode16(w, h, halves, &alpha, opaque).map_err(|e| format!("{}: {e}", i.filename))?;
-    Ok(Rendition { attrs: image_attrs16(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Half, opaque, &data) })
+    Ok(Rendition { attrs: image_attrs16(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Half, opaque, &data, None) })
 }
 
 /// A `dmp2` payload, flagged opaque by the pixels (not the PNG's alpha).
@@ -378,10 +456,10 @@ fn standalone_rendition(i: &SetImage) -> Result<Rendition, String> {
         let ga: Vec<u8> = bgra.chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect();
         let opaque = is_opaque(i);
         let data = dmp2::encode_gray(w, h, &ga, opaque).map_err(|e| format!("{}: {e}", i.filename))?;
-        return Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Gray, opaque, &data) });
+        return Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Gray, opaque, &data, i.slicing.as_ref()) });
     }
     let data = payload(w, h, &i.image.premultiplied_bgra(), &i.filename)?;
-    Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_image_csi_flags(&i.filename, w as u32, h as u32, i.scale, i.flags, &data) })
+    Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Bgra, true, &data, i.slicing.as_ref()) })
 }
 
 /// One atlas of a scale's packable images, as `dmp2`, and a link to it per
@@ -419,7 +497,7 @@ fn pack(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, gray: bool, i
         let (w, h) = (i.image.width as u32, i.image.height as u32);
         crate::iconset::place(&mut pixels, stride, ah, &i.image.premultiplied_bgra(), *x, *y, w, h);
         let pixels = if gray { car::Pixels::Gray } else { car::Pixels::Bgra };
-        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, i.flags, pixels, &key) });
+        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, i.flags, pixels, &key, i.slicing.as_ref()) });
     }
     let name = format!("ZZZZPackedAsset-{scale}.{}.{}-gamut0", opaque as u8, gray as u8);
     // Opaque as its group is, its transparent padding notwithstanding.
@@ -470,7 +548,7 @@ fn pack16(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, index: u16,
         crate::iconset::place_n(&mut alpha, aw as usize, 1, ah, &source_alpha, *x, *y, w as u32, h as u32);
         renditions.push(Rendition {
             attrs: image_attrs16(i),
-            csi: car::link_csi_format(&i.filename, (*x, *y, w as u32, h as u32), scale, i.flags, car::Pixels::Half, &key),
+            csi: car::link_csi_format(&i.filename, (*x, *y, w as u32, h as u32), scale, i.flags, car::Pixels::Half, &key, None),
         });
     }
     let name = format!("ZZZZPackedAsset-{scale}.{}.0-gamut1", opaque as u8);

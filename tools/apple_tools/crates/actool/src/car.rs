@@ -595,18 +595,37 @@ pub fn link_csi(name: &str, rect: (u32, u32, u32, u32), scale: u32, atlas: &[(u1
 
 /// A link with CSI flags given: an image set's rendering intent.
 pub fn link_csi_flags(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, atlas: &[(u16, u16)]) -> Vec<u8> {
-    link_csi_format(name, rect, scale, flags, Pixels::Bgra, atlas)
+    link_csi_format(name, rect, scale, flags, Pixels::Bgra, atlas, None)
 }
 
-/// The same for an image of other pixels, its atlas's.
-pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, pixels: Pixels, atlas: &[(u16, u16)]) -> Vec<u8> {
+/// A resizable image's layout and slices (x, y from the bottom, width and
+/// height), in its rendition's 0x3e9 TLV in place of the whole image.
+pub struct Slicing {
+    pub layout: u16,
+    pub slices: Vec<[u32; 4]>,
+}
+
+/// The 0x3e9 TLV: the slice count and rectangles, the whole image or
+/// `slicing`'s.
+fn slices_tlv(t: &mut Vec<u8>, width: u32, height: u32, slicing: Option<&Slicing>) {
+    let mut slices = Vec::new();
+    match slicing {
+        None => [1u32, 0, 0, width, height].iter().for_each(|v| le32(&mut slices, *v)),
+        Some(s) => {
+            le32(&mut slices, s.slices.len() as u32);
+            s.slices.iter().flatten().for_each(|v| le32(&mut slices, *v));
+        }
+    }
+    tlv(t, 0x3e9, &slices);
+}
+
+/// The same for an image of other pixels, its atlas's, and its slices when
+/// it is resizable.
+#[allow(clippy::too_many_arguments)]
+pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, pixels: Pixels, atlas: &[(u16, u16)], slicing: Option<&Slicing>) -> Vec<u8> {
     let (x, y, w, h) = rect;
     let mut t = Vec::new();
-    let mut slices = Vec::new();
-    for v in [1u32, 0, 0, w, h] {
-        le32(&mut slices, v);
-    }
-    tlv(&mut t, 0x3e9, &slices);
+    slices_tlv(&mut t, w, h, slicing);
     let mut metrics = Vec::new();
     for v in [1u32, 0, 0, 0, 0, w, h] {
         le32(&mut metrics, v);
@@ -616,7 +635,8 @@ pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags
     for v in [0u32, x, y, w, h] {
         le32(&mut link, v);
     }
-    le16(&mut link, 12);
+    // The image's own layout: a resizable one's, else 12.
+    le16(&mut link, slicing.map_or(LAYOUT_ICON_IMAGE, |s| s.layout));
     // By attribute, but an appearance last (one probe).
     let mut key: Vec<(u16, u16)> = atlas.iter().copied().filter(|a| a.1 != 0).collect();
     key.sort_by_key(|a| (a.0 == ATTR_APPEARANCE, a.0));
@@ -684,18 +704,15 @@ pub fn dmp2_image_csi(name: &str, width: u32, height: u32, scale: u32, payload: 
 /// A `dmp2` image with CSI flags given: an image set's rendering intent
 /// (16 automatic, 8 template, 0 original).
 pub fn dmp2_image_csi_flags(name: &str, width: u32, height: u32, scale: u32, flags: u32, payload: &[u8]) -> Vec<u8> {
-    dmp2_pixels_csi(name, width, height, scale, flags, Pixels::Bgra, true, payload)
+    dmp2_pixels_csi(name, width, height, scale, flags, Pixels::Bgra, true, payload, None)
 }
 
-/// A `dmp2` image of any pixels, flags as for [`dmp2_image_csi_flags`].
+/// A `dmp2` image of any pixels, flags as for [`dmp2_image_csi_flags`];
+/// a resizable one has its slicing's layout and slices.
 #[allow(clippy::too_many_arguments)]
-pub fn dmp2_pixels_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, pixels: Pixels, opaque: bool, payload: &[u8]) -> Vec<u8> {
+pub fn dmp2_pixels_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, pixels: Pixels, opaque: bool, payload: &[u8], slicing: Option<&Slicing>) -> Vec<u8> {
     let mut t = Vec::new();
-    let mut slices = Vec::new();
-    for v in [1u32, 0, 0, width, height] {
-        le32(&mut slices, v);
-    }
-    tlv(&mut t, 0x3e9, &slices);
+    slices_tlv(&mut t, width, height, slicing);
     let mut metrics = Vec::new();
     for v in [1u32, 0, 0, 0, 0, width, height] {
         le32(&mut metrics, v);
@@ -705,7 +722,8 @@ pub fn dmp2_pixels_csi(name: &str, width: u32, height: u32, scale: u32, flags: u
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     tlv(&mut t, 0x3ef, &pixels.row(width, opaque).to_le_bytes());
     let (pixel_format, color_space) = pixels.format();
-    csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_ICON_IMAGE, name }, &t, payload)
+    let layout = slicing.map_or(LAYOUT_ICON_IMAGE, |s| s.layout);
+    csi(&CsiHeader { flags, width, height, scale: scale * 100, pixel_format, color_space, layout, name }, &t, payload)
 }
 
 /// A JPEG image (layout 12): no size or colour space in the header, the
