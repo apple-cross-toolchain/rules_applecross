@@ -139,8 +139,9 @@ pub(super) fn parent_controller_nib(
     let mut child_values: Vec<Value> = Vec::new();
     let mut items = Vec::new();
     // A navigation child's root's segue templates (objects, then outlets
-    // to its root), after the children's parts.
+    // to its root), after that child's deeper parts, and the child's index.
     let mut template_objects: Vec<Value> = Vec::new();
+    let mut template_child = None;
     let mut template_outlets: Vec<(String, String)> = Vec::new();
     // The children's bar button items, by child, after every child's
     // parts, and their actions (selector, item, controller) after the scene
@@ -189,11 +190,13 @@ pub(super) fn parent_controller_nib(
             }
             Child::Navigation(nav, r) => {
                 check_navigation_controller(*nav)?;
-                if nav.attribute("storyboardIdentifier").is_some() {
-                    return fail("a child navigation controller with a storyboard identifier is not supported by this ibtool");
-                }
                 let root_name = format!("child {i} root");
                 let title = navigation_title(&mut nib, *nav)?;
+                // An identified child is swapped in for its class, its
+                // identifiers after its title and tab bar item and before
+                // its parent (a corpus storyboard's split view child; ten
+                // probes, titled and in a tab bar controller too).
+                let identified = nav.attribute("storyboardIdentifier").is_some();
                 let (item, explicit) = match kind {
                     Kind::Tab => {
                         let (item, explicit) = tab::tab_bar_item(&mut nib, *nav, &item_name)?;
@@ -209,17 +212,20 @@ pub(super) fn parent_controller_nib(
                 let mut embedded = embedded_controller(&mut nib, r, &root_name, &child_name, Some(&format!("{child_name} bar")), None, nib_names)?;
                 take_bar(i, &mut embedded, &root_name)?;
                 // Its root's segues (Xcode's master-detail template): the
-                // templates after the children's parts, their outlets to the
-                // root after the scene's (one corpus storyboard, two ways).
+                // templates after the child's deeper parts, before the next
+                // child's (a corpus tab bar controller's), their outlets to
+                // the root after the scene's (one corpus storyboard, two
+                // ways).
                 if !no_segues(r) {
                     if !template_objects.is_empty() || !embedded.templates.performs.is_empty() || !embedded.gestures.is_empty() {
                         return fail("segues from more than one child, or with bar button items or gestures, are not supported by this ibtool");
                     }
                     template_objects.extend(std::mem::take(&mut embedded.templates.objects));
+                    template_child = Some(i);
                     template_outlets.extend(std::mem::take(&mut embedded.templates.outlets).into_iter().map(|t| (t, root_name.clone())));
                 }
                 let root_item = embedded.navigation_item.clone();
-                child_values.push(navigation_controller(&mut nib, module, *nav, &child_name, embedded, &root_name, false, title, Some((item, "controller")))?);
+                child_values.push(navigation_controller(&mut nib, module, *nav, &child_name, embedded, &root_name, identified, title, Some((item, "controller")))?);
                 own_parts.push(reference(format!("{child_name} bar")));
                 if explicit {
                     own_parts.push(reference(item_name.clone()));
@@ -273,18 +279,20 @@ pub(super) fn parent_controller_nib(
     for &i in &listed {
         objects.append(&mut parts[at(i)]);
     }
+    if !bar_items.is_empty() && !template_objects.is_empty() {
+        return fail("children's bar button items beside a child's segues are not supported by this ibtool");
+    }
     for &i in &listed {
         objects.append(&mut deeper[at(i)]);
+        if template_child == Some(i) {
+            objects.append(&mut template_objects);
+        }
     }
     for &i in &listed {
         for (_, names) in bar_items.iter().filter(|b| b.0 == i) {
             objects.extend(names.iter().map(|n| reference(n.clone())));
         }
     }
-    if !bar_items.is_empty() && !template_objects.is_empty() {
-        return fail("children's bar button items beside a child's segues are not supported by this ibtool");
-    }
-    objects.extend(template_objects);
     // The controller's storyboard outlet, then the others in preorder,
     // stably by their controllers' original classes.
     let mut connections = vec![outlet(&mut nib, "storyboard", "controller", "storyboard")];
