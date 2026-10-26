@@ -3115,7 +3115,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")),
                 ("fixedFrame", Some("YES")), ("id", None),
             ])?;
-            only_children(n, &["rect", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
@@ -3143,7 +3143,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            // Its autoresizing mask as given, whether or not it translates
+            // it (three probes).
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) => autoresizing_mask(m)?,
+                None => 36,
+            };
+            values.push(("UIAutoresizingMask", Value::Int(mask)));
             alpha(&mut values, n)?;
             if content_mode != 0 {
                 values.push(("UIContentMode", Value::Int(content_mode)));

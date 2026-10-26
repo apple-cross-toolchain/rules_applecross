@@ -364,7 +364,8 @@ other values of the attributes these use, is refused. Observed:
   or has no size when the document says `fixedFrame="YES"` (18 probes,
   three corpus storyboards); so is an image view or a segmented control
   (four probes, one corpus storyboard), an image view's `fixedFrame`
-  otherwise changing nothing. An empty `<toolbarItems/>` on a view
+  otherwise changing nothing. An image view's `UIAutoresizingMask` is its
+  document's mask, whether or not it translates it (three probes). An empty `<toolbarItems/>` on a view
   controller changes nothing (one probe).
 - A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
   (or where it would be): wordWrap 0, characterWrap 1, clip 2,
