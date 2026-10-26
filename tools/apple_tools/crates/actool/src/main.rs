@@ -43,6 +43,8 @@ struct Options {
     launch_entries: std::cell::RefCell<Vec<Value>>,
     /// The sticker icon set `--app-icon` names, for the partial Info.plist.
     sticker_icon: std::cell::RefCell<Option<String>>,
+    /// `--alternate-app-icon`s, in the order given.
+    alternate_icons: Vec<String>,
 }
 
 /// Strict output, the default: byte-identical to Xcode's, or the build fails.
@@ -68,7 +70,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--compress-pngs" => o.compress_pngs = true,
             "--errors" | "--warnings" | "--notices" => {}
             "--launch-image" => o.launch_image = Some(value(&a)?),
-            "--alternate-app-icon" | "--accent-color" | "--widget-background-color" | "--sticker-pack-identifier-prefix"
+            "--alternate-app-icon" => o.alternate_icons.push(value(&a)?),
+            "--accent-color" | "--widget-background-color" | "--sticker-pack-identifier-prefix"
             | "--stickers-icon-role" | "--filter-for-device-model" | "--filter-for-device-os-version" | "--product-type" | "--development-region" => {
                 let v = value(&a)?;
                 return Err(format!("{a} {v} is not supported by this actool"));
@@ -354,6 +357,9 @@ fn write_partial_info_plist(o: &Options, mut entries: Vec<(&str, Value)>, output
 
 fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     let out_dir = o.compile.clone().unwrap();
+    if !o.alternate_icons.is_empty() && (platform_name(&o.platform)? != "ios" || o.app_icon.is_none() || o.target_devices.iter().any(|d| d == "mac")) {
+        return Err("alternate app icons other than an iOS app's beside its --app-icon are not supported by this actool".into());
+    }
     if !out_dir.is_dir() {
         return Err(format!("The output directory \"{}\" does not exist.", out_dir.display()));
     }
@@ -470,6 +476,9 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     };
     let (filename, src, variants) = match source {
         IconSource::Single(filename, src, variants) => (filename, src, variants),
+        IconSource::PerSize(_) if !o.alternate_icons.is_empty() => {
+            return Err("alternate app icons beside a primary icon of several sizes are not supported by this actool".into());
+        }
         IconSource::PerSize(slots) => return per_size_icon(o, &out_dir, platform, &icon_name, &slots, phone, pad, outputs, images),
     };
 
@@ -497,17 +506,42 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     let phone_icons = iconset::DeviceIcons { files: vec![format!("{icon_name}60x60")], named: phone };
     let pad_icons = iconset::DeviceIcons { files: vec![format!("{icon_name}60x60"), format!("{icon_name}76x76")], named: pad };
 
+    let mut renditions = single_icon_renditions(&icon_name, &filename, &src, &variants, phone, pad, platform);
+    if renditions.is_empty() {
+        return Err("--target-device iphone and/or ipad is required".into());
+    }
+    // Alternate icons are compiled as the primary is, but for the bundle's
+    // flat icons, and named in the partial Info.plist (two probes).
+    for alternate in &o.alternate_icons {
+        let (_, dir) = scan.icon_sets.iter().find(|(n, _)| n == alternate).ok_or_else(|| format!("none of the input catalogs contains an app icon set named \"{alternate}\""))?;
+        let Some(IconSource::Single(file, image, variants)) = app_icon_set(dir, true)? else {
+            return Err(format!("{}: an alternate app icon other than a single-size one is not supported by this actool", dir.display()));
+        };
+        renditions.extend(single_icon_renditions(alternate, &file, &image, &variants, phone, pad, platform));
+        images.facets.push(car::Facet {
+            name: alternate.clone(),
+            attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_ICON_IMAGE), (car::ATTR_IDENTIFIER, name_identifier(alternate))],
+        });
+    }
+    finish(o, &out_dir, platform, Some(&icon_name), false, renditions, images, Kind::Ios { phone: Some(phone_icons), pad: Some(pad_icons) }, outputs)
+}
+
+/// A single-size iOS app icon's renditions: per target idiom, the 1024 px
+/// image, the index of its sizes and its dark and tinted images.
+#[allow(clippy::too_many_arguments)]
+fn single_icon_renditions(icon_name: &str, filename: &str, src: &image::Rgba, variants: &[(u16, String, image::Rgba)], phone: bool, pad: bool, platform: &str) -> Vec<car::Rendition> {
+    let bgra = src.to_bgra();
     // Assets.car: per idiom, the 1024 px image and the index of its sizes.
-    let id = name_identifier(&icon_name);
+    let id = name_identifier(icon_name);
     // A grey image is stored as GA8, as its dark and tinted ones are (two
     // probes); its bundle PNGs are RGBA as any other's.
     let image_csi = if src.is_gray() {
         let ga: Vec<u8> = src.premultiplied_bgra().chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect();
-        car::icon_image_gray_csi(&filename, 1024, 1024, 1, &ga, car::MlecVersions::for_platform(platform))
+        car::icon_image_gray_csi(filename, 1024, 1024, 1, &ga, car::MlecVersions::for_platform(platform))
     } else {
-        car::icon_image_csi(&filename, 1024, 1024, 1, &bgra.data, car::MlecVersions::for_platform(platform))
+        car::icon_image_csi(filename, 1024, 1024, 1, &bgra.data, car::MlecVersions::for_platform(platform))
     };
-    let multi_csi = car::multisized_csi(&icon_name, &[(1024, 1024, 1)]);
+    let multi_csi = car::multisized_csi(icon_name, &[(1024, 1024, 1)]);
     let rendition = |idiom: u16, part: u16, dim2: u16, csi: &Vec<u8>| car::Rendition {
         attrs: vec![(car::ATTR_SCALE, 1), (car::ATTR_IDIOM, idiom), (car::ATTR_DIMENSION2, dim2), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, part)],
         csi: csi.clone(),
@@ -543,10 +577,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             }
         }
     }
-    if renditions.is_empty() {
-        return Err("--target-device iphone and/or ipad is required".into());
-    }
-    finish(o, &out_dir, platform, Some(&icon_name), false, renditions, images, Kind::Ios { phone: Some(phone_icons), pad: Some(pad_icons) }, outputs)
+    renditions
 }
 
 /// A tvOS or visionOS app icon from an image stack, when --app-icon names
@@ -723,14 +754,24 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         }
         Value::dict([("CFBundlePrimaryIcon", Value::dict(entry))])
     };
+    // Alternate icons by name, before the primary one, for each target
+    // device (whose entry names the icon; three probes).
+    let with_alternates = |entry: Value, named: bool| -> Value {
+        if o.alternate_icons.is_empty() || !named {
+            return entry;
+        }
+        let alternates = Value::dict(o.alternate_icons.iter().map(|a| (a.clone(), Value::dict([("CFBundleIconName", Value::string(a.clone()))]))));
+        let Value::Dictionary(primary) = entry else { unreachable!() };
+        Value::dict(std::iter::once(("CFBundleAlternateIcons".to_string(), alternates)).chain(primary))
+    };
     let entries = match kind {
         Kind::Ios { phone, pad } => {
             let mut e = Vec::new();
             if let Some(icons) = &phone {
-                e.push(("CFBundleIcons", primary(icons)));
+                e.push(("CFBundleIcons", with_alternates(primary(icons), icons.named)));
             }
             if let Some(icons) = &pad {
-                e.push(("CFBundleIcons~ipad", primary(icons)));
+                e.push(("CFBundleIcons~ipad", with_alternates(primary(icons), icons.named)));
             }
             e
         }

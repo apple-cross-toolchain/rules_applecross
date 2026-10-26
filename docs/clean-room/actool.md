@@ -162,6 +162,17 @@ one is.
 
 ## Dark and tinted app icons
 
+`--alternate-app-icon` names an alternate icon (repeatable). Beside a
+single 1024 px iOS primary icon, each single-size alternate is compiled as
+the primary is (its renditions under its own name, dark and tinted images
+included) but gets no bundle icons, and each target device's entry in the
+partial Info.plist gains `CFBundleAlternateIcons`, before
+`CFBundlePrimaryIcon`: each alternate by name, a dictionary of its
+`CFBundleIconName` (keys sorted; a device the build doesn't target gets
+none, as it gets no icon name). Six probes and rules_apple's test catalog.
+Alternates beside a primary of several sizes, alternates of several sizes,
+and other platforms are refused.
+
 A single 1024 px iOS icon may have dark and tinted images (`appearances`
 luminosity dark or tinted): per idiom, each is a rendition of the 1024 px
 image keyed by its appearance (dark 1, tinted 10, named
