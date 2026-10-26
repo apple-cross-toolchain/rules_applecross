@@ -349,7 +349,7 @@ impl Nib {
 fn document_tint<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> {
     let root = n.document().root_element();
     let Some(tint) = root.children().find(|c| c.has_tag_name("color") && c.attribute("key") == Some("tintColor")) else { return Ok(None) };
-    const UNKNOWN: [&str; 6] = ["tabBar", "toolbar", "splitViewController", "pageViewController", "searchBar", "segmentedControl"];
+    const UNKNOWN: [&str; 5] = ["tabBar", "toolbar", "splitViewController", "pageViewController", "searchBar"];
     if let Some(d) = root.descendants().find(|d| UNKNOWN.contains(&d.tag_name().name())) {
         return fail(format!("a document tint colour beside a <{}> is not supported by this ibtool", d.tag_name().name()));
     }
@@ -2140,6 +2140,119 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             nib.large_content(&mut values);
             values.push(("UIAllowSelectingCells", Value::Bool(true)));
             Object::new("UIPickerView", values)
+        }
+        "datePicker" => {
+            // Its date isn't archived; its mode unless date and time
+            // (UIDatePickerMode), an inline style (UIPickerStyle 3) and its
+            // minute interval, 0 unless given (eight probes).
+            only_attributes(n, &[
+                ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")),
+                ("datePickerMode", None), ("minuteInterval", None), ("style", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "date", "constraints"])?;
+            let mode = match n.attribute("datePickerMode").unwrap_or("dateAndTime") {
+                "time" => Some(0),
+                "date" => Some(1),
+                "dateAndTime" => None,
+                "countDownTimer" => Some(3),
+                other => return fail(format!("date picker mode {other} is not supported by this ibtool")),
+            };
+            let style = match n.attribute("style") {
+                None => None,
+                // Xcode lays wheels out at its own width: refused.
+                Some("inline") => Some(3),
+                Some(other) => return fail(format!("date picker style {other} is not supported by this ibtool")),
+            };
+            if mode.is_some() && style.is_some() {
+                return fail("a date picker with both a mode and a style is not supported by this ibtool");
+            }
+            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIOpaque", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            if let Some(m) = mode {
+                values.push(("UIDatePickerMode", Value::Int(m)));
+            }
+            if let Some(s) = style {
+                values.push(("UIPickerStyle", Value::Int(s)));
+            }
+            let interval: i64 = n.attribute("minuteInterval").map_or(Ok(0), |i| i.parse().map_err(|_| format!("not a number: {i}")))?;
+            values.push(("UIMinuteInterval", Value::Int(interval)));
+            if mode == Some(3) {
+                values.push(("UIDatePickerUseCurrentDateDuringDecoding", Value::Bool(false)));
+            }
+            Object::new("UIDatePicker", values)
+        }
+        "segmentedControl" => {
+            // Its segments are its subviews, the selected one last, each
+            // 0x32 at (0, 16) whatever the control's size, positioned by
+            // index (the first none, the second 3, the rest 1); `UISegments`
+            // lists them in order (24 probes).
+            only_attributes(n, &[
+                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("left")),
+                ("contentVerticalAlignment", Some("top")), ("segmentControlStyle", Some("plain")), ("selectedSegmentIndex", None),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "segments", "constraints", "connections"])?;
+            for c in children(n, "connections") {
+                only_children(c, &["action"])?;
+                for a in children(c, "action") {
+                    only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("valueChanged")), ("id", None)])?;
+                    let target = action_target(scene, a)?;
+                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), 4096, target.into()));
+                }
+            }
+            let id = attr(n, "id")?;
+            let segments: Vec<Node> = children(n, "segments").flat_map(|ss| children(ss, "segment")).collect();
+            let selected: usize = attr(n, "selectedSegmentIndex")?.parse().map_err(|_| "a segmented control's selected index must be a number")?;
+            if segments.len() < 2 || selected >= segments.len() {
+                return fail("a segmented control with fewer than two segments, or none selected, is not supported by this ibtool");
+            }
+            let mut built = Vec::new();
+            for (i, sg) in segments.iter().enumerate() {
+                only_attributes(*sg, &[("title", None)])?;
+                let mut sv = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 32.0])), ("UICenter", doubles(&[0.0, 16.0]))];
+                sv.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true)), ("UIViewSemanticContentAttribute", Value::Int(0))]);
+                nib.large_content(&mut sv);
+                sv.push(("UISegmentInfo", nib.text(id, &format!("segmentTitles[{i}]"), attr(*sg, "title")?)));
+                sv.push(("UISegmentStyle", Value::Int(5)));
+                match i {
+                    0 => {}
+                    1 => sv.push(("UISegmentPosition", Value::Int(3))),
+                    _ => sv.push(("UISegmentPosition", Value::Int(1))),
+                }
+                built.push((i, format!("{name} segment {i}"), Object::new("UISegment", sv)));
+            }
+            let order: Vec<String> = built.iter().map(|b| b.1.clone()).collect();
+            let selected_segment = built.remove(selected);
+            built.push(selected_segment);
+            let subviews = built.into_iter().map(|(_, segment_name, o)| Value::New(o.named(segment_name))).collect();
+            values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
+            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true)), ("UIAutoresizingMask", Value::Int(36))]);
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.extend([
+                ("UIContentVerticalAlignment", Value::Int(1)),
+                ("UIContentVerticalAlignment2", Value::Int(1)),
+                ("UIContentHorizontalAlignment", Value::Int(1)),
+                ("UIPointerInteractionEnabled", Value::Bool(true)),
+            ]);
+            values.push(("UISegments", nib.array("NSMutableArray", order.into_iter().map(reference).collect())));
+            values.push(("UISelectedSegmentIndex", Value::Int(selected as i64)));
+            Object::new("UISegmentedControl", values)
         }
         "mapView" => {
             // An MKMapView: a view's keys, zero layout margins, then MapKit's

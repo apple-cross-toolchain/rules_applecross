@@ -436,9 +436,10 @@ other values of the attributes these use, is refused. Observed:
   of its own (after its mask), on a root table or collection view (after
   its clipping) and on a navigation bar (after its mask); a root view's
   own tint goes in the same place, and its colours other than background
-  and tint are refused. Beside tab bars, toolbars, split and page view
-  controllers, search bars and segmented controls the document's tint is
-  refused, not yet probed (five probes).
+  and tint are refused. A segmented control beside it takes nothing of it
+  (one probe); beside tab bars, toolbars, split and page view controllers
+  and search bars the document's tint is refused, not yet probed (six
+  probes).
 
 - A stack view's `axis` is `UIStackViewAxis` (horizontal 0, vertical 1),
   `distribution` `UIStackViewDistribution` (fill 0, fillEqually 1,
@@ -928,6 +929,27 @@ its large content properties `UIBarStyle` 1 for black,
 when it has none), `UIPlaceholder`, `UIEnablesReturnKeyAutomatically` and
 `UISecureTextEntry` false and `UISearchBarStyle` 2 for minimal; its delegate
 outlet is an outlet like any other (six probes).
+
+A segmented control (plain style, left and top content alignment) is a
+`UISegmentedControl`: its segments are its `UISubviews`, in order but for
+the selected one, which comes last; each a `UISegment` with bounds 0x32 at
+(0, 16) whatever the control's size, `UIDeepDrawRect`,
+`UIAutoresizeSubviews`, the semantic and large content keys, its title as
+`UISegmentInfo` (localizable as `<id>.segmentTitles[i]`),
+`UISegmentStyle` 5 and `UISegmentPosition` by index: none for the first,
+3 for the second, 1 for the rest. Then the control's mask 36, constraint
+keys, hugging `{250, 250}`, the alignments (vertical 1 and 1, horizontal
+1), `UIPointerInteractionEnabled`, `UISegments` (the segments in order)
+and `UISelectedSegmentIndex`; value-changed actions as other controls'
+(24 probes, every selection of two to five segments, three heights, and
+one in `Base.lproj`). The segments aren't in the objects list.
+
+A date picker's date isn't archived: a `UIDatePicker` has the view keys,
+then `UIDatePickerMode` unless date and time (time 0, date 1, count-down
+timer 3), `UIPickerStyle` 3 for inline, `UIMinuteInterval` (0 unless
+given) and, for a count-down timer, `UIDatePickerUseCurrentDateDuringDecoding`
+false (eight probes; Xcode lays the wheels style out at its own width, so
+it is refused).
 
 A map view is an `MKMapView`: opaque, multiple touch, mask 36, clipping,
 its constraint keys, zero `UIViewLayoutMargins`, then MapKit's keys
