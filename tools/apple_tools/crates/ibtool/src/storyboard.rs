@@ -1764,6 +1764,11 @@ struct Scene<'a> {
     effect_contents: Vec<String>,
     /// Subviews with a safe-area guide no constraint uses.
     unused_guides: Vec<String>,
+    /// Toolbars' items, by toolbar, listed in their turn among the objects.
+    toolbar_items: Vec<(String, Vec<String>)>,
+    /// Whether this is a view controller's root view, whose objects list
+    /// takes the toolbars' items.
+    lists_toolbar_items: bool,
     accessibility: Vec<(String, Value)>,
     /// The switches whose frames are among the pairs.
     switch_frames: Vec<String>,
@@ -1798,6 +1803,8 @@ impl<'a> Scene<'a> {
             pairs: Vec::new(),
             effect_contents: Vec::new(),
             unused_guides: Vec::new(),
+            toolbar_items: Vec::new(),
+            lists_toolbar_items: false,
             accessibility: Vec::new(),
             switch_frames: Vec::new(),
             guides: Vec::new(),
@@ -2545,6 +2552,64 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UISegments", nib.array("NSMutableArray", order.into_iter().map(reference).collect())));
             values.push(("UISelectedSegmentIndex", Value::Int(selected as i64)));
             Object::new("UISegmentedControl", values)
+        }
+        "toolbar" => {
+            // A toolbar: a view's keys, hugging `{250, 250}`, then its items
+            // (as a navigation item's, defined here and listed in its turn
+            // among the objects), `UIBarPosition` 1 and `UIBarTranslucence`
+            // 1 (two probes). Items with segues are refused.
+            only_attributes(n, &[
+                ("opaque", Some("NO")), ("clearsContextBeforeDrawing", Some("NO")), ("contentMode", Some("scaleToFill")),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "items", "constraints"])?;
+            if !scene.lists_toolbar_items {
+                return fail("a toolbar in a table, a cell or a collection view is not supported by this ibtool");
+            }
+            if n.attribute("opaque").is_none() || n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
+                return fail("an opaque toolbar, or one translating its mask, is not supported by this ibtool");
+            }
+            let mut items = Vec::new();
+            let mut names = Vec::new();
+            for list in children(n, "items") {
+                only_children(list, &["barButtonItem"])?;
+                for b in children(list, "barButtonItem") {
+                    let (mut actions, mut segues) = (Vec::new(), Vec::new());
+                    let item_name = format!("toolbar item {}", attr(b, "id")?);
+                    let object = bar_button_item(nib, b, &item_name, scene.vc_id, &mut actions, &mut segues)?;
+                    if !segues.is_empty() {
+                        return fail("a toolbar item's segues are not supported by this ibtool");
+                    }
+                    // Its actions on the controller are event connections
+                    // without a mask, sorting before the controls' (one
+                    // probe).
+                    for (selector, source) in actions {
+                        scene.actions.push((selector, source, 0, "upstream".into()));
+                    }
+                    items.push(Value::New(object.named(item_name.clone())));
+                    names.push(item_name);
+                }
+            }
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            if n.attribute("clearsContextBeforeDrawing").is_some() {
+                values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+            }
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.push(("UIItems", nib.array("NSArray", items)));
+            values.push(("UIBarPosition", Value::Int(1)));
+            values.push(("UIBarTranslucence", Value::Int(1)));
+            scene.toolbar_items.push((name.clone(), names));
+            Object::new("UIToolbar", values)
         }
         "wkWebView" => {
             // A WKWebView with the default configuration (no media types
@@ -4991,6 +5056,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let root_name = view_name(view_id);
 
         let mut scene = Scene::new(vc_id, module, view, None);
+        scene.lists_toolbar_items = true;
         // The gesture recognizers, which the view nib reaches through the
         // first placeholders.
         let recognizers: Vec<Node> = objects_node.children().filter(|c| c.tag_name().name().ends_with("GestureRecognizer")).collect();
@@ -5468,6 +5534,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 if let Some(v) = v.filter(|_| !subviews_first) {
                     objects.extend(constraints(v));
                 }
+                if let Some((_, items)) = v.and_then(|v| scene.toolbar_items.iter().find(|t| &t.0 == v)) {
+                    objects.extend(items.iter().map(|i| reference(i.clone())));
+                }
                 for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1)) {
                     objects.push(reference(s.clone()));
                     order.push(s.clone());
@@ -5559,12 +5628,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             scene.actions.sort_by(|a, b| (a.2, &a.0, visited(&a.1)).cmp(&(b.2, &b.0, visited(&b.1))));
             for (selector, source, mask, destination) in &scene.actions {
                 let label = nib.string(selector);
-                connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
-                    ("UILabel", label),
-                    ("UISource", reference(source.clone())),
-                    ("UIDestination", reference(destination.clone())),
-                    ("UIEventMask", Value::Int(*mask)),
-                ])));
+                let mut values = vec![("UILabel", label), ("UISource", reference(source.clone())), ("UIDestination", reference(destination.clone()))];
+                // A bar button item's action has no mask.
+                if *mask != 0 {
+                    values.push(("UIEventMask", Value::Int(*mask)));
+                }
+                connections.push(Value::New(Object::new("UIRuntimeEventConnection", values)));
             }
             let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
             let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
