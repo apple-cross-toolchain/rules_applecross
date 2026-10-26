@@ -19,7 +19,8 @@ impl Compiled {
 }
 
 /// Compiles image sets, by name, for iOS: universal PNG images at 1x, 2x or
-/// 3x (or none, meaning 1x) with an optional template rendering intent.
+/// 3x (or none, meaning 1x), for any appearance or one of the colour sets',
+/// with an optional template rendering intent.
 /// Small images are packed into an atlas per scale; anything else is
 /// refused.
 pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
@@ -54,7 +55,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
         for entry in contents["images"].as_array().ok_or_else(|| format!("{}: an image set without an images list", dir.display()))? {
             let Some(filename) = entry["filename"].as_str() else { continue };
             for k in entry.as_object().unwrap().keys() {
-                if !["filename", "idiom", "scale"].contains(&k.as_str()) {
+                if !["filename", "idiom", "scale", "appearances"].contains(&k.as_str()) {
                     return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
                 }
             }
@@ -70,16 +71,21 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                 None => 1,
                 Some(s) => s.strip_suffix('x').and_then(|n| n.parse::<u32>().ok()).filter(|n| (1..=3).contains(n)).ok_or_else(|| format!("{}: scale {s} is not supported by this actool", dir.display()))?,
             };
-            if scales.contains(&scale) {
-                return Err(format!("{}: two images at scale {scale}x", dir.display()));
+            let appearance = crate::colorset::appearance(entry)
+                .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
+            if scales.contains(&(scale, appearance)) {
+                return Err(format!("{}: two images at scale {scale}x for one appearance", dir.display()));
             }
-            scales.push(scale);
+            scales.push((scale, appearance));
             let path = dir.join(filename);
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             // A JPEG is stored on its own, as it is but for its comments.
             if jpeg {
                 let (stored, width, height) = stored_jpeg(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-                let attrs = vec![(car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
+                let mut attrs = vec![(car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
+                if appearance != 0 {
+                    attrs.push((car::ATTR_APPEARANCE, appearance));
+                }
                 out.renditions.push(Rendition { attrs, csi: car::jpeg_csi(filename, width, height, scale, flags, &stored) });
                 continue;
             }
@@ -87,13 +93,14 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             if extended.is_some() && img.is_gray() {
                 return Err(format!("{}: a grey image with colours outside sRGB is not supported by this actool", path.display()));
             }
-            images.push(SetImage { scale, identifier: id, flags, filename: filename.to_string(), image: img, extended });
+            images.push(SetImage { scale, appearance, identifier: id, flags, filename: filename.to_string(), image: img, extended });
         }
         if !scales.is_empty() {
             out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
         }
     }
-    // Per scale, translucent colour, translucent grey, opaque colour and
+    // Per scale and appearance (each with atlases of its own, keyed by it),
+    // translucent colour, translucent grey, opaque colour and
     // opaque grey images (an atlas named for its opacity and greyness), then
     // the 16-bit renditions of colour images from wide-gamut profiles in
     // atlases of their own (gamut 1, indexed apart),
@@ -101,14 +108,16 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
     // factor, or a group's only packable one, stored on their own, the rest
     // packed into an atlas, as app icons are. An atlas's dimension1 is its
     // index at its scale.
-    let mut scales: Vec<u32> = images.iter().map(|i| i.scale).collect();
+    let mut scales: Vec<(u32, u16)> = images.iter().map(|i| (i.scale, i.appearance)).collect();
     scales.sort();
     scales.dedup();
-    for scale in scales {
+    for (scale, appearance) in scales {
         let mut planned: Vec<(usize, bool, bool, Vec<&SetImage>)> = Vec::new();
         for (gamut, opaque, gray) in [(0, false, false), (0, false, true), (0, true, false), (0, true, true), (1, false, false), (1, true, false)] {
-            let mut group: Vec<&SetImage> =
-                images.iter().filter(|i| i.scale == scale && is_opaque(i) == opaque && is_gray(i) == gray && (gamut == 0 || i.extended.is_some())).collect();
+            let mut group: Vec<&SetImage> = images
+                .iter()
+                .filter(|i| i.scale == scale && i.appearance == appearance && is_opaque(i) == opaque && is_gray(i) == gray && (gamut == 0 || i.extended.is_some()))
+                .collect();
             // Equal areas by identifier (12 probes of equal-area shapes).
             group.sort_by_key(|i| (std::cmp::Reverse(i.image.width * i.image.height), i.identifier));
             let cap = crate::stack::PACKING_AREA * scale as usize;
@@ -144,9 +153,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             for (k, (_, opaque, gray, atlas)) in atlases.into_iter().enumerate() {
                 let index = names.iter().position(|n| *n == k.to_string()).unwrap() as u16;
                 if gamut == 0 {
-                    pack(scale, *opaque, *gray, index, atlas, &mut out.renditions)?;
+                    pack(scale, appearance, *opaque, *gray, index, atlas, &mut out.renditions)?;
                 } else {
-                    pack16(scale, *opaque, index, atlas, &mut out.renditions)?;
+                    pack16(scale, appearance, *opaque, index, atlas, &mut out.renditions)?;
                 }
             }
         }
@@ -207,6 +216,8 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
 
 struct SetImage {
     scale: u32,
+    /// Its appearance's value (0 for any).
+    appearance: u16,
     identifier: u16,
     flags: u32,
     filename: String,
@@ -217,7 +228,11 @@ struct SetImage {
 }
 
 fn image_attrs(i: &SetImage) -> Vec<(u16, u16)> {
-    vec![(car::ATTR_SCALE, i.scale as u16), (car::ATTR_IDENTIFIER, i.identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)]
+    let mut attrs = vec![(car::ATTR_SCALE, i.scale as u16), (car::ATTR_IDENTIFIER, i.identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
+    if i.appearance != 0 {
+        attrs.push((car::ATTR_APPEARANCE, i.appearance));
+    }
+    attrs
 }
 
 /// The attributes of an image's 16-bit rendition: gamut 1.
@@ -267,7 +282,7 @@ fn is_opaque(i: &SetImage) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pack(scale: u32, opaque: bool, gray: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+fn pack(scale: u32, appearance: u16, opaque: bool, gray: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
     let blocks: Vec<(u32, u32)> = images.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
     let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
     let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
@@ -276,6 +291,12 @@ fn pack(scale: u32, opaque: bool, gray: bool, index: u16, images: &[&SetImage], 
     let mut key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16)];
     if index > 0 {
         key.push((car::ATTR_DIMENSION1, index));
+    }
+    if appearance != 0 {
+        if index > 0 {
+            return Err(format!("more than one {scale}x atlas for an appearance is not supported by this actool"));
+        }
+        key.push((car::ATTR_APPEARANCE, appearance));
     }
     for (i, (x, y)) in images.iter().zip(&positions) {
         let (w, h) = (i.image.width as u32, i.image.height as u32);
@@ -300,7 +321,7 @@ fn pack(scale: u32, opaque: bool, gray: bool, index: u16, images: &[&SetImage], 
 
 /// One atlas of a scale's packable 16-bit renditions (gamut 1), packed as
 /// their 8-bit renditions are.
-fn pack16(scale: u32, opaque: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+fn pack16(scale: u32, appearance: u16, opaque: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
     let blocks: Vec<(u32, u32)> = images.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
     let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
     let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
@@ -309,6 +330,12 @@ fn pack16(scale: u32, opaque: bool, index: u16, images: &[&SetImage], renditions
     let mut key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16), (car::ATTR_GAMUT, 1)];
     if index > 0 {
         key.push((car::ATTR_DIMENSION1, index));
+    }
+    if appearance != 0 {
+        if index > 0 {
+            return Err(format!("more than one {scale}x atlas for an appearance is not supported by this actool"));
+        }
+        key.push((car::ATTR_APPEARANCE, appearance));
     }
     for (i, (x, y)) in images.iter().zip(&positions) {
         let (w, h) = (i.image.width, i.image.height);

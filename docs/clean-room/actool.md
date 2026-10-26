@@ -630,6 +630,16 @@ closed once its area reaches the cap and the next taking the following
 dimension1 (and the same name), even for a single image. The key format
 has dimension1 only when an atlas uses it.
 
+An image may be for an appearance, as a colour set's colour is (luminosity
+light or dark, high contrast, or both): its rendition's key has that
+appearance's value, and the catalog's appearance table its name. Each
+appearance has atlases of its own at each scale, with the same names, keyed
+by the appearance too. A link to one names its key by attribute but with the
+appearance last, after the scale. A second atlas for an appearance at one
+scale is refused (seven synthetic probes and four of real images, dark and high
+contrast at each scale; byte-identical or equivalent but for the appearance
+blocks' order).
+
 Folders are scanned for image sets: a folder's assets are named as at the
 top, or with its name and a slash before theirs when its `Contents.json`
 says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
@@ -640,7 +650,7 @@ Refused: atlases whose `dmp2` row
 predictors aren't established (common: the row under an atlas's empty top
 row ties between predictors 1 and 2, which Xcode breaks neither by cost,
 summation order, nor compressed size),
-vector images (SVG, PDF), other idioms, appearances and other properties,
+vector images (SVG, PDF), other idioms and other properties,
 and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,

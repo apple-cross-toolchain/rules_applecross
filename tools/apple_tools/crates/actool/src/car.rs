@@ -518,8 +518,9 @@ pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags
         le32(&mut link, v);
     }
     le16(&mut link, 12);
+    // By attribute, but an appearance last (one probe).
     let mut key: Vec<(u16, u16)> = atlas.iter().copied().filter(|a| a.1 != 0).collect();
-    key.sort();
+    key.sort_by_key(|a| (a.0 == ATTR_APPEARANCE, a.0));
     le32(&mut link, 4 * key.len() as u32 + 4);
     for (a, v) in key {
         le16(&mut link, a);
