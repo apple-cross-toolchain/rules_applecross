@@ -218,9 +218,11 @@ fn platform_name(platform: &str) -> Result<&'static str, String> {
 
 fn icon_images(icon_dir: &Path) -> Result<Vec<IconImage>, String> {
     let contents = read_json(&icon_dir.join("Contents.json"))?;
+    // No images list is as an empty one (one probe).
     Ok(contents["images"]
         .as_array()
-        .ok_or_else(|| format!("{}: app icon set has no images list", icon_dir.display()))?
+        .map(Vec::as_slice)
+        .unwrap_or_default()
         .iter()
         .filter_map(|i| {
             Some(IconImage {

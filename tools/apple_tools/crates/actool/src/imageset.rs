@@ -54,7 +54,8 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
         }
         let id = identifier(name);
         let mut scales = Vec::new();
-        for entry in contents["images"].as_array().ok_or_else(|| format!("{}: an image set without an images list", dir.display()))? {
+        // No images list is as an empty one (two probes).
+        for entry in contents["images"].as_array().map(Vec::as_slice).unwrap_or_default() {
             let Some(filename) = entry["filename"].as_str() else { continue };
             for k in entry.as_object().unwrap().keys() {
                 if !["filename", "idiom", "scale", "appearances"].contains(&k.as_str()) {
