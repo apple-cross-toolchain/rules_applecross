@@ -295,7 +295,12 @@ other values of the attributes these use, is refused. Observed:
   flags, its autoresizing mask (36 without one), the autoresizing key and
   its constraints. With a custom class it is a `UIClassSwapper` with the
   same values, then `UIClassName` (the runtime name, as a controller's)
-  and `UIOriginalClassName` `UIView`.
+  and `UIOriginalClassName` `UIView`. A text field with a custom class is
+  swapped in the same way, `UIOriginalClassName` `UITextField` (three
+  probes: a module, none, and the target's). A button's
+  `UIViewInsetsLayoutMarginsFromSafeArea` 0, when turned off, comes after
+  its compression resistance, before its semantic content attribute (two
+  probes).
 - With a `<device>`, the root view is laid out at the device's size (or
   its freeform size) at its frame's origin (a view below an opaque bar is
   at y 64; eight probes, with simulated bars changing nothing),
