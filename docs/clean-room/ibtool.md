@@ -264,7 +264,7 @@ other values of the attributes these use, is refused. Observed:
   that order (twelve probes).
 - A multiplier other than 1 is `NSMultiplier` after `NSFirstAttribute`: a
   double holding the float nearest it (`1.2` as 1.2000000476837158, `2:3`
-  as 2/3), three probes.
+  and `2/3` as 2/3), four probes.
 - A subview's constraints are its `UIViewAutolayoutConstraints`, after
   `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`: its own width
   and height constants (no second item) and aspect ratios (the view
@@ -378,7 +378,7 @@ other values of the attributes these use, is refused. Observed:
   that doesn't scroll doesn't clip. Its text (a `<string key="text">` or
   the older `text` attribute) is `UIText` and `UIAttributedText`, an
   `NSAttributedString` whose attributes are `NSColor` (the text colour, if
-  any), `NSFont` and `NSParagraphStyle` (an `NSMutableParagraphStyle` with
+  any: none given is nil), `NSFont` and `NSParagraphStyle` (an `NSMutableParagraphStyle` with
   `NSAlignment` in AppKit's order, right 1 and center 2, left left out,
   and nil `NSTabStops`); the view's own `UIFont` and `UITextColor` then
   refer to them. Then `UIAdjustsFontForContentSizeCategory`, `UIFont`,
@@ -501,7 +501,9 @@ when it is initial or identified. Observed with 25 probes:
   below its frame's top, mask 2, hugging `{250, 250}`, zero layout margins
   (directional), `UIViewInsetsLayoutMarginsFromSafeArea` 0 when the
   document turns it off, `UIIsLocked`, `UIItems` (the root's item),
-  `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1.
+  `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1;
+  `largeTitles` is `UIBarPrefersLargeTitles` after the large content
+  properties, the layout the same (two probes).
   Other bar settings, other segues and controllers nothing loads are
   refused.
 
@@ -1012,9 +1014,15 @@ the same. Observed with 55 probes:
 - A control's segue (a button's, or a prototype cell's) is triggered from
   its view nib through a placeholder of its own: the view nib has
   `UpstreamPlaceholder-<n>` proxies, the controller's first if the view
-  refers to it (an outlet or an action), then one per segue in document
-  order, and a button's segue is a `perform:` action (touch up inside,
-  64) on its placeholder, sorted with the other actions. The controller's
+  refers to it (an outlet or an action to it), then one per segue in
+  document order, and a button's segue is a `perform:` action (touch up
+  inside, 64) on its placeholder, sorted with the other actions. Actions
+  go by event mask, then selector, then document order. A control's action
+  on the scene's first responder goes to the `IBFirstResponder` proxy and
+  doesn't bring in the controller's placeholder; a button's events are
+  UIControlEvents from touch down (1) to touch cancel (256), value
+  changed (4096) and primary action triggered (8192). Xcode writes
+  `menuActionTriggered` with no mask, so it is refused (13 probes). The controller's
   external objects table maps each placeholder to the controller or the
   segue's template. Xcode keeps only a control's last segue (refused).
 - The controller's nib (or, for a navigation controller's root, the

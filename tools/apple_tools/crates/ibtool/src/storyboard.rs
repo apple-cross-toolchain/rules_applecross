@@ -1185,10 +1185,8 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         }
         for a in children(c, "action") {
             only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("valueChanged")), ("id", None)])?;
-            if attr(a, "destination")? != scene.vc_id {
-                return fail("actions that don't target the scene's view controller are not supported by this ibtool");
-            }
-            scene.actions.push((attr(a, "selector")?.to_string(), name.to_string(), 4096, "upstream".into()));
+            let target = action_target(scene, a)?;
+            scene.actions.push((attr(a, "selector")?.to_string(), name.to_string(), 4096, target.into()));
         }
     }
     let colors: Vec<&str> = children(n, "color").map(|c| c.attribute("key").unwrap_or("")).collect();
@@ -1896,9 +1894,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 for a in children(c, "action") {
                     only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
-                    if attr(a, "destination")? != scene.vc_id {
-                        return fail("actions that don't target the scene's view controller are not supported by this ibtool");
-                    }
+                    let target = action_target(scene, a)?;
                     let mask = match attr(a, "eventType")? {
                         "valueChanged" => 4096,
                         "primaryActionTriggered" => 8192,
@@ -1908,7 +1904,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                         "editingDidEndOnExit" => 524288,
                         other => return fail(format!("a text field's {other} action is not supported by this ibtool")),
                     };
-                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), mask, "upstream".into()));
+                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), mask, target.into()));
                 }
             }
             // No text colour at all is the same as a nil one.
@@ -2141,10 +2137,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     return fail("text view colours other than its background and text are not supported by this ibtool");
                 }
             }
+            // No text colour is the same as nil.
             let text_color = match (child(n, "color", "textColor"), child(n, "nil", "textColor")) {
                 (Some(c), None) => Some(c),
-                (None, Some(_)) => None,
-                _ => return fail("a text view needs one text colour or nil"),
+                (None, _) => None,
+                _ => return fail("a text view with a text colour and nil is not supported by this ibtool"),
             };
             let text = match (n.attribute("text"), children(n, "string").find(|c| c.attribute("key") == Some("text"))) {
                 (Some(t), None) => Some(t.to_string()),
@@ -2345,11 +2342,24 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             for c in children(n, "connections") {
                 only_children(c, &["action", "segue"])?;
                 for a in children(c, "action") {
-                    only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("touchUpInside")), ("id", None)])?;
-                    if attr(a, "destination")? != scene.vc_id {
-                        return fail("actions that don't target the scene's view controller are not supported by this ibtool");
-                    }
-                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), 64, "upstream".into()));
+                    only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
+                    let target = action_target(scene, a)?;
+                    // UIControlEvents (13 probes).
+                    let mask = match attr(a, "eventType")? {
+                        "touchDown" => 1,
+                        "touchDownRepeat" => 2,
+                        "touchDragInside" => 4,
+                        "touchDragOutside" => 8,
+                        "touchDragEnter" => 16,
+                        "touchDragExit" => 32,
+                        "touchUpInside" => 64,
+                        "touchUpOutside" => 128,
+                        "touchCancel" => 256,
+                        "valueChanged" => 4096,
+                        "primaryActionTriggered" => 8192,
+                        other => return fail(format!("a button's {other} action is not supported by this ibtool")),
+                    };
+                    scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), mask, target.into()));
                 }
                 // Xcode keeps only a control's last segue.
                 if children(c, "segue").count() > 1 {
@@ -3016,7 +3026,8 @@ fn safe_area_guide(nib: &mut Nib, root: &str) -> Value {
 /// ratio `a:b` divided), or None for 1.
 fn multiplier(c: Node) -> Result<Option<f64>, String> {
     let Some(m) = c.attribute("multiplier") else { return Ok(None) };
-    let value = match m.split_once(':') {
+    // Interface Builder writes a ratio with either separator.
+    let value = match m.split_once([':', '/']) {
         Some((a, b)) => number(a)? / number(b)?,
         None => number(m)?,
     };
@@ -3109,6 +3120,23 @@ fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String)], per
 
 /// An action without an event mask: a gesture recognizer's or a bar button
 /// item's.
+/// The placeholder a control's action goes to: the scene's view controller
+/// (upstream) or its first responder.
+fn action_target(scene: &Scene, a: Node) -> Result<&'static str, String> {
+    let destination = attr(a, "destination")?;
+    if destination == scene.vc_id {
+        return Ok("upstream");
+    }
+    let responder = a
+        .ancestors()
+        .find(|n| n.has_tag_name("scene"))
+        .and_then(|sc| sc.descendants().find(|d| d.has_tag_name("placeholder") && d.attribute("placeholderIdentifier") == Some("IBFirstResponder")));
+    if responder.and_then(|r| r.attribute("id")) == Some(destination) {
+        return Ok("responder");
+    }
+    fail("actions that target anything but the scene's view controller or first responder are not supported by this ibtool")
+}
+
 fn event_connection(nib: &mut Nib, selector: &str, source: &str, destination: &str) -> Value {
     let label = nib.string(selector);
     Value::New(Object::new("UIRuntimeEventConnection", vec![("UILabel", label), ("UISource", reference(source)), ("UIDestination", reference(destination))]))
@@ -3298,7 +3326,7 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
     let bar = children(nav, "navigationBar").next().ok_or("a navigation controller without a navigation bar")?;
     only_attributes(
         bar,
-        &[("key", Some("navigationBar")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None)],
+        &[("key", Some("navigationBar")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("largeTitles", Some("YES")), ("id", None)],
     )?;
     only_children(bar, &["rect", "autoresizingMask"])?;
     for m in children(bar, "autoresizingMask") {
@@ -3326,6 +3354,9 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
+    if bar.attribute("largeTitles").is_some() {
+        values.push(("UIBarPrefersLargeTitles", Value::Bool(true)));
+    }
     let items = nib.array("NSMutableArray", vec![reference(item)]);
     values.push(("UIIsLocked", Value::Bool(true)));
     values.push(("UIItems", items));
@@ -3843,7 +3874,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             let upstream_used = !vc_outlets.is_empty()
                 || !vc_collections.is_empty()
-                || view.descendants().any(|d| d.has_tag_name("action") || (d.has_tag_name("outlet") && d.attribute("destination") == Some(vc_id)));
+                || view.descendants().any(|d| (d.has_tag_name("action") || d.has_tag_name("outlet")) && d.attribute("destination") == Some(vc_id));
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
             if gesture == 1 {
