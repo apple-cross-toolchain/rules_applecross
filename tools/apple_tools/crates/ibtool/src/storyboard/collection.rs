@@ -306,12 +306,10 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
         values.push(("UIItemSize", doubles(&[w, h])));
     }
     if let Some(inset) = section_inset {
-        if layout.attribute("scrollDirection").is_some() {
-            return fail("a flow layout with both a section inset and a scroll direction is not supported by this ibtool");
-        }
         values.push(("UISectionInset", doubles(&inset)));
     }
-    // A horizontal scroll direction after the item size (one probe).
+    // A horizontal scroll direction after the item size and section inset
+    // (three probes).
     if layout.attribute("scrollDirection").is_some() {
         values.push(("UIScrollDirection", Value::Int(1)));
     }

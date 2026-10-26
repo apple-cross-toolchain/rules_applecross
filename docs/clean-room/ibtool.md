@@ -295,7 +295,12 @@ other values of the attributes these use, is refused. Observed:
   flags, its autoresizing mask (36 without one), the autoresizing key and
   its constraints. With a custom class it is a `UIClassSwapper` with the
   same values, then `UIClassName` (the runtime name, as a controller's)
-  and `UIOriginalClassName` `UIView`.
+  and `UIOriginalClassName` `UIView`. A text field with a custom class is
+  swapped in the same way, `UIOriginalClassName` `UITextField` (three
+  probes: a module, none, and the target's). A button's
+  `UIViewInsetsLayoutMarginsFromSafeArea` 0, when turned off, comes after
+  its compression resistance, before its semantic content attribute (two
+  probes).
 - With a `<device>`, the root view is laid out at the device's size (or
   its freeform size) at its frame's origin (a view below an opaque bar is
   at y 64; eight probes, with simulated bars changing nothing),
@@ -1152,7 +1157,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
 - A flow layout with a custom class is swapped in after its values (one
   probe); a horizontal one has `UIScrollDirection` 1 after its item size
   (one probe), and a section inset other than zero `UISectionInset` (top,
-  left, bottom, right) there too (one probe).
+  left, bottom, right) there too (one probe), before the scroll direction
+  when it has both (two probes).
 - A custom layout (`<collectionViewLayout>` with a custom class) is a
   `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
   root or in a view (three probes).

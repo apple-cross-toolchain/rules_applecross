@@ -2000,6 +2000,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", None),
                 ("textAlignment", None), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("text", None), ("enabled", Some("NO")),
                 ("hidden", Some("YES")), ("restorationIdentifier", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ])?;
             let border = match n.attribute("borderStyle") {
                 None => None,
@@ -2097,7 +2098,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if border == Some(3) {
                 values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
             }
-            Object::new("UITextField", values)
+            // A custom class swaps in for it, as a button's does (three
+            // probes).
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UITextField")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UITextField")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UITextField", values)
+            }
         }
         "tableView" => table::subview_table(nib, scene, n, &name, &f)?,
         "collectionView" => collection::subview_collection(nib, scene, n, &name, &f)?,
@@ -2609,7 +2619,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("clipsSubviews", Some("YES")), ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("customClass", None), ("customModule", None),
                 ("customModuleProvider", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
                 ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
-                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
             // the centre left out.
@@ -2738,6 +2748,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 let p = |k: &str| n.attribute(k).unwrap_or("750");
                 let value = format!("{{{}, {}}}", p("horizontalCompressionResistancePriority"), p("verticalCompressionResistancePriority"));
                 values.push(("UIViewContentCompressionResistancePriority", nib.string(&value)));
+            }
+            // Turned off, before the semantic content attribute (one probe).
+            if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+                values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
