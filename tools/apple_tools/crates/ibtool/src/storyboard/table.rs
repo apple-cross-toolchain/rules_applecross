@@ -572,6 +572,9 @@ pub(super) fn table_view_nib(
                     only_children(cs, &["tableViewCell"])?;
                     for cell in children(cs, "tableViewCell") {
                         let (cell_value, cell_parts) = cell_object(&mut nib, module, cell, vc_id)?;
+                        if !cell_parts.scene.accessibility.is_empty() {
+                            return fail("accessibility settings on a static table's cells are not supported by this ibtool");
+                        }
                         // Its segue's placeholder and its outlets into its
                         // views, among the outlets.
                         let (segue, cell_outlets) = cell_connections(cell)?;
@@ -725,7 +728,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("restorationIdentifier", None),
         ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections"])?;
+    only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections", "accessibility"])?;
     // A built-in style's labels, the content view's.
     let style = match cell.attribute("style") {
         None | Some("IBUITableViewCellStyleDefault") => 0,
@@ -821,6 +824,9 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     if (!scene.pairs.is_empty() && !one_switch) || !scene.accessibility.is_empty() {
         return fail("runtime attributes, switches and accessibility settings in a cell are not supported by this ibtool");
     }
+    // The cell's own accessibility configuration, as a view's, in its nib
+    // (three probes); beside its views' it isn't established.
+    accessibility(nib, &mut scene, cell, &cell_name)?;
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
     }
@@ -1023,7 +1029,8 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         ])));
     }
     let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
-    nib::archive(root_object_with_pairs(&mut nib, top, objects, connections, pairs))
+    let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
+    nib::archive(root_object_full(&mut nib, top, objects, connections, accessibility, pairs))
 }
 
 /// A cell's own connections: its selection segue's id, if it has one, and
