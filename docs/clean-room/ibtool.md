@@ -588,7 +588,13 @@ other values of the attributes these use, is refused. Observed:
   uses is the same, listed first in the subview's turn in the objects'
   breadth-first order, before the constraints it holds and its subviews
   (two probes). One in use gives the subview its own archived guide, as
-  the root view's below (one probe), which this ibtool refuses. When a constraint uses the guide, the root view also
+  the root view's below: owned by the subview, defined where its first
+  constraint in order uses it (either item; it counts as at the origin,
+  as the root's), in the subview's `UIViewLayoutGuides` after its
+  constraints, its placeholder still listed (seven probes: plain and
+  scroll views, the latter beside their content and frame guides, and a
+  corpus storyboard). One used beyond its view's own constraints is
+  refused. When a constraint uses the guide, the root view also
   owns a second one, archived where a constraint first refers to it (in
   the order above): identifier `UIViewSafeAreaLayoutGuide`, locked,
   archived and allowing negative dimensions, with four system constraints
