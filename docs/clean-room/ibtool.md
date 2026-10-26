@@ -479,7 +479,12 @@ other values of the attributes these use, is refused. Observed:
   (sRGB and grey; three probes and one corpus storyboard). Colours in
   Display P3 and calibrated RGB are converted to extended sRGB in floats,
   through a matrix this ibtool doesn't reproduce exactly (it fits 24
-  colours to 2e-7): refused.
+  colours to 2e-7): refused. For calibrated RGB, 148 colours fit a
+  linearisation of gamma 1.8 with a linear toe of slope 1/16 below 1/32,
+  a matrix whose rows sum to 1, and the sRGB encoding (sign kept for
+  values outside 0 to 1), to within a few float ulps (5e-7) but exactly
+  for only a quarter of the components, which points at single-precision
+  arithmetic or tables not established here.
 - A scene's gesture recognizer (tap, pan or swipe) is in
   the controller's nib, after the storyboard placeholder, with
   `UIGestureRecognizer.allowedTouchTypes` 15 and
@@ -1023,7 +1028,9 @@ content view as a `_UIVisualEffectContentView` (its subviews, mask 18,
 with its subviews as a container's, then
 `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off), listed as its
 child; the objects list its subviews before its constraints (one probe)
-(seven probes; material styles and constraints it holds are refused).
+(seven probes; material styles are refused). Constraints it holds
+itself follow its not-translating key, and the objects list them after
+its content view (one probe).
 
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
