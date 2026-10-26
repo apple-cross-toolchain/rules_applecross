@@ -189,7 +189,9 @@ other values of the attributes these use, is refused. Observed:
   second item of a sibling constraint fit too. Constraints with equal keys
   (the same items and the same pair of attributes either way round) come
   in an order that changes with the rest of the set, so they are refused,
-  as are constraints from a legacy guide or between one and the root view
+  as are constraints from a legacy guide (but the bottom guide as the first
+  item of a sibling constraint, placed at the root view's foot, three
+  probes) or between one and the root view
   (their frames aren't in the document), constraints between the root
   view and a nested view, between axes, and between a width and a
   height (Xcode drops some of those).
@@ -366,7 +368,7 @@ other values of the attributes these use, is refused. Observed:
   `systemBackgroundColor`, as a plain table's is its own. Secure text
   views (which add more keys), `alwaysBounceVertical` and text in
   localizable storyboards are refused (32 probes).
-- Nothing in the output comes from a label's `fixedFrame`, from a label's
+- Nothing in the output comes from an empty `<gestureRecognizers/>`, nor from a label's `fixedFrame`, from a label's
   or button's `<autoresizingMask>` when it doesn't translate it into
   constraints (constrained or not), or from a scene's `<exit>` when
   nothing unwinds to it (ten probes). An exit something refers to is
@@ -652,6 +654,22 @@ right 8), left out for all four; it follows `UIStoryboardSegueTemplates`
 and precedes `UIKeyAutomaticallyAdjustsScrollViewInsets` (eight probes).
 Simulated metrics change nothing on table and collection view
 controllers either.
+
+A table view controller's table can be static (`dataMode="static"`): its
+cells, custom ones, are not nibs of their own but objects of the table's
+nib, held by a `UITableViewDataSource` after the table:
+`UITableSections`, each a `UITableViewSection` with
+`UITableSectionHeaderTitle` and `UITableSectionFooterTitle` if any and
+`UITableSectionRows`, each a `UITableViewRow` with `UITableRowCell` (the
+cell as a prototype's nib has it, without a reuse identifier) and
+`UITableRowHeight`, a float (the cell's `rowHeight`, or -1). The objects
+list the data source, the sections, the cells, then each cell's content
+view and its subviews, then breadth first across the cells their
+constraints and deeper views. The connections begin with the owner's
+`staticDataSource` outlet to the data source; the controller's outlets
+may reach the cells' views (seven probes, and two corpus storyboards).
+Without `colorMatched`, a grey white background stays as it is rather
+than becoming the table's or text view's system background.
 
 ## Collection view controllers
 
