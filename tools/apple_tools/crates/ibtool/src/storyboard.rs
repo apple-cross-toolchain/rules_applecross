@@ -2282,10 +2282,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("textAlignment", None), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("text", None), ("enabled", Some("NO")),
                 ("hidden", Some("YES")), ("restorationIdentifier", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("horizontalHuggingPriority", None),
-                ("verticalHuggingPriority", None),
+                ("verticalHuggingPriority", None), ("tag", None), ("alpha", None),
             ])?;
+            // `none` is the style a text field without one has (one probe).
             let border = match n.attribute("borderStyle") {
-                None => None,
+                None | Some("none") => None,
                 Some("line") => Some(1),
                 Some("bezel") => Some(2),
                 Some("roundedRect") => Some(3),
@@ -2299,7 +2300,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some("always") => Some(3),
                 Some(other) => return fail(format!("clearButtonMode=\"{other}\" on <textField> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
+            only_children(n, &["rect", "autoresizingMask", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
             accessibility(nib, scene, n, &name)?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
             let trait_values = text_input_traits(nib, traits, false)?;
@@ -2336,7 +2337,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            values.extend(mask_key(scene, n)?);
+            alpha(&mut values, n)?;
             if n.attribute("clipsSubviews").is_some() {
                 values.push(("UIClipsToBounds", Value::Bool(true)));
             }
@@ -2593,6 +2595,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("left")),
                 ("contentVerticalAlignment", Some("top")), ("segmentControlStyle", None), ("selectedSegmentIndex", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("fixedFrame", Some("YES")), ("id", None),
+                ("hidden", Some("YES")), ("tag", None), ("alpha", None),
             ])?;
             // `fixedFrame` changes nothing beside a frame (one probe), nor
             // does the deprecated bar style (one probe).
@@ -2639,8 +2642,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             built.push(selected_segment);
             let subviews = built.into_iter().map(|(_, segment_name, o)| Value::New(o.named(segment_name))).collect();
             values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
-            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            hidden_and_tag(&mut values, n)?;
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.extend(mask_key(scene, n)?);
+            alpha(&mut values, n)?;
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -3037,9 +3043,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("bouncesZoom", Some("NO")), ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")),
                 ("indicatorStyle", None),
                 ("adjustsFontForContentSizeCategory", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
-                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
             ])?;
-            only_children(n, &["rect", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
             // An accessibility configuration as any view's (one probe).
             accessibility(nib, scene, n, &name)?;
             for c in children(n, "color") {
@@ -3085,11 +3091,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIOpaque", Value::Bool(true)));
+            hidden_and_tag(&mut values, n)?;
             if n.attribute("multipleTouchEnabled").is_some() {
                 values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            values.extend(mask_key(scene, n)?);
+            alpha(&mut values, n)?;
             // A text view that doesn't scroll doesn't clip either.
             if n.attribute("clipsSubviews").is_some() && scrolls {
                 values.push(("UIClipsToBounds", Value::Bool(true)));
@@ -3247,9 +3255,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some("fill") => Some(3),
                 Some(other) => return fail(format!("contentVerticalAlignment=\"{other}\" on <button> is not supported by this ibtool")),
             };
+            // `custom` is the type a button without one has (one probe).
             let button_type = match n.attribute("buttonType") {
                 Some("roundedRect" | "system") => Some(1),
-                None => None,
+                None | Some("custom") => None,
                 Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
             };
             only_children(n, &[
@@ -3473,16 +3482,21 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         }
         "stackView" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", Some("vertical")), ("distribution", None), ("alignment", None),
+                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", None), ("distribution", None), ("alignment", None),
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("preservesSuperviewLayoutMargins", Some("YES")), ("id", None),
+                ("tag", None), ("alpha", None),
             ])?;
-            only_children(n, &["rect", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
+            only_children(n, &["rect", "autoresizingMask", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
+            // An explicit horizontal axis is the default (fuzzed storyboards).
+            if !matches!(n.attribute("axis"), None | Some("vertical" | "horizontal")) {
+                return fail(format!("axis=\"{}\" on <stackView> is not supported by this ibtool", n.attribute("axis").unwrap_or("")));
+            }
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
-            let vertical = n.attribute("axis").is_some();
+            let vertical = n.attribute("axis") == Some("vertical");
             let distribution = match n.attribute("distribution") {
                 None | Some("fill") => 0,
                 Some("fillEqually") => 1,
@@ -3532,11 +3546,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIBackgroundColor", color(nib, c)?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
-            if n.attribute("hidden").is_some() {
-                values.push(("UIHidden", Value::Bool(true)));
-            }
+            hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            values.extend(mask_key(scene, n)?);
+            alpha(&mut values, n)?;
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
