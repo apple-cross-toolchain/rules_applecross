@@ -131,6 +131,32 @@ fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
     contents[list].as_array().is_some_and(|items| items.iter().any(|i| !i[field].is_null()))
 }
 
+/// Whether a complication set holds no images: only image sets, none of
+/// whose entries names a file, and no other files.
+fn empty_complications(set: &Path) -> Result<bool, String> {
+    for e in std::fs::read_dir(set).map_err(|e| format!("{}: {e}", set.display()))? {
+        let p = e.map_err(|e| e.to_string())?.path();
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        if name == "Contents.json" || name.starts_with('.') {
+            continue;
+        }
+        if !name.ends_with(".imageset") || !p.is_dir() {
+            return Ok(false);
+        }
+        for f in std::fs::read_dir(&p).map_err(|e| format!("{}: {e}", p.display()))? {
+            let f = f.map_err(|e| e.to_string())?.file_name();
+            if f != "Contents.json" && !f.to_string_lossy().starts_with('.') {
+                return Ok(false);
+            }
+        }
+        let contents = p.join("Contents.json");
+        if contents.is_file() && has_entries(&read_json(&contents)?, "images", "filename") {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Lists a catalog's assets, refusing kinds this actool doesn't compile. A
 /// color set without colour components compiles to nothing, as in Xcode.
 fn scan(catalogs: &[PathBuf]) -> Result<Scan, String> {
@@ -170,6 +196,9 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             Some((stem, "brandassets")) if top => found.brand_assets.push((stem.to_string(), p)),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
             Some((stem, "launchimage")) if top => found.launch_images.push((stem.to_string(), p)),
+            // A complication set whose image sets name no files compiles to
+            // nothing (two probes, watchOS); one with images is refused.
+            Some((_, "complicationset")) if empty_complications(&p)? => {}
             None if p.is_dir() => {
                 // A folder: its Contents.json may say it provides a namespace.
                 let contents = p.join("Contents.json");
