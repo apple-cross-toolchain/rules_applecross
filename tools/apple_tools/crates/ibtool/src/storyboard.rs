@@ -3664,7 +3664,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
             // Its states by UIControlState, in that order whatever the
-            // document's: normal 0, highlighted 1, disabled 2, selected 4.
+            // document's: normal 0, highlighted 1, disabled 2, selected 4,
+            // focused 8.
             let mut states: Vec<(i64, &str, Node)> = Vec::new();
             for st in children(n, "state") {
                 let key = attr(st, "key")?;
@@ -3673,6 +3674,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     "highlighted" => 1,
                     "disabled" => 2,
                     "selected" => 4,
+                    "focused" => 8,
                     other => return fail(format!("a button's {other} state is not supported by this ibtool")),
                 };
                 if states.iter().any(|s| s.0 == value) {
@@ -4034,15 +4036,17 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ])?;
                 only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
                 let segues: Vec<Node> = children(n, "connections").flat_map(|c| c.children().filter(|c| c.is_element())).collect();
-                let [sg] = segues[..] else {
-                    return fail("a container view needs one embed segue for this ibtool");
-                };
-                if !sg.has_tag_name("segue") || sg.attribute("kind") != Some("embed") {
-                    return fail("a container view's connections other than its embed segue are not supported by this ibtool");
+                // Without an embed segue, it is a plain view (a corpus
+                // storyboard's two, one of a custom class).
+                match segues[..] {
+                    [] => {}
+                    [sg] if sg.has_tag_name("segue") && sg.attribute("kind") == Some("embed") => {
+                        let placeholder = format!("upstream segue {}", scene.segues.len());
+                        scene.segues.push(attr(sg, "id")?.to_string());
+                        scene.containers.push((placeholder, name.clone()));
+                    }
+                    _ => return fail("a container view's connections other than one embed segue are not supported by this ibtool"),
                 }
-                let placeholder = format!("upstream segue {}", scene.segues.len());
-                scene.segues.push(attr(sg, "id")?.to_string());
-                scene.containers.push((placeholder, name.clone()));
             } else {
                 // A table's header and footer views are its subviews.
                 only_attributes(n, &[
