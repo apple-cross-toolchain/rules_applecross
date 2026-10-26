@@ -46,7 +46,9 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
         let editor_only = matches!(n.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController" | "navigationController")
             && (EDITOR_ONLY.contains(&c.tag_name().name()) || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
-        if !allowed.contains(&c.tag_name().name()) && !editor_only {
+        // An empty list of gesture recognizers is Interface Builder's alone.
+        let empty_gestures = c.has_tag_name("gestureRecognizers") && !c.children().any(|g| g.is_element());
+        if !allowed.contains(&c.tag_name().name()) && !editor_only && !empty_gestures {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
         }
     }
@@ -1371,7 +1373,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             let scrolls = n.attribute("scrollEnabled").is_none();
             // An opaque grey white background is the system background.
             if let Some(c) = child(n, "color", "backgroundColor") {
-                let background = if opaque_grey_white(c)? { system_color_named(nib, "systemBackgroundColor")? } else { color(nib, c)? };
+                let background = if nib.color_matched && opaque_grey_white(c)? { system_color_named(nib, "systemBackgroundColor")? } else { color(nib, c)? };
                 values.push(("UIBackgroundColor", background));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
@@ -2756,9 +2758,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // A group's place: its item's frame origin by distance from the
             // root view's, then x, then id; the safe-area guide's is the origin.
             let direct: Vec<Node> = children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
+            // The bottom legacy guide's is the root view's foot (three
+            // probes).
+            let bottom_guide = scene.guides.iter().find(|g| g.1 == "bottom").map(|g| g.0);
             let place = |id: &str| -> Result<(f64, f64), String> {
                 if Some(id) == safe_area_id {
                     return Ok((0.0, 0.0));
+                }
+                if Some(id) == bottom_guide {
+                    return Ok((f.h * f.h, 0.0));
                 }
                 let v = direct.iter().find(|v| v.attribute("id") == Some(id)).ok_or_else(|| format!("constraints between the root view and a nested view ({id}) are not supported by this ibtool"))?;
                 let f = subview_frame(*v)?;
@@ -2782,7 +2790,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     // Where a legacy guide's own constraints go isn't established;
                     // one as the second item of a sibling constraint is.
                     let legacy = |id: &str| scene.guides.iter().any(|g| g.0 == id);
-                    if legacy(first) || (legacy(second) && first == view_id) {
+                    let from_bottom_guide = Some(first) == bottom_guide && second != view_id && !legacy(second);
+                    if (legacy(first) && !from_bottom_guide) || (legacy(second) && first == view_id) {
                         return fail("constraints from a legacy layout guide, or between one and the root view, are not supported by this ibtool");
                     }
                     for id in [first, second] {

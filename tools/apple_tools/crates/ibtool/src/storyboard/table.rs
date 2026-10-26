@@ -6,7 +6,9 @@ use super::*;
 /// A table's background: a plain table's white, as a system background
 /// or any opaque grey white, is its own `tableBackgroundColor`.
 fn table_background(nib: &mut Nib, n: Node, plain: bool) -> Result<Value, String> {
-    let white = n.attribute("systemColor") == Some("systemBackgroundColor") || opaque_grey_white(n)?;
+    // Without colorMatched, a grey white stays as it is (one corpus
+    // storyboard).
+    let white = n.attribute("systemColor") == Some("systemBackgroundColor") || (nib.color_matched && opaque_grey_white(n)?);
     if plain && white {
         return Ok(nib.system_color("tableBackgroundColor", &SystemColor::Gray([1.0, 1.0])));
     }
@@ -28,12 +30,15 @@ fn check_table(table: Node) -> Result<(), String> {
         ("key", Some("view")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
         ("contentMode", Some("scaleToFill")), ("alwaysBounceVertical", None), ("showsHorizontalScrollIndicator", Some("NO")),
         ("showsVerticalScrollIndicator", Some("NO")),
-        ("keyboardDismissMode", None), ("dataMode", Some("prototypes")), ("style", None), ("separatorStyle", None),
+        ("keyboardDismissMode", None), ("dataMode", None), ("style", None), ("separatorStyle", None),
         ("allowsSelection", Some("NO")), ("allowsMultipleSelection", Some("YES")), ("allowsSelectionDuringEditing", Some("YES")),
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("id", None),
     ])?;
-    only_children(table, &["rect", "autoresizingMask", "color", "prototypes", "connections", "constraints"])?;
+    only_children(table, &["rect", "autoresizingMask", "color", "prototypes", "sections", "connections", "constraints"])?;
+    if !matches!(table.attribute("dataMode"), Some("prototypes" | "static")) {
+        return fail("a table's dataMode other than prototypes or static is not supported by this ibtool");
+    }
     let selection_keys = ["allowsSelection", "allowsMultipleSelection", "allowsSelectionDuringEditing"];
     if selection_keys.iter().filter(|k| table.attribute(**k).is_some()).count() > 1 {
         return fail("more than one of a table's selection settings is not supported by this ibtool");
@@ -266,8 +271,9 @@ pub(super) fn table_view_nib(
         }
     }
     let root_name = view_name(table_id);
+    let static_table = table.attribute("dataMode") == Some("static");
     for (_, destination) in vc_outlets {
-        if *destination != root_name {
+        if *destination != root_name && !static_table {
             return fail("a table view controller's outlets into anything but its table are not supported by this ibtool");
         }
     }
@@ -293,10 +299,80 @@ pub(super) fn table_view_nib(
     top.push(Value::New(Object::new("UITableView", values).named(root_name.clone())));
     objects.push(reference(root_name.clone()));
 
+    // A static table's sections and their cells, as its data source holds
+    // them; its cells are in the table's nib.
+    let mut connections = Vec::new();
+    if static_table {
+        let mut sections = Vec::new();
+        let mut section_names = Vec::new();
+        let mut parts = Vec::new();
+        for ss in children(table, "sections") {
+            only_children(ss, &["tableViewSection"])?;
+            for sec in children(ss, "tableViewSection") {
+                only_attributes(sec, &[("headerTitle", None), ("footerTitle", None), ("id", None)])?;
+                only_children(sec, &["cells"])?;
+                let sec_id = attr(sec, "id")?;
+                let mut rows = Vec::new();
+                for cs in children(sec, "cells") {
+                    only_children(cs, &["tableViewCell"])?;
+                    for cell in children(cs, "tableViewCell") {
+                        if children(cell, "connections").next().is_some() {
+                            return fail("a static cell's own connections are not supported by this ibtool");
+                        }
+                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell, false)?;
+                        let height = cell.attribute("rowHeight").map(number).transpose()?.unwrap_or(-1.0);
+                        rows.push(Value::New(Object::new("UITableViewRow", vec![("UITableRowCell", cell_value), ("UITableRowHeight", Value::Float(height as f32))])));
+                        parts.push(cell_parts);
+                    }
+                }
+                let mut values = Vec::new();
+                if let Some(t) = sec.attribute("headerTitle") {
+                    values.push(("UITableSectionHeaderTitle", nib.text(sec_id, "headerTitle", t)));
+                }
+                if let Some(t) = sec.attribute("footerTitle") {
+                    values.push(("UITableSectionFooterTitle", nib.text(sec_id, "footerTitle", t)));
+                }
+                values.push(("UITableSectionRows", nib.array("NSArray", rows)));
+                let name = format!("section {sec_id}");
+                sections.push(Value::New(Object::new("UITableViewSection", values).named(name.clone())));
+                section_names.push(name);
+            }
+        }
+        let sections = nib.array("NSArray", sections);
+        top.push(Value::New(Object::new("UITableViewDataSource", vec![("UITableSections", sections)]).named("static data source")));
+        // The data source, the sections, the cells, then each cell's content
+        // view and views as a prototype's nib lists them.
+        objects.push(reference("static data source"));
+        objects.extend(section_names.into_iter().map(reference));
+        objects.extend(parts.iter().map(|p| reference(p.name.clone())));
+        for p in &parts {
+            objects.push(reference(p.content.clone()));
+            let content_parent = Some(p.content.clone());
+            objects.extend(p.scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| reference(s.1.clone())));
+        }
+        // Then breadth first across the cells: each view's constraints and
+        // its subviews, the content views' already listed.
+        let mut queue: std::collections::VecDeque<(&CellParts, &String)> = parts.iter().map(|p| (p, &p.content)).collect();
+        while let Some((p, v)) = queue.pop_front() {
+            objects.extend(p.scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
+            for (_, sv) in p.scene.subviews.iter().filter(|sv| sv.0.as_ref() == Some(v)) {
+                if *v != p.content {
+                    objects.push(reference(sv.clone()));
+                }
+                queue.push_back((p, sv));
+            }
+        }
+        for (_, destination) in vc_outlets {
+            if *destination != root_name && !parts.iter().any(|p| p.scene.subviews.iter().any(|sv| sv.1 == *destination)) {
+                return fail("a table view controller's outlets into anything but its table and static cells' views are not supported by this ibtool");
+            }
+        }
+        connections.push(outlet(&mut nib, "staticDataSource", "owner", "static data source"));
+    }
+
     // Outlets, `view` among them, in byte order of their names.
     outlets.push(("view".to_string(), "owner", root_name.clone()));
     outlets.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut connections = Vec::new();
     for (label, source, destination) in &outlets {
         let source = if *source == "table" { root_name.as_str() } else { source };
         connections.push(outlet(&mut nib, label, source, destination));
@@ -304,9 +380,17 @@ pub(super) fn table_view_nib(
     Ok((root_object(&mut nib, top, objects, connections), upstream_used, segues))
 }
 
-/// A prototype cell's nib: the cell, its content view and the separator
-/// Xcode lays out at its foot, and the content view's subviews.
-fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool) -> Result<Vec<u8>, String> {
+/// A table cell as a prototype's nib or a static table's row holds it,
+/// and what was compiled for it.
+struct CellParts<'a> {
+    name: String,
+    content: String,
+    scene: Scene<'a>,
+}
+
+/// A cell: its object (named after its id), with its content view and the
+/// separator Xcode lays out at its foot.
+fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, has_segue: bool) -> Result<(Value, CellParts<'a>), String> {
     only_attributes(cell, &[
         ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
@@ -346,12 +430,6 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let content_id = attr(content, "id")?;
     let content_name = view_name(content_id);
 
-    let mut nib = Nib::new(platform, color_matched, localizable);
-    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
-    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
-    // A cell's segue is its placeholder's.
-    let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
-
     // The content view and its subviews, compiled as a container's are.
     let mut scene = Scene {
         vc_id: "",
@@ -374,7 +452,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let mut subviews = Vec::new();
     for s in children(content, "subviews") {
         for c in s.children().filter(|c| c.is_element()) {
-            subviews.push(subview(&mut nib, &mut scene, c)?);
+            subviews.push(subview(nib, &mut scene, c)?);
         }
     }
     if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() {
@@ -390,7 +468,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     if content.attribute("clipsSubviews").is_some() {
         cv.push(("UIClipsToBounds", Value::Bool(true)));
     }
-    if let Some(own) = own_constraints(&mut nib, &mut scene, content, &content_name)? {
+    if let Some(own) = own_constraints(nib, &mut scene, content, &content_name)? {
         cv.push(("UIViewAutolayoutConstraints", own));
     }
     if content.attribute("preservesSuperviewLayoutMargins").is_some() {
@@ -436,7 +514,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     // default, the plain cell background and a background view.
     let system_background = background.is_none() && selection.is_some();
     if let Some(c) = background {
-        values.push(("UIBackgroundColor", color(&mut nib, c)?));
+        values.push(("UIBackgroundColor", color(nib, c)?));
     } else if system_background {
         values.push(("UIBackgroundColor", nib.system_color("tableCellPlainBackgroundColor", &SystemColor::Gray([1.0, 1.0]))));
         values.push(("UIDidEncodeCompatibilityBackgroundColor", Value::Bool(true)));
@@ -451,7 +529,10 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
-    values.push(("UIReuseIdentifier", nib.string(attr(cell, "reuseIdentifier")?)));
+    // A static table's cell has no reuse identifier.
+    if let Some(reuse) = cell.attribute("reuseIdentifier") {
+        values.push(("UIReuseIdentifier", nib.string(reuse)));
+    }
     if let Some(level) = cell.attribute("indentationLevel") {
         let level: i64 = level.parse().map_err(|_| format!("not a number: {level}"))?;
         if level != 0 {
@@ -469,7 +550,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         values.push(("UITableCellBackgroundColorSet", Value::Bool(true)));
     }
     if system_background {
-        values.push(("UISystemBackgroundView", system_background_view(&mut nib, &f)));
+        values.push(("UISystemBackgroundView", system_background_view(nib, &f)));
     } else {
         values.push(("UISystemBackgroundView", Value::Nil));
     }
@@ -486,9 +567,24 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     } else {
         Object::new("UITableViewCell", values)
     };
+    let _ = has_segue;
+    Ok((Value::New(object.named(cell_name.clone())), CellParts { name: cell_name, content: content_name, scene }))
+}
+
+/// A prototype cell's nib: the cell, its content view and the separator
+/// Xcode lays out at its foot, and the content view's subviews.
+fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool) -> Result<Vec<u8>, String> {
+    let mut nib = Nib::new(platform, color_matched, localizable);
+    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+    // A cell's segue is its placeholder's.
+    let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
+
+    let (cell_value, parts) = cell_object(&mut nib, module, cell, has_segue)?;
+    let CellParts { name: cell_name, content: content_name, scene } = parts;
     let mut top = vec![owner, responder];
     top.extend(upstream);
-    top.push(Value::New(object.named(cell_name.clone())));
+    top.push(cell_value);
 
     // The objects: the cell, its content view and the content view's
     // subviews; then, breadth first, each view's constraints and its
