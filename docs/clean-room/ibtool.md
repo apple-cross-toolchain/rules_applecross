@@ -330,7 +330,10 @@ other values of the attributes these use, is refused. Observed:
   resistance if given (each 750 unless given), and `UIImage`:
   a `UIImageNibPlaceholder` per image name (width and height 1, the name,
   nil symbol, configuration and catalog), shared by the views using it;
-  no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
+  a system symbol (`catalog="system"`) is a placeholder of width and
+  height 0 naming it as both resource and symbol, shared by name apart
+  from an image of the document's of that name (five probes, image views
+  and a button's normal state); no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
   when set (one probe). snag's launch screen is byte-identical.
 - A controller's own `restorationIdentifier` is `UIRestorationIdentifier`
   after `UINibName` (one probe; beside a storyboard identifier, or in an
@@ -1115,7 +1118,8 @@ Switches, sliders, steppers and activity indicators (29 probes):
   `UIHidesWhenStopped` false unless set, and `UIColor`. A colour is also
   `UITintColor`, with `UIDisableUpdateColorOnTraitCollectionChange`;
   without one, a modern style's tint is the secondary label colour. One
-  hidden when stopped and not animating is `UIHidden`.
+  hidden when stopped and not animating is `UIHidden`, once if it is
+  hidden as well (two probes).
 
 User-defined runtime attributes of a view, the root view or a controller
 are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
