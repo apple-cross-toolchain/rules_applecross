@@ -266,8 +266,13 @@ and every icon set in the examples:
   areas by name identifier. One of more than 18,050 px² × scale is not
   packed; neither is the only packable image of a group.
 - Atlases fill next-fit: an atlas takes images while the area it already
-  holds is below the cap, then the next atlas begins; the key format then
-  includes `dimension1`. A scale's atlases take their `dimension1` in the
+  holds is below the cap, then the next atlas begins. That holds where the
+  next image would grow the closed atlas; where it would fit in it, Xcode
+  sometimes keeps adding a few more images, and how many isn't established
+  (23 probes of one shape repeated: 54 x 60 px at 3x takes three more when
+  at least three remain and none otherwise, 60 x 54 never more; the
+  images' content plays no part). Such catalogs are refused. A second
+  atlas's key format includes `dimension1`. A scale's atlases take their `dimension1` in the
   order of their creation indices as decimal strings: with 19 atlases the
   third is 11 and the eleventh 2 ("0", "1", "10", ..., "18", "2", ...). With
   ten or fewer that's their creation order.
@@ -658,7 +663,8 @@ scale on, dimension1 its index) named `ZZZZPackedAsset-{scale}.{opaque}.{grey}-g
 and flagged opaque as its group is, whatever its padding (an opaque grey
 atlas's padding is opaque too: alpha 255, grey 0); each image is a
 layout 1003 link to it flagged with its rendering intent. A group's only
-packable image is stored on its own. Atlases are filled next-fit, one
+packable image is stored on its own. Atlases are filled next-fit (refused
+where the next image would fit in the closed atlas, see above), one
 closed once its area reaches the cap and the next taking the following
 dimension1 (and the same name), even for a single image. The key format
 has dimension1 only when an atlas uses it.
@@ -687,7 +693,10 @@ says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
 identifier is the hash of that full name. Other assets in folders, and
 other folder properties, are refused. Files that aren't assets (a README,
 with or without an extension, at the top or in a folder) are ignored
-(three probes).
+(three probes). So are an image set without a `Contents.json` (one probe)
+and, without a word, an image or icon whose file is missing (five probes:
+an icon set of only missing files compiles to nothing; one whose 1024 px
+image is missing but whose dark and tinted ones aren't is refused).
 
 Refused: atlases whose `dmp2` row
 predictors aren't established (common: the row under an atlas's empty top

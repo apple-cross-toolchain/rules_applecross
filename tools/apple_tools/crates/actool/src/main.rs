@@ -224,6 +224,8 @@ fn icon_images(icon_dir: &Path) -> Result<Vec<IconImage>, String> {
         .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
+        // An image whose file is missing is left out (two probes).
+        .filter(|i| i["filename"].as_str().is_some_and(|f| icon_dir.join(f).is_file()))
         .filter_map(|i| {
             Some(IconImage {
                 filename: i["filename"].as_str()?.to_string(),

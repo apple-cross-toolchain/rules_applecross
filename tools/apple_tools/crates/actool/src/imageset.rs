@@ -29,6 +29,10 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
     for (name, dir) in sets {
+        // A set without a Contents.json is left out (one probe).
+        if !dir.join("Contents.json").is_file() {
+            continue;
+        }
         let contents = read_json(&dir.join("Contents.json"))?;
         for key in contents.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default() {
             if !["images", "info", "properties"].contains(&key.as_str()) {
@@ -57,6 +61,11 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
         // No images list is as an empty one (two probes).
         for entry in contents["images"].as_array().map(Vec::as_slice).unwrap_or_default() {
             let Some(filename) = entry["filename"].as_str() else { continue };
+            // An image whose file is missing is left out, without a word
+            // (one probe: rules_apple's imageset_missing_child).
+            if !dir.join(filename).is_file() {
+                continue;
+            }
             for k in entry.as_object().unwrap().keys() {
                 if !["filename", "idiom", "scale", "appearances"].contains(&k.as_str()) {
                     return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
@@ -146,9 +155,22 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
                 }
                 // Next-fit atlases: one is closed once its area reaches the
                 // cap, the next taking the following index at this scale.
+                // When the next image would fit in the closed atlas without
+                // growing it, Xcode sometimes keeps adding a few more, in a
+                // way not established (23 probes of equal shapes: 54 x 60
+                // takes three more, 60 x 54 none): refused. Where it would
+                // grow the atlas, Xcode closes it as next-fit does.
                 let mut total = 0;
                 for i in packable {
                     if planned.last().is_none_or(|a| (a.0, a.1, a.2) != (gamut, opaque, gray)) || total >= cap {
+                        if let Some(last) = planned.last().filter(|a| (a.0, a.1, a.2) == (gamut, opaque, gray)) {
+                            let mut blocks: Vec<(u32, u32)> = last.3.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
+                            let closed = crate::iconset::pack::pack(&blocks).1;
+                            blocks.push((i.image.width as u32, i.image.height as u32));
+                            if crate::iconset::pack::pack(&blocks).1 == closed {
+                                return Err(format!("{scale}x images filling more than one atlas, where the next image fits in the one before, are not supported by this actool"));
+                            }
+                        }
                         planned.push((gamut, opaque, gray, Vec::new()));
                         total = 0;
                     }
