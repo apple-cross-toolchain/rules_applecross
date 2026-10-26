@@ -883,6 +883,15 @@ are; the identifier stays a string (one probe). Runtime attributes, switches (th
 settings inside cells and table headers are refused: those nibs aren't
 built with them.
 
+A button with a plain `<buttonConfiguration>` and a title has no
+`UIButtonStatefulContent` or `UIFont`; its `UIButtonConfiguration` is
+UIKit's default configuration (style 0, a `UIBackgroundConfiguration` with
+a clear background and stroke, corner radius 17 whatever the button's
+size, stroke width 1; image placement 2, image padding 0, title padding
+1), its title an `NSAttributedString` with the empty attributes,
+localizable as `<id>.configuration.title`, and an empty subtitle (four
+probes and one in `Base.lproj`; other styles and settings are refused).
+
 Buttons take a custom class, swapped in after `UIButtonConfiguration`
 (two probes), and labels one swapped in last (two probes). Stack views and visual effect views take runtime
 attributes (two probes). Image views take a custom class (swapped in, after their image), runtime

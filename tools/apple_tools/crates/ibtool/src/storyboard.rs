@@ -2422,8 +2422,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             };
             only_children(n, &[
                 "rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints", "userDefinedRuntimeAttributes", "accessibility",
-                "inset",
+                "inset", "buttonConfiguration",
             ])?;
+            // A configuration replaces the states and font, which Xcode then
+            // leaves out (four probes).
+            let configuration = child(n, "buttonConfiguration", "configuration");
+            if configuration.is_some() && (child(n, "fontDescription", "fontDescription").is_some() || child(n, "inset", "contentEdgeInsets").is_some()) {
+                return fail("a button configuration beside a font or insets is not supported by this ibtool");
+            }
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
@@ -2532,7 +2538,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIContentHorizontalAlignment", Value::Int(h)));
             }
             let mut stateful = Vec::new();
-            for (value, key, st) in &states {
+            for (value, key, st) in states.iter().filter(|_| configuration.is_none()) {
                 stateful.push(nib.int_number(*value));
                 let mut content = Vec::new();
                 if let Some(title) = st.attribute("title") {
@@ -2557,7 +2563,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 stateful.push(Value::New(Object::new("UIButtonContent", content)));
             }
-            values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", stateful)));
+            if configuration.is_none() {
+                values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", stateful)));
+            }
             values.push(("UIAdjustsImageWhenHighlighted", Value::Bool(true)));
             values.push(("UIAdjustsImageWhenDisabled", Value::Bool(true)));
             if let Some(t) = button_type {
@@ -2565,7 +2573,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             // A custom button's default font is larger.
             let default_size = if button_type.is_some() { 15.0 } else { 18.0 };
-            values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), Some(default_size))?));
+            if configuration.is_none() {
+                values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), Some(default_size))?));
+            }
             // Its insets: top, left, bottom and right from the document's
             // minimum y and x and maximum y and x.
             if let Some(i) = children(n, "inset").find(|i| !["contentEdgeInsets", "titleEdgeInsets", "imageEdgeInsets"].contains(&i.attribute("key").unwrap_or(""))) {
@@ -2578,7 +2588,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     values.push((key, doubles(&[edge("minY")?, edge("minX")?, edge("maxY")?, edge("maxX")?])));
                 }
             }
-            values.push(("UIButtonConfiguration", Value::Nil));
+            let configuration = match configuration {
+                Some(c) => button_configuration(nib, c, id)?,
+                None => Value::Nil,
+            };
+            values.push(("UIButtonConfiguration", configuration));
             if n.attribute("customClass").is_some() {
                 let class = runtime_class_name(n, scene.module, "UIButton")?;
                 values.push(("UIClassName", nib.string(&class)));
@@ -3563,6 +3577,76 @@ fn text_attributes(nib: &mut Nib, t: Node) -> Result<Value, String> {
         entries.extend([nib.string("NSFont"), font(nib, Some(f), None)?]);
     }
     Ok(nib.array("NSDictionary", entries))
+}
+
+/// A button's plain configuration with a title: a `UIButtonConfiguration`
+/// of UIKit's defaults (a clear background and stroke, corner radius 17,
+/// title padding 1), its title an attributed string, localizable as
+/// `<id>.configuration.title`, and an empty subtitle (four probes).
+fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, String> {
+    only_attributes(c, &[("key", Some("configuration")), ("style", Some("plain")), ("title", None)])?;
+    only_children(c, &[])?;
+    let clear = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]));
+    let stroke = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]));
+    let insets = nib.string("{0, 0, 0, 0}");
+    let background = Object::new("UIBackgroundConfiguration", vec![
+        ("customView", Value::Nil),
+        ("hasCustomized-customView", Value::Bool(false)),
+        ("cornerRadius", Value::Double(17.0)),
+        ("hasCustomized-cornerRadius", Value::Bool(false)),
+        ("maskedCorners", Value::Int(15)),
+        ("hasCustomized-maskedCorners", Value::Bool(false)),
+        ("backgroundColor", clear),
+        ("hasCustomized-backgroundColor", Value::Bool(false)),
+        ("backgroundColorTransformerIdentifier", Value::Int(0)),
+        ("hasCustomized-backgroundColorTransformerIdentifier", Value::Bool(false)),
+        ("visualEffect", Value::Nil),
+        ("hasCustomized-visualEffect", Value::Bool(false)),
+        ("visualEffectGroupName", Value::Nil),
+        ("hasCustomized-visualEffectGroupName", Value::Bool(false)),
+        ("visualEffectblurClippingMode", Value::Int(0)),
+        ("image", Value::Nil),
+        ("hasCustomized-image", Value::Bool(false)),
+        ("imageContentMode", Value::Int(0)),
+        ("hasCustomized-imageContentMode", Value::Bool(false)),
+        ("backgroundInsets", insets),
+        ("hasCustomized-backgroundInsets", Value::Bool(false)),
+        ("edgesAddingLayoutMarginsToBackgroundInsets", Value::Int(0)),
+        ("hasCustomized-edgesAddingLayoutMarginsToBackgroundInsets", Value::Bool(false)),
+        ("strokeColor", stroke),
+        ("hasCustomized-strokeColor", Value::Bool(true)),
+        ("strokeColorTransformerIdentifier", Value::Int(0)),
+        ("hasCustomized-strokeColorTransformerIdentifier", Value::Bool(false)),
+        ("strokeWidth", Value::Double(1.0)),
+        ("hasCustomized-strokeWidth", Value::Bool(true)),
+        ("strokeOutset", Value::Double(0.0)),
+        ("hasCustomized-strokeOutset", Value::Bool(false)),
+        ("strokeLocation", Value::Int(0)),
+        ("defaultStyle", Value::Int(0)),
+        ("defaultStyle_v2", Value::Int(0)),
+    ]);
+    let title = nib.text(id, "configuration.title", c.attribute("title").unwrap_or(""));
+    let attributes = nib.shared("empty attributes".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]));
+    let subtitle = nib.string("");
+    Ok(Value::New(Object::new("UIButtonConfiguration", vec![
+        ("UIButtonConfigurationButtonStyle", Value::Int(0)),
+        ("UIButtonConfigurationBackground", Value::New(background)),
+        ("UIButtonConfigurationCornerStyle", Value::Int(0)),
+        ("UIButtonConfigurationButtonSize", Value::Int(0)),
+        ("UIButtonConfigurationMacIdiomStyle", Value::Int(0)),
+        ("UIButtonConfigurationBaseBackgroundColor", Value::Nil),
+        ("UIButtonConfigurationBaseForegroundColor", Value::Nil),
+        ("UIButtonConfigurationImage", Value::Nil),
+        ("UIButtonConfigurationPreferredSymbolConfigurationForImage", Value::Nil),
+        ("UIButtonConfigurationSymbolContentTransition", Value::Nil),
+        ("UIButtonConfigurationShowsActivityIndicator", Value::Bool(false)),
+        ("UIButtonConfigurationTitle", Value::New(Object::new("NSAttributedString", vec![("NSString", title), ("NSAttributes", attributes)]))),
+        ("UIButtonConfigurationSubtitle", Value::New(Object::new("NSAttributedString", vec![("NSString", subtitle)]))),
+        ("UIButtonConfigurationImagePlacement", Value::Int(2)),
+        ("UIButtonConfigurationImagePadding", Value::Float(0.0)),
+        ("UIButtonConfigurationTitlePadding", Value::Float(1.0)),
+        ("UIButtonConfigurationTitleAlignment", Value::Int(0)),
+    ])))
 }
 
 /// A navigation controller's attributes, checked.
