@@ -489,6 +489,14 @@ other values of the attributes these use, is refused. Observed:
   `UITopLevelObjectsToKeepAliveFromStoryboard` in document order, and
   their actions by selector, one selector's in document order (ten
   probes). A recognizer of two views is refused.
+- A navigation controller's root that nothing loads on its own keeps its
+  recognizers in the navigation controller's nib: defined in the root's
+  `UIExternalObjectsTableForViewLoading` in their placeholders' order,
+  kept alive (`UITopLevelObjectsToKeepAliveFromStoryboard`, after
+  `UIParentViewController`), top-level objects after the navigation
+  controller (in reverse document order) and listed right after it, their
+  actions after `sceneViewController` (two probes). Beside segues or bar
+  button items, and in other containers, they are refused.
 
 ## Navigation controllers
 
@@ -868,7 +876,10 @@ needs, highlighted 1, disabled 2, selected 4), each a `UIButtonContent` of
 its title, image, background image (`UIBackgroundImage`) and colours (ten
 probes; a localizable build's titles for other states than normal are
 refused). A button may be hidden, tagged (both after `UIOpaque`) and
-have an alpha (after its mask), as a plain view (two probes).
+have an alpha (after its mask), as a plain view (two probes), and given
+hugging (each 250 unless given) or compression resistance (each 750
+unless given) priorities, written when given, before its semantic content
+attribute (three probes).
 
 A label's, plain view's, button's or control's (a switch or slider: two
 probes) `<accessibility>` is a
@@ -1054,6 +1065,10 @@ prototype cells compiles like a table view controller: the collection
 view is its view nib's root view, and each prototype is a nib of its own
 inside it. Observed with 15 probes and one corpus storyboard:
 
+- A collection view in a view may hide its indicators
+  (`UIShowsHorizontalScrollIndicator`, `UIShowsVerticalScrollIndicator`
+  false, before `UIPagingEnabled`) and bounce vertically
+  (`UIAlwaysBounceVertical`, after `UIBouncesZoom`; four probes).
 - The collection view: geometry, background colour (with `colorMatched`,
   an opaque grey white is `systemBackgroundColor`, at the root or in a
   view: nine probes), opaque, multiple

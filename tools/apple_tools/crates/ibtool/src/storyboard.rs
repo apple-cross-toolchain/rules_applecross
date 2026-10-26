@@ -2523,7 +2523,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
                 ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")), ("enabled", Some("NO")),
                 ("clipsSubviews", Some("YES")), ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("customClass", None), ("customModule", None),
-                ("customModuleProvider", None),
+                ("customModuleProvider", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
+                ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
@@ -2653,6 +2654,17 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
+            }
+            // Hugging (each 250 unless given) and compression resistance
+            // (each 750 unless given), when given (three probes).
+            let given = |h: &str, v: &str| n.attribute(h).is_some() || n.attribute(v).is_some();
+            if given("horizontalHuggingPriority", "verticalHuggingPriority") {
+                values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            }
+            if given("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority") {
+                let p = |k: &str| n.attribute(k).unwrap_or("750");
+                let value = format!("{{{}, {}}}", p("horizontalCompressionResistancePriority"), p("verticalCompressionResistancePriority"));
+                values.push(("UIViewContentCompressionResistancePriority", nib.string(&value)));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -3476,6 +3488,10 @@ struct RootController<'a, 'i> {
     /// placeholders' indices, and its own.
     view_segues: Vec<(usize, Node<'a, 'i>)>,
     own_segues: Vec<Node<'a, 'i>>,
+    /// Its scene's gesture recognizers in document order, and their ids in
+    /// their placeholders' order.
+    recognizers: Vec<Node<'a, 'i>>,
+    gesture_order: Vec<String>,
 }
 
 /// The id of a navigation controller's root view controller, its one
@@ -3515,6 +3531,10 @@ struct Embedded {
     /// their actions (selector, item), after the templates' outlets.
     bar_items: Vec<String>,
     bar_actions: Vec<(String, String)>,
+    /// Its gesture recognizers' names, in reverse document order, and their
+    /// actions (selector, recognizer) by selector.
+    gestures: Vec<String>,
+    gesture_actions: Vec<(String, String)>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3561,7 +3581,36 @@ fn embedded_controller(
         )),
         (None, None) => None,
     };
-    let mut templates = segue::templates(nib, name, root.upstream_used, 1, &root.view_segues, &root.own_segues, &bar_segues, nib_names)?;
+    let gesture_count = root.recognizers.len();
+    let mut templates = segue::templates(nib, name, root.upstream_used, 1 + gesture_count, &root.view_segues, &root.own_segues, &bar_segues, nib_names)?;
+    // Its gesture recognizers, defined in its external objects table, in
+    // their placeholders' order (two probes).
+    let mut gestures = Vec::new();
+    let mut gesture_actions = Vec::new();
+    if gesture_count > 0 {
+        if templates.array.is_some() || !bar_items.is_empty() || extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+            return fail("an embedded controller's gesture recognizers beside segues, bar button items or these settings are not supported by this ibtool");
+        }
+        let mut defined = Vec::new();
+        for r in &root.recognizers {
+            let id = attr(*r, "id")?;
+            let (object, selectors) = gesture_recognizer(nib, *r, attr(vc, "id")?)?;
+            defined.push((id, format!("{name} gesture {id}"), object, selectors));
+        }
+        let mut entries = Vec::new();
+        for (i, g) in root.gesture_order.iter().enumerate() {
+            let k = defined.iter().position(|d| d.0 == g).expect("recognized above");
+            let (_, gesture_name, object, _) = &mut defined[k];
+            entries.push(nib.string(&format!("UpstreamPlaceholder-{}", i + 1)));
+            entries.push(Value::New(std::mem::replace(object, Object::new("", Vec::new())).named(gesture_name.clone())));
+        }
+        templates.external.splice(0..0, entries);
+        for (_, gesture_name, _, selectors) in &defined {
+            gesture_actions.extend(selectors.iter().map(|s| (s.clone(), gesture_name.clone())));
+        }
+        gesture_actions.sort_by(|a, b| a.0.cmp(&b.0));
+        gestures = defined.iter().rev().map(|d| d.1.clone()).collect();
+    }
     // An empty table is one object however many controllers have one.
     let external = if templates.external.is_empty() {
         nib.shared("empty dictionary".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))
@@ -3587,6 +3636,10 @@ fn embedded_controller(
         }
     }
     values.push(("UIParentViewController", reference(parent)));
+    if gesture_count > 0 {
+        let alive = root.recognizers.iter().map(|r| attr(*r, "id").map(|id| reference(format!("{name} gesture {id}")))).collect::<Result<_, _>>()?;
+        values.push(("UITopLevelObjectsToKeepAliveFromStoryboard", nib.array("NSArray", alive)));
+    }
     if let Some(array) = templates.array.take() {
         values.push(("UIStoryboardSegueTemplates", array));
     }
@@ -3607,7 +3660,15 @@ fn embedded_controller(
     } else {
         Object::new(root.original_class, values)
     };
-    Ok(Embedded { value: Value::New(controller.named(name)), templates, navigation_item: explicit_item.map(|_| item_name), bar_items, bar_actions })
+    Ok(Embedded {
+        value: Value::New(controller.named(name)),
+        templates,
+        navigation_item: explicit_item.map(|_| item_name),
+        bar_items,
+        bar_actions,
+        gestures,
+        gesture_actions,
+    })
 }
 
 /// A navigation controller's bar (`name`), at the height Xcode gives it
@@ -3897,16 +3958,13 @@ fn navigation_controller_nib(
     let bar_items = std::mem::take(&mut embedded.bar_items);
     let bar_actions = std::mem::take(&mut embedded.bar_actions);
     let templates_performs = std::mem::take(&mut embedded.templates.performs);
+    let gestures = std::mem::take(&mut embedded.gestures);
+    let gesture_actions = std::mem::take(&mut embedded.gesture_actions);
     let controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, title, None)?;
-    let mut objects = vec![
-        reference("root storyboard"),
-        reference("owner"),
-        reference("responder"),
-        reference("storyboard"),
-        reference("controller"),
-        reference("controller bar"),
-        reference("root"),
-    ];
+    // The root's gesture recognizers follow the controller (two probes).
+    let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+    objects.extend(gestures.iter().map(|g| reference(g.clone())));
+    objects.extend([reference("controller bar"), reference("root")]);
     if let Some(item) = explicit_item {
         objects.push(reference(item));
     }
@@ -3921,7 +3979,11 @@ fn navigation_controller_nib(
         connections.push(outlet(&mut nib, "viewController", t, "root"));
     }
     connections.extend(bar_events(&mut nib, &bar_items, &bar_actions, &templates_performs, "root"));
-    let top = vec![root_storyboard, owner, responder, storyboard, controller];
+    for (selector, gesture) in &gesture_actions {
+        connections.push(event_connection(&mut nib, selector, gesture, "root"));
+    }
+    let mut top = vec![root_storyboard, owner, responder, storyboard, controller];
+    top.extend(gestures.iter().map(|g| reference(g.clone())));
     Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))))
 }
 
@@ -4679,8 +4741,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut external = templates.external;
         // The recognizers: the nib's objects in reverse document order,
         // kept alive in document order, mapped to their placeholders.
+        // A navigation controller's root that nothing loads on its own has
+        // them in the navigation controller's nib (two probes).
+        let nav_root_only = navs.iter().any(|n| n.2 == vc_id && n.3) && !held_children.contains(vc_id) && !in_held_nav(vc_id);
         if !recognizers.is_empty() {
-            if embedded_here {
+            if embedded_here && !(nav_root_only && !is_initial && !identified && !segue_destination) {
                 return fail("a gesture recognizer in an embedded controller's scene is not supported by this ibtool");
             }
             if extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
@@ -4780,6 +4845,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 upstream_used,
                 view_segues: view_segues.clone(),
                 own_segues: own_segues.clone(),
+                recognizers: recognizers.clone(),
+                gesture_order: gesture_order(&scene.gesture_views).into_iter().cloned().collect(),
             });
         }
         if !is_initial && !identified && !segue_destination && !embedded {

@@ -160,10 +160,20 @@ fn collection_values(
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+    // Hidden indicators, paging, then after `UIBouncesZoom` a vertical
+    // bounce (four probes).
+    for (attribute, key) in [("showsHorizontalScrollIndicator", "UIShowsHorizontalScrollIndicator"), ("showsVerticalScrollIndicator", "UIShowsVerticalScrollIndicator")] {
+        if cv.attribute(attribute).is_some() {
+            values.push((key, Value::Bool(false)));
+        }
+    }
     if cv.attribute("pagingEnabled").is_some() {
         values.push(("UIPagingEnabled", Value::Bool(true)));
     }
     values.push(("UIBouncesZoom", Value::Bool(true)));
+    if cv.attribute("alwaysBounceVertical").is_some() {
+        values.push(("UIAlwaysBounceVertical", Value::Bool(true)));
+    }
     values.push(("UIDelegate", Value::Nil));
     values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
     let (flow, estimated) = match child(cv, "collectionViewLayout", "collectionViewLayout") {
@@ -205,7 +215,8 @@ fn collection_values(
 pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame) -> Result<Object, String> {
     only_attributes(n, &[
         ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("dataMode", Some("prototypes")),
-        ("pagingEnabled", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+        ("pagingEnabled", Some("YES")), ("alwaysBounceVertical", Some("YES")), ("showsHorizontalScrollIndicator", Some("NO")),
+        ("showsVerticalScrollIndicator", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
     ])?;
     only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "connections", "constraints"])?;
     for c in children(n, "color") {
