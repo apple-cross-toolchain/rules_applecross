@@ -232,6 +232,10 @@ iPhone 40 and 60 pt at 1x, iPad 76 pt at 3x); this actool compiles the
 current and legacy slots (iPhone 20, 40 and 60 pt at 2x and 3x, 29 pt at
 1x to 3x, 57 pt at 1x and 2x; iPad 20, 29, 40, 50, 72 and 76 pt at 1x and
 2x, 83.5 pt at 2x) and the App Store's 1024 pt, and refuses the rest.
+CarPlay's 60 pt icons at 2x and 3x (idiom 4, its own multi-size index and
+images, as an iPhone's) go with an iPhone build (without one they are
+refused). An image the set has but no slot uses (only a file name, perhaps
+`unassigned`) is ignored (five probes and four corpus catalogs).
 
 ## Packed images
 

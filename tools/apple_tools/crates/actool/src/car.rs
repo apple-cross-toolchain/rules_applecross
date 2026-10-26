@@ -20,6 +20,8 @@ pub const ATTR_GAMUT: u16 = 24;
 
 pub const IDIOM_PHONE: u16 = 1;
 pub const IDIOM_PAD: u16 = 2;
+/// CarPlay.
+pub const IDIOM_CAR: u16 = 4;
 pub const IDIOM_WATCH: u16 = 5;
 /// The App Store's (`ios-marketing`) icon.
 pub const IDIOM_MARKETING: u16 = 6;
