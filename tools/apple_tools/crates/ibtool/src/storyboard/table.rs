@@ -41,6 +41,7 @@ fn check_table(table: Node) -> Result<(), String> {
         ("allowsSelection", Some("NO")), ("allowsMultipleSelection", Some("YES")), ("allowsSelectionDuringEditing", Some("YES")),
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("restorationIdentifier", None), ("id", None),
+        ("customClass", None), ("customModule", None), ("customModuleProvider", None),
     ])?;
     only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "searchBar", "prototypes", "sections", "connections", "constraints"])?;
     for v in children(table, "view") {
@@ -330,7 +331,19 @@ pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &st
         layout.push(("UIViewAutolayoutConstraints", own));
     }
     let values = table_values(nib, scene, name, n, f, &cells, 36, layout, None)?;
-    Ok(Object::new("UITableView", values))
+    swapped_table(nib, n, scene.module, values)
+}
+
+/// A table view, or its custom class swapped in for it after its values,
+/// as for a view (two probes).
+fn swapped_table(nib: &mut Nib, n: Node, module: Option<&str>, mut values: Vec<(&'static str, Value)>) -> Result<Object, String> {
+    if n.attribute("customClass").is_none() {
+        return Ok(Object::new("UITableView", values));
+    }
+    let class = runtime_class_name(n, module, "UITableView")?;
+    values.push(("UIClassName", nib.string(&class)));
+    values.push(("UIOriginalClassName", nib.string("UITableView")));
+    Ok(Object::new("UIClassSwapper", values))
 }
 
 /// A table view controller's view nib: its table, the root view, holding
@@ -491,7 +504,7 @@ pub(super) fn table_view_nib(
     if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
         return fail("runtime attributes, switches and accessibility settings in a table's header or footer are not supported by this ibtool");
     }
-    top.push(Value::New(Object::new("UITableView", values).named(root_name.clone())));
+    top.push(Value::New(swapped_table(&mut nib, table, module, values)?.named(root_name.clone())));
     objects.push(reference(root_name.clone()));
     if refresh.is_some() {
         objects.push(reference("refresh control"));
