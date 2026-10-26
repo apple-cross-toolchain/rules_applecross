@@ -1314,6 +1314,13 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             allowed.extend([("progress", None), ("progressViewStyle", Some("bar"))]);
             children_allowed.push("color");
         }
+        "pageControl" => {
+            allowed.extend([
+                ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("numberOfPages", None),
+                ("currentPage", None), ("hidesForSinglePage", Some("YES")),
+            ]);
+            children_allowed.push("color");
+        }
         _ => {
             allowed.extend([
                 ("hidesWhenStopped", Some("YES")),
@@ -1359,6 +1366,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         "slider" => &["minimumTrackTintColor", "maximumTrackTintColor", "thumbTintColor"],
         "stepper" => &["backgroundColor", "tintColor"],
         "progressView" => &["progressTintColor", "trackTintColor"],
+        "pageControl" => &["pageIndicatorTintColor", "currentPageIndicatorTintColor"],
         _ => &["color"],
     };
     if tag == "progressView" && n.attribute("progressViewStyle").is_some() && !colors.is_empty() {
@@ -1403,7 +1411,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     let priority = |k: &str| n.attribute(k).unwrap_or("250");
     let (h, v) = (priority("horizontalHuggingPriority"), priority("verticalHuggingPriority"));
     let default = if tag == "progressView" { ("250", "750") } else { ("750", "750") };
-    if tag == "slider" || (h, v) != default {
+    if tag == "slider" || tag == "pageControl" || (h, v) != default {
         values.push(("UIViewContentHuggingPriority", nib.string(&format!("{{{h}, {v}}}"))));
     }
     let resistance = (n.attribute("horizontalCompressionResistancePriority"), n.attribute("verticalCompressionResistancePriority"));
@@ -1500,6 +1508,28 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
                 values.push(("UIProgressViewStyle", Value::Int(1)));
             }
             "UIProgressView"
+        }
+        "pageControl" => {
+            // Its pages and current page, the current page's indicator tint
+            // and the others', and hiding for a single page (four probes;
+            // tints beside hiding aren't established).
+            let pages = n.attribute("numberOfPages").ok_or("a page control without a number of pages is not supported by this ibtool")?;
+            let pages = pages.parse::<i64>().map_err(|_| format!("numberOfPages=\"{pages}\" is not supported by this ibtool"))?;
+            let current = n.attribute("currentPage").map_or(Ok(0), str::parse::<i64>).map_err(|_| "a page control's current page is not a number")?;
+            values.push(("UINumberOfPages", Value::Int(pages)));
+            values.push(("UICurrentPage", Value::Int(current)));
+            if !colors.is_empty() && n.attribute("hidesForSinglePage").is_some() {
+                return fail("a page control's colours beside hiding for a single page are not supported by this ibtool");
+            }
+            for (key, value_key) in [("currentPageIndicatorTintColor", "UICurrentPageIndicatorTintColor"), ("pageIndicatorTintColor", "UIPageIndicatorTintColor")] {
+                if let Some(c) = child(n, "color", key) {
+                    values.push((value_key, color(nib, c)?));
+                }
+            }
+            if n.attribute("hidesForSinglePage").is_some() {
+                values.push(("UIHideForSinglePage", Value::Bool(true)));
+            }
+            "UIPageControl"
         }
         _ => {
             // The modern style and the legacy one.
@@ -3340,7 +3370,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Object::new(original, values)
             }
         }
-        "switch" | "slider" | "stepper" | "activityIndicatorView" | "progressView" => simple_control(nib, scene, n, &name, &f, values)?,
+        "switch" | "slider" | "stepper" | "activityIndicatorView" | "progressView" | "pageControl" => simple_control(nib, scene, n, &name, &f, values)?,
         "imageView" => {
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
