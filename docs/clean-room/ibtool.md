@@ -1193,7 +1193,8 @@ factor with a text style font scales the style's default size (Body and
 Headline 17, Callout 16, Subhead 15, Footnote 13, Caption1 12, Caption2 11,
 Title1 28, Title2 22, Title3 20), to a quarter point (19 probes).
 
-Switches, sliders, steppers and activity indicators (29 probes):
+Switches, sliders, steppers, activity indicators and progress views (37
+probes):
 - **Common.** Each is a non-opaque view: `UIDeepDrawRect`, hidden and tag,
   `UIAutoresizeSubviews`, mask 36, alpha, the constraint keys, then its
   hugging (each priority 250 unless given; a switch's, stepper's or
@@ -1222,6 +1223,15 @@ Switches, sliders, steppers and activity indicators (29 probes):
   without one, a modern style's tint is the secondary label colour. One
   hidden when stopped and not animating is `UIHidden`, once if it is
   hidden as well (two probes).
+- **A progress view** (`UIProgressView`, eight probes, one of the corpus's
+  storyboards). Xcode lays it out at least 4 points tall, a bar style one
+  point less than its frame (a frame 2 tall is 4, a bar 10 tall 9), from
+  the frame's top. Its hugging is left out when it is 250 across and 750
+  down, its default. Then `UIProgress` (a float) unless 0, the progress and
+  track tint colours (`UIProgressProgressTintColor`,
+  `UIProgressTrackTintColor`), and `UIProgressViewStyle` 1 for a bar.
+  Opaque ones, a bar under 4 points or with colours, and actions are
+  refused.
 
 User-defined runtime attributes of a view, the root view or a controller
 are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
