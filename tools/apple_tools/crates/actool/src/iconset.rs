@@ -424,7 +424,11 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         if i.as_object().is_some_and(|o| o.keys().all(|k| k == "filename" || (k == "unassigned" && i["unassigned"] == true))) {
             continue;
         }
+        // A single-size watch icon (universal, for watchOS, 1024 pt) is
+        // compiled as a watch icon of that size (one probe).
+        let single_watch = i["idiom"] == "universal" && i["platform"] == "watchos" && i["size"] == "1024x1024" && i.get("scale").is_none();
         let idiom = match i["idiom"].as_str() {
+            _ if single_watch => "watch",
             Some("iphone") => "iphone",
             Some("ipad") => "ipad",
             Some("watch") => "watch",
@@ -434,10 +438,12 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             other => return Err(format!("{filename}: the {} idiom is not supported by this actool in a multi-size icon set", other.unwrap_or("missing"))),
         };
         let size = i["size"].as_str().and_then(|s| s.split_once('x')).and_then(|(w, h)| (w == h).then(|| w.parse::<f64>().ok()).flatten()).ok_or_else(|| format!("{filename}: unsupported size"))?;
-        let scale = i["scale"].as_str().and_then(|s| s.strip_suffix('x')).and_then(|s| s.parse().ok()).ok_or_else(|| format!("{filename}: unsupported scale"))?;
+        let scale = if single_watch { 1 } else { i["scale"].as_str().and_then(|s| s.strip_suffix('x')).and_then(|s| s.parse().ok()).ok_or_else(|| format!("{filename}: unsupported scale"))? };
         // An icon generator's `expected-size` and `folder` are ignored (one
         // probe, Valdi's).
-        let allowed: &[&str] = if idiom == "watch" {
+        let allowed: &[&str] = if single_watch {
+            &["filename", "idiom", "size", "platform"]
+        } else if idiom == "watch" {
             &["filename", "idiom", "size", "scale", "role", "subtype", "expected-size", "folder"]
         } else {
             &["filename", "idiom", "size", "scale", "expected-size", "folder"]
@@ -473,6 +479,7 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         // sizes, as companion settings' are.
         let subtype = match (idiom, i["role"].as_str(), i["subtype"].as_str()) {
             (_, None, None) if idiom != "watch" => 0,
+            ("watch", None, None) if single_watch => 0,
             ("watch", Some("companionSettings"), None) => 0,
             ("watch", Some("appLauncher"), Some("38mm")) => 0,
             ("watch", Some("notificationCenter" | "quickLook"), Some("38mm")) => 320,
