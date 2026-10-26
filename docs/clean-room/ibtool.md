@@ -398,6 +398,45 @@ other values of the attributes these use, is refused. Observed:
   maps to its class swapper in `UIExternalObjectsTableForViewLoading`.
 - tvOS views have no `UIViewLargeContentStoredProperties`.
 
+## Stack views, content modes, named colours and gesture recognizers
+
+- A stack view's `axis` is `UIStackViewAxis` (horizontal 0, vertical 1),
+  `distribution` `UIStackViewDistribution` (fill 0, fillEqually 1,
+  fillProportionally 2, equalSpacing 3, equalCentering 4), `alignment`
+  `UIStackViewAlignment` (fill 0, leading or top 1, firstBaseline 2,
+  center 3, trailing or bottom 4), a missing `spacing` 0;
+  `baselineRelativeArrangement` sets `UIStackViewBaselineRelative`. Edge
+  insets are its `UIViewLayoutMargins` and set
+  `UIStackViewLayoutMarginsRelative`; `layoutMarginsRelativeArrangement`
+  without them changes nothing (16 probes).
+- A view's or label's `contentMode` is `UIContentMode` after
+  `UIAutoresizingMask`, UIViewContentMode's values, scaleToFill (0) left
+  out; Xcode compiles `topLeft` as scaleToFill, so it is refused (18
+  probes). A label is `UIUserInteractionDisabled` only when it says so.
+- A named colour (`<color name=...>`, defined by a `<namedColor>` in the
+  document's resources) is `UIDynamicCatalogName`,
+  `UIDynamicCatalogUseNibBundle` and its definition's components, unrounded
+  (sRGB and grey; three probes and one corpus storyboard). Colours in
+  Display P3 and calibrated RGB are converted to extended sRGB in floats,
+  through a matrix this ibtool doesn't reproduce exactly (it fits 24
+  colours to 2e-7): refused.
+- A scene's gesture recognizer (tap, pan or swipe; one per scene) is in
+  the controller's nib, after the storyboard placeholder, with
+  `UIGestureRecognizer.allowedTouchTypes` 15 and
+  `requiresExclusiveTouchType`, then a tap's `_imp` `UITapRecognizer`
+  (taps or touches when not 1), a pan's minimum and maximum touches and
+  `allowedScrollTypesMask` 0, a swipe's direction (left 2, up 4, down 8,
+  right left out). The controller's external objects map
+  `UpstreamPlaceholder-1` to it, before the controller's own placeholder
+  and the segues', which move up by one; `UITopLevelObjectsToKeepAliveFromStoryboard`
+  follows the segue templates; its action is an event connection without
+  a mask after the templates' outlets. In the view nib, each view that has
+  it (plain views, labels, image views, the root view) has a
+  `gestureRecognizers` `UIRuntimeOutletCollectionConnection` to the
+  placeholder (an `NSMutableArray`, `runtimeCollectionClassName`
+  `NSArray`, appending), before the outlets (13 probes). Two or more
+  recognizers in a scene are ordered in a way not established: refused.
+
 ## Navigation controllers
 
 A `<navigationController>` (its bar, a root view controller by a

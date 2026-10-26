@@ -169,8 +169,14 @@ const SYSTEM_COLORS: &[(&str, SystemColor)] = &[
 /// isn't exact, then the components as text (`%.3g`, alpha only when not 1).
 fn color_components(names: &[(&'static str, &'static str)], values: &[f64]) -> (Vec<(&'static str, Value)>, Vec<u8>) {
     let values: Vec<f64> = values.iter().map(|&x| significant_10(x)).collect();
+    exact_color_components(names, &values)
+}
+
+/// As `color_components`, without rounding: a named colour's components
+/// are kept as the document gives them.
+fn exact_color_components(names: &[(&'static str, &'static str)], values: &[f64]) -> (Vec<(&'static str, Value)>, Vec<u8>) {
     let mut keys = Vec::new();
-    for (&(key, double_key), &x) in names.iter().zip(&values) {
+    for (&(key, double_key), &x) in names.iter().zip(values) {
         keys.push((key, Value::Float(x as f32)));
         if (x as f32) as f64 != x {
             keys.push((double_key, Value::Double(x)));
@@ -366,6 +372,43 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
         return Ok(nib.system_color(name, sc));
     }
+    // A colour of the asset catalog, by name: its definition in the
+    // document's resources, marked as the catalog's.
+    if let Some(name) = n.attribute("name") {
+        only_attributes(n, &[("key", None), ("name", None)])?;
+        let key = format!("color:named:{name}");
+        if let Some(v) = nib.existing(&key) {
+            return Ok(v);
+        }
+        let definition = n
+            .document()
+            .descendants()
+            .find(|d| d.has_tag_name("namedColor") && d.attribute("name") == Some(name))
+            .and_then(|d| d.children().find(|c| c.has_tag_name("color")))
+            .ok_or_else(|| format!("named colour {name} without its definition in the document is not supported by this ibtool"))?;
+        let space = definition.attribute("customColorSpace").or_else(|| definition.attribute("colorSpace"));
+        let (count, components, text_key, text, space_code) = match space {
+            Some("sRGB") => {
+                only_attributes(definition, &[("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
+                let c = [number(attr(definition, "red")?)?, number(attr(definition, "green")?)?, number(attr(definition, "blue")?)?, number(attr(definition, "alpha")?)?];
+                let (keys, text) = exact_color_components(&RGB_KEYS, &c);
+                (4, keys, "NSRGB", text, 2)
+            }
+            Some("genericGamma22GrayColorSpace") => {
+                only_attributes(definition, &[("white", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
+                let c = [number(attr(definition, "white")?)?, number(attr(definition, "alpha")?)?];
+                let (keys, text) = exact_color_components(&GRAY_KEYS, &c);
+                (2, keys, "NSWhite", text, 4)
+            }
+            _ => return fail(format!("named colour {name} in this colour space is not supported by this ibtool")),
+        };
+        let name_value = nib.string(name);
+        let mut keys = vec![("UIDynamicCatalogName", name_value), ("UIDynamicCatalogUseNibBundle", Value::Bool(true)), ("UIColorComponentCount", Value::Int(count))];
+        keys.extend(components);
+        keys.push((text_key, Value::Data(text)));
+        keys.push(("NSColorSpace", Value::Int(space_code)));
+        return Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")));
+    }
     if !nib.color_matched {
         return unmatched_color(nib, n);
     }
@@ -537,6 +580,102 @@ fn extended_edges(vc: Node) -> Result<Option<i64>, String> {
     only_attributes(e, &[("key", None), ("top", Some("YES")), ("left", Some("YES")), ("bottom", Some("YES")), ("right", Some("YES"))])?;
     let mask = [("top", 1), ("left", 2), ("bottom", 4), ("right", 8)].iter().filter(|(k, _)| e.attribute(*k).is_some()).map(|(_, b)| b).sum();
     Ok((mask != 15).then_some(mask))
+}
+
+/// A view's `gestureRecognizers` outlet collection to its scene's
+/// recognizer, from its `<connections>`.
+fn gesture_outlets(scene: &mut Scene, n: Node, name: &str) -> Result<(), String> {
+    for c in children(n, "connections") {
+        only_children(c, &["outletCollection"])?;
+        for o in children(c, "outletCollection") {
+            only_attributes(o, &[("property", Some("gestureRecognizers")), ("destination", None), ("appends", Some("YES")), ("id", None)])?;
+            if scene.gesture.as_deref() != Some(attr(o, "destination")?) {
+                return fail("an outlet collection to anything but the scene's gesture recognizer is not supported by this ibtool");
+            }
+            scene.gesture_views.push(name.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// A scene's gesture recognizer (tap, pan or swipe), with the selectors of
+/// its actions on the controller.
+fn gesture_recognizer(nib: &mut Nib, r: Node, vc_id: &str) -> Result<(Object, Vec<String>), String> {
+    let count = |key: &str| -> Result<Option<i64>, String> {
+        match r.attribute(key) {
+            None | Some("1") => Ok(None),
+            Some(v) => v.parse().map(Some).map_err(|_| format!("{key}=\"{v}\" is not supported by this ibtool")),
+        }
+    };
+    let mut values = vec![("UIGestureRecognizer.allowedTouchTypes", Value::Int(15)), ("UIGestureRecognizer.requiresExclusiveTouchType", Value::Bool(true))];
+    let class = match r.tag_name().name() {
+        "tapGestureRecognizer" => {
+            only_attributes(r, &[("numberOfTapsRequired", None), ("numberOfTouchesRequired", None), ("id", None)])?;
+            let (taps, touches) = (count("numberOfTapsRequired")?, count("numberOfTouchesRequired")?);
+            if taps.is_some() && touches.is_some() {
+                return fail("a tap gesture recognizer with both its taps and touches set is not supported by this ibtool");
+            }
+            let mut imp = Vec::new();
+            if let Some(t) = taps {
+                imp.push(("UITapRecognizer.numberOfTapsRequired", Value::Int(t)));
+            }
+            if let Some(t) = touches {
+                imp.push(("UITapRecognizer.numberOfTouchesRequired", Value::Int(t)));
+            }
+            values.push(("UITapGestureRecognizer._imp", Value::New(Object::new("UITapRecognizer", imp))));
+            "UITapGestureRecognizer"
+        }
+        "panGestureRecognizer" => {
+            only_attributes(r, &[("minimumNumberOfTouches", None), ("maximumNumberOfTouches", None), ("id", None)])?;
+            if let Some(t) = count("minimumNumberOfTouches")? {
+                values.push(("UIPanGestureRecognizer.minimumNumberOfTouches", Value::Int(t)));
+            }
+            if let Some(t) = r.attribute("maximumNumberOfTouches") {
+                let t = t.parse().map_err(|_| format!("maximumNumberOfTouches=\"{t}\" is not supported by this ibtool"))?;
+                values.push(("UIPanGestureRecognizer.maximumNumberOfTouches", Value::Int(t)));
+            }
+            values.push(("UIPanGestureRecognizer.allowedScrollTypesMask", Value::Int(0)));
+            "UIPanGestureRecognizer"
+        }
+        "swipeGestureRecognizer" => {
+            only_attributes(r, &[("direction", None), ("id", None)])?;
+            // UISwipeGestureRecognizerDirection; right, the default, is
+            // left out.
+            match r.attribute("direction") {
+                None | Some("right") => {}
+                Some("left") => values.push(("UISwipeGestureRecognizer.direction", Value::Int(2))),
+                Some("up") => values.push(("UISwipeGestureRecognizer.direction", Value::Int(4))),
+                Some("down") => values.push(("UISwipeGestureRecognizer.direction", Value::Int(8))),
+                Some(other) => return fail(format!("swipe direction {other} is not supported by this ibtool")),
+            }
+            "UISwipeGestureRecognizer"
+        }
+        other => return fail(format!("<{other}> is not supported by this ibtool")),
+    };
+    let mut selectors = Vec::new();
+    for c in children(r, "connections") {
+        only_children(c, &["action"])?;
+        for a in children(c, "action") {
+            only_attributes(a, &[("selector", None), ("destination", None), ("id", None)])?;
+            if attr(a, "destination")? != vc_id {
+                return fail("a gesture recognizer's actions on anything but the scene's view controller are not supported by this ibtool");
+            }
+            selectors.push(attr(a, "selector")?.to_string());
+        }
+    }
+    if selectors.len() > 1 {
+        return fail("a gesture recognizer with more than one action is not supported by this ibtool");
+    }
+    let _ = nib;
+    Ok((Object::new(class, values), selectors))
+}
+
+/// A view's `contentMode`: UIViewContentMode (scaleToFill, 0, is left out).
+fn content_mode(name: &str) -> Result<i64, String> {
+    const MODES: [&str; 13] =
+        ["scaleToFill", "scaleAspectFit", "scaleAspectFill", "redraw", "center", "top", "bottom", "left", "right", "", "topRight", "bottomLeft", "bottomRight"];
+    // Xcode compiles topLeft as scaleToFill: refused.
+    MODES.iter().position(|m| !m.is_empty() && *m == name).map(|p| p as i64).ok_or_else(|| format!("contentMode=\"{name}\" is not supported by this ibtool"))
 }
 
 /// A system colour by name, as the table above has it.
@@ -841,6 +980,10 @@ struct Scene<'a> {
     containers: Vec<(String, String)>,
     /// Controls' outlets to the controller: (label, the control).
     control_outlets: Vec<(String, String)>,
+    /// The scene's gesture recognizer's id, and the views whose
+    /// `gestureRecognizers` it is.
+    gesture: Option<String>,
+    gesture_views: Vec<String>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -990,13 +1133,14 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
     let object = match n.tag_name().name() {
         "label" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", Some("left")),
+                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
                 ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections"])?;
+            gesture_outlets(scene, n, &name)?;
             ignored_autoresizing_mask(n)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
@@ -1010,10 +1154,15 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 _ => return fail("a label needs one text colour or nil"),
             };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
-            values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
-            values.push(("UIContentMode", Value::Int(7)));
+            let mode = content_mode(n.attribute("contentMode").unwrap_or("left"))?;
+            if mode != 0 {
+                values.push(("UIContentMode", Value::Int(mode)));
+            }
             if n.attribute("clipsSubviews").is_some() {
                 values.push(("UIClipsToBounds", Value::Bool(true)));
             }
@@ -1411,10 +1560,41 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
         }
         "stackView" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", Some("vertical")), ("spacing", None),
+                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", Some("vertical")), ("distribution", None), ("alignment", None),
+                ("spacing", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "subviews"])?;
+            only_children(n, &["rect", "subviews", "edgeInsets"])?;
+            let vertical = n.attribute("axis").is_some();
+            let distribution = match n.attribute("distribution") {
+                None | Some("fill") => 0,
+                Some("fillEqually") => 1,
+                Some("fillProportionally") => 2,
+                Some("equalSpacing") => 3,
+                Some("equalCentering") => 4,
+                Some(other) => return fail(format!("stack view distribution {other} is not supported by this ibtool")),
+            };
+            let alignment = match (n.attribute("alignment"), vertical) {
+                (None | Some("fill"), _) => 0,
+                (Some("leading"), true) | (Some("top"), false) => 1,
+                (Some("firstBaseline"), false) => 2,
+                (Some("center"), _) => 3,
+                (Some("trailing"), true) | (Some("bottom"), false) => 4,
+                (Some(other), _) => return fail(format!("stack view alignment {other} is not supported by this ibtool here")),
+            };
+            // Edge insets are its layout margins, which it then arranges
+            // within; without them the arrangement setting changes nothing.
+            let margins = match child(n, "edgeInsets", "layoutMargins") {
+                Some(e) => {
+                    only_attributes(e, &[("key", None), ("top", None), ("left", None), ("bottom", None), ("right", None)])?;
+                    if n.attribute("layoutMarginsRelativeArrangement").is_none() {
+                        return fail("a stack view's edge insets without layout-margins-relative arrangement are not supported by this ibtool");
+                    }
+                    let side = |k| e.attribute(k).map(number).transpose().map(|v| v.unwrap_or(0.0));
+                    Some([side("top")?, side("left")?, side("bottom")?, side("right")?])
+                }
+                None => None,
+            };
             let mut arranged = Vec::new();
             for s in children(n, "subviews") {
                 for c in s.children().filter(|c| c.is_element()) {
@@ -1432,16 +1612,16 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
-            values.push(("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])));
+            values.push(("UIViewLayoutMargins", doubles(&margins.unwrap_or([0.0; 4]))));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIStackViewArrangedSubviews", nib.array("NSArray", refs)));
-            values.push(("UIStackViewAxis", Value::Int(1)));
-            values.push(("UIStackViewDistribution", Value::Int(0)));
-            values.push(("UIStackViewAlignment", Value::Int(0)));
-            values.push(("UIStackViewSpacing", Value::Double(number(attr(n, "spacing")?)?)));
-            values.push(("UIStackViewBaselineRelative", Value::Bool(false)));
-            values.push(("UIStackViewLayoutMarginsRelative", Value::Bool(false)));
+            values.push(("UIStackViewAxis", Value::Int(vertical as i64)));
+            values.push(("UIStackViewDistribution", Value::Int(distribution)));
+            values.push(("UIStackViewAlignment", Value::Int(alignment)));
+            values.push(("UIStackViewSpacing", Value::Double(n.attribute("spacing").map(number).transpose()?.unwrap_or(0.0))));
+            values.push(("UIStackViewBaselineRelative", Value::Bool(n.attribute("baselineRelativeArrangement").is_some())));
+            values.push(("UIStackViewLayoutMarginsRelative", Value::Bool(margins.is_some())));
             Object::new("UIStackView", values)
         }
         "view" | "containerView" => {
@@ -1462,10 +1642,11 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 scene.containers.push((placeholder, name.clone()));
             } else {
                 only_attributes(n, &[
-                    ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                    ("contentMode", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
                     ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                 ])?;
-                only_children(n, &["rect", "autoresizingMask", "color", "subviews", "constraints"])?;
+                only_children(n, &["rect", "autoresizingMask", "color", "subviews", "constraints", "connections"])?;
+                gesture_outlets(scene, n, &name)?;
             }
             let mut inner = Vec::new();
             for s in children(n, "subviews") {
@@ -1495,6 +1676,10 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 None => 36,
             };
             values.push(("UIAutoresizingMask", Value::Int(mask)));
+            let mode = content_mode(n.attribute("contentMode").unwrap_or("scaleToFill"))?;
+            if mode != 0 {
+                values.push(("UIContentMode", Value::Int(mode)));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -1522,7 +1707,8 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("image", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "color", "constraints"])?;
+            only_children(n, &["rect", "color", "constraints", "connections"])?;
+            gesture_outlets(scene, n, &name)?;
             if n.attribute("userInteractionEnabled").is_none() {
                 return fail("image views with user interaction are not supported by this ibtool");
             }
@@ -1945,7 +2131,7 @@ fn embedded_controller(
         (None, None) => None,
     };
     let view_segues: Vec<Node> = root.view_segues.iter().filter_map(|id| vc.descendants().find(|d| d.attribute("id") == Some(id.as_str()))).collect();
-    let mut templates = segue::templates(nib, name, root.upstream_used, &view_segues, &root.own_segues, nib_names)?;
+    let mut templates = segue::templates(nib, name, root.upstream_used, 1, &view_segues, &root.own_segues, nib_names)?;
     // An empty table is one object however many controllers have one.
     let external = if templates.external.is_empty() {
         nib.shared("empty dictionary".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))
@@ -2294,7 +2480,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
         only_children(objects_node, &[
             "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
-            "exit", "viewControllerPlaceholder",
+            "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer",
         ])?;
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
@@ -2387,13 +2573,25 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("a table or collection view controller with layout guides is not supported by this ibtool");
         }
         if !is_list {
-            only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints"])?;
+            only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints", "connections"])?;
             only_attributes(view, &[("key", Some("view")), ("contentMode", Some("scaleToFill")), ("id", None)])?;
         }
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), containers: Vec::new(), control_outlets: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), containers: Vec::new(), control_outlets: Vec::new(), gesture: None, gesture_views: Vec::new(), guides: Vec::new() };
+        // One gesture recognizer, which the view nib reaches through the
+        // first placeholder.
+        let recognizers: Vec<Node> = objects_node.children().filter(|c| c.tag_name().name().ends_with("GestureRecognizer")).collect();
+        if recognizers.len() > 1 {
+            return fail("more than one gesture recognizer in a scene is not supported by this ibtool");
+        }
+        let recognizer = recognizers.first().copied();
+        if recognizer.is_some() && is_list {
+            return fail("a gesture recognizer in a table or collection view controller's scene is not supported by this ibtool");
+        }
+        scene.gesture = recognizer.map(|r| attr(r, "id")).transpose()?.map(str::to_string);
+        let gesture = usize::from(recognizer.is_some());
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -2496,8 +2694,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let upstream_used = !vc_outlets.is_empty() || view.descendants().any(|d| d.has_tag_name("action") || d.has_tag_name("outlet"));
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
+            if gesture == 1 {
+                top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "gesture"));
+                objects.push(reference("gesture"));
+            }
             if upstream_used {
-                top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
+                top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", 1 + gesture), "upstream"));
                 objects.push(reference("upstream"));
             }
 
@@ -2511,8 +2713,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             // Each control's segue has a placeholder of its own, after the
             // controller's.
+            gesture_outlets(&mut scene, view, &root_name)?;
+            if recognizer.is_some() && scene.gesture_views.is_empty() {
+                return fail("a gesture recognizer no view has is not supported by this ibtool");
+            }
             for i in 0..scene.segues.len() {
-                let n = i + 1 + usize::from(upstream_used);
+                let n = i + 1 + gesture + usize::from(upstream_used);
                 let name = format!("upstream segue {i}");
                 top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{n}"), &name));
                 objects.push(reference(name));
@@ -2664,8 +2870,24 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
             outlets.extend(scene.control_outlets.iter().map(|(l, v)| (l.as_str(), v.as_str(), "upstream")));
             outlets.sort_by(|a, b| a.0.cmp(b.0));
+            // A view's gesture recognizers are an outlet collection, before
+            // the outlets.
+            outlets.splice(0..0, scene.gesture_views.iter().map(|v| ("gestureRecognizers", v.as_str(), "")));
             for (label, source, destination) in outlets {
-                connections.push(outlet(&mut nib, label, source, destination));
+                if destination.is_empty() {
+                    let label = nib.string(label);
+                    let collection = nib.array("NSMutableArray", vec![reference("gesture")]);
+                    let class = nib.string("NSArray");
+                    connections.push(Value::New(Object::new("UIRuntimeOutletCollectionConnection", vec![
+                        ("UILabel", label),
+                        ("UISource", reference(source)),
+                        ("UIDestination", collection),
+                        ("runtimeCollectionClassName", class),
+                        ("addsContentToExistingCollection", Value::Bool(true)),
+                    ])));
+                } else {
+                    connections.push(outlet(&mut nib, label, source, destination));
+                }
             }
             // By event, then selector.
             scene.actions.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
@@ -2701,6 +2923,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let identified = vc.attribute("storyboardIdentifier").is_some();
         let segue_destination = reached.contains(vc_id);
         let embedded = navs.iter().any(|n| n.2 == vc_id && n.3) || held_children.contains(vc_id) || in_held_nav(vc_id);
+        let embedded_here = embedded;
         let swapped = is_initial || identified || vc.attribute("customClass").is_some();
         let view_segues: Vec<Node> = scene.segues.iter().filter_map(|id| view.descendants().find(|d| d.attribute("id") == Some(id.as_str()))).collect();
 
@@ -2720,8 +2943,23 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if let Some(item) = child(vc, "navigationItem", "navigationItem") {
             swapper.push(("UINavigationItem", navigation_item(&mut vnib, item)?));
         }
-        let templates = segue::templates(&mut vnib, "controller", upstream_used, &view_segues, &own_segues, &nib_names)?;
-        let external = vnib.array("NSDictionary", templates.external);
+        let templates = segue::templates(&mut vnib, "controller", upstream_used, 1 + gesture, &view_segues, &own_segues, &nib_names)?;
+        let mut external = templates.external;
+        let recognizer = match recognizer {
+            Some(r) => {
+                if embedded_here {
+                    return fail("a gesture recognizer in an embedded controller's scene is not supported by this ibtool");
+                }
+                if extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+                    return fail("a gesture recognizer with these controller settings is not supported by this ibtool");
+                }
+                let (object, selectors) = gesture_recognizer(&mut vnib, r, vc_id)?;
+                external.splice(0..0, [vnib.string("UpstreamPlaceholder-1"), reference("gesture")]);
+                Some((Value::New(object.named("gesture")), selectors))
+            }
+            None => None,
+        };
+        let external = vnib.array("NSDictionary", external);
         swapper.push(("UIExternalObjectsTableForViewLoading", external));
         swapper.push(("UINibName", vnib.string(&view_nib_name)));
         if let Some(identifier) = vc.attribute("storyboardIdentifier") {
@@ -2734,6 +2972,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         if let Some(array) = templates.array {
             swapper.push(("UIStoryboardSegueTemplates", array));
+        }
+        if recognizer.is_some() {
+            swapper.push(("UITopLevelObjectsToKeepAliveFromStoryboard", vnib.array("NSArray", vec![reference("gesture")])));
         }
         if let Some(edges) = extended_edges(vc)? {
             swapper.push(("UIKeyEdgesForExtendedLayout", Value::Int(edges)));
@@ -2756,7 +2997,21 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         for t in &templates.outlets {
             connections.push(outlet(&mut vnib, "viewController", t, "controller"));
         }
-        let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+        let mut top = vec![owner, responder, storyboard];
+        let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard")];
+        if let Some((object, selectors)) = recognizer {
+            top.push(object);
+            objects.push(reference("gesture"));
+            for selector in selectors {
+                let label = vnib.string(&selector);
+                connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
+                    ("UILabel", label),
+                    ("UISource", reference("gesture")),
+                    ("UIDestination", reference("controller")),
+                ])));
+            }
+        }
+        objects.push(reference("controller"));
         if child(vc, "navigationItem", "navigationItem").is_some() {
             objects.push(reference("navigation item"));
         }
@@ -2764,7 +3019,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             objects.push(reference("tab bar item"));
         }
         objects.extend(templates.objects);
-        let vc_root = root_object(&mut vnib, vec![owner, responder, storyboard, controller], objects, connections);
+        top.push(controller);
+        let vc_root = root_object(&mut vnib, top, objects, connections);
         if embedded {
             roots.insert(vc_id, RootController {
                 vc,

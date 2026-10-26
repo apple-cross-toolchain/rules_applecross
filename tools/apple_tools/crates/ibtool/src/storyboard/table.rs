@@ -364,6 +364,8 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         segues: Vec::new(),
         containers: Vec::new(),
         control_outlets: Vec::new(),
+        gesture: None,
+        gesture_views: Vec::new(),
         guides: Vec::new(),
     };
     let cf = frame(content)?;
