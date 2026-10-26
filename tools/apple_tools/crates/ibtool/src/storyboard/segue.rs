@@ -221,10 +221,11 @@ fn unwind_template(nib: &mut Nib, s: Node) -> Result<Object, String> {
 /// A controller's segue templates as one of its nibs (its own, or its
 /// navigation controller's) holds them.
 pub(super) struct Templates {
-    /// The external objects table for its view's placeholders: the
-    /// controller's (`UpstreamPlaceholder-1`) if its view refers to it, then
-    /// each control's segue template, in the view's order.
-    pub external: Vec<Value>,
+    /// The external objects table for its view's placeholders, each with
+    /// its number: the controller's (`UpstreamPlaceholder-1`) if its view
+    /// refers to it, then each control's segue template, in the view's
+    /// order. [`external_table`] lays it out.
+    pub external: Vec<(usize, Value)>,
     /// `UIStoryboardSegueTemplates`: the controller's own segues, then its
     /// controls', then its bar button items', each in document order.
     pub array: Option<Value>,
@@ -236,6 +237,14 @@ pub(super) struct Templates {
     /// The bar button items' `perform:` actions: (item, template), in the
     /// order of the templates' outlets.
     pub performs: Vec<(String, String)>,
+}
+
+/// An external objects table's entries, keyed by their placeholders'
+/// names in string order: `UpstreamPlaceholder-10` before `-2` (RxSwift's
+/// example, 16 placeholders).
+pub(super) fn external_table(nib: &mut Nib, mut entries: Vec<(usize, Value)>) -> Vec<Value> {
+    entries.sort_by_key(|e| format!("UpstreamPlaceholder-{}", e.0));
+    entries.into_iter().flat_map(|(n, v)| [nib.string(&format!("UpstreamPlaceholder-{n}")), v]).collect()
 }
 
 /// The templates of a controller (`controller`, its object's name in the
@@ -251,8 +260,7 @@ pub(super) fn templates(
     // recognizer's comes before it).
     let mut external = Vec::new();
     if upstream_used {
-        external.push(nib.string(&format!("UpstreamPlaceholder-{first}")));
-        external.push(reference(controller));
+        external.push((first, reference(controller)));
     }
     // The external objects in placeholder order, the rest as listed.
     let mut by_placeholder: Vec<&(usize, Node)> = view_segues.iter().collect();
@@ -260,10 +268,9 @@ pub(super) fn templates(
     let mut classes = HashMap::new();
     for (i, s) in by_placeholder {
         let name = format!("segue {i}");
-        external.push(nib.string(&format!("UpstreamPlaceholder-{}", i + first + usize::from(upstream_used))));
         let t = template(nib, *s, names)?;
         classes.insert(*i, t.class);
-        external.push(Value::New(t.named(name)));
+        external.push((i + first + usize::from(upstream_used), Value::New(t.named(name))));
     }
     let view_classes: Vec<(&'static str, String)> = view_segues.iter().map(|(i, _)| (classes[i], format!("segue {i}"))).collect();
     let mut outlets: Vec<(&'static str, String)> = Vec::new();
