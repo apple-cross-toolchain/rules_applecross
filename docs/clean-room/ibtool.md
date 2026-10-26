@@ -362,7 +362,10 @@ other values of the attributes these use, is refused. Observed:
   `UICenter` when the centre is the origin. A label, button or plain view
   without a frame, or with an all-zero one, is 1000x1000 at the origin,
   or has no size when the document says `fixedFrame="YES"` (18 probes,
-  three corpus storyboards). An empty `<toolbarItems/>` on a view
+  three corpus storyboards); so is an image view or a segmented control
+  (four probes, one corpus storyboard), an image view's `fixedFrame`
+  otherwise changing nothing. An image view's `UIAutoresizingMask` is its
+  document's mask, whether or not it translates it (three probes). An empty `<toolbarItems/>` on a view
   controller changes nothing (one probe).
 - A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
   (or where it would be): wordWrap 0, characterWrap 1, clip 2,
@@ -573,7 +576,8 @@ when it is initial or identified. Observed with 25 probes:
   storyboard). A table view controller root is a `UITableViewController`, with
   `UIClearsSelectionOnViewWillAppear` last (four probes).
 - The bar is laid out by Xcode, not the document: bounds 0x54 centred 27
-  below its frame's top, mask 2, hugging `{250, 250}`, zero layout margins
+  below its frame's top (the root view's top without a frame, one probe
+  and one corpus storyboard), mask 2, hugging `{250, 250}`, zero layout margins
   (directional), `UIViewInsetsLayoutMarginsFromSafeArea` 0 when the
   document turns it off, `UIIsLocked`, `UIItems` (the root's item),
   `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1;
