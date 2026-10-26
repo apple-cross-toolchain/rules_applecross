@@ -238,7 +238,9 @@ fn collection_values(
         }
         values.push(("UICollectionViewSupplementaryViewNibDict", nib.array("NSMutableDictionary", nibs)));
     }
-    values.push(("UICollectionViewPrefetchingEnabled", Value::Bool(true)));
+    // Prefetching, which tvOS leaves off (three probes and a corpus
+    // storyboard).
+    values.push(("UICollectionViewPrefetchingEnabled", Value::Bool(nib.platform != Platform::Tvos)));
     Ok((values, estimated))
 }
 

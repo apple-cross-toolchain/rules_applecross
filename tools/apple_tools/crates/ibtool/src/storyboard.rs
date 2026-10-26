@@ -1322,6 +1322,40 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
     Ok(nib.shared(key, || Object::new("UIFont", values).with_fallback("NSFont")))
 }
 
+/// A tvOS button's default font, whatever its type: the Body text style,
+/// at its size category (3), not as a label's text style (four probes and
+/// a corpus storyboard).
+fn tvos_button_font(nib: &mut Nib) -> Value {
+    if let Some(v) = nib.existing("font:tvOS button") {
+        return v;
+    }
+    let name = nib.string(".SFUI-Medium");
+    let attributes = vec![
+        nib.string("NSCTFontSizeCategoryAttribute"),
+        nib.int_number(3),
+        nib.string("NSCTFontUIUsageAttribute"),
+        nib.string("UICTFontTextStyleBody"),
+        nib.string("NSFontSizeAttribute"),
+        nib.double_number(29.0),
+    ];
+    let attributes = nib.array("NSDictionary", attributes);
+    let descriptor = Value::New(Object::new("UIFontDescriptor", vec![("UIFontDescriptorAttributes", attributes), ("UIFontDescriptorOptions", Value::Int(2147517444))]));
+    let ns_name = nib.string(".SFUI-Medium");
+    let values = vec![
+        ("UIFontName", name),
+        ("UIFontDescriptor", descriptor),
+        ("UIFontPointSize", Value::Double(29.0)),
+        ("UIFontTextStyleForScaling", Value::Nil),
+        ("UIFontPointSizeForScaling", Value::Double(0.0)),
+        ("UIFontMaximumPointSizeAfterScaling", Value::Double(0.0)),
+        ("UIFontTraits", Value::Int(0)),
+        ("UISystemFont", Value::Bool(true)),
+        ("NSName", ns_name),
+        ("NSSize", Value::Double(29.0)),
+    ];
+    nib.shared("font:tvOS button".into(), || Object::new("UIFont", values).with_fallback("NSFont"))
+}
+
 #[derive(Clone, Copy)]
 struct Frame {
     x: f64,
@@ -3793,8 +3827,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             // A custom button's default font is larger.
             let default_size = if button_type.is_some() { 15.0 } else { 18.0 };
-            if configuration.is_none() {
-                values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), Some(default_size))?));
+            let given = child(n, "fontDescription", "fontDescription");
+            if configuration.is_none() && nib.platform == Platform::Tvos {
+                if given.is_some() {
+                    return fail("a tvOS button's font is not supported by this ibtool");
+                }
+                values.push(("UIFont", tvos_button_font(nib)));
+            } else if configuration.is_none() {
+                values.push(("UIFont", font(nib, given, Some(default_size))?));
             }
             // Its insets: top, left, bottom and right from the document's
             // minimum y and x and maximum y and x.
@@ -5165,11 +5205,11 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: Option<&str>, dele
         values.push(("UITintColor", color(nib, tint)?));
     }
     let hugging = nib.string("{250, 250}");
-    values.extend([
-        ("UIViewContentHuggingPriority", hugging),
-        ("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])),
-        ("UIViewLayoutMarginsAreDirectional", Value::Bool(true)),
-    ]);
+    values.push(("UIViewContentHuggingPriority", hugging));
+    // No layout margins on tvOS (two probes and a corpus storyboard).
+    if nib.platform != Platform::Tvos {
+        values.extend([("UIViewLayoutMargins", doubles(&[0.0, 0.0, 0.0, 0.0])), ("UIViewLayoutMarginsAreDirectional", Value::Bool(true))]);
+    }
     if bar.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
         values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
     }

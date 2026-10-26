@@ -609,7 +609,17 @@ other values of the attributes these use, is refused. Observed:
 - A view nib that refers to its controller (an outlet into it, an action
   to it) has an `UpstreamPlaceholder-1` proxy, which the controller's nib
   maps to its class swapper in `UIExternalObjectsTableForViewLoading`.
-- tvOS views have no `UIViewLargeContentStoredProperties`.
+- tvOS views have no `UIViewLargeContentStoredProperties`. A tvOS button's
+  font is, whatever its type, the Body text style at size category 3:
+  `.SFUI-Medium` 29 with a descriptor of `NSCTFontSizeCategoryAttribute`
+  3, `NSCTFontUIUsageAttribute` `UICTFontTextStyleBody` and the size,
+  options 2147517444, not as a label's text style (four probes and a
+  corpus storyboard); one with a font of its own is refused. A tvOS
+  collection view's `UICollectionViewPrefetchingEnabled` is false unless
+  it says `prefetchingEnabled="YES"` (three probes and a corpus
+  storyboard; the attribute is refused). A tvOS navigation bar has no
+  `UIViewLayoutMargins` or `UIViewLayoutMarginsAreDirectional` (two
+  probes and a corpus storyboard).
 
 ## Stack views, content modes, named colours and gesture recognizers
 
