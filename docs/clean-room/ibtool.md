@@ -478,6 +478,28 @@ when it is initial or identified. Observed with 25 probes:
   Other bar settings, other segues and controllers nothing loads are
   refused.
 
+A navigation item's left and right bar button items are its
+`UILeftBarButtonItem` and `UIRightBarButtonItem`, after its title, and each
+alone in `UILeftBarButtonItems` and `UIRightBarButtonItems`, around
+`UICenterItemGroups`. An item is `UIEnabled`, then for a system item
+`UIIsSystemItem` and `UISystemItem` (UIBarButtonSystemItem's numbering
+by the item's name, but `close` is 0) and for a space `UIHidesSharedBG`,
+then `UIStyle` (1 with no style, 2 for done, none for plain), then its
+`UITitle`. The items follow the controller's segue templates in its nib's
+objects (its own nib's, or its navigation controller's).
+- **Actions.** An item's action on its controller is an event connection
+  without a mask.
+- **Segues.** An item's segue is a template in the controller's nib, after
+  its own and its view's in the templates array and objects, with a
+  `perform:` event connection from the item.
+- **Order.** These connections come after the templates' outlets, by
+  selector: actions with one selector the right item's first, and the
+  `perform:`s in the order of their templates' outlets.
+
+Bar button items in a tab or split view controller's children, beside a
+tab bar item or a gesture recognizer, and with images, are refused (46
+probes).
+
 ## Tab bar controllers
 
 A `<tabBarController>` (its tab bar, children by `viewControllers`
