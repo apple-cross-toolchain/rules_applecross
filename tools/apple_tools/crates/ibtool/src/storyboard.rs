@@ -3216,6 +3216,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
                 ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")),
                 ("fixedFrame", Some("YES")), ("catalog", Some("system")), ("id", None),
+                ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
@@ -3239,10 +3240,17 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
-            values.push(("UIOpaque", Value::Bool(true)));
+            // Not opaque, it leaves `UIOpaque` out; multiple touch before
+            // the autoresizing keys (Flutter's accessibility launch screen).
+            if n.attribute("opaque").is_none() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
             hidden_and_tag(&mut values, n)?;
             if n.attribute("userInteractionEnabled").is_some() {
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
+            if n.attribute("multipleTouchEnabled").is_some() {
+                values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             // Its autoresizing mask as given, whether or not it translates
@@ -4757,6 +4765,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 Frame { x: origin.as_ref().map_or(0.0, |o| o.x), y: origin.as_ref().map_or(0.0, |o| o.y), w, h }
             }
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
+            // Without a frame (and no device), 1000x1000 at the origin, as
+            // a subview without one is (Flutter's accessibility launch
+            // screen).
+            (false, false, _, _) if child(view, "rect", "frame").is_none() => Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 },
             (false, _, _, _) => frame(view)?,
         };
         if is_list && !vc_collections.is_empty() {
@@ -4775,7 +4787,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // Laid out at another size than its frame's, the root view resizes
             // its autoresizing subviews: only those whose masks keep their
             // frames (fixed left and top margins, size) are established.
-            let document = frame(view)?;
+            let document = if child(view, "rect", "frame").is_none() && !has_device { Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 } } else { frame(view)? };
             if (f.w, f.h) != (document.w, document.h) {
                 for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
                     if s.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {

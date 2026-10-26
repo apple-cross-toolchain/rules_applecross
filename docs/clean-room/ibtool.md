@@ -306,7 +306,11 @@ other values of the attributes these use, is refused. Observed:
   `UIViewInsetsLayoutMarginsFromSafeArea` 0, when turned off, comes after
   its compression resistance, before its semantic content attribute (two
   probes).
-- A `<device>` without an orientation is portrait (one probe).
+- A `<device>` without an orientation is portrait (one probe). Without a
+  device, a root view without a frame is 1000x1000 at the origin, as a
+  subview without one is; an image view with `opaque="NO"` leaves
+  `UIOpaque` out, and `multipleTouchEnabled` is `UIMultipleTouchEnabled`
+  before its autoresizing keys (Flutter's accessibility launch screen).
 - With a `<device>`, the root view is laid out at the device's size (or
   its freeform size) at its frame's origin (a view below an opaque bar is
   at y 64; eight probes, with simulated bars changing nothing),
