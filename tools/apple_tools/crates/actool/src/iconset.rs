@@ -401,7 +401,13 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         };
         let size = i["size"].as_str().and_then(|s| s.split_once('x')).and_then(|(w, h)| (w == h).then(|| w.parse::<f64>().ok()).flatten()).ok_or_else(|| format!("{filename}: unsupported size"))?;
         let scale = i["scale"].as_str().and_then(|s| s.strip_suffix('x')).and_then(|s| s.parse().ok()).ok_or_else(|| format!("{filename}: unsupported scale"))?;
-        let allowed: &[&str] = if idiom == "watch" { &["filename", "idiom", "size", "scale", "role", "subtype"] } else { &["filename", "idiom", "size", "scale"] };
+        // An icon generator's `expected-size` and `folder` are ignored (one
+        // probe, Valdi's).
+        let allowed: &[&str] = if idiom == "watch" {
+            &["filename", "idiom", "size", "scale", "role", "subtype", "expected-size", "folder"]
+        } else {
+            &["filename", "idiom", "size", "scale", "expected-size", "folder"]
+        };
         if i.as_object().is_some_and(|o| o.keys().any(|k| !allowed.contains(&k.as_str()))) {
             return Err(format!("{filename}: icon set entries with other properties are not supported by this actool"));
         }

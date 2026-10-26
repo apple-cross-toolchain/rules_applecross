@@ -173,6 +173,9 @@ icons and the partial Info.plist are the plain icon's. Other appearances are
 refused (four probes and Chromium's legacy icons, equivalent but for the
 appearance blocks' order).
 
+An icon set entry's `expected-size` and `folder`, an icon generator's,
+are ignored (one probe, Valdi's).
+
 Building for iOS without `--include-all-app-icons` (refused, as is
 `--alternate-app-icon`), Xcode ignores the app icon sets `--app-icon`
 doesn't name, and all of them without `--app-icon`: the outputs are as if
@@ -632,7 +635,8 @@ and keys not above. In the 350-catalog comparison 13 more catalogs matched:
 8 byte-identical and 5 matching but for the appearance blocks' order.
 
 A colour may refer to a system colour (`"reference"`, with platform
-universal or ios): its rendition holds the colour as Xcode resolves it for
+universal or ios, or osx, which Xcode compiles for iOS the same way, one
+probe): its rendition holds the colour as Xcode resolves it for
 the appearance (a table of the 39 it knows, from one probe of each in each
 appearance; light is resolved as dark and high-contrast light as
 high-contrast dark, all 39 checked), with a reference flag (1) in the byte
