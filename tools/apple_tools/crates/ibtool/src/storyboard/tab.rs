@@ -39,7 +39,7 @@ pub(super) fn tab_bar_item(nib: &mut Nib, controller: Node, name: &str) -> Resul
     only_attributes(
         item,
         &[
-            ("key", Some("tabBarItem")), ("title", None), ("image", None), ("selectedImage", None), ("largeContentSizeImage", None), ("systemItem", None),
+            ("key", Some("tabBarItem")), ("title", None), ("image", None), ("selectedImage", None), ("largeContentSizeImage", None), ("systemItem", None), ("catalog", Some("system")),
             ("tag", None), ("id", None),
         ],
     )?;
@@ -78,8 +78,13 @@ pub(super) fn tab_bar_item(nib: &mut Nib, controller: Node, name: &str) -> Resul
     if let Some(title) = item.attribute("title") {
         values.push(("UITitle", nib.text(attr(item, "id")?, "title", title)));
     }
+    // A system symbol as an image view's (one probe); beside other images
+    // it is refused.
+    if item.attribute("catalog").is_some() && (item.attribute("image").is_none() || item.attribute("selectedImage").is_some() || item.attribute("largeContentSizeImage").is_some()) {
+        return fail("a tab bar item's system catalog beside a selected or large image, or without an image, is not supported by this ibtool");
+    }
     if let Some(image) = item.attribute("image") {
-        values.push(("UIImage", nib.image(image)));
+        values.push(("UIImage", nib.image_in(image, item.attribute("catalog"))?));
     }
     if let Some(image) = item.attribute("selectedImage") {
         values.push(("UISelectedTemplateImage", nib.image(image)));

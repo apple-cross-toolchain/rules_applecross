@@ -675,8 +675,12 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
     if (style != 0) != detail_label.is_some() || (cell.attribute("style").is_some() && text_label.is_none()) {
         return fail("a cell style without its labels is not supported by this ibtool");
     }
+    // Its mask, when it has one, after `UIAutoresizeSubviews` (three
+    // probes, prototype and static cells).
+    let mut mask = 0;
     for m in children(cell, "autoresizingMask") {
-        if autoresizing_mask(m)? != 0 || m.has_children() {
+        mask = autoresizing_mask(m)?;
+        if m.has_children() {
             return fail("a cell with an autoresizing mask is not supported by this ibtool");
         }
     }
@@ -824,6 +828,9 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
         values.push(("UIDidEncodeCompatibilityBackgroundColor", Value::Bool(true)));
     }
     values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIOpaque", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+    if mask != 0 {
+        values.push(("UIAutoresizingMask", Value::Int(mask)));
+    }
     if cell.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }

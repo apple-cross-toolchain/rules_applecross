@@ -2142,7 +2142,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         "visualEffectView" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
-                ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("userInteractionEnabled", Some("NO")),
+                ("id", None),
             ])?;
             only_children(n, &["rect", "view", "blurEffect", "constraints", "userDefinedRuntimeAttributes"])?;
             let pairs = runtime_attributes(nib, n, &name)?;
@@ -2211,6 +2212,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             cv.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut cv);
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            // Turned off, after `UIDeepDrawRect` (one probe).
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             values.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
@@ -2326,8 +2331,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("left")),
                 ("contentVerticalAlignment", Some("top")), ("segmentControlStyle", Some("plain")), ("selectedSegmentIndex", None),
-                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("fixedFrame", Some("YES")), ("id", None),
             ])?;
+            // `fixedFrame` changes nothing beside a frame (one probe).
             only_children(n, &["rect", "segments", "constraints", "connections"])?;
             for c in children(n, "connections") {
                 only_children(c, &["action"])?;
@@ -2591,8 +2597,34 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(text) = text {
                 // In `Base.lproj` its text is localizable as `<id>.text`, the
                 // attributed text's string its development value (one probe).
-                values.push(("UIText", nib.text(attr(n, "id")?, "text", &text)));
-                let string = nib.string(&text);
+                // Text longer than 512 characters is its own mutable string,
+                // the attributed text's another; a localizable short one that
+                // fits a tagged pointer (Objective-C's: 7 ASCII characters,
+                // 9 of a 6-bit alphabet, 11 of a 5-bit one) is one object
+                // with the localizable string, which the attributed text
+                // then refers to (19 probes).
+                let id = attr(n, "id")?;
+                let (utf16, utf8) = (text.encode_utf16().count(), text.len());
+                if (utf16 > 512) != (utf8 > 512) {
+                    return fail("a text view's non-ASCII text of about 512 characters is not supported by this ibtool");
+                }
+                let long = utf16 > 512;
+                let mutable = |t: &str| Value::New(Object::new("NSMutableString", vec![("NS.bytes", Value::Data(t.as_bytes().to_vec()))]));
+                let tagged = nib.localizable && !text.is_empty() && tagged_pointer_string(&text);
+                let string = if long && !nib.localizable {
+                    values.push(("UIText", mutable(&text)));
+                    mutable(&text)
+                } else {
+                    let localized = nib.text(id, "text", &text);
+                    if tagged {
+                        let Value::New(o) = localized else { return fail("a text view's text as a shared string") };
+                        values.push(("UIText", Value::New(o.named(format!("text {id}")))));
+                        reference(format!("text {id}"))
+                    } else {
+                        values.push(("UIText", localized));
+                        if long { mutable(&text) } else { nib.string(&text) }
+                    }
+                };
                 let mut attributes = Vec::new();
                 if let Some(c) = text_color {
                     attributes.extend([nib.string("NSColor"), color(nib, c)?]);
@@ -3648,6 +3680,30 @@ fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String)], per
 
 /// An action without an event mask: a gesture recognizer's or a bar button
 /// item's.
+/// Whether Objective-C would make `s` a tagged pointer string: up to 7
+/// ASCII characters, 9 of the 6-bit alphabet, or 11 of the 5-bit one.
+fn tagged_pointer_string(s: &str) -> bool {
+    const SIX: &str = "eilotrm.apdnsIc ufkMShjTRxgC4013bDNvwyUL2O856P-B79AFKEWV_zGJ/HYX";
+    let n = s.chars().count();
+    s.is_ascii() && (n <= 7 || (n <= 9 && s.chars().all(|c| SIX.contains(c))) || (n <= 11 && s.chars().all(|c| SIX[..32].contains(c))))
+}
+
+/// A controller's `modalPresentationStyle` as UIModalPresentationStyle, none
+/// for automatic (eight probes on navigation controllers).
+fn modal_presentation_style(n: Node) -> Result<Option<i64>, String> {
+    Ok(match n.attribute("modalPresentationStyle") {
+        None | Some("automatic") => None,
+        Some("fullScreen") => Some(0),
+        Some("pageSheet") => Some(1),
+        Some("formSheet") => Some(2),
+        Some("currentContext") => Some(3),
+        Some("overFullScreen") => Some(5),
+        Some("overCurrentContext") => Some(6),
+        Some("popover") => Some(7),
+        Some(other) => return fail(format!("modalPresentationStyle=\"{other}\" is not supported by this ibtool")),
+    })
+}
+
 /// An action's event, as UIControlEvents' mask (13 probes): Xcode writes
 /// `menuActionTriggered` with none, so it is refused.
 fn control_event(event: &str) -> Result<i64, String> {
@@ -4102,6 +4158,7 @@ fn check_navigation_controller(nav: Node) -> Result<(), String> {
             ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")),
             ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")),
+            ("modalPresentationStyle", None),
             ("sceneMemberID", Some("viewController")),
         ],
     )?;
@@ -4148,6 +4205,9 @@ fn navigation_controller(
         }
     }
     values.push(("UIChildViewControllers", nib.array("NSMutableArray", vec![root.value])));
+    if let Some(style) = modal_presentation_style(nav)? {
+        values.push(("UIModalPresentationStyle", Value::Int(style)));
+    }
     if nav.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
     }

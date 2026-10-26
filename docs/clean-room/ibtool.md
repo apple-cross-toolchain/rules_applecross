@@ -416,7 +416,12 @@ other values of the attributes these use, is refused. Observed:
   that doesn't scroll doesn't clip. Its text (a `<string key="text">` or
   the older `text` attribute) is `UIText` (in `Base.lproj` localizable as
   `<id>.text`, the attributed string sharing its development value: one
-  probe) and `UIAttributedText`, an
+  probe; text that fits an Objective-C tagged pointer string, up to 7
+  ASCII characters, 9 of the 6-bit alphabet or 11 of the 5-bit one, is one
+  object with the localizable string, which the attributed string refers
+  to; text of more than 512 characters gives the attributed string a
+  mutable string of its own, and outside `Base.lproj` makes `UIText` one
+  too: 19 probes) and `UIAttributedText`, an
   `NSAttributedString` whose attributes are `NSColor` (the text colour, if
   any: none given is nil), `NSFont` and `NSParagraphStyle` (an `NSMutableParagraphStyle` with
   `NSAlignment` in AppKit's order, right 1 and center 2, left left out,
@@ -560,6 +565,9 @@ when it is initial or identified. Observed with 25 probes:
   and a class swapper for the controller (`UINavigationController`, or the
   custom class's runtime name): `UITitle`, `UIStoryboardIdentifier`,
   `UIRestorationIdentifier`, `UIChildViewControllers` (the root),
+  `UIModalPresentationStyle` (UIKit's order: full screen 0, page sheet 1,
+  form sheet 2, current context 3, over full screen 5, over current
+  context 6, popover 7; none when automatic: eight probes),
   `UIKeyAutomaticallyAdjustsScrollViewInsets` 0 when it says NO,
   `UIViewControllers` (the root again), `UINavigationBar`, the class names.
   The objects list then has the bar, the root and its navigation item, if
@@ -657,7 +665,8 @@ rest are refused for other elements):
   keeps its implied one. A child with no `<tabBarItem>` gets one Xcode
   implies: `UIEnabled` and `UISpringLoaded`, both true. A declared item has
   `UISystemItem` (UIKit's `UITabBarSystemItem` order), `UIEnabled`, `UITag`,
-  `UITitle`, `UIImage`, `UISelectedTemplateImage`, then `UIImageInsets`;
+  `UITitle`, `UIImage` (a system symbol as an image view's, one probe),
+  `UISelectedTemplateImage`, then `UIImageInsets`;
   a `largeContentSizeImage` is `_UIBarItemLargeContentSizeImageCodingKey`,
   the item's first key (two probes)
   (top, left, bottom, right from its `imageInsets`; four probes). A view
@@ -766,8 +775,9 @@ probes:
   subviews, the content view's not listed again.
 - The cell: geometry from its frame in the document, `UISubviews` (the
   content view and a `_UITableViewCellSeparatorView`), its background,
-  `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, `UIClipsToBounds`
-  when clipping, `UIViewPreservesSuperviewMargins` and
+  `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, its
+  `UIAutoresizingMask` when it has one (prototype and static cells, three
+  probes), `UIClipsToBounds` when clipping, `UIViewPreservesSuperviewMargins` and
   `UIViewPreservesSpecificSuperviewMargins` 15 when preserving margins,
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off (one probe),
   the semantic content attribute, large content, `UIReuseIdentifier`,
@@ -1023,7 +1033,8 @@ keys, hugging `{250, 250}`, the alignments (vertical 1 and 1, horizontal
 1), `UIPointerInteractionEnabled`, `UISegments` (the segments in order)
 and `UISelectedSegmentIndex`; value-changed actions as other controls'
 (24 probes, every selection of two to five segments, three heights, and
-one in `Base.lproj`). The segments aren't in the objects list.
+one in `Base.lproj`). The segments aren't in the objects list, and
+`fixedFrame` beside a frame changes nothing (one probe).
 
 A date picker's date isn't archived: a `UIDatePicker` has the view keys,
 then `UIDatePickerMode` unless date and time (time 0, date 1, count-down
@@ -1046,6 +1057,7 @@ hugging `{250, 250}` and after its large content properties
 `UIAllowSelectingCells` true; its data source and delegate outlets are
 outlets like others (four probes). A visual effect view (non-opaque, with a
 blur effect) is a `UIVisualEffectView`: `UIDeepDrawRect`,
+`UIUserInteractionDisabled` when it says so (one probe),
 `UIAutoresizeSubviews`, mask 36, `UIShouldNotAdaptToMaterials`, clipping,
 its not-translating key, no `insetsLayoutMarginsFromSafeArea`
 (`UIViewInsetsLayoutMarginsFromSafeArea` 0), then after its large content properties
@@ -1183,7 +1195,11 @@ inside it. Observed with 15 probes and one corpus storyboard:
   (leading, trailing, top, bottom, each `UIIBSystemGenerated`), which the
   objects leave out. The objects list the cell and its content view, then
   breadth first each view's constraints and subviews (a table cell lists
-  its content view's subviews first).
+  its content view's subviews first). A collection cell's content view's
+  mask is `UIAutoresizingMask` after its `UIAutoresizeSubviews` when it has
+  one, and its `customSize` changes nothing (three probes). A control's
+  action on the cell itself is an event connection after the cell's
+  outlets, the cell its destination (one corpus storyboard).
 - An old-format content view (`<view key="contentView">`, no id) is not
   the document's: an empty one compiles to a plain opaque view the
   objects leave out. One with subviews keeps its constraints on the cell,
