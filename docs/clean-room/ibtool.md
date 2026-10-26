@@ -393,7 +393,7 @@ other values of the attributes these use, is refused. Observed:
   `extendedLayoutIncludesOpaqueBars` is `UIKeyExtendedLayoutIncludesOpaqueBars`
   1 before `UIViewControllers` (one probe). A text view's custom class
   swaps in for it as a text field's does, and a segmented control's mask is
-  its document's (three probes).
+  a label's (below).
 - A scene controller's `modalTransitionStyle` (flip horizontal 1, cross
   dissolve 2, partial curl 3; cover vertical left out) and
   `modalPresentationStyle` (as a navigation controller's) are
@@ -430,8 +430,8 @@ other values of the attributes these use, is refused. Observed:
   or has no size when the document says `fixedFrame="YES"` (18 probes,
   three corpus storyboards); so is an image view or a segmented control
   (four probes, one corpus storyboard), an image view's `fixedFrame`
-  otherwise changing nothing. An image view's `UIAutoresizingMask` is its
-  document's mask, whether or not it translates it (three probes). An empty `<toolbarItems/>` on a view
+  otherwise changing nothing. An image view's `UIAutoresizingMask` is a
+  label's (below). An empty `<toolbarItems/>` on a view
   controller changes nothing (one probe).
 - A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
   (or where it would be): wordWrap 0, characterWrap 1, clip 2,
@@ -1379,7 +1379,8 @@ controls (42 probes):
   `UITintColor`, with `UIDisableUpdateColorOnTraitCollectionChange`;
   without one, a modern style's tint is the secondary label colour. One
   hidden when stopped and not animating is `UIHidden`, once if it is
-  hidden as well (two probes).
+  hidden as well; one hidden in the document is `UIHidden` only if it
+  animates or hides when stopped (eight probes, every combination).
 - **A progress view** (`UIProgressView`, eight probes, one of the corpus's
   storyboards). Xcode lays it out at least 4 points tall, a bar style one
   point less than its frame (a frame 2 tall is 4, a bar 10 tall 9), from
@@ -1416,15 +1417,18 @@ probes), and a size an
 `NSValue` (`NS.special` 2, `NS.sizeval` `{w, h}`). Those of an embedded
 controller and of other kinds of view are refused (13 probes).
 
-A label's, button's, picker view's or control's (a switch, slider,
-stepper, activity indicator, progress view or page control)
-`UIAutoresizingMask` is the document's mask (36 without one; a label's
-left out when empty) unless the view doesn't translate it: when it says
+A label's, button's, picker view's, image view's, plain view's, search
+bar's, segmented control's, SceneKit view's or control's (a switch,
+slider, stepper, activity indicator, progress view or page control)
+`UIAutoresizingMask` is the document's mask (36 without one; left out when
+empty, as UIKit leaves out defaults) unless the view doesn't translate it: when it says
 `translatesAutoresizingMaskIntoConstraints="NO"` and a constraint is on
 it, the mask is 36. `translatesAutoresizingMaskIntoConstraints="NO"`
 alone, or `fixedFrame`, doesn't change it (ten probes: labels, buttons and
 switches, constrained or not, translating or not, and a corpus
-storyboard's switches, steppers and labels). A system font with `size="button"` (older
+storyboard's switches, steppers and labels; 210 random storyboards of
+these views, which first showed image views, plain views and empty masks
+following it). A system font with `size="button"` (older
 documents) is 18 points (one probe). A system font of size 0, regular or bold, is 12
 points (14 probes).
 

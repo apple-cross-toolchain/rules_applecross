@@ -1461,8 +1461,13 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     }
     hidden_and_tag(&mut values, n)?;
     values.dedup_by(|a, b| a.0 == "UIHidden" && b.0 == "UIHidden");
+    // Hidden but neither animating nor hiding when stopped, it isn't
+    // archived hidden (eight probes, every combination).
+    if tag == "activityIndicatorView" && n.attribute("hidesWhenStopped").is_none() && n.attribute("animating").is_none() {
+        values.retain(|v| v.0 != "UIHidden");
+    }
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-    values.push(("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)));
+    values.extend(mask_key(scene, n)?);
     // A stepper's clipping right after its mask (one probe); beside an
     // alpha it isn't established.
     if n.attribute("clipsSubviews").is_some() {
@@ -1934,6 +1939,14 @@ fn document_mask(scene: &Scene, n: Node) -> Result<i64, String> {
         Some(m) if !does_not_translate(scene, n) => autoresizing_mask(m),
         _ => Ok(36),
     }
+}
+
+/// `UIAutoresizingMask` for `document_mask`, left out when empty as UIKit
+/// leaves out defaults (fuzzed storyboards: labels, buttons, controls,
+/// image and plain views).
+fn mask_key(scene: &Scene, n: Node) -> Result<Option<(&'static str, Value)>, String> {
+    let mask = document_mask(scene, n)?;
+    Ok((mask != 0).then_some(("UIAutoresizingMask", Value::Int(mask))))
 }
 
 /// Whether a view is archived as not translating its autoresizing mask:
@@ -2510,7 +2523,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIOpaque", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)));
+            values.extend(mask_key(scene, n)?);
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -2626,13 +2639,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             built.push(selected_segment);
             let subviews = built.into_iter().map(|(_, segment_name, o)| Value::New(o.named(segment_name))).collect();
             values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
-            // Its mask as given, whether or not it translates it (two
-            // probes).
-            let mask = match children(n, "autoresizingMask").next() {
-                Some(m) => autoresizing_mask(m)?,
-                None => 36,
-            };
-            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true)), ("UIAutoresizingMask", Value::Int(mask))]);
+            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+            values.extend(mask_key(scene, n)?);
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -2897,9 +2905,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("UIOpaque", Value::Bool(true)),
                 ("UIMultipleTouchEnabled", Value::Bool(true)),
                 ("UIAutoresizeSubviews", Value::Bool(true)),
-                ("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)),
-                ("UIClipsToBounds", Value::Bool(true)),
             ]);
+            values.extend(mask_key(scene, n)?);
+            values.push(("UIClipsToBounds", Value::Bool(true)));
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -2996,11 +3004,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIOpaque", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            let mask = match children(n, "autoresizingMask").next() {
-                Some(m) if n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() => autoresizing_mask(m)?,
-                _ => 36,
-            };
-            values.push(("UIAutoresizingMask", Value::Int(mask)));
+            values.extend(mask_key(scene, n)?);
             values.push(("UIContentMode", Value::Int(3)));
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -3325,7 +3329,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)));
+            values.extend(mask_key(scene, n)?);
             alpha(&mut values, n)?;
             // A content mode other than scale to fill after the mask (one
             // probe).
@@ -3687,11 +3691,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("autoresizesSubviews").is_none() {
                 values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             }
-            let mask = match children(n, "autoresizingMask").next() {
-                Some(m) => autoresizing_mask(m)?,
-                None => 36,
-            };
-            values.push(("UIAutoresizingMask", Value::Int(mask)));
+            values.extend(mask_key(scene, n)?);
             alpha(&mut values, n)?;
             if n.attribute("clearsContextBeforeDrawing").is_some() {
                 values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
@@ -3795,13 +3795,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            // Its autoresizing mask as given, whether or not it translates
-            // it (three probes).
-            let mask = match children(n, "autoresizingMask").next() {
-                Some(m) => autoresizing_mask(m)?,
-                None => 36,
-            };
-            values.push(("UIAutoresizingMask", Value::Int(mask)));
+            values.extend(mask_key(scene, n)?);
             alpha(&mut values, n)?;
             if content_mode != 0 {
                 values.push(("UIContentMode", Value::Int(content_mode)));
