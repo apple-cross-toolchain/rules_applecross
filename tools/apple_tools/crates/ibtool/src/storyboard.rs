@@ -1218,6 +1218,12 @@ fn runtime_attributes(nib: &mut Nib, n: Node, name: &str) -> Result<Vec<Value>, 
                     only_attributes(a, &[("type", None), ("keyPath", None), ("value", None)])?;
                     nib.string(attr(a, "value")?)
                 }
+                // An image by name, as a view's image is, whether or not
+                // the document declares it (two probes).
+                "image" => {
+                    only_attributes(a, &[("type", None), ("keyPath", None), ("value", None)])?;
+                    nib.image(attr(a, "value")?)
+                }
                 "color" => {
                     only_attributes(a, &[("type", None), ("keyPath", None)])?;
                     color(nib, child(a, "color", "value").ok_or("a runtime attribute's colour without a value")?)?

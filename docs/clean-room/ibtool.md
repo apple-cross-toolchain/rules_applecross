@@ -1153,7 +1153,9 @@ custom classes, a stack view or another view between, outlets to either:
 fifteen probes), but one corpus storyboard's (TreasureHunt's claim
 button) follow the document's order of their lists instead, for reasons
 not established. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
-boolean one of 0 or 1, a string the string, a colour the colour and a size an
+boolean one of 0 or 1, a string the string, a colour the colour, an image the
+`UIImageNibPlaceholder` an image view's image would be, declared or not (two
+probes), and a size an
 `NSValue` (`NS.special` 2, `NS.sizeval` `{w, h}`). Those of an embedded
 controller and of other kinds of view are refused (13 probes).
 
