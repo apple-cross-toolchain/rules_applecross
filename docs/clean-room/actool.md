@@ -193,6 +193,11 @@ as 83) with those ranks. An iPhone 60pt@3x image is also written as 90pt@2x
 for subtype 1792 (the derived size counts in the ranking). Watch icons
 take their size's subtype (38mm 320, 42mm 384) as notification-centre and
 quick-look icons; the app launcher's and companion settings' are subtype 0.
+A single-size watch icon (one universal image for watchOS, 1024 pt, as
+Xcode makes it from watchOS 7) compiles as a watch icon of that size and
+scale 1, subtype 0: one icon image and a MultiSized Image of the one size,
+and the partial Info.plist naming it (three probes and one of the corpus's
+catalogs, watchOS 7 and 10).
 In BITMAPKEYS a subtype is a bit from a list (0: 0, 320: 8, 384: 9, 1792:
 16); size and layer are tracked too.
 
