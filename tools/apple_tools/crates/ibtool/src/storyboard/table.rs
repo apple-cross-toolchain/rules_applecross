@@ -338,7 +338,7 @@ pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &st
             if attr(o, "destination")? != scene.vc_id {
                 return fail("a table's outlets to anything but its controller are not supported by this ibtool");
             }
-            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string()));
+            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string(), "upstream".into()));
         }
     }
     let mut layout = Vec::new();

@@ -943,7 +943,7 @@ fn view_connections(scene: &mut Scene, n: Node, name: &str) -> Result<(), String
             only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
             let (label, destination) = (attr(o, "property")?.to_string(), attr(o, "destination")?);
             if destination == scene.vc_id {
-                scene.control_outlets.push((label, name.to_string()));
+                scene.control_outlets.push((label, name.to_string(), "upstream".into()));
             } else {
                 scene.view_outlets.push((label, name.to_string(), view_name(destination)));
             }
@@ -1940,7 +1940,7 @@ struct Scene<'a> {
     /// view's embed segue, the view).
     containers: Vec<(String, String)>,
     /// Controls' outlets to the controller: (label, the control).
-    control_outlets: Vec<(String, String)>,
+    control_outlets: Vec<(String, String, String)>,
     /// The scene's gesture recognizers' ids, and the views whose
     /// `gestureRecognizers` they are, with each view's recognizers.
     gestures: Vec<String>,
@@ -2658,10 +2658,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 only_children(c, &["outlet", "action"])?;
                 for o in children(c, "outlet") {
                     only_attributes(o, &[("property", Some("delegate")), ("destination", None), ("id", None)])?;
-                    if attr(o, "destination")? != scene.vc_id {
-                        return fail("a text field's delegate other than the scene's view controller is not supported by this ibtool");
+                    let destination = attr(o, "destination")?;
+                    // A custom object of the scene (four probes).
+                    if custom_object(n, destination) {
+                        scene.control_outlets.push(("delegate".into(), name.clone(), view_name(destination)));
+                        continue;
                     }
-                    scene.control_outlets.push(("delegate".into(), name.clone()));
+                    if destination != scene.vc_id {
+                        return fail("a text field's delegate other than the scene's view controller or a custom object is not supported by this ibtool");
+                    }
+                    scene.control_outlets.push(("delegate".into(), name.clone(), "upstream".into()));
                 }
                 for a in children(c, "action") {
                     only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
@@ -3436,7 +3442,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     if attr(o, "destination")? != scene.vc_id {
                         return fail("a text view's delegate other than the scene's view controller is not supported by this ibtool");
                     }
-                    scene.control_outlets.push(("delegate".into(), name.clone()));
+                    scene.control_outlets.push(("delegate".into(), name.clone(), "upstream".into()));
                 }
             }
             let scrolls = n.attribute("scrollEnabled").is_none();
@@ -4814,6 +4820,13 @@ fn control_event(event: &str) -> Result<i64, String> {
 
 /// The placeholder a control's action goes to: the scene's view controller
 /// (upstream) or its first responder.
+/// Whether `id` is a custom object of `n`'s scene.
+fn custom_object(n: Node, id: &str) -> bool {
+    n.ancestors()
+        .find(|a| a.has_tag_name("scene"))
+        .is_some_and(|sc| children(sc, "objects").flat_map(|o| children(o, "customObject")).any(|o| o.attribute("id") == Some(id)))
+}
+
 /// A bar button item's custom view, if it has one.
 fn custom_view<'a, 'i>(b: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
     b.children().find(|c| c.is_element() && c.attribute("key") == Some("customView"))
@@ -5506,7 +5519,15 @@ fn navigation_controller_nib(
     let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
     let title = navigation_title(&mut nib, nav)?;
     let tab_item = if has_tab_item { Some(tab::tab_bar_item(&mut nib, nav, "tab bar item")?.0) } else { None };
-    let mut embedded = embedded_controller(&mut nib, root, "root", "controller", Some("controller bar"), None, nib_names)?;
+    // The root's own tab bar item, before its navigation item, listed after
+    // it (a corpus storyboard); beside the navigation controller's own it
+    // isn't established.
+    let root_tab_item = child(root.vc, "tabBarItem", "tabBarItem").is_some();
+    if root_tab_item && has_tab_item {
+        return fail("tab bar items on both a navigation controller and its root are not supported by this ibtool");
+    }
+    let root_tab = if root_tab_item { Some(tab::tab_bar_item(&mut nib, root.vc, "root tab bar item")?.0) } else { None };
+    let mut embedded = embedded_controller(&mut nib, root, "root", "controller", Some("controller bar"), root_tab, nib_names)?;
     let explicit_item = embedded.navigation_item.clone();
     let templates_objects = std::mem::take(&mut embedded.templates.objects);
     let templates_outlets = std::mem::take(&mut embedded.templates.outlets);
@@ -5531,6 +5552,9 @@ fn navigation_controller_nib(
     objects.push(reference("root"));
     if let Some(item) = explicit_item {
         objects.push(reference(item));
+    }
+    if root_tab_item {
+        objects.push(reference("root tab bar item"));
     }
     objects.extend(templates_objects);
     objects.extend(bar_items.iter().map(|b| reference(b.clone())));
@@ -5674,7 +5698,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         only_children(objects_node, &[
             "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
             "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer", "pageViewController",
-            "hostingController",
+            "hostingController", "customObject",
         ])?;
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
@@ -5917,7 +5941,29 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("a gesture recognizer in a table or collection view controller's scene is not supported by this ibtool");
         }
         scene.gestures = recognizers.iter().map(|r| attr(*r, "id").map(str::to_string)).collect::<Result<_, _>>()?;
-        let gesture = recognizers.len();
+        // Custom objects (`<customObject>`), of a custom class, top-level
+        // in the controller's nib as the recognizers are: those the view's
+        // outlets name are reached through placeholders after the
+        // recognizers', in reverse document order (eight probes).
+        let custom_objects: Vec<Node> = objects_node.children().filter(|c| c.has_tag_name("customObject")).collect();
+        for o in &custom_objects {
+            only_attributes(*o, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+            if o.attribute("customClass").is_none() || o.children().any(|c| c.is_element()) {
+                return fail("a custom object without a custom class, or with connections of its own, is not supported by this ibtool");
+            }
+        }
+        if !custom_objects.is_empty() && is_list {
+            return fail("a custom object in a table or collection view controller's scene is not supported by this ibtool");
+        }
+        let named_by_view = |id: &str| view.descendants().any(|d| d.has_tag_name("outlet") && d.attribute("destination") == Some(id));
+        let referenced: Vec<&str> = custom_objects.iter().rev().filter_map(|o| o.attribute("id")).filter(|id| named_by_view(id)).collect();
+        if view.descendants().any(|d| d.has_tag_name("outletCollection") && custom_objects.iter().any(|o| o.attribute("id") == d.attribute("destination"))) {
+            return fail("an outlet collection of custom objects is not supported by this ibtool");
+        }
+        // The recognizers' and objects' placeholders: the recognizers', then
+        // the objects', the controller's after them, but before the
+        // objects' when its outlets reach into the view (twelve probes).
+        let gesture = recognizers.len() + referenced.len();
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -5963,6 +6009,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut vc_outlets = Vec::new();
         // Outlets to the scene's gesture recognizers, (property, id).
         let mut gesture_outlets: Vec<(String, String)> = Vec::new();
+        // Outlets to the scene's custom objects, (property, id).
+        let mut object_outlets: Vec<(String, String)> = Vec::new();
         // Outlets to its navigation item's custom views, (property, name).
         let mut item_outlets: Vec<(String, String)> = Vec::new();
         // Outlet collections: (property, collection class, views), by first
@@ -5984,6 +6032,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                             return fail("an outlet to a placeholder constraint is not supported by this ibtool");
                         }
                         constraint_name(c)?
+                    }
+                    // One to a custom object is in the controller's nib too,
+                    // after its storyboard outlet (three probes).
+                    Some(g) if g.has_tag_name("customObject") => {
+                        object_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
+                        continue;
                     }
                     // Xcode puts one to a gesture recognizer in the
                     // controller's nib, beside the recognizer (three probes).
@@ -6062,6 +6116,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if is_list && !gesture_outlets.is_empty() {
             return fail("a table or collection view controller's outlets to gesture recognizers are not supported by this ibtool");
         }
+        let controller_first = !referenced.is_empty() && (!vc_outlets.is_empty() || !vc_collections.is_empty());
+        let object_base = recognizers.len() + usize::from(controller_first);
+        let controller_placeholder = if controller_first { recognizers.len() + 1 } else { gesture + 1 };
         let (view_root, upstream_used) = if is_table {
             let (root, upstream_used, segues, listing) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets, child(vc, "refreshControl", "refreshControl"))?;
             scene.segues = segues;
@@ -6116,7 +6173,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
             if upstream_used {
-                top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", 1 + gesture), "upstream"));
+                top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{controller_placeholder}"), "upstream"));
                 objects.push(reference("upstream"));
             }
 
@@ -6137,7 +6194,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // controller's.
             view_connections(&mut scene, view, &root_name)?;
             let numbered = gesture_order(&scene.gesture_views);
-            if numbered.len() != gesture {
+            if numbered.len() != recognizers.len() {
                 return fail("a gesture recognizer no view has is not supported by this ibtool");
             }
             // Popover segues' placeholders come first, in reverse document
@@ -6174,6 +6231,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1), &format!("gesture {g}"))).collect();
             top.splice(2..2, gesture_proxies);
             objects.splice(2..2, numbered.iter().map(|g| reference(format!("gesture {g}"))));
+            let object_proxies: Vec<Value> =
+                referenced.iter().enumerate().map(|(i, id)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", object_base + i + 1), &view_name(id))).collect();
+            let at = 2 + numbered.len() + usize::from(controller_first);
+            top.splice(at..at, object_proxies);
+            objects.splice(at..at, referenced.iter().map(|id| reference(view_name(id))));
             for i in 0..scene.segues.len() {
                 let n = i + 1 + gesture + usize::from(upstream_used);
                 let name = format!("upstream segue {i}");
@@ -6525,9 +6587,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
             outlets.push(("view", "owner", &root_name));
             outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
-            outlets.extend(scene.control_outlets.iter().map(|(l, v)| (l.as_str(), v.as_str(), "upstream")));
+            outlets.extend(scene.control_outlets.iter().map(|(l, v, d)| (l.as_str(), v.as_str(), d.as_str())));
             for (label, source, destination) in &scene.view_outlets {
-                if *destination != root_name && !scene.subviews.iter().any(|s| s.1 == *destination) {
+                if *destination != root_name && !scene.subviews.iter().any(|s| s.1 == *destination) && !referenced.iter().any(|id| view_name(id) == *destination) {
                     return fail("a view's outlets to anything but the controller and its views are not supported by this ibtool");
                 }
                 outlets.push((label, source, destination));
@@ -6691,7 +6753,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 return fail("a controller with both a tab bar item and bar button items in its own nib is not supported by this ibtool");
             }
         }
-        let templates = segue::templates(&mut vnib, "controller", upstream_used, 1 + gesture, &view_segues, &own_segues, &bar_segues, &nib_names)?;
+        let templates = segue::templates(&mut vnib, "controller", upstream_used, controller_placeholder, &view_segues, &own_segues, &bar_segues, &nib_names)?;
         let mut external = templates.external;
         // The recognizers: the nib's objects in reverse document order,
         // kept alive in document order, mapped to their placeholders.
@@ -6721,6 +6783,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut placeholders = Vec::new();
         for (i, g) in gesture_order(&scene.gesture_views).iter().enumerate() {
             placeholders.push((i + 1, reference(format!("gesture {g}"))));
+        }
+        for (i, id) in referenced.iter().enumerate() {
+            placeholders.push((object_base + i + 1, reference(format!("object {id}"))));
+        }
+        if !custom_objects.is_empty() {
+            if embedded_here || is_list {
+                return fail("a custom object in an embedded controller's scene is not supported by this ibtool");
+            }
+            if extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() || !view_segues.is_empty() || !own_segues.is_empty() {
+                return fail("a custom object with these controller settings or segues is not supported by this ibtool");
+            }
         }
         external.splice(0..0, placeholders);
         let external = segue::external_table(&mut vnib, external);
@@ -6767,8 +6840,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if let Some(array) = templates.array {
             swapper.push(("UIStoryboardSegueTemplates", array));
         }
-        if !recognizers.is_empty() {
-            let alive = recognizers.iter().map(|r| attr(*r, "id").map(|id| reference(format!("gesture {id}")))).collect::<Result<_, _>>()?;
+        // Recognizers and custom objects kept alive in document order.
+        if !recognizers.is_empty() || !custom_objects.is_empty() {
+            let mut alive = Vec::new();
+            for o in objects_node.children() {
+                if o.tag_name().name().ends_with("GestureRecognizer") {
+                    alive.push(reference(format!("gesture {}", attr(o, "id")?)));
+                } else if o.has_tag_name("customObject") {
+                    alive.push(reference(format!("object {}", attr(o, "id")?)));
+                }
+            }
             swapper.push(("UITopLevelObjectsToKeepAliveFromStoryboard", vnib.array("NSArray", alive)));
         }
         if let Some(t) = transition {
@@ -6807,6 +6888,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         };
         let controller = Value::New(controller.named("controller"));
         let mut connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard")];
+        if !object_outlets.is_empty() && (!gesture_outlets.is_empty() || !item_outlets.is_empty()) {
+            return fail("outlets to custom objects beside outlets to gesture recognizers or custom views are not supported by this ibtool");
+        }
+        object_outlets.sort();
+        for (property, id) in &object_outlets {
+            if !custom_objects.iter().any(|o| o.attribute("id") == Some(id.as_str())) {
+                return fail("a controller's outlet to another scene's custom object is not supported by this ibtool");
+            }
+            connections.push(outlet(&mut vnib, property, "controller", &format!("object {id}")));
+        }
         if item_outlets.len() > 1 || !item_outlets.is_empty() && !gesture_outlets.is_empty() {
             return fail("several outlets to custom views, or one beside an outlet to a gesture recognizer, are not supported by this ibtool");
         }
@@ -6852,6 +6943,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut gesture_actions: Vec<(String, &str)> =
             gesture_objects.iter().rev().flat_map(|(_, id, selectors)| selectors.iter().map(|s| (s.clone(), *id))).collect();
         gesture_actions.sort_by(|a, b| a.0.cmp(&b.0));
+        // Custom objects first, in reverse document order (three probes).
+        for o in custom_objects.iter().rev() {
+            let id = attr(*o, "id")?;
+            let class = runtime_class_name(*o, module, "UICustomObject")?;
+            let values = vec![("UIClassName", vnib.string(&class)), ("UIOriginalClassName", vnib.string("UICustomObject"))];
+            top.push(Value::New(Object::new("UIClassSwapper", values).named(format!("object {id}"))));
+            objects.push(reference(format!("object {id}")));
+        }
         for (object, id, _) in gesture_objects {
             top.push(object);
             objects.push(reference(format!("gesture {id}")));

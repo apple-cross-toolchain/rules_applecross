@@ -729,6 +729,23 @@ other values of the attributes these use, is refused. Observed:
   actions after `sceneViewController` (two probes). Beside segues or bar
   button items, and in other containers, they are refused.
 
+- A scene's custom objects (`<customObject>`, of a custom class) are
+  top-level in the controller's nib before its recognizers, in reverse
+  document order, each a `UIClassSwapper` of `UIClassName` (the runtime
+  name) and `UIOriginalClassName` `UICustomObject`, and listed so;
+  `UITopLevelObjectsToKeepAliveFromStoryboard` holds them and the
+  recognizers in document order. The controller's outlets to them are in
+  its nib after its storyboard outlet, by name. Those the view's outlets
+  name (a text field's delegate, a collection view's data source or
+  delegate, in document order beside the controller's) have placeholders
+  in the view nib, numbered after the recognizers' in the same order; the
+  controller's own placeholder comes after them, but before them when the
+  controller has outlets into the view (16 probes and a corpus
+  storyboard). Custom objects with connections of their own, without a
+  class, beside segues, insets or edge settings, in table or collection
+  view controllers' scenes or in an embedded controller's, and beside
+  outlets to recognizers or custom views, are refused.
+
 ## Navigation controllers
 
 A `<navigationController>` (its bar, a root view controller by a
@@ -751,6 +768,9 @@ and a corpus storyboard's five). With a title, a tab bar item or
 presentation settings, or as a tab or split view controller's child, it
 is refused. Observed with 25 probes:
 
+- The root's own tab bar item is its `UITabBarItem` before its navigation
+  item, listed after its navigation item (two probes and a corpus
+  storyboard); beside the navigation controller's own, it is refused.
 - Top-level objects: the root's scene's storyboard placeholder, the owner,
   the first responder, the navigation controller's storyboard placeholder
   and a class swapper for the controller (`UINavigationController`, or the
