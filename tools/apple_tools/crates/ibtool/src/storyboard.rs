@@ -1039,7 +1039,11 @@ fn gesture_recognizer(nib: &mut Nib, module: Option<&str>, r: Node, vc_id: &str)
     };
     let mut selectors = Vec::new();
     for c in children(r, "connections") {
-        only_children(c, &["action", "outlet"])?;
+        // A segue, the caller's (see `gesture_segue`).
+        only_children(c, &["action", "outlet", "segue"])?;
+        if children(c, "segue").count() > 1 || (children(c, "segue").next().is_some() && children(c, "action").next().is_some()) {
+            return fail("a gesture recognizer with several segues, or a segue and an action, is not supported by this ibtool");
+        }
         // Its delegate, the scene's controller: see `gesture_delegate`.
         for o in children(c, "outlet") {
             only_attributes(o, &[("property", Some("delegate")), ("destination", Some(vc_id)), ("id", None)])?;
@@ -4839,6 +4843,12 @@ fn custom_object(n: Node, id: &str) -> bool {
         .is_some_and(|sc| children(sc, "objects").flat_map(|o| children(o, "customObject")).any(|o| o.attribute("id") == Some(id)))
 }
 
+/// A gesture recognizer's segue, if it has one: a template in the
+/// controller's nib, which the recognizer performs.
+fn gesture_segue<'a, 'i>(r: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    children(r, "connections").flat_map(|c| children(c, "segue")).next()
+}
+
 /// A bar button item's custom view, if it has one.
 fn custom_view<'a, 'i>(b: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
     b.children().find(|c| c.is_element() && c.attribute("key") == Some("customView"))
@@ -5001,9 +5011,10 @@ struct Embedded {
     bar_items: Vec<String>,
     bar_actions: Vec<(String, String, i64)>,
     /// Its gesture recognizers' names, in reverse document order, and their
-    /// actions (selector, recognizer) by selector.
+    /// actions (selector, recognizer, target: the controller, or a segue's
+    /// template for `perform:`) by selector.
     gestures: Vec<String>,
-    gesture_actions: Vec<(String, String)>,
+    gesture_actions: Vec<(String, String, String)>,
     /// Its outlets to its navigation item's custom views, after its
     /// storyboard outlet.
     item_outlets: Vec<(String, String)>,
@@ -5060,13 +5071,24 @@ fn embedded_controller(
         (None, None) => None,
     };
     let gesture_count = root.recognizers.len();
+    // A recognizer's segue, templated as a bar button item's is (one corpus
+    // storyboard); beside other segues, refused.
+    let gesture_segues: Vec<(Node, String)> =
+        root.recognizers.iter().filter_map(|r| gesture_segue(*r).map(|sg| (sg, format!("{name} gesture {}", r.attribute("id").unwrap_or_default())))).collect();
+    let only_gesture_segues = root.view_segues.is_empty() && root.own_segues.is_empty() && bar_segues.is_empty();
+    if !gesture_segues.is_empty() && (gesture_segues.len() > 1 || !only_gesture_segues) {
+        return fail("an embedded controller's gesture recognizer's segue beside other segues is not supported by this ibtool");
+    }
+    bar_segues.extend(gesture_segues);
     let mut templates = segue::templates(nib, name, root.upstream_used, 1 + gesture_count, &root.view_segues, &root.own_segues, &bar_segues, nib_names)?;
+    let gesture_performs: Vec<(String, String)> = templates.performs.iter().filter(|p| p.0.starts_with(&format!("{name} gesture "))).cloned().collect();
+    templates.performs.retain(|p| !p.0.starts_with(&format!("{name} gesture ")));
     // Its gesture recognizers, defined in its external objects table, in
     // their placeholders' order (two probes).
     let mut gestures = Vec::new();
     let mut gesture_actions = Vec::new();
     if gesture_count > 0 {
-        if templates.array.is_some() || !bar_items.is_empty() || extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+        if (templates.array.is_some() && !only_gesture_segues) || !bar_items.is_empty() || extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
             return fail("an embedded controller's gesture recognizers beside segues, bar button items or these settings are not supported by this ibtool");
         }
         let mut defined = Vec::new();
@@ -5089,8 +5111,9 @@ fn embedded_controller(
         }
         templates.external.splice(0..0, entries);
         for (_, gesture_name, _, selectors) in &defined {
-            gesture_actions.extend(selectors.iter().map(|s| (s.clone(), gesture_name.clone())));
+            gesture_actions.extend(selectors.iter().map(|s| (s.clone(), gesture_name.clone(), name.to_string())));
         }
+        gesture_actions.extend(gesture_performs.iter().map(|(g, t)| ("perform:".to_string(), g.clone(), t.clone())));
         gesture_actions.sort_by(|a, b| a.0.cmp(&b.0));
         gestures = defined.iter().rev().map(|d| d.1.clone()).collect();
     }
@@ -5128,12 +5151,13 @@ fn embedded_controller(
         }
         values.push(("UIAutoresizesArchivedViewToFullSize", Value::Bool(false)));
     }
+    // The segue templates before the recognizers kept alive (two probes).
+    if let Some(array) = templates.array.take() {
+        values.push(("UIStoryboardSegueTemplates", array));
+    }
     if gesture_count > 0 {
         let alive = root.recognizers.iter().map(|r| attr(*r, "id").map(|id| reference(format!("{name} gesture {id}")))).collect::<Result<_, _>>()?;
         values.push(("UITopLevelObjectsToKeepAliveFromStoryboard", nib.array("NSArray", alive)));
-    }
-    if let Some(array) = templates.array.take() {
-        values.push(("UIStoryboardSegueTemplates", array));
     }
     if let Some(edges) = extended_edges(vc)? {
         values.push(("UIKeyEdgesForExtendedLayout", Value::Int(edges)));
@@ -5579,8 +5603,8 @@ fn navigation_controller_nib(
         connections.push(outlet(&mut nib, "viewController", t, "root"));
     }
     connections.extend(bar_events(&mut nib, &bar_items, &bar_actions, &templates_performs, &[], "root")?);
-    for (selector, gesture) in &gesture_actions {
-        connections.push(event_connection(&mut nib, selector, gesture, "root"));
+    for (selector, gesture, target) in &gesture_actions {
+        connections.push(event_connection(&mut nib, selector, gesture, target));
     }
     let mut top = vec![root_storyboard, owner, responder, storyboard, controller];
     top.extend(gestures.iter().map(|g| reference(g.clone())));
@@ -6780,7 +6804,18 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 return fail("a controller with both a tab bar item and bar button items in its own nib is not supported by this ibtool");
             }
         }
-        let templates = segue::templates(&mut vnib, "controller", upstream_used, controller_placeholder, &view_segues, &own_segues, &bar_segues, &nib_names)?;
+        // A recognizer's segue is templated as a bar button item's is, after
+        // the controls' (three probes); several, or beside bar button items'
+        // segues, are refused.
+        let gesture_segues: Vec<(Node, String)> =
+            recognizers.iter().filter_map(|r| gesture_segue(*r).map(|sg| (sg, format!("gesture {}", r.attribute("id").unwrap_or_default())))).collect();
+        if gesture_segues.len() > 1 || (!gesture_segues.is_empty() && !bar_segues.is_empty()) {
+            return fail("several gesture recognizers' segues, or one beside bar button items' segues, are not supported by this ibtool");
+        }
+        bar_segues.extend(gesture_segues);
+        let mut templates = segue::templates(&mut vnib, "controller", upstream_used, controller_placeholder, &view_segues, &own_segues, &bar_segues, &nib_names)?;
+        let gesture_performs: Vec<(String, String)> = templates.performs.iter().filter(|p| p.0.starts_with("gesture ")).cloned().collect();
+        templates.performs.retain(|p| !p.0.starts_with("gesture "));
         let mut external = templates.external;
         // The recognizers: the nib's objects in reverse document order,
         // kept alive in document order, mapped to their placeholders.
@@ -6997,16 +7032,26 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             top.push(object);
             objects.push(reference(format!("gesture {id}")));
         }
-        let mut events: Vec<(String, String)> = gesture_actions.into_iter().map(|(selector, id)| (selector, format!("gesture {id}"))).collect();
+        let mut events: Vec<(String, String, String)> =
+            gesture_actions.into_iter().map(|(selector, id)| (selector, format!("gesture {id}"), "controller".to_string())).collect();
         if merged {
-            events.extend(bar_actions.iter().map(|(selector, item, _)| (selector.clone(), item.clone())));
+            events.extend(bar_actions.iter().map(|(selector, item, _)| (selector.clone(), item.clone(), "controller".to_string())));
             events.sort_by(|a, b| a.0.cmp(&b.0));
             if events.windows(2).any(|w| w[0].0 == w[1].0) {
                 return fail("gesture recognizers' and bar button items' actions sharing a selector are not supported by this ibtool");
             }
         }
-        for (selector, source) in events {
-            connections.push(event_connection(&mut vnib, &selector, &source, "controller"));
+        // A recognizer's segue: `perform:` on its template, by selector with
+        // the recognizers' actions (three probes).
+        if !gesture_performs.is_empty() {
+            if merged {
+                return fail("a gesture recognizer's segue beside bar button items is not supported by this ibtool");
+            }
+            events.extend(gesture_performs.into_iter().map(|(gesture, template)| ("perform:".to_string(), gesture, template)));
+            events.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        for (selector, source, destination) in events {
+            connections.push(event_connection(&mut vnib, &selector, &source, &destination));
         }
         objects.push(reference("controller"));
         if child(vc, "navigationItem", "navigationItem").is_some() {
