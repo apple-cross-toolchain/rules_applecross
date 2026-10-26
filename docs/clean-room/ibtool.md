@@ -1185,6 +1185,18 @@ interest on, an `MKStandardMapConfiguration`, `MKPitchButtonVisibility` 1,
 no user tracking button); its delegate outlet is an outlet like others
 (six probes; other map types and settings are refused).
 
+A web view is a `WKWebView`: a background colour if any, opaque unless it
+says NO, mask 36, its constraint keys, semantic content and large content
+properties, then `configuration`, a `WKWebViewConfiguration` of WebKit's
+defaults for this SDK (a process pool, preferences, a user content
+controller and the default data store, then its flags: data detectors
+127, no media types needing a user action, and so on), then
+`allowsBackForwardNavigationGestures` false, an empty `customUserAgent`
+(the configuration's empty application name), `allowsLinkPreview` true and
+`findInteractionEnabled` false (two probes). Only the default
+configuration (`mediaTypesRequiringUserActionForPlayback` none, empty
+preferences) is compiled; others are refused.
+
 A picker view is a `UIPickerView`: the view keys (opaque, hidden, mask 36),
 hugging `{250, 250}` and after its large content properties
 `UIAllowSelectingCells` true; its data source and delegate outlets are

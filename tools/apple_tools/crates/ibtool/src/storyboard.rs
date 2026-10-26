@@ -2546,6 +2546,83 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UISelectedSegmentIndex", Value::Int(selected as i64)));
             Object::new("UISegmentedControl", values)
         }
+        "wkWebView" => {
+            // A WKWebView with the default configuration (no media types
+            // needing a user action, default preferences): a view's keys,
+            // then WebKit's, its defaults for this SDK (two probes).
+            only_attributes(n, &[
+                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "color", "constraints", "wkWebViewConfiguration"])?;
+            if children(n, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
+                return fail("web view colours other than the background are not supported by this ibtool");
+            }
+            let configuration = child(n, "wkWebViewConfiguration", "configuration").ok_or("a web view without a configuration is not supported by this ibtool")?;
+            only_attributes(configuration, &[("key", Some("configuration"))])?;
+            only_children(configuration, &["audiovisualMediaTypes", "wkPreferences"])?;
+            let media = child(configuration, "audiovisualMediaTypes", "mediaTypesRequiringUserActionForPlayback");
+            let preferences = child(configuration, "wkPreferences", "preferences");
+            if !media.is_some_and(|m| m.attributes().count() == 2 && m.attribute("none") == Some("YES"))
+                || !preferences.is_some_and(|p| p.attributes().count() == 1 && !p.has_children())
+            {
+                return fail("a web view configuration other than the default is not supported by this ibtool");
+            }
+            if let Some(c) = child(n, "color", "backgroundColor") {
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            if n.attribute("opaque").is_none() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            let empty = nib.string("");
+            let configuration = Object::new("WKWebViewConfiguration", vec![
+                ("processPool", Value::New(Object::new("WKProcessPool", vec![]))),
+                ("preferences", Value::New(Object::new("WKPreferences", vec![
+                    ("minimumFontSize", Value::Double(0.0)),
+                    ("javaScriptCanOpenWindowsAutomatically", Value::Bool(false)),
+                    ("javaScriptEnabled", Value::Bool(true)),
+                    ("textInteractionEnabled", Value::Bool(true)),
+                    ("shouldPrintBackgrounds", Value::Bool(false)),
+                ]))),
+                ("userContentController", Value::New(Object::new("WKUserContentController", vec![]))),
+                ("websiteDataStore", Value::New(Object::new("WKWebsiteDataStore", vec![("isDefaultDataStore", Value::Bool(true))]))),
+                ("suppressesIncrementalRendering", Value::Bool(false)),
+                ("applicationNameForUserAgent", empty),
+                ("allowsAirPlayForMediaPlayback", Value::Bool(true)),
+                ("drawsBackground", Value::Bool(true)),
+                ("dataDetectorTypes", Value::Int(127)),
+                ("allowsInlineMediaPlayback", Value::Bool(false)),
+                ("allowsInlineMediaPlaybackAfterFullscreen", Value::Bool(false)),
+                ("mediaTypesRequiringUserActionForPlayback", Value::Bool(false)),
+                ("selectionGranularity", Value::Int(0)),
+                ("allowsPictureInPictureMediaPlayback", Value::Bool(true)),
+                ("ignoresViewportScaleLimits", Value::Bool(false)),
+                ("dragLiftDelay", Value::Int(0)),
+                ("textInteractionGesturesEnabled", Value::Bool(true)),
+                ("longPressActionsEnabled", Value::Bool(true)),
+                ("systemPreviewEnabled", Value::Bool(false)),
+                ("shouldDecidePolicyBeforeLoadingQuickLookPreview", Value::Bool(true)),
+                ("scrollToTextFragmentMarkingEnabled", Value::Bool(true)),
+                ("multiRepresentationHEICInsertionEnabled", Value::Bool(false)),
+                ("scrollToTextFragmentIndicatorEnabled", Value::Bool(true)),
+            ]);
+            values.push(("configuration", Value::New(configuration)));
+            values.push(("allowsBackForwardNavigationGestures", Value::Bool(false)));
+            values.push(("customUserAgent", nib.string("")));
+            values.push(("allowsLinkPreview", Value::Bool(true)));
+            values.push(("findInteractionEnabled", Value::Bool(false)));
+            Object::new("WKWebView", values)
+        }
         "mapView" => {
             // An MKMapView: a view's keys, zero layout margins, then MapKit's
             // with their defaults but for the scale and compass (five
