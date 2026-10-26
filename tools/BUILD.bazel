@@ -1,0 +1,54 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+
+# bazel run //tools:package_sdks -- <Xcode.xip> <output.tar.gz>: the SDK archive
+# whose SHA-256 toolchain/xcode_versions.bzl pins.
+py_binary(
+    name = "package_sdks",
+    srcs = ["package_sdks.py"],
+    data = [
+        ":llvm_readtapi",
+        "//toolchain:repo_tools/extract_xip.py",
+        "//toolchain:repo_tools/link_local_xcode.py",
+    ],
+    env = {
+        "LLVM_READTAPI": "$(rlocationpath :llvm_readtapi)",
+        # Bytecode written into the hermetic Python's repository makes Bazel
+        # fetch it again.
+        "PYTHONDONTWRITEBYTECODE": "1",
+    },
+    deps = ["@rules_python//python/runfiles"],
+)
+
+# The LLVM the repository rule stubs Mach-O binaries with, for this host.
+alias(
+    name = "llvm_readtapi",
+    actual = select({
+        ":linux_aarch64": "@llvm_prebuilt_aarch64//:bin/llvm-readtapi",
+        ":linux_x86_64": "@llvm_prebuilt//:bin/llvm-readtapi",
+        ":macos_arm64": "@llvm_prebuilt_macos//:bin/llvm-readtapi",
+    }),
+)
+
+config_setting(
+    name = "linux_aarch64",
+    constraint_values = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+    ],
+)
+
+config_setting(
+    name = "linux_x86_64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+config_setting(
+    name = "macos_arm64",
+    constraint_values = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:macos",
+    ],
+)

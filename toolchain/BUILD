@@ -3,6 +3,12 @@ load("//toolchain:apple_bundling_toolchain.bzl", "apple_bundling_toolchain")
 
 package(default_visibility = ["//visibility:public"])
 
+# For //tools:package_sdks, which stages the SDKs as the repository rule does.
+exports_files([
+    "repo_tools/extract_xip.py",
+    "repo_tools/link_local_xcode.py",
+])
+
 # Required by every patched rules_apple bundling rule, resource aspect and test
 # rule. Those rules can only resolve to an execution platform that has an
 # instance of this type registered, which is what keeps their actions -- the

@@ -35,6 +35,8 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "apple_sdk_sha256": config.apple_sdk_sha256,
                 "apple_sdk_strip_prefix": config.apple_sdk_strip_prefix,
                 "apple_sdk_archive_type": config.apple_sdk_archive_type,
+                "xcode_version": config.xcode_version,
+                "xcode_xip_urls": config.xcode_xip_urls,
                 "local_xcode": config.local_xcode,
                 "ported_tools_archives": config.ported_tools_archives,
                 "swift_tools": config.swift_tools,
@@ -51,6 +53,16 @@ _configure_tag = tag_class(
         "apple_sdk_sha256": attr.string(),
         "apple_sdk_strip_prefix": attr.string(),
         "apple_sdk_archive_type": attr.string(),
+        "xcode_version": attr.string(
+            doc = "An Xcode release from toolchain/xcode_versions.bzl, such " +
+                  "as \"27.0\", pinning the SHA-256 of xcode_xip_urls and " +
+                  "apple_sdk_urls. The staged SDKs must be from that release.",
+        ),
+        "xcode_xip_urls": attr.string_list(
+            doc = "URLs of xcode_version's .xip (a mirror, a bucket, or a " +
+                  "file:// URL to a local copy), from which the SDKs are " +
+                  "extracted when no SDK archive is configured.",
+        ),
         "local_xcode": attr.bool(
             default = False,
             doc = "Read the Apple SDKs from this host's installed Xcode. " +
