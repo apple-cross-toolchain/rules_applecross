@@ -422,8 +422,19 @@ other values of the attributes these use, is refused. Observed:
   a system symbol (`catalog="system"`) is a placeholder of width and
   height 0 naming it as both resource and symbol, shared by name apart
   from an image of the document's of that name (five probes, image views
-  and a button's normal state); no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
+  and a button's normal state; one the document's resources don't list
+  is archived as a plain image, so Interface Builder's own documents
+  always list theirs); no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
   when set (one probe). snag's launch screen is byte-identical.
+- A button state's `<preferredSymbolConfiguration>` is
+  `UIImageSymbolConfiguration` in its content right after `UIImage` (before
+  the title colour): `UISymbolScale` when given (default -1, small 1,
+  medium 2, large 3); for a point size, `UIPointSize` as a float and
+  `UISymbolWeight` when given (ultraLight 1 to black 9); for a text style,
+  the weight (4 unless given) and `UITextStyle`; for a system font, its
+  point size and weight (15 probes and a corpus storyboard). A system
+  font without a weight, other fonts and a configuration without an
+  image are refused.
 - A controller's own `restorationIdentifier` is `UIRestorationIdentifier`
   after `UINibName` (one probe; beside a storyboard identifier, or in an
   embedded controller, it is refused).

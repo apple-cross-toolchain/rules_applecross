@@ -2126,6 +2126,61 @@ fn ranked_run<'a>(run: &[(Option<&'a String>, Option<String>)], withheld: &[Stri
     out
 }
 
+/// A preferred symbol configuration, after the image it applies to (15
+/// probes): `UISymbolScale` (default -1, small 1, medium 2, large 3) when
+/// given, then a point size's `UIPointSize` (a float; a system font's
+/// too) and
+/// `UISymbolWeight` (ultraLight 1 to black 9) when given; a text style's
+/// weight, 4 unless given, and `UITextStyle`.
+fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
+    only_attributes(c, &[("key", Some("preferredSymbolConfiguration")), ("configurationType", None), ("pointSize", None), ("scale", None), ("weight", None)])?;
+    let mut values = Vec::new();
+    if let Some(scale) = c.attribute("scale") {
+        let code = match scale {
+            "default" => -1,
+            "small" => 1,
+            "medium" => 2,
+            "large" => 3,
+            other => return fail(format!("symbol scale {other} is not supported by this ibtool")),
+        };
+        values.push(("UISymbolScale", Value::Int(code)));
+    }
+    const WEIGHTS: [&str; 9] = ["ultraLight", "thin", "light", "regular", "medium", "semibold", "bold", "heavy", "black"];
+    let weight = match c.attribute("weight") {
+        Some(w) => Some(WEIGHTS.iter().position(|x| *x == w).ok_or_else(|| format!("symbol weight {w} is not supported by this ibtool"))? as i64 + 1),
+        None => None,
+    };
+    match c.attribute("configurationType") {
+        Some("pointSize") => {
+            only_children(c, &[])?;
+            values.push(("UIPointSize", Value::Float(number(attr(c, "pointSize")?)? as f32)));
+            values.extend(weight.map(|w| ("UISymbolWeight", Value::Int(w))));
+        }
+        Some("font") => {
+            only_children(c, &["fontDescription"])?;
+            if c.attribute("pointSize").is_some() {
+                return fail("a font symbol configuration with a point size is not supported by this ibtool");
+            }
+            let f = child(c, "fontDescription", "fontDescription").ok_or("a font symbol configuration without a font is not supported by this ibtool")?;
+            match (f.attribute("style"), f.attribute("type"), weight) {
+                (Some(style), None, _) => {
+                    only_attributes(f, &[("key", None), ("style", None)])?;
+                    values.push(("UISymbolWeight", Value::Int(weight.unwrap_or(4))));
+                    values.push(("UITextStyle", nib.string(style)));
+                }
+                (None, Some("system"), Some(w)) => {
+                    only_attributes(f, &[("key", None), ("type", None), ("pointSize", None)])?;
+                    values.push(("UIPointSize", Value::Float(number(attr(f, "pointSize")?)? as f32)));
+                    values.push(("UISymbolWeight", Value::Int(w)));
+                }
+                _ => return fail("this font symbol configuration is not supported by this ibtool"),
+            }
+        }
+        _ => return fail("this symbol configuration type is not supported by this ibtool"),
+    }
+    Ok(Value::New(Object::new("UIImageSymbolConfiguration", values)))
+}
+
 /// The trait storage list of the root view `root`, if its views' default
 /// variations exclude constraints (198 probes): a `_UITraitStorageList`
 /// of a `_UIRelationshipTraitStorage` per such view, in the document's
@@ -3570,7 +3625,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if st.attribute("catalog").is_some() && (st.attribute("image").is_none() || st.attribute("backgroundImage").is_some()) {
                     return fail("a button state's system catalog beside a background image, or without an image, is not supported by this ibtool");
                 }
-                only_children(st, &["color"])?;
+                only_children(st, &["color", "preferredSymbolConfiguration"])?;
                 for c in children(st, "color") {
                     if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
                         return fail("button state colours other than title and title shadow colours are not supported by this ibtool");
@@ -3687,6 +3742,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 if let Some(image) = st.attribute("image") {
                     content.push(("UIImage", nib.image_in(image, st.attribute("catalog"))?));
+                }
+                if let Some(c) = child(*st, "preferredSymbolConfiguration", "preferredSymbolConfiguration") {
+                    if st.attribute("image").is_none() {
+                        return fail("a symbol configuration without an image is not supported by this ibtool");
+                    }
+                    content.push(("UIImageSymbolConfiguration", symbol_configuration(nib, c)?));
                 }
                 if let Some(image) = st.attribute("backgroundImage") {
                     content.push(("UIBackgroundImage", nib.image(image)));
