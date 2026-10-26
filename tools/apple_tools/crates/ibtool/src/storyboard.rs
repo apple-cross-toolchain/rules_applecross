@@ -61,7 +61,10 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
 fn only_attributes(n: Node, allowed: &[(&str, Option<&str>)]) -> Result<(), String> {
     // An object's name in Interface Builder's outline, and its warnings that
     // a view is misplaced or ambiguous; not compiled.
-    for a in n.attributes().filter(|a| !matches!(a.name(), "userLabel" | "misplaced" | "ambiguous")) {
+    // A bar button item's custom view is keyed by the item, which compiles
+    // it.
+    let custom = n.parent_element().is_some_and(|p| p.has_tag_name("barButtonItem")) && n.attribute("key") == Some("customView");
+    for a in n.attributes().filter(|a| !matches!(a.name(), "userLabel" | "misplaced" | "ambiguous") && !(custom && a.name() == "key")) {
         match allowed.iter().find(|(name, _)| *name == a.name()) {
             Some((_, Some(v))) if *v != a.value() => {
                 return fail(format!("{}=\"{}\" on <{}> is not supported by this ibtool", a.name(), a.value(), n.tag_name().name()))
@@ -569,12 +572,12 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
 /// A view controller's navigation item: its title, also as an attributed
 /// string without attributes, no items, and the large title mode.
 /// A navigation item (`name`) of controller `vc_id`: the object, its bar
-/// button items' names, their actions (selector, item) on the controller
-/// and their segues (with the item).
+/// button items' names, their actions (selector, item, event mask: none
+/// for an item's own) on the controller and their segues (with the item).
 struct NavigationItem<'a, 'i> {
     value: Value,
     bar_items: Vec<String>,
-    actions: Vec<(String, String)>,
+    actions: Vec<(String, String, i64)>,
     segues: Vec<(Node<'a, 'i>, String)>,
     /// Actions on the first responder, when allowed.
     responder_actions: Vec<(String, String)>,
@@ -616,6 +619,9 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
     // items around the center item groups, the first referred to and the
     // rest defined there (a single item or a list: two probes).
     let mut bar_items = Vec::new();
+    // Custom views are listed after all the items, in the same order (two
+    // probes).
+    let mut custom_views = Vec::new();
     let mut actions = Vec::new();
     let mut responder_actions = Vec::new();
     let mut segues = Vec::new();
@@ -643,6 +649,9 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
                 entries.push(object);
             }
             bar_items.push(item_name);
+            if let Some(v) = custom_view(*b) {
+                custom_views.push(view_name(attr(v, "id")?));
+            }
         }
         if !entries.is_empty() {
             arrays.push((array, entries));
@@ -655,6 +664,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
             return fail("bar button items in lists sharing a selector are not supported by this ibtool");
         }
     }
+    bar_items.extend(custom_views);
     let mut take = |wanted: &str| arrays.iter().position(|a| a.0 == wanted).map(|i| arrays.remove(i).1);
     if let Some(entries) = take("UILeftBarButtonItems") {
         values.push(("UILeftBarButtonItems", nib.array("NSArray", entries)));
@@ -678,11 +688,40 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
 /// `actions` and `segues`.
 #[allow(clippy::too_many_arguments)]
 fn bar_button_item<'a, 'i>(
-    nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
+    nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String, i64)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
     responder: Option<&str>, responder_actions: &mut Vec<(String, String)>,
 ) -> Result<Object, String> {
     only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("id", None)])?;
-    only_children(b, &["connections", "color", "inset"])?;
+    // A custom view (a button, a segmented control...) is compiled as a
+    // subview, first among the item's values and listed after it among the
+    // objects (two probes). Its actions on the controller keep their event
+    // masks (two probes); one with subviews, outlets, constraints or a
+    // custom class is refused.
+    let custom = custom_view(b);
+    for c in b.children().filter(|c| c.is_element()) {
+        if !["connections", "color", "inset"].contains(&c.tag_name().name()) && Some(c) != custom {
+            return fail(format!("<{}> inside <barButtonItem> is not supported by this ibtool", c.tag_name().name()));
+        }
+    }
+    let mut values = Vec::new();
+    if let Some(v) = custom {
+        let other = |d: &Node| matches!(d.tag_name().name(), "subviews" | "constraints" | "outlet" | "outletCollection" | "segue");
+        if v.attribute("customClass").is_some() || v.descendants().any(|d| other(&d)) {
+            return fail("a bar button item's custom view with a custom class, subviews, constraints, outlets or segues is not supported by this ibtool");
+        }
+        let mut scene = Scene::new(vc_id, None, v, None);
+        let object = subview(nib, &mut scene, v)?;
+        if !scene.pairs.is_empty() || !scene.accessibility.is_empty() || scene.subviews.len() > 1 {
+            return fail("a bar button item's custom view with runtime attributes or accessibility settings is not supported by this ibtool");
+        }
+        for (selector, source, mask, target) in scene.actions {
+            if target != "upstream" {
+                return fail("a bar button item's custom view's actions on anything but its controller are not supported by this ibtool");
+            }
+            actions.push((selector, source, mask));
+        }
+        values.push(("UICustomView", object));
+    }
     if children(b, "color").any(|c| c.attribute("key") != Some("tintColor")) {
         return fail("bar button item colours other than a tint colour are not supported by this ibtool");
     }
@@ -705,12 +744,16 @@ fn bar_button_item<'a, 'i>(
             // Beside a segue, Xcode drops the action, whatever their order
             // (two probes).
             if children(c, "segue").next().is_none() {
-                let target = if to_responder { &mut *responder_actions } else { &mut *actions };
-                target.push((attr(a, "selector")?.to_string(), name.to_string()));
+                let selector = attr(a, "selector")?.to_string();
+                if to_responder {
+                    responder_actions.push((selector, name.to_string()));
+                } else {
+                    actions.push((selector, name.to_string(), 0));
+                }
             }
         }
     }
-    let mut values = vec![("UIEnabled", Value::Bool(true))];
+    values.push(("UIEnabled", Value::Bool(true)));
     // UIBarButtonSystemItem, as probed.
     if let Some(item) = b.attribute("systemItem") {
         // Xcode archives close as done.
@@ -1781,6 +1824,9 @@ struct Scene<'a> {
     unused_guides: Vec<String>,
     /// Toolbars' items, by toolbar, listed in their turn among the objects.
     toolbar_items: Vec<(String, Vec<String>)>,
+    /// Toolbar items' custom views, by item, listed in the item's turn as
+    /// if its subviews (two probes).
+    item_views: Vec<(String, String)>,
     /// Whether this is a view controller's root view, whose objects list
     /// takes the toolbars' items.
     lists_toolbar_items: bool,
@@ -1819,6 +1865,7 @@ impl<'a> Scene<'a> {
             effect_contents: Vec::new(),
             unused_guides: Vec::new(),
             toolbar_items: Vec::new(),
+            item_views: Vec::new(),
             lists_toolbar_items: false,
             accessibility: Vec::new(),
             switch_frames: Vec::new(),
@@ -1855,9 +1902,13 @@ fn text_alignment(s: Option<&str>) -> Result<i64, String> {
 }
 
 /// A button's autoresizing mask, which Xcode leaves out when the view
-/// doesn't translate it into constraints.
+/// doesn't translate it into constraints. A bar button item's custom view
+/// translates the flexible right and bottom margins it is archived with
+/// anyway (one probe).
 fn ignored_autoresizing_mask(n: Node) -> Result<(), String> {
-    if children(n, "autoresizingMask").next().is_some() && n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
+    let custom = n.parent_element().is_some_and(|p| p.has_tag_name("barButtonItem"))
+        && children(n, "autoresizingMask").all(|m| autoresizing_mask(m).ok() == Some(36));
+    if !custom && children(n, "autoresizingMask").next().is_some() && n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
         return fail(format!("<autoresizingMask> inside a <{}> that translates it is not supported by this ibtool", n.tag_name().name()));
     }
     Ok(())
@@ -2503,10 +2554,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // lists them in order (24 probes).
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("left")),
-                ("contentVerticalAlignment", Some("top")), ("segmentControlStyle", Some("plain")), ("selectedSegmentIndex", None),
+                ("contentVerticalAlignment", Some("top")), ("segmentControlStyle", None), ("selectedSegmentIndex", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("fixedFrame", Some("YES")), ("id", None),
             ])?;
-            // `fixedFrame` changes nothing beside a frame (one probe).
+            // `fixedFrame` changes nothing beside a frame (one probe), nor
+            // does the deprecated bar style (one probe).
+            if !matches!(n.attribute("segmentControlStyle"), None | Some("plain" | "bar")) {
+                return fail("a segmented control style other than plain or bar is not supported by this ibtool");
+            }
             only_children(n, &["rect", "autoresizingMask", "segments", "constraints", "connections"])?;
             for c in children(n, "connections") {
                 only_children(c, &["action"])?;
@@ -2524,11 +2579,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             let mut built = Vec::new();
             for (i, sg) in segments.iter().enumerate() {
-                only_attributes(*sg, &[("title", None)])?;
+                only_attributes(*sg, &[("title", None), ("width", None)])?;
                 let mut sv = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 32.0])), ("UICenter", doubles(&[0.0, 16.0]))];
                 sv.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true)), ("UIViewSemanticContentAttribute", Value::Int(0))]);
                 nib.large_content(&mut sv);
                 sv.push(("UISegmentInfo", nib.text(id, &format!("segmentTitles[{i}]"), attr(*sg, "title")?)));
+                // Its fixed width, single precision, which leaves its bounds
+                // alone (one probe).
+                if let Some(w) = sg.attribute("width") {
+                    sv.push(("UISegmentWidth", Value::Float(number(w)? as f32)));
+                }
                 sv.push(("UISegmentStyle", Value::Int(5)));
                 match i {
                     0 => {}
@@ -2593,6 +2653,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 only_children(list, &["navigationItem"])?;
                 for i in children(list, "navigationItem") {
                     let item_name = format!("bar item {}", attr(i, "id")?);
+                    if i.descendants().any(|d| d.attribute("key") == Some("customView")) {
+                        return fail("a navigation bar's bar button items' custom views are not supported by this ibtool");
+                    }
                     let parts = navigation_item_with(nib, i, &item_name, scene.vc_id, first_responder(n))?;
                     if !parts.segues.is_empty() {
                         return fail("a navigation bar's bar button items' segues are not supported by this ibtool");
@@ -2602,7 +2665,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     items.push(Value::New(o));
                     names.push(item_name);
                     names.extend(parts.bar_items);
-                    for (selector, source) in parts.actions {
+                    for (selector, source, _) in parts.actions {
                         scene.actions.push((selector, source, 0, "upstream".into()));
                     }
                     for (selector, source) in parts.responder_actions {
@@ -2661,14 +2724,18 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     }
                     // Its actions on the controller or the first responder
                     // are event connections without a mask, sorting before
-                    // the controls' (two probes).
-                    for (selector, source) in actions {
-                        scene.actions.push((selector, source, 0, "upstream".into()));
+                    // the controls' (two probes); its custom view's keep
+                    // their masks (one probe).
+                    for (selector, source, mask) in actions {
+                        scene.actions.push((selector, source, mask, "upstream".into()));
                     }
                     for (selector, source) in responder_actions {
                         scene.actions.push((selector, source, 0, "responder".into()));
                     }
                     items.push(Value::New(object.named(item_name.clone())));
+                    if let Some(v) = custom_view(b) {
+                        scene.item_views.push((item_name.clone(), view_name(attr(v, "id")?)));
+                    }
                     names.push(item_name);
                 }
             }
@@ -4163,15 +4230,29 @@ fn outlet_collection(nib: &mut Nib, label: &str, source: &str, destinations: Vec
 /// A navigation item's bar button items' actions and segues' `perform:`,
 /// by selector: actions with one selector the right item's first (`items`
 /// in the left-right order), the `perform:`s in their templates' order.
-fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String)], performs: &[(String, String)], controller: &str) -> Vec<Value> {
+/// Custom views' actions, with their masks, follow them by mask and then
+/// selector, whatever their items' sides (nine probes); two with one mask
+/// and selector are refused.
+fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String, i64)], performs: &[(String, String)], controller: &str) -> Result<Vec<Value>, String> {
     let mut events: Vec<(&str, usize, &str, &str)> = Vec::new();
-    for (selector, item) in actions {
+    let mut masked: Vec<_> = actions.iter().filter(|a| a.2 != 0).collect();
+    masked.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
+    if masked.windows(2).any(|w| (w[0].2, &w[0].0) == (w[1].2, &w[1].0)) {
+        return fail("bar button items' custom views' actions sharing a selector are not supported by this ibtool");
+    }
+    for (selector, item, _) in actions.iter().filter(|a| a.2 == 0) {
         let from_right = items.len() - items.iter().position(|i| i == item).unwrap_or(0);
         events.push((selector, from_right, item, controller));
     }
     events.extend(performs.iter().enumerate().map(|(i, (item, template))| ("perform:", i, item.as_str(), template.as_str())));
     events.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-    events.into_iter().map(|(selector, _, item, destination)| event_connection(nib, selector, item, destination)).collect()
+    let mut connections: Vec<Value> = events.into_iter().map(|(selector, _, item, destination)| event_connection(nib, selector, item, destination)).collect();
+    for (selector, view, mask) in masked {
+        let Value::New(mut o) = event_connection(nib, selector, view, controller) else { unreachable!() };
+        o.values.push(("UIEventMask", Value::Int(*mask)));
+        connections.push(Value::New(o));
+    }
+    Ok(connections)
 }
 
 /// An action without an event mask: a gesture recognizer's or a bar button
@@ -4221,6 +4302,11 @@ fn control_event(event: &str) -> Result<i64, String> {
 
 /// The placeholder a control's action goes to: the scene's view controller
 /// (upstream) or its first responder.
+/// A bar button item's custom view, if it has one.
+fn custom_view<'a, 'i>(b: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    b.children().find(|c| c.is_element() && c.attribute("key") == Some("customView"))
+}
+
 /// The id of the first responder placeholder of `n`'s scene.
 fn first_responder<'a>(n: Node<'a, '_>) -> Option<&'a str> {
     n.ancestors()
@@ -4297,6 +4383,8 @@ struct RootController<'a, 'i> {
     /// their placeholders' order.
     recognizers: Vec<Node<'a, 'i>>,
     gesture_order: Vec<String>,
+    /// Its outlets to its navigation item's custom views, (property, view).
+    item_outlets: Vec<(String, String)>,
 }
 
 /// The id of a navigation controller's root view controller, its one
@@ -4336,11 +4424,14 @@ struct Embedded {
     /// Its navigation item's bar button items, after the templates, and
     /// their actions (selector, item), after the templates' outlets.
     bar_items: Vec<String>,
-    bar_actions: Vec<(String, String)>,
+    bar_actions: Vec<(String, String, i64)>,
     /// Its gesture recognizers' names, in reverse document order, and their
     /// actions (selector, recognizer) by selector.
     gestures: Vec<String>,
     gesture_actions: Vec<(String, String)>,
+    /// Its outlets to its navigation item's custom views, after its
+    /// storyboard outlet.
+    item_outlets: Vec<(String, String)>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4486,6 +4577,7 @@ fn embedded_controller(
         bar_actions,
         gestures,
         gesture_actions,
+        item_outlets: root.item_outlets.clone(),
     })
 }
 
@@ -4820,6 +4912,7 @@ fn navigation_controller_nib(
     let templates_performs = std::mem::take(&mut embedded.templates.performs);
     let gestures = std::mem::take(&mut embedded.gestures);
     let gesture_actions = std::mem::take(&mut embedded.gesture_actions);
+    let item_outlets = std::mem::take(&mut embedded.item_outlets);
     let controller = navigation_controller(&mut nib, module, nav, "controller", embedded, "root", swapped, title, None)?;
     // The root's gesture recognizers follow the controller (two probes).
     let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
@@ -4830,15 +4923,15 @@ fn navigation_controller_nib(
     }
     objects.extend(templates_objects);
     objects.extend(bar_items.iter().map(|b| reference(b.clone())));
-    let mut connections = vec![
-        outlet(&mut nib, "storyboard", "controller", "storyboard"),
-        outlet(&mut nib, "storyboard", "root", "root storyboard"),
-        outlet(&mut nib, "sceneViewController", "owner", "controller"),
-    ];
+    let mut connections = vec![outlet(&mut nib, "storyboard", "controller", "storyboard"), outlet(&mut nib, "storyboard", "root", "root storyboard")];
+    for (property, view) in &item_outlets {
+        connections.push(outlet(&mut nib, property, "root", view));
+    }
+    connections.push(outlet(&mut nib, "sceneViewController", "owner", "controller"));
     for t in &templates_outlets {
         connections.push(outlet(&mut nib, "viewController", t, "root"));
     }
-    connections.extend(bar_events(&mut nib, &bar_items, &bar_actions, &templates_performs, "root"));
+    connections.extend(bar_events(&mut nib, &bar_items, &bar_actions, &templates_performs, "root")?);
     for (selector, gesture) in &gesture_actions {
         connections.push(event_connection(&mut nib, selector, gesture, "root"));
     }
@@ -5200,6 +5293,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut vc_outlets = Vec::new();
         // Outlets to the scene's gesture recognizers, (property, id).
         let mut gesture_outlets: Vec<(String, String)> = Vec::new();
+        // Outlets to its navigation item's custom views, (property, name).
+        let mut item_outlets: Vec<(String, String)> = Vec::new();
         // Outlet collections: (property, collection class, views), by first
         // appearance, the views in document order.
         let mut vc_collections: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -5224,6 +5319,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                     // controller's nib, beside the recognizer (three probes).
                     Some(g) if g.tag_name().name().ends_with("GestureRecognizer") => {
                         gesture_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
+                        continue;
+                    }
+                    // And one to a custom view of its navigation item's bar
+                    // button items in the nib that holds the item, after
+                    // the controller's storyboard outlet (two probes).
+                    Some(v) if v.parent_element().is_some_and(|p| p.has_tag_name("barButtonItem")) && v.attribute("key") == Some("customView") => {
+                        let item = v.ancestors().find(|a| a.has_tag_name("navigationItem"));
+                        if item.and_then(|i| i.parent_element()) != Some(vc) {
+                            return fail("an outlet to a custom view outside the controller's navigation item is not supported by this ibtool");
+                        }
+                        item_outlets.push((attr(o, "property")?.to_string(), view_name(destination)));
                         continue;
                     }
                     _ => view_name(destination),
@@ -5626,6 +5732,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
                 if let Some((_, items)) = v.and_then(|v| scene.toolbar_items.iter().find(|t| &t.0 == v)) {
                     objects.extend(items.iter().map(|i| reference(i.clone())));
+                    queue.extend(items.iter().map(Some));
+                }
+                if let Some((_, view)) = v.and_then(|v| scene.item_views.iter().find(|t| &t.0 == v)) {
+                    objects.push(reference(view.clone()));
                 }
                 for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1)) {
                     objects.push(reference(s.clone()));
@@ -5884,6 +5994,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         };
         let controller = Value::New(controller.named("controller"));
         let mut connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard")];
+        if item_outlets.len() > 1 || !item_outlets.is_empty() && !gesture_outlets.is_empty() {
+            return fail("several outlets to custom views, or one beside an outlet to a gesture recognizer, are not supported by this ibtool");
+        }
+        for (property, view) in &item_outlets {
+            connections.push(outlet(&mut vnib, property, "controller", view));
+        }
         // Its outlets to its recognizers by name, after its storyboard
         // outlet and before their delegates' (three probes).
         gesture_outlets.sort();
@@ -5906,7 +6022,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         for t in &templates.outlets {
             connections.push(outlet(&mut vnib, "viewController", t, "controller"));
         }
-        connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, "controller"));
+        connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, "controller")?);
         let mut top = vec![owner, responder, storyboard];
         if !recognizers.is_empty() && !bar_items.is_empty() {
             return fail("a gesture recognizer with bar button items is not supported by this ibtool");
@@ -5951,6 +6067,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 view_segues: view_segues.clone(),
                 own_segues: own_segues.clone(),
                 recognizers: recognizers.clone(),
+                item_outlets: item_outlets.clone(),
                 gesture_order: gesture_order(&scene.gesture_views).into_iter().cloned().collect(),
             });
         }

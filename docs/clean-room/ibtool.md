@@ -728,6 +728,18 @@ objects (its own nib's, or its navigation controller's).
 - **Order.** These connections come after the templates' outlets, by
   selector: actions with one selector the right item's first, and the
   `perform:`s in the order of their templates' outlets.
+- **Custom views.** An item's custom view (`<button key="customView">`, a
+  segmented control) is its `UICustomView`, first among its values: the
+  view compiled as a subview, its document mask kept. The objects list the
+  custom views after all the items, in the same order. Their actions on
+  the controller keep their event masks and follow the items' actions and
+  `perform:`s, by mask and then selector, whatever the items' sides. A
+  controller's outlet to one is in the nib holding the item, after the
+  controller's storyboard outlet (13 probes, pushed and root controllers).
+  Custom views with subviews, constraints, outlets, segues, a custom
+  class, runtime attributes or accessibility settings are refused, as are
+  two actions with one mask and selector, several outlets, and custom
+  views in a navigation bar in a view.
 
 A child navigation controller's root may have segues (Xcode's
 master-detail template): its templates follow the children's parts in the
@@ -1167,7 +1179,10 @@ keys, hugging `{250, 250}`, the alignments (vertical 1 and 1, horizontal
 and `UISelectedSegmentIndex`; value-changed actions as other controls'
 (24 probes, every selection of two to five segments, three heights, and
 one in `Base.lproj`). The segments aren't in the objects list, and
-`fixedFrame` beside a frame changes nothing (one probe).
+`fixedFrame` beside a frame changes nothing (one probe), nor does the
+deprecated bar style (two probes). A segment's fixed width is
+`UISegmentWidth`, single precision, after its `UISegmentInfo`, leaving
+its bounds alone (one probe).
 
 A date picker's date isn't archived: a `UIDatePicker` has the view keys,
 then `UIDatePickerMode` unless date and time (time 0, date 1, count-down
@@ -1192,7 +1207,9 @@ hugging `{250, 250}`, semantic content and large content properties, then
 are), `UIBarPosition` 1 and `UIBarTranslucence` 1. The objects list its
 items in its turn, after its constraints, as its subviews would be (two
 probes). An item's action on the controller is an event connection
-without a mask, which sorts before the controls' actions (one probe).
+without a mask, which sorts before the controls' actions (one probe). An
+item's custom view is listed in the item's turn, as if its subview, and
+its action keeps its mask, sorting with the controls' (four probes).
 Items with segues, opaque toolbars and toolbars in tables, cells or
 collection views are refused.
 
