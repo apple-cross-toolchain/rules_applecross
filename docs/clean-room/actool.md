@@ -206,8 +206,15 @@ atlas, whose name's middle number is 1 when opaque and 0 when not
 (Google Maps' and Firebase's example icon sets, and probes at 20 to 167
 pixels). An atlas of opaque and translucent icons, which those don't have,
 is refused. An image under 40 pixels wide is stored with method 1, a
-run-length coding (per-row offsets, then runs), opaque or not; this actool
-refuses those. Xcode ignores entries that aren't iOS icon slots (Flutter's
+run-length coding, opaque or not: after `MLEC`, the version (2 opaque, 0
+not), 1 and the length, the pixel format (4, BGRA; 3 for GA8), width,
+height and each row's offset from the format, then each row's runs, a count
+with the top bit set followed by one premultiplied pixel, or a count
+followed by that many pixels. A row equal to the one above takes its
+offset (an equal row further up doesn't). A run is taken, greedily from the
+left, where it spans more bytes than its pixel and two counts: four pixels
+and up in BGRA, six in GA8 (a run at a row's start, middle and end, two
+runs side by side, rows of runs from 1 to 20 pixels; 13 probes). Xcode ignores entries that aren't iOS icon slots (Flutter's
 iPhone 40 and 60 pt at 1x, iPad 76 pt at 3x); this actool compiles the
 current and legacy slots (iPhone 20, 40 and 60 pt at 2x and 3x, 29 pt at
 1x to 3x, 57 pt at 1x and 2x; iPad 20, 29, 40, 50, 72 and 76 pt at 1x and

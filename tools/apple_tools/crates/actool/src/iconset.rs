@@ -310,13 +310,14 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             if mac && car::stride(w as usize) * (h as usize) < 16384 {
                 return Err(format!("{}: small standalone images are not supported by this actool for macOS", i.filename));
             }
-            // Below 40 pixels wide Xcode run-length encodes an iOS icon
-            // (method 1), which this actool doesn't.
-            if !mac && w < 40 {
-                return Err(format!("{}: an icon image narrower than 40 pixels is run-length encoded by Xcode, which is not supported by this actool", i.filename));
-            }
-            let image_version = if mac { version } else { car::MlecVersions::opacity(opaque_image(&i.image)) };
-            renditions.push(Rendition { attrs: image_attrs(i), csi: car::icon_image_csi(&i.filename, w, h, scale, &i.image.premultiplied_bgra(), image_version) });
+            // Below 40 pixels wide Xcode run-length encodes an iOS icon.
+            let csi = if !mac && w < 40 {
+                car::icon_image_rle_csi(&i.filename, w, h, scale, &i.image.premultiplied_bgra(), opaque_image(&i.image))
+            } else {
+                let image_version = if mac { version } else { car::MlecVersions::opacity(opaque_image(&i.image)) };
+                car::icon_image_csi(&i.filename, w, h, scale, &i.image.premultiplied_bgra(), image_version)
+            };
+            renditions.push(Rendition { attrs: image_attrs(i), csi });
         }
     }
 

@@ -437,6 +437,83 @@ impl MlecVersions {
 }
 
 pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], versions: MlecVersions) -> Vec<u8> {
+    let t = icon_image_tlvs(width, height);
+    let payload = lzfse_bitmap(&padded(bgra, width as usize, height as usize), stride(width as usize), height as usize, versions);
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
+}
+
+/// An iOS icon under 40 pixels wide, its bitmap run-length coded.
+pub fn icon_image_rle_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], opaque: bool) -> Vec<u8> {
+    let t = icon_image_tlvs(width, height);
+    let payload = rle_bitmap(bgra, width as usize, height as usize, opaque);
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
+}
+
+/// MLEC method 1 (version 2 opaque, 0 not): after the length, the pixel
+/// format (4, BGRA), width, height and each row's offset (from the format),
+/// then each row's runs: a count with the top bit set and one pixel, or a
+/// count of literal pixels. A row equal to the one above shares its runs.
+/// A run is taken where it spans more bytes than its pixel and two counts
+/// (4 pixels and up); shorter ones are literal.
+pub fn rle_bitmap(bgra: &[u8], width: usize, height: usize, opaque: bool) -> Vec<u8> {
+    const BPP: usize = 4;
+    let header = 12 + 4 * height;
+    let mut offsets = Vec::with_capacity(height);
+    let mut data = Vec::new();
+    let mut previous: Option<(&[u8], u32)> = None;
+    for y in 0..height {
+        let row = &bgra[y * width * BPP..(y + 1) * width * BPP];
+        if let Some((above, offset)) = previous {
+            if above == row {
+                offsets.push(offset);
+                continue;
+            }
+        }
+        let offset = (header + data.len()) as u32;
+        offsets.push(offset);
+        previous = Some((row, offset));
+        let pixel = |x: usize| &row[x * BPP..(x + 1) * BPP];
+        let mut literal = Vec::new();
+        let flush = |data: &mut Vec<u8>, literal: &mut Vec<u8>| {
+            if !literal.is_empty() {
+                le32(data, (literal.len() / BPP) as u32);
+                data.append(literal);
+            }
+        };
+        let mut x = 0;
+        while x < width {
+            let n = (x..width).take_while(|&i| pixel(i) == pixel(x)).count();
+            if n * BPP > BPP + 8 {
+                flush(&mut data, &mut literal);
+                le32(&mut data, 0x8000_0000 | n as u32);
+                data.extend_from_slice(pixel(x));
+                x += n;
+            } else {
+                literal.extend_from_slice(pixel(x));
+                x += 1;
+            }
+        }
+        flush(&mut data, &mut literal);
+    }
+    let mut body = Vec::new();
+    for v in [4u32, width as u32, height as u32] {
+        le32(&mut body, v);
+    }
+    for o in offsets {
+        le32(&mut body, o);
+    }
+    body.extend_from_slice(&data);
+    let mut out = b"MLEC".to_vec();
+    for v in [if opaque { 2 } else { 0 }, 1, body.len() as u32] {
+        le32(&mut out, v);
+    }
+    out.extend_from_slice(&body);
+    out
+}
+
+/// An icon image's TLVs: slices, metrics, composition, 0x3ee and the
+/// bytes per row.
+fn icon_image_tlvs(width: u32, height: u32) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, width, height] {
@@ -453,10 +530,8 @@ pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u
     composition.extend_from_slice(&1.0f32.to_le_bytes());
     tlv(&mut t, 0x3ec, &composition);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-    let s = stride(width as usize);
-    tlv(&mut t, 0x3ef, &(s as u32).to_le_bytes());
-    let payload = lzfse_bitmap(&padded(bgra, width as usize, height as usize), s, height as usize, versions);
-    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
+    tlv(&mut t, 0x3ef, &(stride(width as usize) as u32).to_le_bytes());
+    t
 }
 
 /// A packed atlas (element 9, part 181): `bgra` is already flipped and
