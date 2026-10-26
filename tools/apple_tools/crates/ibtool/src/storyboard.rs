@@ -906,7 +906,18 @@ fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64
         (Platform::Ios, "UICTFontTextStyleTitle1") => (".SFUI-Regular", 0, 25.0),
         (Platform::Ios, "UICTFontTextStyleTitle2") => (".SFUI-Regular", 0, 19.0),
         (Platform::Ios, "UICTFontTextStyleTitle3") => (".SFUI-Regular", 0, 17.0),
+        // tvOS's, from one storyboard labelling each: Medium but for
+        // Footnote, none bold.
+        (Platform::Tvos, "UICTFontTextStyleHeadline") => (".SFUI-Medium", 0, 38.0),
+        (Platform::Tvos, "UICTFontTextStyleBody") => (".SFUI-Medium", 0, 29.0),
+        (Platform::Tvos, "UICTFontTextStyleCallout") => (".SFUI-Medium", 0, 31.0),
+        (Platform::Tvos, "UICTFontTextStyleSubhead") => (".SFUI-Medium", 0, 29.0),
+        (Platform::Tvos, "UICTFontTextStyleFootnote") => (".SFUI-Regular", 0, 29.0),
+        (Platform::Tvos, "UICTFontTextStyleCaption1") => (".SFUI-Medium", 0, 25.0),
+        (Platform::Tvos, "UICTFontTextStyleCaption2") => (".SFUI-Medium", 0, 23.0),
         (Platform::Tvos, "UICTFontTextStyleTitle1") => (".SFUI-Medium", 0, 76.0),
+        (Platform::Tvos, "UICTFontTextStyleTitle2") => (".SFUI-Medium", 0, 57.0),
+        (Platform::Tvos, "UICTFontTextStyleTitle3") => (".SFUI-Medium", 0, 48.0),
         _ => return fail(format!("the {style} text style is not supported by this ibtool here")),
     })
 }

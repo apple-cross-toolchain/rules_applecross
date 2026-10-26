@@ -76,8 +76,8 @@ legacy guides, beside them, whether it lists the safe area or not, the
 safe-area guide following the root view in the objects as without them:
 three probes, constraints on that guide beside legacy ones refused), alone or in a navigation, tab bar or split view controller (and table and collection view
 controllers). Subviews: labels (the system font in any weight, bold or
-italic, a font Xcode finds for iOS, or the iOS text styles and, on tvOS,
-Title1; the default or an sRGB, grey or system text colour), text fields
+italic, a font Xcode finds for iOS, or the iOS and tvOS text styles; the
+default or an sRGB, grey or system text colour), text fields
 (any border, alignment, text input traits, a delegate and editing actions on
 the controller), text views (text, colours, scrolling and editing flags,
 traits, a delegate),
@@ -149,6 +149,10 @@ other values of the attributes these use, is refused. Observed:
   are `.SFUI-Regular` (Headline `.SFUI-Semibold`, traits 2) with `NSSize`
   Body 14, Subhead 12, Footnote 12, Caption1 and Caption2 11, Title0 31,
   Title1 25, Title2 19, Title3 17, Headline 14, Callout 13 (23 probes).
+  tvOS's are `.SFUI-Medium` (Footnote `.SFUI-Regular`), none bold, with
+  `NSSize` Headline 38, Body 29, Callout 31, Subhead 29, Footnote 29,
+  Caption1 25, Caption2 23, Title1 76, Title2 57, Title3 48 (one
+  storyboard labelling each).
 - A label's declared text colour, even `labelColor`, sets
   `UIDisableUpdateTextColorOnTraitCollectionChange`; a nil one is
   `labelColor` without it.
