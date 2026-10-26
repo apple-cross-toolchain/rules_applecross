@@ -4017,7 +4017,7 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
         bar,
         &[
             ("key", Some("navigationBar")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("largeTitles", Some("YES")),
-            ("barStyle", Some("black")), ("translucent", Some("NO")), ("id", None),
+            ("barStyle", Some("black")), ("translucent", Some("NO")), ("id", None), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")),
         ],
     )?;
     only_children(bar, &["rect", "autoresizingMask", "color", "textAttributes"])?;
@@ -4046,12 +4046,25 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: &str, delegate: &s
     if opaque {
         values.push(("UIOpaque", Value::Bool(true)));
     }
+    // Multiple touch before the autoresizing keys, clipping after them
+    // (Xcode's master-detail template, two bars); beside opacity or a tint
+    // their order isn't established.
+    let (touch, clips) = (bar.attribute("multipleTouchEnabled").is_some(), bar.attribute("clipsSubviews").is_some());
+    if touch {
+        values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
+    }
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     values.push(("UIAutoresizingMask", Value::Int(2)));
     let tint = match child(bar, "color", "tintColor") {
         Some(own) => Some(own),
         None => document_tint(bar)?,
     };
+    if (touch || clips) && (opaque || tint.is_some()) {
+        return fail("a navigation bar's multiple touch or clipping beside opacity or a tint is not supported by this ibtool");
+    }
+    if clips {
+        values.push(("UIClipsToBounds", Value::Bool(true)));
+    }
     if let Some(tint) = tint {
         values.push(("UITintColor", color(nib, tint)?));
     }
@@ -5295,7 +5308,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if !loadable {
             return fail("a navigation controller nothing loads is not supported by this ibtool");
         }
-        if held_children.contains(attr(nav, "id")?) {
+        // A child navigation controller a segue loads has its own nib
+        // besides its place in its parent's (Xcode's master-detail
+        // template); one loaded otherwise too is not established.
+        if held_children.contains(attr(nav, "id")?) && (initial == Some(attr(nav, "id")?) || nav.attribute("storyboardIdentifier").is_some()) {
             return fail("a child navigation controller that is loaded on its own too is not supported by this ibtool");
         }
         let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;

@@ -648,6 +648,16 @@ objects (its own nib's, or its navigation controller's).
   selector: actions with one selector the right item's first, and the
   `perform:`s in the order of their templates' outlets.
 
+A child navigation controller's root may have segues (Xcode's
+master-detail template): its templates follow the children's parts in the
+parent's objects, their `viewController` outlets to the root follow the
+scene outlet. A child navigation controller a segue shows (the detail) has
+a nib of its own too, as any controller a segue loads; one loaded
+otherwise as well is refused. Its bar's `multipleTouchEnabled` is
+`UIMultipleTouchEnabled` before the autoresizing keys and `clipsSubviews`
+`UIClipsToBounds` after them (two corpus storyboards, Swift and
+Objective-C).
+
 Bar button items in a tab or split view controller's children, beside a
 tab bar item or a gesture recognizer, and with images, are refused (46
 probes).

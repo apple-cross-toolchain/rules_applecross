@@ -74,9 +74,12 @@ pub(super) fn segue_destinations<'a>(controllers: &[Node<'a, '_>], initial: Opti
             if find(destination).is_none() {
                 return fail("a segue to anything but a view, table view, collection view, navigation, tab bar or split view controller or a storyboard reference is not supported by this ibtool");
             }
+            // Reached even if loaded already as a parent's child: a
+            // split view's detail, which its master's segue shows, has a
+            // nib of its own too (Xcode's master-detail template).
+            reached.insert(destination);
             if !loaded.contains(&destination) {
                 loaded.push(destination);
-                reached.insert(destination);
             }
         }
     }
