@@ -338,6 +338,9 @@ other values of the attributes these use, is refused. Observed:
 - A controller's own `restorationIdentifier` is `UIRestorationIdentifier`
   after `UINibName` (one probe; beside a storyboard identifier, or in an
   embedded controller, it is refused).
+- A root view's content mode other than scale to fill is `UIContentMode`
+  after its mask (two probes; beside `clearsContextBeforeDrawing` or a
+  tint it is refused).
 - A scene controller's `modalTransitionStyle` (flip horizontal 1, cross
   dissolve 2, partial curl 3; cover vertical left out) and
   `modalPresentationStyle` (as a navigation controller's) are

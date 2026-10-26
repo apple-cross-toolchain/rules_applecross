@@ -4517,7 +4517,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 "directionalEdgeInsets", "accessibility",
             ])?;
             only_attributes(view, &[
-                ("key", Some("view")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", None),
+                ("key", Some("view")), ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", None),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
                 ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
             ])?;
@@ -4733,6 +4733,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(mask)));
+            // A content mode other than scale to fill after the mask (two
+            // probes); beside clearing or a tint it is refused.
+            let mode = content_mode(view.attribute("contentMode").unwrap_or("scaleToFill"))?;
+            if mode != 0 {
+                if view.attribute("clearsContextBeforeDrawing").is_some() || tint.is_some() {
+                    return fail("a root view's content mode beside clearsContextBeforeDrawing or a tint colour is not supported by this ibtool");
+                }
+                values.push(("UIContentMode", Value::Int(mode)));
+            }
             if view.attribute("clearsContextBeforeDrawing").is_some() {
                 if tint.is_some() {
                     return fail("a root view's tint colour beside clearsContextBeforeDrawing is not supported by this ibtool");
