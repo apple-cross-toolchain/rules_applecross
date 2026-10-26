@@ -263,17 +263,31 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             return Err(format!("{name}: icons of equal area in one atlas are not supported by this actool"));
         }
         let cap = 18_050 * scale as usize;
-        let (standalone, packable): (Vec<&Item>, Vec<&Item>) = group.into_iter().partition(|i| i.image.width * i.image.height > cap);
-        let (mut standalone, packable) = if packable.len() < 2 { (standalone.into_iter().chain(packable).collect::<Vec<_>>(), Vec::new()) } else { (standalone, packable) };
+        // For iOS, translucent and opaque icons are packed apart, as image
+        // sets' are: an opacity's only packable icon is stored on its own
+        // (Flutter's gallery). Both needing atlases is not established.
+        let (translucent, opaque): (Vec<&Item>, Vec<&Item>) = group.into_iter().partition(|i| !mac && !opaque_image(&i.image));
+        let mut standalone = Vec::new();
         let mut atlases: Vec<Vec<&Item>> = Vec::new();
-        let mut total = 0;
-        for i in packable {
-            if atlases.is_empty() || total >= cap {
-                atlases.push(Vec::new());
-                total = 0;
+        for part in [translucent, opaque] {
+            let (big, packable): (Vec<&Item>, Vec<&Item>) = part.into_iter().partition(|i| i.image.width * i.image.height > cap);
+            standalone.extend(big);
+            if packable.len() < 2 {
+                standalone.extend(packable);
+                continue;
             }
-            total += i.image.width * i.image.height;
-            atlases.last_mut().unwrap().push(i);
+            if !atlases.is_empty() {
+                return Err(format!("{name}: atlases of both translucent and opaque icons at one scale are not supported by this actool"));
+            }
+            let mut total = 0;
+            for i in packable {
+                if atlases.is_empty() || total >= cap {
+                    atlases.push(Vec::new());
+                    total = 0;
+                }
+                total += i.image.width * i.image.height;
+                atlases.last_mut().unwrap().push(i);
+            }
         }
         let image_attrs = |i: &Item| {
             let mut a = vec![(car::ATTR_SCALE, scale as u16)];
@@ -317,17 +331,9 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
                 return Err(format!("{name}: small atlases are not supported by this actool for macOS"));
             }
             // An iOS atlas's name and MLEC version say whether its icons
-            // are opaque; one mixing opaque and translucent icons is not
-            // established.
-            let opaque = if mac {
-                false
-            } else {
-                let o: Vec<bool> = atlas.iter().map(|i| opaque_image(&i.image)).collect();
-                if o.iter().any(|&x| x != o[0]) {
-                    return Err(format!("{name}: an atlas of opaque and translucent icons is not supported by this actool"));
-                }
-                o[0]
-            };
+            // are all opaque; one mixing opaque and translucent icons is
+            // translucent (Flutter's gallery).
+            let opaque = !mac && atlas.iter().all(|i| opaque_image(&i.image));
             let atlas_name = format!("ZZZZPackedAsset-{scale}.{}.{}-gamut0", opaque as u8, gray as u8);
             let atlas_version = if mac { version } else { car::MlecVersions::opacity(opaque) };
             let csi = if gray {

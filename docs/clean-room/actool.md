@@ -238,8 +238,11 @@ An iOS icon's `MLEC` version says whether it is opaque: 2 (one stream) or
 3 (chunks) when it is, 0 or 1 when it isn't, per standalone image and per
 atlas, whose name's middle number is 1 when opaque and 0 when not
 (Google Maps' and Firebase's example icon sets, and probes at 20 to 167
-pixels). An atlas of opaque and translucent icons, which those don't have,
-is refused. An image under 40 pixels wide is stored with method 1, a
+pixels). Translucent and opaque icons are packed apart, as image sets'
+are: at a scale, each opacity's icons fill their own atlases, and an
+opacity's only packable icon is stored on its own (Flutter's gallery, its
+one opaque iPad icon at 1x standalone beside an atlas of translucent ones).
+Atlases of both opacities at one scale aren't established and are refused. An image under 40 pixels wide is stored with method 1, a
 run-length coding, opaque or not: after `MLEC`, the version (2 opaque, 0
 not), 1 and the length, the pixel format (4, BGRA; 3 for GA8), width,
 height and each row's offset from the format, then each row's runs, a count
