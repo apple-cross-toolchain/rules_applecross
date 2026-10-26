@@ -310,6 +310,9 @@ other values of the attributes these use, is refused. Observed:
   nil symbol, configuration and catalog), shared by the views using it;
   no image, no key; then `UIAdjustsImageSizeForAccessibilityContentSizeCategory`
   when set (one probe). snag's launch screen is byte-identical.
+- A controller's own `restorationIdentifier` is `UIRestorationIdentifier`
+  after `UINibName` (one probe; beside a storyboard identifier, or in an
+  embedded controller, it is refused).
 - A controller's `title` is its swapper's `UITitle`, first;
   `useStoryboardIdentifierAsRestorationIdentifier` adds
   `UIRestorationIdentifier` (the identifier's string) after
@@ -458,6 +461,10 @@ other values of the attributes these use, is refused. Observed:
   `UIStackViewLayoutMarginsRelative` whether or not
   `layoutMarginsRelativeArrangement` does, which without them changes
   nothing; a hidden one has `UIHidden` after `UIDeepDrawRect` (one probe);
+  an empty one has neither `UISubviews` nor `UIStackViewArrangedSubviews`
+  (one probe and a corpus storyboard); a custom class is swapped in last
+  and `insetsLayoutMarginsFromSafeArea="NO"` follows the margin flags (two
+  probes);
   directional margins add `UIViewLayoutMarginsAreDirectional`
   after them and after `UIViewLayoutMarginsFollowReadableWidth`. A
   background colour comes after its subviews, its own constraints after
@@ -697,6 +704,8 @@ probes:
   `UISectionIndexBackgroundColor`, `UISeparatorInsetReference` 0.
 - Left out, the row height is 44, a plain table's section heights 22, and
   the estimates 0.
+- A table without user interaction has `UIUserInteractionDisabled` after
+  `UIOpaque` (one probe).
 - The separator style: default and singleLine are `UISeparatorStyle` and
   `UISeparatorStyleIOS5AndLater` 1; none only
   `UISeparatorStyleIOS9AndLater` 0; singleLineEtched all three, 2. A
@@ -895,7 +904,10 @@ unless given) priorities, written when given, before its semantic content
 attribute (three probes). A selected button has `UISelected` before
 `UIDisabled`, and a line break mode other than middle truncation is
 `UILineBreakMode` (word wrap 0, tail truncation 4) after its stateful
-content (four probes).
+content (four probes). A button may have no states at all, and then no
+`UIButtonStatefulContent`, or only others than normal (two probes); a
+content mode other than scale to fill is `UIContentMode` after its mask
+(one probe).
 
 A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
@@ -1116,7 +1128,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
   `estimatedItemSize` set to an `NSValue` size of the largest doubles.
 - A flow layout with a custom class is swapped in after its values (one
   probe); a horizontal one has `UIScrollDirection` 1 after its item size
-  (one probe).
+  (one probe), and a section inset other than zero `UISectionInset` (top,
+  left, bottom, right) there too (one probe).
 - A custom layout (`<collectionViewLayout>` with a custom class) is a
   `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
   root or in a view (three probes).

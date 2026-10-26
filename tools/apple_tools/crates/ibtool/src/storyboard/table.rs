@@ -34,6 +34,7 @@ fn height(n: Node, name: &str, default: Option<f32>) -> Result<f32, String> {
 fn check_table(table: Node) -> Result<(), String> {
     only_attributes(table, &[
         ("key", Some("view")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
+        ("userInteractionEnabled", Some("NO")),
         ("contentMode", Some("scaleToFill")), ("alwaysBounceVertical", None), ("showsHorizontalScrollIndicator", Some("NO")),
         ("showsVerticalScrollIndicator", Some("NO")),
         ("keyboardDismissMode", None), ("dataMode", None), ("style", None), ("separatorStyle", None),
@@ -172,6 +173,10 @@ fn table_values(
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     if table.attribute("opaque").is_none() {
         values.push(("UIOpaque", Value::Bool(true)));
+    }
+    // One probe.
+    if table.attribute("userInteractionEnabled").is_some() {
+        values.push(("UIUserInteractionDisabled", Value::Bool(true)));
     }
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     let mask = match children(table, "autoresizingMask").next() {
