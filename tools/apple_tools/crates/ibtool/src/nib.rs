@@ -46,6 +46,27 @@ pub fn reference(name: impl Into<String>) -> Value {
     Value::Ref(name.into())
 }
 
+/// The start of the names of objects shared by value (strings, numbers,
+/// colours, images). Xcode encodes one where it is first used, which needn't
+/// be where it was first built, so the encoder defines each where it first
+/// meets it, as its definition or a reference.
+pub const SHARED: char = '=';
+
+/// Takes the shared objects' definitions out of `values` (and theirs), leaving
+/// references in their place.
+fn lift(values: &mut [(&'static str, Value)], defs: &mut HashMap<String, Object>) {
+    for (_, v) in values.iter_mut() {
+        if let Value::New(o) = v {
+            lift(&mut o.values, defs);
+            if o.name.as_ref().is_some_and(|n| n.starts_with(SHARED)) {
+                let name = o.name.clone().expect("checked");
+                let Value::New(o) = std::mem::replace(v, Value::Ref(name.clone())) else { unreachable!() };
+                defs.insert(name, o);
+            }
+        }
+    }
+}
+
 enum Stored {
     Int(i64),
     Bool(bool),
@@ -66,6 +87,8 @@ struct Encoder {
     /// resolved once everything is (an object may refer ahead, as a
     /// navigation item to its bar).
     pending: Vec<(u32, usize, String)>,
+    /// Shared objects not encoded yet, by name.
+    defs: HashMap<String, Object>,
 }
 
 impl Encoder {
@@ -96,6 +119,10 @@ impl Encoder {
                 Value::New(child) => Stored::Object(self.encode(child)),
                 Value::Ref(name) => match self.names.get(&name) {
                     Some(&n) => Stored::Object(n),
+                    None if self.defs.contains_key(&name) => {
+                        let o = self.defs.remove(&name).expect("checked");
+                        Stored::Object(self.encode(o))
+                    }
                     None => {
                         let at = self.objects[me as usize].2.len();
                         self.pending.push((me, at, name));
@@ -121,11 +148,15 @@ fn varint(out: &mut Vec<u8>, mut v: usize) {
     }
 }
 
-pub fn archive(root: Object) -> Vec<u8> {
-    let mut e = Encoder { objects: Vec::new(), keys: Vec::new(), key_index: HashMap::new(), names: HashMap::new(), pending: Vec::new() };
+/// The nib of `root`; an error if something refers to an object it doesn't
+/// hold (as an outlet to an object the document doesn't have).
+pub fn archive(mut root: Object) -> Result<Vec<u8>, String> {
+    let mut defs = HashMap::new();
+    lift(&mut root.values, &mut defs);
+    let mut e = Encoder { objects: Vec::new(), keys: Vec::new(), key_index: HashMap::new(), names: HashMap::new(), pending: Vec::new(), defs };
     e.encode(root);
     for (object, at, name) in std::mem::take(&mut e.pending) {
-        let n = *e.names.get(&name).unwrap_or_else(|| panic!("no object named {name}"));
+        let n = *e.names.get(&name).ok_or_else(|| format!("a connection to an object the nib doesn't hold ({name}) is not supported by this ibtool"))?;
         e.objects[object as usize].2[at].1 = Stored::Object(n);
     }
 
@@ -250,5 +281,5 @@ pub fn archive(root: Object) -> Vec<u8> {
     out.extend(values);
     out.extend(class_table);
     out.extend_from_slice(b"LNE\0");
-    out
+    Ok(out)
 }

@@ -552,7 +552,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             ("UIEventMask", Value::Int(*mask)),
         ])));
     }
-    Ok(nib::archive(root_object(&mut nib, top, objects, connections)))
+    nib::archive(root_object(&mut nib, top, objects, connections))
 }
 
 /// A constraint Xcode makes between the cell's and its content view's
