@@ -84,7 +84,7 @@ fn prototypes<'a, 'i>(table: Node<'a, 'i>) -> Result<(Vec<(&'a str, Node<'a, 'i>
     for p in children(table, "prototypes") {
         only_children(p, &["tableViewCell"])?;
         for c in children(p, "tableViewCell") {
-            let segue = children(c, "connections").flat_map(|cs| children(cs, "segue")).map(|sg| attr(sg, "id")).next().transpose()?;
+            let segue = cell_connections(c)?.0;
             if let Some(reuse) = c.attribute("reuseIdentifier") {
                 if cells.iter().any(|(r, ..)| *r == reuse) {
                     return fail(format!("two prototypes reused as {reuse:?} are not supported by this ibtool"));
@@ -308,11 +308,14 @@ pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &st
 
 /// A table view controller's view nib: its table, the root view, holding
 /// its prototype cells' nibs. Returns the nib's root, whether it uses the
-/// controller's placeholder, and the ids of the segues its cells trigger.
+/// controller's placeholder, the ids of the segues its cells trigger in
+/// their placeholders' order, and for a static table the order the
+/// controller's nib lists them in (as placeholder indices).
+#[allow(clippy::type_complexity)]
 pub(super) fn table_view_nib(
     platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, table: Node, f: &Frame,
     vc_outlets: &[(String, String)],
-) -> Result<(Object, bool, Vec<String>), String> {
+) -> Result<(Object, bool, Vec<String>, Option<Vec<usize>>), String> {
     check_table(table)?;
     if table.attribute("key").is_none() {
         return fail("a table view controller's table view needs key=\"view\"");
@@ -334,7 +337,29 @@ pub(super) fn table_view_nib(
     let static_table = table.attribute("dataMode") == Some("static");
     let upstream_used = !outlets.is_empty();
 
-    let (cells, segues) = prototypes(table)?;
+    let (cells, mut segues) = prototypes(table)?;
+    // A static table's cells' segues: their placeholders follow the
+    // controller's, section by section, each section's cells in reverse;
+    // the controller's nib lists them in document order.
+    let mut listing = None;
+    if table.attribute("dataMode") == Some("static") {
+        let sections: Vec<Vec<Node>> = children(table, "sections")
+            .flat_map(|ss| children(ss, "tableViewSection"))
+            .map(|sec| children(sec, "cells").flat_map(|cs| children(cs, "tableViewCell")).collect())
+            .collect();
+        for cells in &sections {
+            for cell in cells.iter().rev() {
+                segues.extend(cell_connections(*cell)?.0.map(str::to_string));
+            }
+        }
+        let mut order = Vec::new();
+        for cell in sections.iter().flatten() {
+            if let Some(id) = cell_connections(*cell)?.0 {
+                order.push(segues.iter().position(|s| s == id).expect("collected above"));
+            }
+        }
+        listing = Some(order);
+    }
     let mut nib = Nib::new(platform, color_matched, localizable);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
@@ -378,6 +403,7 @@ pub(super) fn table_view_nib(
         let mut sections = Vec::new();
         let mut section_names = Vec::new();
         let mut parts = Vec::new();
+        let mut segue_outlets = Vec::new();
         for ss in children(table, "sections") {
             only_children(ss, &["tableViewSection"])?;
             for sec in children(ss, "tableViewSection") {
@@ -388,10 +414,21 @@ pub(super) fn table_view_nib(
                 for cs in children(sec, "cells") {
                     only_children(cs, &["tableViewCell"])?;
                     for cell in children(cs, "tableViewCell") {
-                        if children(cell, "connections").next().is_some() {
-                            return fail("a static cell's own connections are not supported by this ibtool");
+                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell)?;
+                        // Its segue's placeholder and its outlets into its
+                        // views, among the outlets.
+                        let (segue, cell_outlets) = cell_connections(cell)?;
+                        if let Some(id) = segue {
+                            let i = segues.iter().position(|s| s == id).expect("static segues are collected first");
+                            segue_outlets.push((i, cell_parts.name.clone()));
                         }
-                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell, false)?;
+                        for (label, destination) in cell_outlets {
+                            let destination = view_name(destination);
+                            if !cell_parts.scene.subviews.iter().any(|s| s.1 == destination) {
+                                return fail("a cell's outlets to anything but its content's views are not supported by this ibtool");
+                            }
+                            outlets.push((label.to_string(), cell_parts.name.clone(), destination));
+                        }
                         let height = cell.attribute("rowHeight").map(number).transpose()?.unwrap_or(-1.0);
                         rows.push(Value::New(Object::new("UITableViewRow", vec![("UITableRowCell", cell_value), ("UITableRowHeight", Value::Float(height as f32))])));
                         parts.push(cell_parts);
@@ -410,6 +447,9 @@ pub(super) fn table_view_nib(
                 section_names.push(name);
             }
         }
+        // Cells' segue outlets in their placeholders' order.
+        segue_outlets.sort();
+        outlets.extend(segue_outlets.into_iter().map(|(i, cell)| ("selectionSegueTemplate".to_string(), cell, format!("upstream segue {i}"))));
         let sections = nib.array("NSArray", sections);
         top.push(Value::New(Object::new("UITableViewDataSource", vec![("UITableSections", sections)]).named("static data source")));
         // The data source; the sections (level 1); the cells (2); each cell's
@@ -461,7 +501,7 @@ pub(super) fn table_view_nib(
     for (label, source, destination) in &outlets {
         connections.push(outlet(&mut nib, label, source, destination));
     }
-    Ok((root_object(&mut nib, top, objects, connections), upstream_used, segues))
+    Ok((root_object(&mut nib, top, objects, connections), upstream_used, segues, listing))
 }
 
 /// A table cell as a prototype's nib or a static table's row holds it,
@@ -474,14 +514,27 @@ struct CellParts<'a> {
 
 /// A cell: its object (named after its id), with its content view and the
 /// separator Xcode lays out at its foot.
-fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, has_segue: bool) -> Result<(Value, CellParts<'a>), String> {
+fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -> Result<(Value, CellParts<'a>), String> {
     only_attributes(cell, &[
         ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
         ("accessoryType", None), ("reuseIdentifier", None), ("rowHeight", None), ("customClass", None), ("customModule", None),
-        ("customModuleProvider", None), ("userLabel", None), ("id", None),
+        ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("id", None),
     ])?;
     only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections"])?;
+    // A built-in style's labels, the content view's.
+    let style = match cell.attribute("style") {
+        None | Some("IBUITableViewCellStyleDefault") => 0,
+        Some("IBUITableViewCellStyleValue1") => 1,
+        Some("IBUITableViewCellStyleValue2") => 2,
+        Some("IBUITableViewCellStyleSubtitle") => 3,
+        Some(other) => return fail(format!("cell style {other} is not supported by this ibtool")),
+    };
+    let text_label = cell.attribute("textLabel").map(view_name);
+    let detail_label = cell.attribute("detailTextLabel").map(view_name);
+    if (style != 0) != detail_label.is_some() || (cell.attribute("style").is_some() && text_label.is_none()) {
+        return fail("a cell style without its labels is not supported by this ibtool");
+    }
     for m in children(cell, "autoresizingMask") {
         if autoresizing_mask(m)? != 0 || m.has_children() {
             return fail("a cell with an autoresizing mask is not supported by this ibtool");
@@ -522,8 +575,30 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, h
     let mut subviews = Vec::new();
     for s in children(content, "subviews") {
         for c in s.children().filter(|c| c.is_element()) {
-            subviews.push(subview(nib, &mut scene, c)?);
+            let mut v = subview(nib, &mut scene, c)?;
+            if let Value::New(o) = &mut v {
+                if o.name.is_some() && (o.name == text_label || o.name == detail_label) {
+                    if o.class != "UILabel" {
+                        return fail("a cell's text label that isn't a label is not supported by this ibtool");
+                    }
+                    o.class = "UITableViewLabel";
+                }
+            }
+            subviews.push(v);
         }
+    }
+    for l in text_label.iter().chain(&detail_label) {
+        if !scene.subviews.iter().any(|s| s.0.as_ref() == Some(&content_name) && s.1 == *l) {
+            return fail("a cell's text label outside its content view is not supported by this ibtool");
+        }
+    }
+    // The objects list a style's detail label before its text label,
+    // wherever they are in the document (three probes).
+    if text_label.is_some() {
+        if scene.subviews.len() != 1 + usize::from(detail_label.is_some()) {
+            return fail("other views beside a cell style's labels are not supported by this ibtool");
+        }
+        scene.subviews.sort_by_key(|s| Some(&s.1) != detail_label.as_ref());
     }
     if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
         return fail("actions, outlets and segues in a cell are not supported by this ibtool");
@@ -603,6 +678,9 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, h
     if let Some(reuse) = cell.attribute("reuseIdentifier") {
         values.push(("UIReuseIdentifier", nib.string(reuse)));
     }
+    if style != 0 {
+        values.push(("UITableViewCellStyle", Value::Int(style)));
+    }
     if let Some(level) = cell.attribute("indentationLevel") {
         let level: i64 = level.parse().map_err(|_| format!("not a number: {level}"))?;
         if level != 0 {
@@ -626,8 +704,8 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, h
     }
     values.push(("UIContentConfigurationView", Value::Nil));
     values.push(("UIContentView", reference(content_name.clone())));
-    values.push(("UITextLabel", Value::Nil));
-    values.push(("UIDetailTextLabel", Value::Nil));
+    values.push(("UITextLabel", text_label.map_or(Value::Nil, reference)));
+    values.push(("UIDetailTextLabel", detail_label.map_or(Value::Nil, reference)));
     values.push(("UIImageView", Value::Nil));
     let object = if cell.attribute("customClass").is_some() {
         let class = runtime_class_name(cell, module, "UITableViewCell")?;
@@ -637,7 +715,6 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, h
     } else {
         Object::new("UITableViewCell", values)
     };
-    let _ = has_segue;
     Ok((Value::New(object.named(cell_name.clone())), CellParts { name: cell_name, content: content_name, scene }))
 }
 
@@ -650,7 +727,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     // A cell's segue is its placeholder's.
     let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
 
-    let (cell_value, parts) = cell_object(&mut nib, module, cell, has_segue)?;
+    let (cell_value, parts) = cell_object(&mut nib, module, cell)?;
     let CellParts { name: cell_name, content: content_name, scene } = parts;
     let mut top = vec![owner, responder];
     top.extend(upstream);
@@ -683,28 +760,41 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     if has_segue {
         outlets.push(("selectionSegueTemplate", "upstream".to_string()));
     }
-    for c in children(cell, "connections") {
-        only_children(c, &["outlet", "segue"])?;
-        if children(c, "segue").count() > 1 {
-            return fail("a cell with more than one segue is not supported by this ibtool");
+    for (label, destination) in cell_connections(cell)?.1 {
+        let destination = view_name(destination);
+        if !scene.subviews.iter().any(|s| s.1 == destination) {
+            return fail("a cell's outlets to anything but its content's views are not supported by this ibtool");
         }
-        for sg in children(c, "segue") {
-            if sg.attribute("trigger").is_some() {
-                return fail("a cell's accessory segue is not supported by this ibtool");
-            }
-        }
-        for o in children(c, "outlet") {
-            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
-            let destination = view_name(attr(o, "destination")?);
-            if !scene.subviews.iter().any(|s| s.1 == destination) {
-                return fail("a cell's outlets to anything but its content's views are not supported by this ibtool");
-            }
-            outlets.push((attr(o, "property")?, destination));
-        }
+        outlets.push((label, destination));
     }
     outlets.sort_by(|a, b| a.0.cmp(b.0));
     let connections = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
     Ok(nib::archive(root_object(&mut nib, top, objects, connections)))
+}
+
+/// A cell's own connections: its selection segue's id, if it has one, and
+/// its outlets (label, destination id).
+#[allow(clippy::type_complexity)]
+fn cell_connections<'a>(cell: Node<'a, '_>) -> Result<(Option<&'a str>, Vec<(&'a str, &'a str)>), String> {
+    let mut segue = None;
+    let mut outlets = Vec::new();
+    for c in children(cell, "connections") {
+        only_children(c, &["outlet", "segue"])?;
+        for sg in children(c, "segue") {
+            if segue.is_some() {
+                return fail("a cell with more than one segue is not supported by this ibtool");
+            }
+            if sg.attribute("trigger").is_some() {
+                return fail("a cell's accessory segue is not supported by this ibtool");
+            }
+            segue = Some(attr(sg, "id")?);
+        }
+        for o in children(c, "outlet") {
+            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
+            outlets.push((attr(o, "property")?, attr(o, "destination")?));
+        }
+    }
+    Ok((segue, outlets))
 }
 
 /// The background view of a cell that selects other than by default: its
