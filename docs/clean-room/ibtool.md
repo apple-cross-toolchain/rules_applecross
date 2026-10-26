@@ -492,7 +492,8 @@ other values of the attributes these use, is refused. Observed:
   any: none given is nil), `NSFont` and `NSParagraphStyle` (an `NSMutableParagraphStyle` with
   `NSAlignment` in AppKit's order, right 1 and center 2, left left out,
   and nil `NSTabStops`); the view's own `UIFont` and `UITextColor` then
-  refer to them. Then `UIAdjustsFontForContentSizeCategory`, `UIFont`,
+  refer to them. Text views of the same colour, font and alignment in one
+  nib share that attributes dictionary (a fuzzed storyboard). Then `UIAdjustsFontForContentSizeCategory`, `UIFont`,
   `UITextColor` (none for a nil colour), `UITextAlignment`, `UIEditable`
   and `UISelectable` (false when turned off), the text input traits,
   `UITextHighlightAttributes` (`NSColor` system blue,

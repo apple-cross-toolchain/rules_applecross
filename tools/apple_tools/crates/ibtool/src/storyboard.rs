@@ -3171,24 +3171,34 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                         if long { mutable(&text) } else { nib.string(&text) }
                     }
                 };
-                let mut attributes = Vec::new();
-                if let Some(c) = text_color {
-                    attributes.extend([nib.string("NSColor"), color(nib, c)?]);
-                }
-                attributes.extend([nib.string("NSFont"), font(nib, font_node, None)?]);
-                let mut paragraph = Vec::new();
-                let ns_alignment = match alignment {
-                    0 => None,
-                    1 => Some(2),
-                    2 => Some(1),
-                    other => Some(other),
+                // Text views of equal attributes share one dictionary (a
+                // fuzzed storyboard, two probes).
+                let describe = |n: Option<Node>| n.map(|n| n.attributes().map(|a| format!("{}={}", a.name(), a.value())).collect::<Vec<_>>().join(" "));
+                let key = format!("text view attributes:{:?}:{:?}:{alignment}", describe(text_color), describe(font_node));
+                let attributes = match nib.existing(&key) {
+                    Some(shared) => shared,
+                    None => {
+                        let mut attributes = Vec::new();
+                        if let Some(c) = text_color {
+                            attributes.extend([nib.string("NSColor"), color(nib, c)?]);
+                        }
+                        attributes.extend([nib.string("NSFont"), font(nib, font_node, None)?]);
+                        let mut paragraph = Vec::new();
+                        let ns_alignment = match alignment {
+                            0 => None,
+                            1 => Some(2),
+                            2 => Some(1),
+                            other => Some(other),
+                        };
+                        if let Some(a) = ns_alignment {
+                            paragraph.push(("NSAlignment", Value::Int(a)));
+                        }
+                        paragraph.push(("NSTabStops", Value::Nil));
+                        attributes.extend([nib.string("NSParagraphStyle"), Value::New(Object::new("NSMutableParagraphStyle", paragraph))]);
+                        let Value::New(dictionary) = nib.array("NSDictionary", attributes) else { unreachable!("a new array") };
+                        nib.shared(key, || dictionary)
+                    }
                 };
-                if let Some(a) = ns_alignment {
-                    paragraph.push(("NSAlignment", Value::Int(a)));
-                }
-                paragraph.push(("NSTabStops", Value::Nil));
-                attributes.extend([nib.string("NSParagraphStyle"), Value::New(Object::new("NSMutableParagraphStyle", paragraph))]);
-                let attributes = nib.array("NSDictionary", attributes);
                 values.push(("UIAttributedText", Value::New(Object::new("NSAttributedString", vec![("NSString", string), ("NSAttributes", attributes)]))));
             }
             if n.attribute("adjustsFontForContentSizeCategory").is_some() {
