@@ -342,7 +342,13 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "connections"])?;
+    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "connections"])?;
+    // A custom size is Interface Builder's alone (one probe).
+    for size in children(cell, "size") {
+        if size.attribute("key") != Some("customSize") {
+            return fail(format!("a collection view cell's {} size is not supported by this ibtool", size.attribute("key").unwrap_or("unkeyed")));
+        }
+    }
     for required in ["opaque", "multipleTouchEnabled", "contentMode"] {
         if cell.attribute(required).is_none() {
             return fail(format!("a collection view cell without {required} is not supported by this ibtool"));
@@ -363,8 +369,11 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         }
     }
     only_children(content, &["rect", "autoresizingMask", "subviews", "constraints"])?;
+    // Its mask, when it has one, after `UIAutoresizeSubviews` (two probes).
+    let mut mask = 0;
     for m in children(content, "autoresizingMask") {
-        if autoresizing_mask(m)? != 0 || m.has_children() {
+        mask = autoresizing_mask(m)?;
+        if m.has_children() || (mask != 0 && content.has_tag_name("view")) {
             return fail("a cell's content view with an autoresizing mask is not supported by this ibtool");
         }
     }
@@ -386,7 +395,10 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
 
     // The content view and its subviews, compiled as a container's are.
-    let mut scene = Scene::new("", module, content, Some(content_name.clone()));
+    // Its controls' actions may target the cell, as the scene's do its
+    // controller.
+    let cell_id = attr(cell, "id")?;
+    let mut scene = Scene::new(cell_id, module, content, Some(content_name.clone()));
     // A content view holding constraints is pinned to its cell's edges by
     // constraints Xcode makes, which the objects leave out.
     let pinned = children(content, "constraints").any(|c| c.has_children());
@@ -399,8 +411,8 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             subviews.push(subview(&mut nib, &mut scene, c)?);
         }
     }
-    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
-        return fail("actions, outlets and segues in a cell are not supported by this ibtool");
+    if scene.actions.iter().any(|a| a.3 != "upstream") || scene.actions.len() > 1 || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
+        return fail("actions other than one on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
     // A cell's nib has no key-value pairs or accessibility configurations
     // of its own here.
@@ -417,6 +429,9 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     } else {
         cv.push(("UIMultipleTouchEnabled", Value::Bool(true)));
         cv.push(("UIAutoresizeSubviews", Value::Bool(true)));
+        if mask != 0 {
+            cv.push(("UIAutoresizingMask", Value::Int(mask)));
+        }
         cv.push(("UIContentMode", Value::Int(4)));
         if content.attribute("clipsSubviews").is_some() {
             cv.push(("UIClipsToBounds", Value::Bool(true)));
@@ -519,7 +534,17 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         }
     }
     outlets.sort_by(|a, b| a.0.cmp(b.0));
-    let connections = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
+    let mut connections: Vec<Value> = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
+    // A control's action on the cell after its outlets (one probe).
+    for (selector, source, mask, _) in &scene.actions {
+        let label = nib.string(selector);
+        connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
+            ("UILabel", label),
+            ("UISource", reference(source.clone())),
+            ("UIDestination", reference(cell_name.clone())),
+            ("UIEventMask", Value::Int(*mask)),
+        ])));
+    }
     Ok(nib::archive(root_object(&mut nib, top, objects, connections)))
 }
 

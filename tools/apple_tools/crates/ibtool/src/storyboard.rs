@@ -1218,6 +1218,12 @@ fn runtime_attributes(nib: &mut Nib, n: Node, name: &str) -> Result<Vec<Value>, 
                     only_attributes(a, &[("type", None), ("keyPath", None), ("value", None)])?;
                     nib.string(attr(a, "value")?)
                 }
+                // An image by name, as a view's image is, whether or not
+                // the document declares it (two probes).
+                "image" => {
+                    only_attributes(a, &[("type", None), ("keyPath", None), ("value", None)])?;
+                    nib.image(attr(a, "value")?)
+                }
                 "color" => {
                     only_attributes(a, &[("type", None), ("keyPath", None)])?;
                     color(nib, child(a, "color", "value").ok_or("a runtime attribute's colour without a value")?)?
@@ -2142,7 +2148,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         "visualEffectView" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
-                ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("userInteractionEnabled", Some("NO")),
+                ("id", None),
             ])?;
             only_children(n, &["rect", "view", "blurEffect", "constraints", "userDefinedRuntimeAttributes"])?;
             let pairs = runtime_attributes(nib, n, &name)?;
@@ -2211,6 +2218,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             cv.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut cv);
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            // Turned off, after `UIDeepDrawRect` (one probe).
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             values.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
@@ -2326,8 +2337,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("left")),
                 ("contentVerticalAlignment", Some("top")), ("segmentControlStyle", Some("plain")), ("selectedSegmentIndex", None),
-                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("fixedFrame", Some("YES")), ("id", None),
             ])?;
+            // `fixedFrame` changes nothing beside a frame (one probe).
             only_children(n, &["rect", "segments", "constraints", "connections"])?;
             for c in children(n, "connections") {
                 only_children(c, &["action"])?;
@@ -2591,8 +2603,34 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(text) = text {
                 // In `Base.lproj` its text is localizable as `<id>.text`, the
                 // attributed text's string its development value (one probe).
-                values.push(("UIText", nib.text(attr(n, "id")?, "text", &text)));
-                let string = nib.string(&text);
+                // Text longer than 512 characters is its own mutable string,
+                // the attributed text's another; a localizable short one that
+                // fits a tagged pointer (Objective-C's: 7 ASCII characters,
+                // 9 of a 6-bit alphabet, 11 of a 5-bit one) is one object
+                // with the localizable string, which the attributed text
+                // then refers to (19 probes).
+                let id = attr(n, "id")?;
+                let (utf16, utf8) = (text.encode_utf16().count(), text.len());
+                if (utf16 > 512) != (utf8 > 512) {
+                    return fail("a text view's non-ASCII text of about 512 characters is not supported by this ibtool");
+                }
+                let long = utf16 > 512;
+                let mutable = |t: &str| Value::New(Object::new("NSMutableString", vec![("NS.bytes", Value::Data(t.as_bytes().to_vec()))]));
+                let tagged = nib.localizable && !text.is_empty() && tagged_pointer_string(&text);
+                let string = if long && !nib.localizable {
+                    values.push(("UIText", mutable(&text)));
+                    mutable(&text)
+                } else {
+                    let localized = nib.text(id, "text", &text);
+                    if tagged {
+                        let Value::New(o) = localized else { return fail("a text view's text as a shared string") };
+                        values.push(("UIText", Value::New(o.named(format!("text {id}")))));
+                        reference(format!("text {id}"))
+                    } else {
+                        values.push(("UIText", localized));
+                        if long { mutable(&text) } else { nib.string(&text) }
+                    }
+                };
                 let mut attributes = Vec::new();
                 if let Some(c) = text_color {
                     attributes.extend([nib.string("NSColor"), color(nib, c)?]);
@@ -3648,6 +3686,30 @@ fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String)], per
 
 /// An action without an event mask: a gesture recognizer's or a bar button
 /// item's.
+/// Whether Objective-C would make `s` a tagged pointer string: up to 7
+/// ASCII characters, 9 of the 6-bit alphabet, or 11 of the 5-bit one.
+fn tagged_pointer_string(s: &str) -> bool {
+    const SIX: &str = "eilotrm.apdnsIc ufkMShjTRxgC4013bDNvwyUL2O856P-B79AFKEWV_zGJ/HYX";
+    let n = s.chars().count();
+    s.is_ascii() && (n <= 7 || (n <= 9 && s.chars().all(|c| SIX.contains(c))) || (n <= 11 && s.chars().all(|c| SIX[..32].contains(c))))
+}
+
+/// A controller's `modalPresentationStyle` as UIModalPresentationStyle, none
+/// for automatic (eight probes on navigation controllers).
+fn modal_presentation_style(n: Node) -> Result<Option<i64>, String> {
+    Ok(match n.attribute("modalPresentationStyle") {
+        None | Some("automatic") => None,
+        Some("fullScreen") => Some(0),
+        Some("pageSheet") => Some(1),
+        Some("formSheet") => Some(2),
+        Some("currentContext") => Some(3),
+        Some("overFullScreen") => Some(5),
+        Some("overCurrentContext") => Some(6),
+        Some("popover") => Some(7),
+        Some(other) => return fail(format!("modalPresentationStyle=\"{other}\" is not supported by this ibtool")),
+    })
+}
+
 /// An action's event, as UIControlEvents' mask (13 probes): Xcode writes
 /// `menuActionTriggered` with none, so it is refused.
 fn control_event(event: &str) -> Result<i64, String> {
@@ -3796,6 +3858,9 @@ fn embedded_controller(
     let vc = root.vc;
     if vc.attribute("restorationIdentifier").is_some() {
         return fail("an embedded controller's restoration identifier is not supported by this ibtool");
+    }
+    if vc.attribute("modalPresentationStyle").is_some() || vc.attribute("modalTransitionStyle").is_some() {
+        return fail("an embedded controller's presentation styles are not supported by this ibtool");
     }
     // Its title is encoded before its navigation item, which may share the
     // string.
@@ -4102,6 +4167,7 @@ fn check_navigation_controller(nav: Node) -> Result<(), String> {
             ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")),
             ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")),
+            ("modalPresentationStyle", None),
             ("sceneMemberID", Some("viewController")),
         ],
     )?;
@@ -4148,6 +4214,9 @@ fn navigation_controller(
         }
     }
     values.push(("UIChildViewControllers", nib.array("NSMutableArray", vec![root.value])));
+    if let Some(style) = modal_presentation_style(nav)? {
+        values.push(("UIModalPresentationStyle", Value::Int(style)));
+    }
     if nav.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
     }
@@ -4422,7 +4491,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("clearsSelectionOnViewWillAppear", Some("NO")), ("userLabel", None),
-            ("restorationIdentifier", None),
+            ("restorationIdentifier", None), ("modalPresentationStyle", None), ("modalTransitionStyle", None),
             ("sceneMemberID", Some("viewController")),
         ])?;
         if !is_table && vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
@@ -4454,7 +4523,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 "directionalEdgeInsets", "accessibility",
             ])?;
             only_attributes(view, &[
-                ("key", Some("view")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", None),
+                ("key", Some("view")), ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", None),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
                 ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
             ])?;
@@ -4670,6 +4739,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(mask)));
+            // A content mode other than scale to fill after the mask (two
+            // probes); beside clearing or a tint it is refused.
+            let mode = content_mode(view.attribute("contentMode").unwrap_or("scaleToFill"))?;
+            if mode != 0 {
+                if view.attribute("clearsContextBeforeDrawing").is_some() || tint.is_some() {
+                    return fail("a root view's content mode beside clearsContextBeforeDrawing or a tint colour is not supported by this ibtool");
+                }
+                values.push(("UIContentMode", Value::Int(mode)));
+            }
             if view.attribute("clearsContextBeforeDrawing").is_some() {
                 if tint.is_some() {
                     return fail("a root view's tint colour beside clearsContextBeforeDrawing is not supported by this ibtool");
@@ -5038,12 +5116,32 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         } else if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
             return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
         }
+        // Its transition and presentation styles after its identifiers,
+        // before its extended edges (six probes); beside segues or gesture
+        // recognizers they are refused.
+        let transition = match vc.attribute("modalTransitionStyle") {
+            None | Some("coverVertical") => None,
+            Some("flipHorizontal") => Some(1),
+            Some("crossDissolve") => Some(2),
+            Some("partialCurl") => Some(3),
+            Some(other) => return fail(format!("modalTransitionStyle=\"{other}\" is not supported by this ibtool")),
+        };
+        let presentation = modal_presentation_style(vc)?;
+        if (transition.is_some() || presentation.is_some()) && (templates.array.is_some() || !recognizers.is_empty()) {
+            return fail("a controller's presentation styles beside segues or gesture recognizers are not supported by this ibtool");
+        }
         if let Some(array) = templates.array {
             swapper.push(("UIStoryboardSegueTemplates", array));
         }
         if !recognizers.is_empty() {
             let alive = recognizers.iter().map(|r| attr(*r, "id").map(|id| reference(format!("gesture {id}")))).collect::<Result<_, _>>()?;
             swapper.push(("UITopLevelObjectsToKeepAliveFromStoryboard", vnib.array("NSArray", alive)));
+        }
+        if let Some(t) = transition {
+            swapper.push(("UIModalTransitionStyle", Value::Int(t)));
+        }
+        if let Some(p) = presentation {
+            swapper.push(("UIModalPresentationStyle", Value::Int(p)));
         }
         if let Some(edges) = extended_edges(vc)? {
             swapper.push(("UIKeyEdgesForExtendedLayout", Value::Int(edges)));
