@@ -173,6 +173,12 @@ icons and the partial Info.plist are the plain icon's. Other appearances are
 refused (four probes and Chromium's legacy icons, equivalent but for the
 appearance blocks' order).
 
+Building for iOS without `--include-all-app-icons` (refused, as is
+`--alternate-app-icon`), Xcode ignores the app icon sets `--app-icon`
+doesn't name, and all of them without `--app-icon`: the outputs are as if
+those sets weren't there (three probes, rules_apple's catalog with an
+alternate icon). Other platforms' are refused.
+
 ## App icon sets with an image per size
 
 Each image is a rendition (part 220) of its scale, idiom, subtype and

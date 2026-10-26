@@ -380,8 +380,11 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     if let Some(outputs) = stack_icon(o, &out_dir, platform, &scan, &mut outputs)? {
         return Ok(outputs);
     }
+    // Building for iOS without --include-all-app-icons (refused), Xcode
+    // ignores the icon sets --app-icon doesn't name, as if they weren't
+    // there, and all of them without it (three probes).
     for (name, dir) in &scan.icon_sets {
-        if o.app_icon.as_deref() != Some(name.as_str()) && !icon_images(dir)?.is_empty() {
+        if platform != "ios" && o.app_icon.as_deref() != Some(name.as_str()) && !icon_images(dir)?.is_empty() {
             return Err(format!("{}: app icon sets other than --app-icon's are not supported by this actool yet", dir.display()));
         }
     }
