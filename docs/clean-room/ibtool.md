@@ -905,8 +905,11 @@ probes:
   table with no separator style has the default (one probe).
 - A plain table's white background, `systemBackgroundColor` or any opaque
   grey white (gamma 2.2, calibrated or device), is
-  `tableBackgroundColor`; other colours, and every colour of a grouped
-  table, are archived as usual.
+  `tableBackgroundColor`. A grouped or inset grouped table's sRGB
+  background of `systemGroupedBackgroundColor`'s own value (242, 242 and
+  247 of 255, at 10 digits) is that system colour, `UISystemColorName`
+  first (six probes and a corpus storyboard; a plain table's and a near
+  value are not). Other colours are archived as usual.
 - Each prototype cell with a reuse identifier is a nib of its own, in
   `UITableViewCellPrototypeNibs`: a dictionary of the identifiers, in byte
   order, each followed by a `UINib` (`captureEnclosingNIBBundleOnDecode`,
@@ -917,9 +920,13 @@ probes:
 - A cell's nib: the owner, the first responder and the cell (a
   `UIClassSwapper` with a custom class), its connections the cell's
   outlets in byte order of their names (the nib's empty array when there
-  are none). Its objects are the cell, its content view and the content
-  view's subviews; then, breadth first, each view's constraints and its
-  subviews, the content view's not listed again.
+  are none), then its controls' actions on the cell, by event mask and
+  then selector (five probes and a corpus storyboard). Its objects are the
+  cell, its content view and the content view's subviews; then, breadth
+  first, each view's constraints and its subviews, the content view's not
+  listed again. A switch's frame is its key-value pair, as in a
+  controller's view (six probes); several switches, and actions or
+  switches in a static table's cells, are refused.
 - The cell: geometry from its frame in the document, `UISubviews` (the
   content view and a `_UITableViewCellSeparatorView`), its background,
   `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, its
@@ -1122,8 +1129,8 @@ static text 64, not enabled 256, header 65536, none 0) and
 probes). In `Base.lproj` the hint and label are `NSLocalizableString`s
 keyed `<id>.accessibilityHint` and `<id>.accessibilityLabel`, as titles
 are; the identifier stays a string (one probe). Runtime attributes, switches (their frame pair) and accessibility
-settings inside cells and table headers are refused: those nibs aren't
-built with them.
+settings inside cells and table headers are refused, but for one switch's
+frame in a prototype table cell (above).
 
 A button with a plain `<buttonConfiguration>` and a title has no
 `UIButtonStatefulContent` or `UIFont`; its `UIButtonConfiguration` is
