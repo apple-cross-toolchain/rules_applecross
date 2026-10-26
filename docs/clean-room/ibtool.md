@@ -1236,8 +1236,8 @@ factor with a text style font scales the style's default size (Body and
 Headline 17, Callout 16, Subhead 15, Footnote 13, Caption1 12, Caption2 11,
 Title1 28, Title2 22, Title3 20), to a quarter point (19 probes).
 
-Switches, sliders, steppers, activity indicators and progress views (37
-probes):
+Switches, sliders, steppers, activity indicators, progress views and page
+controls (42 probes):
 - **Common.** Each is a non-opaque view: `UIDeepDrawRect`, hidden and tag,
   `UIAutoresizeSubviews`, mask 36, alpha, the constraint keys, then its
   hugging (each priority 250 unless given; a switch's, stepper's or
@@ -1275,6 +1275,13 @@ probes):
   `UIProgressTrackTintColor`), and `UIProgressViewStyle` 1 for a bar.
   Opaque ones, a bar under 4 points or with colours, and actions are
   refused.
+- **A page control** (`UIPageControl`, five probes). Its hugging is always
+  written, as a slider's. Then `UINumberOfPages` (which the document must
+  give) and `UICurrentPage` (0 unless given), the current page's and the
+  other pages' indicator tints (`UICurrentPageIndicatorTintColor`,
+  `UIPageIndicatorTintColor`), and `UIHideForSinglePage` when it hides for
+  a single page. Its actions are event connections as other controls'.
+  Tints beside hiding for a single page are refused.
 
 User-defined runtime attributes of a view, the root view or a controller
 are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
