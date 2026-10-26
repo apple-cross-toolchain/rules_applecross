@@ -1671,8 +1671,9 @@ fn layout_margins(n: Node) -> Result<Option<([f64; 4], bool)>, String> {
 /// its superview's and whether it insets them from the safe area, after its
 /// constraints (and a root view's layout guides).
 fn margins(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
-    // The margins, whether they follow the readable width, then whether
-    // they are directional (two probes and a corpus storyboard).
+    // The margins, whether they follow the readable width, whether they
+    // preserve the superview's, then whether they are directional (two
+    // probes and two corpus storyboards).
     let margins = layout_margins(n)?;
     if let Some((m, _)) = margins {
         values.push(("UIViewLayoutMargins", doubles(&m)));
@@ -1683,12 +1684,13 @@ fn margins(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), Strin
     if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
         values.push(("UIViewLayoutMarginsFollowReadableWidth", Value::Bool(true)));
     }
-    if margins.is_some_and(|(_, directional)| directional) {
-        values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
-    }
     if n.attribute("preservesSuperviewLayoutMargins").is_some() {
         values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
         values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
+    }
+    // Directional after preserving the superview's (a corpus storyboard).
+    if margins.is_some_and(|(_, directional)| directional) {
+        values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
     }
     // Turned on, the default, it changes nothing (one probe).
     match n.attribute("insetsLayoutMarginsFromSafeArea") {
@@ -6081,19 +6083,20 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             // Runtime attributes and accessibility configurations go in that
             // order too, each view's as the document gives them (eight
-            // probes, and six of accessibility on several views), but
-            // attributes of several views don't always: their order changes
-            // with unrelated views added, and not with ids (docs), so they
-            // are refused, as are attributes beside a switch's frame. Several
-            // switches' frames aren't in that order either (three in a
-            // corpus storyboard came third, first, second).
-            let distinct = |names: Vec<&String>| names.into_iter().collect::<std::collections::HashSet<_>>().len();
-            let user_views = distinct(scene.pairs.iter().map(|p| &p.0).filter(|n| !scene.switch_frames.contains(n)).collect());
-            if user_views > 1 || (user_views == 1 && !scene.switch_frames.is_empty()) || scene.switch_frames.len() > 1 {
-                return fail("user-defined runtime attributes of more than one view, beside a switch, or several switches are not supported by this ibtool");
+            // probes, and six of accessibility on several views). Key-value
+            // pairs of several views (runtime attributes and switches'
+            // frames) go by their views' places in the objects list,
+            // counted from 1, compared as decimal strings: 10 to 19 before
+            // 2 (436 probes of 2 to 30 views, before and after other
+            // objects and proxies, and a corpus storyboard's three switches).
+            let listed = |name: &String| objects.iter().position(|o| matches!(o, Value::Ref(r) if r == name)).map(|i| (i + 1).to_string());
+            for (view, _) in &scene.pairs {
+                if listed(view).is_none() {
+                    return fail("key-value pairs of a view the objects don't list are not supported by this ibtool");
+                }
             }
+            scene.pairs.sort_by_key(|p| listed(&p.0));
             let position = |name: &String| order.iter().position(|o| o == name).unwrap_or(usize::MAX);
-            scene.pairs.sort_by_key(|p| position(&p.0));
             scene.accessibility.sort_by_key(|a| position(&a.0));
 
             // Outlets, `view` among them, then actions, each in byte order of

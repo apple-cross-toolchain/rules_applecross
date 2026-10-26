@@ -1435,17 +1435,17 @@ controls (42 probes):
 
 User-defined runtime attributes of a view, the root view or a controller
 are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
-document order; a controller's are in its own nib. Those of more than one
-view in a nib, or beside a switch's frame pair, are refused: probes put
-them in the objects' order (siblings, a container and its subview with
-its list before or after its subviews, the root view and a subview,
-custom classes, a stack view or another view between, outlets to either:
-fifteen probes, and four of the corpus's storyboards), but not always.
-In one corpus storyboard (TreasureHunt's claim button) a container's
-come after its subviews'. Adding one to five unrelated labels to a
-variant flips the order and flips it back, while renaming the views (eight
-probes) changes nothing, as if a table of the objects themselves, not
-their ids, ordered them. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
+document order; a controller's are in its own nib. The pairs of several
+views (their runtime attributes and switches' frames) go by each view's
+place in the nib's objects list, counted from 1 and compared as decimal
+strings: the 10th to 19th objects' before the 2nd's, the 100th's before
+the 11th's, a view's own pairs in document order. That explains every
+earlier observation: the objects' order while fewer than ten objects come
+before them, "flips" when unrelated views pushed one past the tenth, and
+nothing from renaming. 436 probes of 2 to 30 views (before and after other
+objects, labels and proxies, nested), and nine corpus storyboards (among
+them Styles' three switches, third, first, second); accessibility
+configurations stay in the objects' order (twelve views). A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
 boolean one of 0 or 1, a string the string, a colour the colour, an image the
 `UIImageNibPlaceholder` an image view's image would be, declared or not (two
 probes), and a size an
