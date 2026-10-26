@@ -58,8 +58,9 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
 /// Refuses attributes other than `allowed`, and values other than those
 /// given (a `None` value accepts any).
 fn only_attributes(n: Node, allowed: &[(&str, Option<&str>)]) -> Result<(), String> {
-    // An object's name in Interface Builder's outline; not compiled.
-    for a in n.attributes().filter(|a| a.name() != "userLabel") {
+    // An object's name in Interface Builder's outline, and its warnings that
+    // a view is misplaced or ambiguous; not compiled.
+    for a in n.attributes().filter(|a| !matches!(a.name(), "userLabel" | "misplaced" | "ambiguous")) {
         match allowed.iter().find(|(name, _)| *name == a.name()) {
             Some((_, Some(v))) if *v != a.value() => {
                 return fail(format!("{}=\"{}\" on <{}> is not supported by this ibtool", a.name(), a.value(), n.tag_name().name()))
@@ -1147,7 +1148,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         "slider" => {
             allowed.extend([
                 ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None), ("minValue", None),
-                ("maxValue", None), ("continuous", Some("NO")),
+                ("maxValue", None), ("continuous", Some("NO")), ("enabled", Some("NO")),
             ]);
             children_allowed.push("color");
         }
@@ -1231,6 +1232,9 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             "UISwitch"
         }
         "slider" => {
+            if n.attribute("enabled").is_some() {
+                values.push(("UIDisabled", Value::Bool(true)));
+            }
             let value = |k: &str, default: f64| n.attribute(k).map(number).transpose().map(|v| v.unwrap_or(default));
             values.push(("UIValue", Value::Float(value("value", 0.5)? as f32)));
             let (min, max) = (value("minValue", 0.0)?, value("maxValue", 1.0)?);
@@ -1291,6 +1295,36 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         }
     };
     Ok(Object::new(class, values))
+}
+
+/// A view's layout margins (top, left, bottom, right, or leading and
+/// trailing), whether they follow the readable width, whether it preserves
+/// its superview's and whether it insets them from the safe area, after its
+/// constraints (and a root view's layout guides).
+fn margins(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
+    match (child(n, "edgeInsets", "layoutMargins"), child(n, "directionalEdgeInsets", "directionalLayoutMargins")) {
+        (None, None) => {}
+        (Some(m), None) => values.push(("UIViewLayoutMargins", doubles(&insets(m, "left", "right")?))),
+        (None, Some(m)) => {
+            values.push(("UIViewLayoutMargins", doubles(&insets(m, "leading", "trailing")?)));
+            values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
+        }
+        _ => return fail("a view with both layout margins and directional ones is not supported by this ibtool"),
+    }
+    if children(n, "edgeInsets").chain(children(n, "directionalEdgeInsets")).count() > 1 {
+        return fail("a view's other edge insets are not supported by this ibtool");
+    }
+    if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
+        values.push(("UIViewLayoutMarginsFollowReadableWidth", Value::Bool(true)));
+    }
+    if n.attribute("preservesSuperviewLayoutMargins").is_some() {
+        values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
+        values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
+    }
+    if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+        values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+    }
+    Ok(())
 }
 
 /// A view's `UIRestorationIdentifier`, just before
@@ -1482,8 +1516,13 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     for c in children(cs, "constraint") {
         only_attributes(c, &[
             ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
-            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("id", None),
+            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("identifier", None), ("placeholder", Some("YES")), ("id", None),
         ])?;
+        // A placeholder constraint is removed at build time, though its view
+        // still doesn't translate its mask.
+        if c.attribute("placeholder").is_some() {
+            continue;
+        }
         let first = c.attribute("firstItem").unwrap_or(id);
         let a = attr(c, "firstAttribute")?;
         let Some(second) = c.attribute("secondItem") else {
@@ -1563,13 +1602,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")),
                 ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
-                ("restorationIdentifier", None),
+                ("restorationIdentifier", None), ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
                 ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections", "string"])?;
+            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections", "string", "userDefinedRuntimeAttributes"])?;
+            let pairs = runtime_attributes(nib, n, &name)?;
+            scene.pairs.extend(pairs);
             view_connections(scene, n, &name)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
@@ -1619,6 +1660,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             match (n.attribute("horizontalHuggingPriority"), n.attribute("verticalHuggingPriority")) {
                 (None, None) => {}
                 _ => values.push(("UIViewContentHuggingPriority", hugging(nib, n)?)),
+            }
+            // Compression resistance, each 750 unless given.
+            let resistance = (n.attribute("horizontalCompressionResistancePriority"), n.attribute("verticalCompressionResistancePriority"));
+            if resistance != (None, None) {
+                let (h, v) = (resistance.0.unwrap_or("750"), resistance.1.unwrap_or("750"));
+                values.push(("UIViewContentCompressionResistancePriority", nib.string(&format!("{{{h}, {v}}}"))));
             }
             if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
                 values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
@@ -1955,7 +2002,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 None => None,
                 Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints", "userDefinedRuntimeAttributes"])?;
+            let pairs = runtime_attributes(nib, n, &name)?;
+            scene.pairs.extend(pairs);
             ignored_autoresizing_mask(n)?;
             let states: Vec<Node> = children(n, "state").collect();
             if states.len() != 1 || states[0].attribute("key") != Some("normal") {
@@ -2049,7 +2098,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         "stackView" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", Some("vertical")), ("distribution", None), ("alignment", None),
-                ("spacing", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
+                ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "subviews", "edgeInsets"])?;
@@ -2101,14 +2150,27 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIStackViewAxis", Value::Int(vertical as i64)));
             values.push(("UIStackViewDistribution", Value::Int(distribution)));
             values.push(("UIStackViewAlignment", Value::Int(alignment)));
-            values.push(("UIStackViewSpacing", Value::Double(n.attribute("spacing").map(number).transpose()?.unwrap_or(0.0))));
+            // The standard spacing is archived as none, whatever the spacing.
+            let spacing = match n.attribute("spacingType") {
+                Some("standard") => 0.0,
+                None => n.attribute("spacing").map(number).transpose()?.unwrap_or(0.0),
+                Some(other) => return fail(format!("spacingType=\"{other}\" on <stackView> is not supported by this ibtool")),
+            };
+            values.push(("UIStackViewSpacing", Value::Double(spacing)));
             values.push(("UIStackViewBaselineRelative", Value::Bool(n.attribute("baselineRelativeArrangement").is_some())));
             values.push(("UIStackViewLayoutMarginsRelative", Value::Bool(margins.is_some())));
             Object::new("UIStackView", values)
         }
-        "view" | "containerView" => {
-            // A container view is a plain view its embed segue fills.
+        "view" | "containerView" | "scrollView" => {
+            // A container view is a plain view its embed segue fills; a
+            // scroll view one with the scrolling values tables have.
             let container = n.has_tag_name("containerView");
+            let scroll = n.has_tag_name("scrollView");
+            const SCROLLING: [&str; 6] =
+                ["showsHorizontalScrollIndicator", "showsVerticalScrollIndicator", "alwaysBounceVertical", "directionalLockEnabled", "minimumZoomScale", "maximumZoomScale"];
+            if !scroll && SCROLLING.iter().any(|a| n.attribute(*a).is_some()) {
+                return fail("scrolling attributes on a <view> are not supported by this ibtool");
+            }
             if container {
                 only_attributes(n, &[("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None)])?;
                 only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
@@ -2129,8 +2191,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
                     ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
                     ("preservesSuperviewLayoutMargins", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("restorationIdentifier", None),
-                    ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+                    ("layoutMarginsFollowReadableWidth", Some("YES")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+                    ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")), ("alwaysBounceVertical", Some("YES")),
+                    ("directionalLockEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None),
                 ])?;
+                if scroll && n.attribute("key").is_some() {
+                    return fail("a scroll view as a table's header or footer view is not supported by this ibtool");
+                }
                 if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
                     return fail(format!("key=\"{}\" on <view> is not supported by this ibtool", n.attribute("key").unwrap_or("")));
                 }
@@ -2194,40 +2261,44 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
-            // Layout margins: top, left, bottom, right (leading, trailing).
-            match (child(n, "edgeInsets", "layoutMargins"), child(n, "directionalEdgeInsets", "directionalLayoutMargins")) {
-                (None, None) => {}
-                (Some(m), None) => values.push(("UIViewLayoutMargins", doubles(&insets(m, "left", "right")?))),
-                (None, Some(m)) => {
-                    values.push(("UIViewLayoutMargins", doubles(&insets(m, "leading", "trailing")?)));
-                    values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
-                }
-                _ => return fail("a view with both layout margins and directional ones is not supported by this ibtool"),
-            }
-            if children(n, "edgeInsets").chain(children(n, "directionalEdgeInsets")).count() > 1 {
-                return fail("a view's other edge insets are not supported by this ibtool");
-            }
-            if n.attribute("preservesSuperviewLayoutMargins").is_some() {
-                values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
-                values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
-            }
-            if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
-                values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
-            }
+            margins(&mut values, n)?;
             restoration_identifier(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
+            if scroll {
+                values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+                if n.attribute("showsHorizontalScrollIndicator").is_some() {
+                    values.push(("UIShowsHorizontalScrollIndicator", Value::Bool(false)));
+                }
+                if n.attribute("showsVerticalScrollIndicator").is_some() {
+                    values.push(("UIShowsVerticalScrollIndicator", Value::Bool(false)));
+                }
+                values.push(("UIBouncesZoom", Value::Bool(true)));
+                if n.attribute("alwaysBounceVertical").is_some() {
+                    values.push(("UIAlwaysBounceVertical", Value::Bool(true)));
+                }
+                if n.attribute("directionalLockEnabled").is_some() {
+                    values.push(("UIDirectionalLockEnabled", Value::Bool(true)));
+                }
+                for (a, key) in [("minimumZoomScale", "UIMinimumZoomScale"), ("maximumZoomScale", "UIMaximumZoomScale")] {
+                    if let Some(z) = n.attribute(a) {
+                        values.push((key, Value::Float(number(z)? as f32)));
+                    }
+                }
+                values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
+            }
+            let original = if scroll { "UIScrollView" } else { "UIView" };
             // A custom class is swapped in for the view when it loads.
             if n.attribute("customClass").is_some() {
-                let class = runtime_class_name(n, scene.module, "UIView")?;
+                let class = runtime_class_name(n, scene.module, original)?;
                 values.push(("UIClassName", nib.string(&class)));
-                values.push(("UIOriginalClassName", nib.string("UIView")));
+                values.push(("UIOriginalClassName", nib.string(original)));
                 Object::new("UIClassSwapper", values)
             } else {
                 if n.attribute("customModule").is_some() || n.attribute("customModuleProvider").is_some_and(|p| !p.is_empty()) {
                     return fail("a custom module without a custom class is not supported by this ibtool");
                 }
-                Object::new("UIView", values)
+                Object::new(original, values)
             }
         }
         "switch" | "slider" | "activityIndicatorView" => simple_control(nib, scene, n, &name, &f, values)?,
@@ -2405,6 +2476,9 @@ fn document_constraint(nib: &mut Nib, c: Node, first: Value, second: Option<Valu
         if p != 1000 {
             values.push(("NSPriority", Value::Int(p)));
         }
+    }
+    if let Some(identifier) = c.attribute("identifier") {
+        values.push(("NSLayoutIdentifier", nib.string(identifier)));
     }
     if constant + margin != 0.0 {
         values.push(("NSConstant", Value::Double(constant + margin)));
@@ -3159,8 +3233,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("a table or collection view controller with layout guides is not supported by this ibtool");
         }
         if !is_list {
-            only_children(view, &["rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints", "connections", "userDefinedRuntimeAttributes"])?;
-            only_attributes(view, &[("key", Some("view")), ("contentMode", Some("scaleToFill")), ("id", None)])?;
+            only_children(view, &[
+                "rect", "autoresizingMask", "viewLayoutGuide", "color", "subviews", "constraints", "connections", "userDefinedRuntimeAttributes", "edgeInsets",
+                "directionalEdgeInsets",
+            ])?;
+            only_attributes(view, &[
+                ("key", Some("view")), ("contentMode", Some("scaleToFill")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
+                ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
+                ("clearsContextBeforeDrawing", Some("NO")), ("id", None),
+            ])?;
         }
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
@@ -3292,7 +3373,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 Some(m) => autoresizing_mask(m)?,
                 None => 0,
             };
-            let background = child(view, "color", "backgroundColor").ok_or("view without a background color")?;
+            let background = child(view, "color", "backgroundColor");
 
             // The view's nib, in encoding order.
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
@@ -3347,11 +3428,18 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             if !subview_values.is_empty() {
                 values.push(("UISubviews", nib.array("NSMutableArray", subview_values)));
             }
-            values.push(("UIBackgroundColor", color(&mut nib, background)?));
+            if let Some(background) = background {
+                values.push(("UIBackgroundColor", color(&mut nib, background)?));
+            }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
-            values.push(("UIOpaque", Value::Bool(true)));
+            if view.attribute("opaque").is_none() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(mask)));
+            if view.attribute("clearsContextBeforeDrawing").is_some() {
+                values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+            }
 
             // The view's constraints: the guides' first, then the document's in
             // the order Xcode gives them, by first attribute.
@@ -3389,8 +3477,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 for c in children(cs, "constraint") {
                     only_attributes(c, &[
             ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
-            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("id", None),
+            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("identifier", None), ("placeholder", Some("YES")), ("id", None),
         ])?;
+                    if c.attribute("placeholder").is_some() {
+                        continue;
+                    }
                     let first = c.attribute("firstItem").unwrap_or(view_id);
                     let second = c.attribute("secondItem").unwrap_or(view_id);
                     if c.attribute("secondItem").is_none() && c.attribute("secondAttribute").is_none() {
@@ -3466,6 +3557,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             if safe_area_used {
                 values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![reference("safe area guide")])));
             }
+            margins(&mut values, view)?;
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             top.push(Value::New(Object::new("UIView", values).named(root_name.clone())));
