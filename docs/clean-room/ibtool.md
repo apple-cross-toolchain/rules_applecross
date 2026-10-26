@@ -66,7 +66,8 @@ not. foundation-hashing.md describes that set's layout.
 Scenes whose view controller (with or without a custom class) has a root
 view with a frame and autoresizing mask, a background colour that is one of
 40 iOS system colours or an sRGB colour, and either a safe-area layout guide or legacy top and bottom layout
-guides, alone or in a navigation, tab bar or split view controller (and table and collection view
+guides (in a document using safe areas, a root view that lists neither
+has the safe-area guide all the same: four probes), alone or in a navigation, tab bar or split view controller (and table and collection view
 controllers). Subviews: labels (the system font in any weight, bold or
 italic, a font Xcode finds for iOS, or the iOS text styles and, on tvOS,
 Title1; the default or an sRGB, grey or system text colour), text fields
@@ -726,7 +727,8 @@ cell as a prototype's nib has it, without a reuse identifier) and
 `UITableRowHeight`, a float (the cell's `rowHeight`, or -1). The objects
 list the data source, the sections, the cells, then each cell's content
 view and its subviews, then breadth first across the cells their
-constraints and deeper views. The connections begin with the owner's
+constraints and deeper views, each cell's content view and its subviews
+walked together before the next cell's (one corpus storyboard). The connections begin with the owner's
 `staticDataSource` outlet to the data source; the controller's outlets
 may reach the cells' views (seven probes, and two corpus storyboards).
 Without `colorMatched`, a grey white background stays as it is rather
@@ -743,7 +745,12 @@ grouped one under the header view (35 points without one) and a section
 footer height (17 when automatic). Rows, section headers and estimates
 don't move it. The objects list goes breadth first through the table's
 views and a static table's data source together, level by level, the
-table's views first in each. A table's `separatorInset` is
+table's views first in each. A container view in the header view embeds
+as in any view: its segue's placeholder follows the controller's, before
+the prototypes' or static cells' whatever the document order, its
+template comes first in the controller's nib, its destination loads
+first, and its `containerView` outlet is among the table nib's (five
+probes; container views in a footer are refused). A table's `separatorInset` is
 `UISeparatorInset` (top, left, bottom, right), even at the default,
 before `UISeparatorInsetReference` (36 probes in all).
 

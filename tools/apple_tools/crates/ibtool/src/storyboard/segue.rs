@@ -97,7 +97,11 @@ pub(super) fn load_order<'a>(controllers: &[Node<'a, '_>], initial: Option<&str>
         let own = |s: &Node| s.parent().is_some_and(|p| p.has_tag_name("connections") && p.parent() == Some(c));
         let relationships = segues.clone().filter(|s| s.attribute("kind") == Some("relationship"));
         let owned = segues.clone().filter(|s| s.attribute("kind") != Some("relationship") && own(s));
-        let viewed = segues.filter(|s| s.attribute("kind") != Some("relationship") && !own(s));
+        // A table header's embeds load before the rest of its views' segues,
+        // as their placeholders come first (one probe).
+        let in_header = |s: &Node| s.ancestors().any(|a| a.attribute("key") == Some("tableHeaderView"));
+        let viewed = segues.clone().filter(|s| s.attribute("kind") != Some("relationship") && !own(s));
+        let viewed = viewed.clone().filter(in_header).chain(viewed.filter(|s| !in_header(s)));
         for s in relationships.chain(owned).chain(viewed) {
             if let Some(d) = controllers.iter().find(|d| d.attribute("id").is_some() && d.attribute("id") == s.attribute("destination")) {
                 visit(*d, controllers, order);

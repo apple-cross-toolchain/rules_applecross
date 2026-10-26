@@ -400,7 +400,33 @@ pub(super) fn table_view_nib(
     }
     let upstream_used = !outlets.is_empty() || !refresh_actions.is_empty();
 
-    let (cells, mut segues) = prototypes(table)?;
+    let (mut cells, mut segues) = prototypes(table)?;
+    // The embed segues of container views in the header view: their
+    // placeholders follow the controller's, before the prototypes' or
+    // static cells', wherever the header is in the document, and the
+    // controller's nib lists them first (five probes). Those in a footer
+    // aren't established.
+    let embeds = |key: &str| -> Vec<String> {
+        header_or_footer(table, key)
+            .into_iter()
+            .flat_map(|v| v.descendants().filter(|d| d.has_tag_name("containerView")))
+            .flat_map(|c| c.descendants().filter(|d| d.has_tag_name("segue")).filter_map(|sg| sg.attribute("id")).map(str::to_string))
+            .collect()
+    };
+    let header_segues = embeds("tableHeaderView");
+    if !embeds("tableFooterView").is_empty() {
+        return fail("container views in a table's footer are not supported by this ibtool");
+    }
+    if !header_segues.is_empty() {
+        let shift = header_segues.len();
+        for (_, _, placeholder) in &mut cells {
+            if let Some(p) = placeholder {
+                let i: usize = p.trim_start_matches("upstream segue ").parse().expect("named by prototypes");
+                *p = format!("upstream segue {}", i + shift);
+            }
+        }
+        segues.splice(0..0, header_segues.iter().cloned());
+    }
     // A static table's cells' segues: their placeholders follow the
     // controller's, section by section, each section's cells in reverse;
     // the controller's nib lists them in document order.
@@ -415,7 +441,7 @@ pub(super) fn table_view_nib(
                 segues.extend(cell_connections(*cell)?.0.map(str::to_string));
             }
         }
-        let mut order = Vec::new();
+        let mut order: Vec<usize> = (0..header_segues.len()).collect();
         for cell in sections.iter().flatten() {
             if let Some(id) = cell_connections(*cell)?.0 {
                 order.push(segues.iter().position(|s| s == id).expect("collected above"));
@@ -455,7 +481,10 @@ pub(super) fn table_view_nib(
         None => None,
     };
     let values = table_values(&mut nib, &mut scene, &root_name, table, f, &cells, 0, Vec::new(), refresh_value)?;
-    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.gesture_views.is_empty() {
+    if scene.segues != header_segues {
+        return fail("segues in a table's header or footer other than its containers' are not supported by this ibtool");
+    }
+    if !scene.actions.is_empty() || !scene.control_outlets.is_empty() || !scene.gesture_views.is_empty() {
         return fail("actions, outlets to the controller, gestures and segues in a table's header or footer are not supported by this ibtool");
     }
     if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
@@ -554,16 +583,21 @@ pub(super) fn table_view_nib(
         }
         // Then breadth first across the cells: each view's constraints and
         // its subviews, the content views' already listed.
-        let mut queue: std::collections::VecDeque<(usize, &CellParts, &String)> = parts.iter().map(|p| (3, p, &p.content)).collect();
+        // The content views' subviews are walked with them, cell by cell, as
+        // they are listed (one corpus storyboard).
+        let mut queue: std::collections::VecDeque<(usize, &CellParts, &String)> = std::collections::VecDeque::new();
+        for p in &parts {
+            queue.push_back((3, p, &p.content));
+            queue.extend(p.scene.subviews.iter().filter(|sv| sv.0.as_ref() == Some(&p.content)).map(|sv| (3, p, &sv.1)));
+        }
         while let Some((depth, p, v)) = queue.pop_front() {
             levels.extend(p.scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| (depth + 1, c.1.clone())));
+            if *v == p.content {
+                continue;
+            }
             for (_, sv) in p.scene.subviews.iter().filter(|sv| sv.0.as_ref() == Some(v)) {
-                if *v == p.content {
-                    queue.push_back((depth, p, sv));
-                } else {
-                    levels.push((depth + 1, sv.clone()));
-                    queue.push_back((depth + 1, p, sv));
-                }
+                levels.push((depth + 1, sv.clone()));
+                queue.push_back((depth + 1, p, sv));
             }
         }
         connections.push(outlet(&mut nib, "staticDataSource", "owner", "static data source"));
@@ -577,7 +611,11 @@ pub(super) fn table_view_nib(
         }
     }
 
-    // The header's and footer's views' outlets among them.
+    // The header's and footer's views' outlets among them, its container
+    // views' from their placeholders.
+    for (placeholder, view) in scene.containers {
+        outlets.push(("containerView".to_string(), placeholder, view));
+    }
     for (label, source, destination) in scene.view_outlets {
         if !levels.iter().any(|l| l.1 == destination) {
             return fail("a header or footer view's outlets to anything but its table's views are not supported by this ibtool");

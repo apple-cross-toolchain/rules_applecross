@@ -3801,7 +3801,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("layout guides other than a top and a bottom one are not supported by this ibtool");
         }
         let safe_area = children(view, "viewLayoutGuide").find(|g| g.attribute("key") == Some("safeArea"));
-        let has_safe_area = safe_area.is_some();
+        // A document using safe areas gives every root view a safe-area
+        // guide, the same whether or not its view lists one (three probes).
+        let uses_safe_areas = view.document().root_element().attribute("useSafeAreas") == Some("YES");
+        let has_safe_area = safe_area.is_some() || (uses_safe_areas && scene.guides.is_empty());
         if !is_list && has_safe_area == !scene.guides.is_empty() {
             return fail("a view needs either a safe-area layout guide or legacy top and bottom layout guides for this ibtool");
         }
