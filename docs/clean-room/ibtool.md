@@ -339,8 +339,16 @@ other values of the attributes these use, is refused. Observed:
   after `UINibName` (one probe; beside a storyboard identifier, or in an
   embedded controller, it is refused).
 - A root view's content mode other than scale to fill is `UIContentMode`
-  after its mask (two probes; beside `clearsContextBeforeDrawing` or a
-  tint it is refused).
+  after its mask (two probes), then `UIClipsToBounds` when it clips (one);
+  beside `clearsContextBeforeDrawing` or a tint they are refused. One that
+  doesn't autoresize its subviews leaves `UIAutoresizeSubviews` out (one
+  probe). A table view controller's `autoresizesArchivedViewToFullSize="NO"`
+  is `UIAutoresizesArchivedViewToFullSize` false after its identifiers,
+  before its segues (two probes). A navigation controller's
+  `extendedLayoutIncludesOpaqueBars` is `UIKeyExtendedLayoutIncludesOpaqueBars`
+  1 before `UIViewControllers` (one probe). A text view's custom class
+  swaps in for it as a text field's does, and a segmented control's mask is
+  its document's (three probes).
 - A scene controller's `modalTransitionStyle` (flip horizontal 1, cross
   dissolve 2, partial curl 3; cover vertical left out) and
   `modalPresentationStyle` (as a navigation controller's) are
@@ -388,6 +396,9 @@ other values of the attributes these use, is refused. Observed:
   without that attribute it has `UIAdjustsFontSizeToFit` after
   `UINumberOfLines`, then `UIMinimumFontSize` (a 32-bit float) before
   `UITextAlignment` and `UIMinimumScaleFactor` (also 32-bit) after it.
+  A `preferredMaxLayoutWidth` is `UIPreferredMaxLayoutWidth`, a 32-bit
+  float, after the alignment (one probe; beside a scale factor or letter
+  spacing it is refused).
   With `minimumScaleFactor` (which wins over `minimumFontSize`) the factor
   is kept and the size is factor times the font's point size rounded to
   the nearest quarter point, halves up (0.33 of 17 is 5.5, 0.375 of 17 is
@@ -1250,7 +1261,9 @@ the same. Observed with 55 probes:
   its view nib through a placeholder of its own: the view nib has
   `UpstreamPlaceholder-<n>` proxies, the controller's first if the view
   refers to it (an outlet or an action to it), then one per segue in
-  document order, and a button's segue is a `perform:` action (touch up
+  document order (the controller's external objects table lists them by
+  name as strings, `UpstreamPlaceholder-10` before `-2`: RxSwift's example,
+  16 placeholders), and a button's segue is a `perform:` action (touch up
   inside, 64) on its placeholder, sorted with the other actions. Actions
   go by event mask, then selector, then document order. A control's action
   on the scene's first responder goes to the `IBFirstResponder` proxy and
@@ -1329,7 +1342,13 @@ controllers are, and the Info.plist's
 to `UIReferencedBundleIdentifier` (if any), `UIReferencedControllerIdentifier`
 (the referenced identifier, if any) and `UIReferencedStoryboardName`;
 equal keys and values in those are one string each. A reference nothing
-leads to compiles to nothing. Observed with ten probes.
+leads to compiles to nothing. Observed with ten probes. A reference's
+empty navigation item is a `UINavigationItem` (an empty
+`UICenterItemGroups`, `UILargeTitleDisplayMode` 0) after the placeholder
+in its nib's objects; anything else inside a reference is refused. With
+references, the order Xcode adds the Info.plist tables' entries in isn't
+established (RxSwift's example, 15 references, fits none tried): where
+their hashes collide so that the order would matter, it is refused.
 
 Refused for now: custom and popover segues, segues from
 other elements (bar button items, gesture recognizers, a cell's

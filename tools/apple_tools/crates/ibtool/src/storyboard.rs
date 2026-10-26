@@ -1857,7 +1857,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")),
                 ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
                 ("restorationIdentifier", None), ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
-                ("adjustsFontForContentSizeCategory", Some("YES")),
+                ("adjustsFontForContentSizeCategory", Some("YES")), ("preferredMaxLayoutWidth", None),
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
@@ -2011,6 +2011,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UILineBreakMode", Value::Int(mode)));
             }
             values.push(("UITextAlignment", Value::Int(text_alignment(n.attribute("textAlignment"))?)));
+            // A preferred maximum width, a float, after the alignment (one
+            // probe); beside a scale factor or letter spacing it is refused.
+            if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
+                if minimum.is_some() || n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
+                    return fail("a label's preferredMaxLayoutWidth beside a minimum scale or letter spacing is not supported by this ibtool");
+                }
+                values.push(("UIPreferredMaxLayoutWidth", Value::Float(number(w)? as f32)));
+            }
             if let Some((_, scale)) = minimum {
                 values.push(("UIMinimumScaleFactor", Value::Float(scale)));
             }
@@ -2340,7 +2348,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("fixedFrame", Some("YES")), ("id", None),
             ])?;
             // `fixedFrame` changes nothing beside a frame (one probe).
-            only_children(n, &["rect", "segments", "constraints", "connections"])?;
+            only_children(n, &["rect", "autoresizingMask", "segments", "constraints", "connections"])?;
             for c in children(n, "connections") {
                 only_children(c, &["action"])?;
                 for a in children(c, "action") {
@@ -2375,7 +2383,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             built.push(selected_segment);
             let subviews = built.into_iter().map(|(_, segment_name, o)| Value::New(o.named(segment_name))).collect();
             values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
-            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true)), ("UIAutoresizingMask", Value::Int(36))]);
+            // Its mask as given, whether or not it translates it (two
+            // probes).
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) => autoresizing_mask(m)?,
+                None => 36,
+            };
+            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true)), ("UIAutoresizingMask", Value::Int(mask))]);
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -2506,6 +2520,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("bouncesZoom", Some("NO")), ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")),
                 ("indicatorStyle", None),
                 ("adjustsFontForContentSizeCategory", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ])?;
             only_children(n, &["rect", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
             // An accessibility configuration as any view's (one probe).
@@ -2674,7 +2689,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             let fill = system_color_named(nib, "secondarySystemFillColor")?;
             values.push(("UITextHighlightAttributes", nib.array("NSDictionary", vec![color_key, blue, outline_key, fill])));
             values.push(("UITextAllowsNumberPadPopover", Value::Bool(true)));
-            Object::new("UITextView", values)
+            // A custom class swaps in for it, as a text field's does (one
+            // probe).
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UITextView")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UITextView")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UITextView", values)
+            }
         }
         "button" => {
             // `fixedFrame` is Interface Builder's alone, and a system button
@@ -3915,8 +3939,7 @@ fn embedded_controller(
         for (i, g) in root.gesture_order.iter().enumerate() {
             let k = defined.iter().position(|d| d.0 == g).expect("recognized above");
             let (_, gesture_name, object, _) = &mut defined[k];
-            entries.push(nib.string(&format!("UpstreamPlaceholder-{}", i + 1)));
-            entries.push(Value::New(std::mem::replace(object, Object::new("", Vec::new())).named(gesture_name.clone())));
+            entries.push((i + 1, Value::New(std::mem::replace(object, Object::new("", Vec::new())).named(gesture_name.clone()))));
         }
         templates.external.splice(0..0, entries);
         for (_, gesture_name, _, selectors) in &defined {
@@ -3929,7 +3952,8 @@ fn embedded_controller(
     let external = if templates.external.is_empty() {
         nib.shared("empty dictionary".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))
     } else {
-        nib.array("NSDictionary", std::mem::take(&mut templates.external))
+        let entries = segue::external_table(nib, std::mem::take(&mut templates.external));
+        nib.array("NSDictionary", entries)
     };
     let nib_name = nib.string(&root.view_nib_name);
     let mut values = Vec::new();
@@ -4168,6 +4192,7 @@ fn check_navigation_controller(nav: Node) -> Result<(), String> {
             ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")),
             ("modalPresentationStyle", None),
+            ("extendedLayoutIncludesOpaqueBars", Some("YES")),
             ("sceneMemberID", Some("viewController")),
         ],
     )?;
@@ -4219,6 +4244,14 @@ fn navigation_controller(
     }
     if nav.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
+    }
+    // Extended under opaque bars, before its controllers (one probe);
+    // beside a presentation style or insets setting it is refused.
+    if nav.attribute("extendedLayoutIncludesOpaqueBars").is_some() {
+        if nav.attribute("modalPresentationStyle").is_some() || nav.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
+            return fail("a navigation controller's extendedLayoutIncludesOpaqueBars beside a presentation style or insets setting is not supported by this ibtool");
+        }
+        values.push(("UIKeyExtendedLayoutIncludesOpaqueBars", Value::Int(1)));
     }
     values.push(("UIViewControllers", nib.array("NSMutableArray", vec![reference(root_name)])));
     values.push(("UINavigationBar", navigation_bar(nib, nav, &bar_name, &item, name)?));
@@ -4440,6 +4473,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             only_attributes(placeholder, &[
                 ("storyboardName", None), ("referencedIdentifier", None), ("bundleIdentifier", None), ("id", None), ("sceneMemberID", Some("viewController")),
             ])?;
+            only_children(placeholder, &["navigationItem"])?;
+            // An empty navigation item is a `UINavigationItem` after the
+            // placeholder in the objects (RxSwift's example, 15 references).
+            let navigation_item = children(placeholder, "navigationItem").next();
+            if let Some(item) = navigation_item {
+                only_attributes(item, &[("key", Some("navigationItem")), ("id", None)])?;
+                only_children(item, &[])?;
+            }
             let id = attr(placeholder, "id")?;
             if initial == Some(id) {
                 return fail("an initial storyboard reference is not supported by this ibtool");
@@ -4454,7 +4495,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
             let identifier = nib.string(&name);
             let controller = Value::New(Object::new("UIStoryboardViewControllerPlaceholder", vec![("UIStoryboardIdentifier", identifier)]).named("controller"));
-            let objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+            let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+            if navigation_item.is_some() {
+                let groups = nib.empty_array();
+                objects.push(Value::New(Object::new("UINavigationItem", vec![("UICenterItemGroups", groups), ("UILargeTitleDisplayMode", Value::Int(0))])));
+            }
             let connections = vec![outlet(&mut nib, "sceneViewController", "owner", "controller")];
             let root = root_object(&mut nib, vec![owner, responder, storyboard, controller], objects, connections);
             outputs.push((index, vec![(format!("{name}.nib"), nib::archive(root))], Some((name.clone(), false, false))));
@@ -4492,6 +4537,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("clearsSelectionOnViewWillAppear", Some("NO")), ("userLabel", None),
             ("restorationIdentifier", None), ("modalPresentationStyle", None), ("modalTransitionStyle", None),
+            ("autoresizesArchivedViewToFullSize", Some("NO")),
             ("sceneMemberID", Some("viewController")),
         ])?;
         if !is_table && vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
@@ -4526,6 +4572,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 ("key", Some("view")), ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", None),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
                 ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+                ("autoresizesSubviews", Some("NO")), ("clipsSubviews", Some("YES")),
             ])?;
         }
         let view_id = attr(view, "id")?;
@@ -4737,16 +4784,24 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             if view.attribute("opaque").is_none() {
                 values.push(("UIOpaque", Value::Bool(true)));
             }
-            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            // Not resizing its subviews, it leaves the key out (one probe).
+            if view.attribute("autoresizesSubviews").is_none() {
+                values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            }
             values.push(("UIAutoresizingMask", Value::Int(mask)));
             // A content mode other than scale to fill after the mask (two
-            // probes); beside clearing or a tint it is refused.
+            // probes), then clipping (one); beside clearing or a tint they
+            // are refused.
             let mode = content_mode(view.attribute("contentMode").unwrap_or("scaleToFill"))?;
+            let clips = view.attribute("clipsSubviews").is_some();
+            if (mode != 0 || clips) && (view.attribute("clearsContextBeforeDrawing").is_some() || tint.is_some()) {
+                return fail("a root view's content mode or clipping beside clearsContextBeforeDrawing or a tint colour is not supported by this ibtool");
+            }
             if mode != 0 {
-                if view.attribute("clearsContextBeforeDrawing").is_some() || tint.is_some() {
-                    return fail("a root view's content mode beside clearsContextBeforeDrawing or a tint colour is not supported by this ibtool");
-                }
                 values.push(("UIContentMode", Value::Int(mode)));
+            }
+            if clips {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
             }
             if view.attribute("clearsContextBeforeDrawing").is_some() {
                 if tint.is_some() {
@@ -5095,9 +5150,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         let mut placeholders = Vec::new();
         for (i, g) in gesture_order(&scene.gesture_views).iter().enumerate() {
-            placeholders.extend([vnib.string(&format!("UpstreamPlaceholder-{}", i + 1)), reference(format!("gesture {g}"))]);
+            placeholders.push((i + 1, reference(format!("gesture {g}"))));
         }
         external.splice(0..0, placeholders);
+        let external = segue::external_table(&mut vnib, external);
         let external = vnib.array("NSDictionary", external);
         swapper.push(("UIExternalObjectsTableForViewLoading", external));
         swapper.push(("UINibName", vnib.string(&view_nib_name)));
@@ -5115,6 +5171,14 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
         } else if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
             return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
+        }
+        // Not resizing its archived view, after its identifiers, before its
+        // segues (two probes); beside presentation styles it is refused.
+        if vc.attribute("autoresizesArchivedViewToFullSize").is_some() {
+            if vc.attribute("modalPresentationStyle").is_some() || vc.attribute("modalTransitionStyle").is_some() {
+                return fail("a controller's autoresizesArchivedViewToFullSize beside presentation styles is not supported by this ibtool");
+            }
+            swapper.push(("UIAutoresizesArchivedViewToFullSize", Value::Bool(false)));
         }
         // Its transition and presentation styles after its identifiers,
         // before its extended edges (six probes); beside segues or gesture
@@ -5292,6 +5356,20 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
     }
     info.push(("UIStoryboardVersion", cf::Value::Integer(1)));
+    // With storyboard references, the order Xcode adds the tables' entries
+    // in isn't established (RxSwift's example, 15 references): where their
+    // hashes collide so that the order would matter, it is refused.
+    if !references.is_empty() {
+        let order_sensitive = |keys: Vec<&str>| {
+            let reversed: Vec<&str> = keys.iter().rev().copied().collect();
+            let a: Vec<&str> = cf::hash::table_order(&keys).into_iter().map(|i| keys[i]).collect();
+            let b: Vec<&str> = cf::hash::table_order(&reversed).into_iter().map(|i| reversed[i]).collect();
+            a != b
+        };
+        if order_sensitive(identifiers.iter().map(|(n, ..)| n.as_str()).collect()) || order_sensitive(references.iter().map(|(n, _)| n.as_str()).collect()) {
+            return fail("storyboard references whose Info.plist tables' order would depend on the order Xcode adds them in are not supported by this ibtool");
+        }
+    }
     info.push(("UIViewControllerIdentifiersToNibNames", cf::Value::dict(identifiers.iter().map(|(n, ..)| (n.clone(), cf::Value::string(n.clone()))))));
     if !references.is_empty() {
         info.push(("UIViewControllerIdentifiersToExternalStoryboardReferences", cf::Value::dict(references)));
