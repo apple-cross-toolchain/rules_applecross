@@ -1336,7 +1336,13 @@ colour instead of the clear one: grey (120, 120 and 128 of 255) at alpha
 0.16, the tint blue (0, 136 of 255, 1) at 0.18, and that blue opaque; the
 stroke stays a clear colour of its own (four probes). A system symbol
 (`image`, `catalog="system"`) is `UIButtonConfigurationImage`, a symbol
-placeholder (two probes). Other settings and images are refused; 200
+placeholder (two probes). A `<backgroundConfiguration key="background">`
+sets the background's `cornerRadius` and its colour (`backgroundColor`,
+in place of the clear or style's colour, a tinted button's too), each
+with its `hasCustomized-` flag true; a `baseForegroundColor` is
+`UIButtonConfigurationBaseForegroundColor` (seven probes and a corpus
+storyboard). A `baseBackgroundColor`, which also becomes the background's
+colour without the flag, other settings and images are refused; 200
 random storyboards with configured buttons were byte-identical.
 
 Buttons take a custom class, swapped in after `UIButtonConfiguration`
