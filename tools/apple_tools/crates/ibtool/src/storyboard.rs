@@ -5651,7 +5651,9 @@ fn navigation_controller_nib(
     }
     let mut top = vec![root_storyboard, owner, responder, storyboard, controller];
     top.extend(gestures.iter().map(|g| reference(g.clone())));
-    Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))?))
+    // The root's runtime attributes, as key-value pairs on it.
+    let pairs = runtime_attributes(&mut nib, root.vc, "root")?;
+    Ok((name, nib::archive(root_object_with_pairs(&mut nib, top, objects, connections, pairs))?))
 }
 
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
@@ -6866,7 +6868,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // them in the navigation controller's nib (two probes).
         let nav_root_only = navs.iter().any(|n| n.2 == vc_id && n.3) && !held_children.contains(vc_id) && !in_held_nav(vc_id);
         if !recognizers.is_empty() {
-            if embedded_here && !(nav_root_only && !is_initial && !identified && !segue_destination) {
+            // A tab or split view controller's child nothing else loads has
+            // them in its parent's nib (a corpus storyboard).
+            let child_only = held_children.contains(vc_id) && !in_held_nav(vc_id) && !is_initial && !identified && !segue_destination;
+            if embedded_here && !(nav_root_only && !is_initial && !identified && !segue_destination) && !child_only {
                 return fail("a gesture recognizer in an embedded controller's scene is not supported by this ibtool");
             }
             if extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
@@ -7108,7 +7113,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         top.push(controller);
         // The controller's runtime attributes are its own nib's.
         let pairs = runtime_attributes(&mut vnib, vc, "controller")?;
-        if !pairs.is_empty() && embedded {
+        // A navigation controller's root has them in that nib too (two
+        // probes and a corpus storyboard); other parents' children's are
+        // refused.
+        let nav_root = navs.iter().any(|n| n.2 == vc_id && n.3) && !held_children.contains(vc_id) && !in_held_nav(vc_id);
+        if !pairs.is_empty() && embedded && !nav_root {
             return fail("an embedded controller's runtime attributes are not supported by this ibtool");
         }
         let vc_root = root_object_with_pairs(&mut vnib, top, objects, connections, pairs);

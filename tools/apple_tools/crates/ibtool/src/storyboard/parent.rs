@@ -147,6 +147,11 @@ pub(super) fn parent_controller_nib(
     // parts, and their actions (selector, item, controller) after the scene
     // outlet by selector (four probes, children and navigation roots).
     let mut bar_items: Vec<(usize, Vec<String>)> = Vec::new();
+    // A child controller's gesture recognizers: top-level and listed after
+    // the parent in reverse document order, their actions after the scene
+    // outlet by selector (a corpus storyboard); one child's only.
+    let mut child_gestures: Vec<String> = Vec::new();
+    let mut gesture_actions: Vec<(String, String, String)> = Vec::new();
     let mut bar_actions: Vec<(String, String, String)> = Vec::new();
     let mut take_bar = |i: usize, embedded: &mut Embedded, controller: &str| -> Result<(), String> {
         if embedded.bar_items.is_empty() {
@@ -179,6 +184,13 @@ pub(super) fn parent_controller_nib(
                     Kind::Split => (None, false),
                 };
                 let mut embedded = embedded_controller(&mut nib, r, &child_name, "controller", None, item, nib_names)?;
+                if !embedded.gestures.is_empty() {
+                    if !child_gestures.is_empty() || !embedded.bar_items.is_empty() || kind == Kind::Split {
+                        return fail("several children's gesture recognizers, one beside bar button items, or a split view child's, are not supported by this ibtool");
+                    }
+                    child_gestures = std::mem::take(&mut embedded.gestures);
+                    gesture_actions = std::mem::take(&mut embedded.gesture_actions);
+                }
                 take_bar(i, &mut embedded, &child_name)?;
                 if let Some(n) = &embedded.navigation_item {
                     own_parts.push(reference(n.clone()));
@@ -269,9 +281,11 @@ pub(super) fn parent_controller_nib(
         Object::new(class, values)
     };
     top.push(Value::New(controller.named("controller")));
+    top.extend(child_gestures.iter().map(|g| reference(g.clone())));
 
     let mut objects: Vec<Value> = held.iter().rev().map(|(n, _)| reference(format!("{n} storyboard"))).collect();
     objects.extend([reference("owner"), reference("responder"), reference("storyboard"), reference("controller")]);
+    objects.extend(child_gestures.iter().map(|g| reference(g.clone())));
     if kind == Kind::Tab {
         objects.push(reference("tab bar"));
     }
@@ -313,6 +327,12 @@ pub(super) fn parent_controller_nib(
     }
     for (selector, item, controller) in &bar_actions {
         connections.push(event_connection(&mut nib, selector, item, controller));
+    }
+    if !gesture_actions.is_empty() && (!bar_actions.is_empty() || !template_outlets.is_empty()) {
+        return fail("a child's gesture recognizers beside bar button items' actions or segues are not supported by this ibtool");
+    }
+    for (selector, gesture, target) in &gesture_actions {
+        connections.push(event_connection(&mut nib, selector, gesture, target));
     }
     Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))?))
 }

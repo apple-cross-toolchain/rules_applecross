@@ -730,8 +730,18 @@ other values of the attributes these use, is refused. Observed:
   kept alive (`UITopLevelObjectsToKeepAliveFromStoryboard`, after
   `UIParentViewController`), top-level objects after the navigation
   controller (in reverse document order) and listed right after it, their
-  actions after `sceneViewController` (two probes). Beside segues or bar
-  button items, and in other containers, they are refused.
+  actions after `sceneViewController` (two probes). A tab bar
+  controller's child that nothing else loads keeps them in the tab bar
+  controller's nib the same way: defined in the child's external objects,
+  kept alive after `UIParentViewController`, top-level and listed right
+  after the tab bar controller in reverse document order, their actions
+  after `sceneViewController` by selector (two probes and a corpus
+  storyboard). Beside segues or bar button items, in several children, in
+  a split view controller's child and in other containers, they are
+  refused.
+- A navigation controller's root's runtime attributes are key-value pairs
+  on it in the navigation controller's nib too (two probes and a corpus
+  storyboard); other embedded controllers' are refused.
 - A recognizer's segue (`<segue>` in its connections) is templated as a
   bar button item's is: in `UIStoryboardSegueTemplates` after the
   controls', listed after them and the controller, its `viewController`
