@@ -776,6 +776,17 @@ and `UIPageSpacing` as a whole number (12.5 is 12), then its storyboard and
 (seven probes). Fractional spacing, an unidentified or initial one,
 children and segues to one are refused.
 
+A SwiftUI `<hostingController>` a segue leads to compiles to a nib named
+`UIHostingController-<id>` (so its segue templates' destination), listed
+in the Info.plist: the owner, first responder and storyboard placeholders
+and a plain `UIViewController` with no view nib, swapped in for a custom
+class (`UIOriginalClassName` `UIViewController`), its empty navigation
+item (`UICenterItemGroups`, `UILargeTitleDisplayMode` 0) its only value
+and after it in the objects, then its storyboard and `sceneViewController`
+outlets (three probes, Kingfisher's demo). Initial, identified or
+contained ones, and anything inside one but an empty navigation item, are
+refused.
+
 ## Tab bar controllers
 
 A `<tabBarController>` (its tab bar, children by `viewControllers`
@@ -1458,7 +1469,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
   breadth first each view's constraints and subviews (a table cell lists
   its content view's subviews first). A collection cell's content view's
   mask is `UIAutoresizingMask` after its `UIAutoresizeSubviews` when it has
-  one, and its `customSize` changes nothing (three probes). A collection
+  one, and its `customSize` changes nothing (three probes); the cell's own
+  empty mask is left out (one corpus storyboard). A collection
   cell's background colour is `UIBackgroundColor` after its `UISubviews`
   (two probes). A control's
   action on the cell itself is an event connection after the cell's
@@ -1500,7 +1512,10 @@ the same. Observed with 55 probes:
   custom class's runtime name, for any kind: three probes),
   `UIDestinationViewControllerIdentifier`
   (the destination's nib's name), then for show `UIAnimates` false when it
-  doesn't animate and `UIActionName`; for presentation
+  doesn't animate, a segue action's selector (`destinationCreationSelector`)
+  as `UICustomPrepareForChildViewControllersSegueName` (one probe; beside
+  `animates` or on other kinds it is refused) and `UIActionName`; for
+  presentation
   `UIModalPresentationStyle` (fullScreen 0, pageSheet 1, formSheet 2,
   currentContext 3, overFullScreen 5, overCurrentContext 6, popover 7,
   automatic -2), `UIModalTransitionStyle` (crossDissolve 2) or

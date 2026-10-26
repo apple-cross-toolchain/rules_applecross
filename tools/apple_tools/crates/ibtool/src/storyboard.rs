@@ -5084,6 +5084,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         only_children(objects_node, &[
             "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
             "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer", "pageViewController",
+            "hostingController",
         ])?;
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
@@ -5151,6 +5152,55 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let connections = vec![outlet(&mut nib, "storyboard", "controller", "storyboard"), outlet(&mut nib, "sceneViewController", "owner", "controller")];
             let root = root_object(&mut nib, vec![owner, responder, storyboard, controller], objects, connections);
             outputs.push((index, vec![(format!("{identifier}.nib"), nib::archive(root)?)], Some((identifier.to_string(), false, true))));
+            continue;
+        }
+        // A SwiftUI hosting controller a segue leads to: a nib named
+        // `UIHostingController-<id>` holding a plain view controller (swapped
+        // in for a custom class) with no view of its own, and its empty
+        // navigation item after it in the objects (three probes, two corpus
+        // storyboards). Identified, initial or embedded ones, its own
+        // segues and anything else inside it are refused.
+        if let Some(host) = children(objects_node, "hostingController").next() {
+            only_attributes(host, &[
+                ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("sceneMemberID", Some("viewController")),
+            ])?;
+            only_children(host, &["navigationItem"])?;
+            let id = attr(host, "id")?;
+            if initial == Some(id) || host.document().descendants().any(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("relationship") && d.attribute("destination") == Some(id)) {
+                return fail("an initial or contained hosting controller is not supported by this ibtool");
+            }
+            if !reached.contains(id) {
+                continue;
+            }
+            let mut nib = Nib::new(platform, color_matched, localizable);
+            let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+            let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+            let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
+            let mut values = Vec::new();
+            let item = children(host, "navigationItem").next();
+            if let Some(item) = item {
+                only_attributes(item, &[("key", Some("navigationItem")), ("id", None)])?;
+                only_children(item, &[])?;
+                let groups = nib.empty_array();
+                let object = Object::new("UINavigationItem", vec![("UICenterItemGroups", groups), ("UILargeTitleDisplayMode", Value::Int(0))]);
+                values.push(("UINavigationItem", Value::New(object.named("navigation item"))));
+            }
+            let controller = if host.attribute("customClass").is_some() {
+                let class = runtime_class_name(host, module, "UIViewController")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UIViewController")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UIViewController", values)
+            };
+            let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
+            if item.is_some() {
+                objects.push(reference("navigation item"));
+            }
+            let connections = vec![outlet(&mut nib, "storyboard", "controller", "storyboard"), outlet(&mut nib, "sceneViewController", "owner", "controller")];
+            let root = root_object(&mut nib, vec![owner, responder, storyboard, Value::New(controller.named("controller"))], objects, connections);
+            let name = segue::nib_name(host)?;
+            outputs.push((index, vec![(format!("{name}.nib"), nib::archive(root)?)], Some((name, false, false))));
             continue;
         }
         if let Some(placeholder) = children(objects_node, "viewControllerPlaceholder").next() {

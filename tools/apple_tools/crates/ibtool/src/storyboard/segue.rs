@@ -13,6 +13,7 @@ pub(super) fn scene_controller<'a, 'i>(scene: Node<'a, 'i>) -> Option<Node<'a, '
             matches!(
                 c.tag_name().name(),
                 "viewController" | "tableViewController" | "collectionViewController" | "navigationController" | "tabBarController" | "splitViewController" | "viewControllerPlaceholder" | "pageViewController"
+                    | "hostingController"
             )
         })
 }
@@ -26,6 +27,7 @@ pub(super) fn original_class(c: Node) -> &'static str {
         "tabBarController" => "UITabBarController",
         "splitViewController" => "UISplitViewController",
         "pageViewController" => "UIPageViewController",
+        "hostingController" => "UIHostingController",
         _ => "UIViewController",
     }
 }
@@ -135,7 +137,12 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
     only_attributes(s, &[
         ("destination", None), ("kind", None), ("identifier", None), ("animates", Some("NO")), ("modalPresentationStyle", None),
         ("modalTransitionStyle", Some("crossDissolve")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+        ("destinationCreationSelector", None),
     ])?;
+    let creation = s.attribute("destinationCreationSelector");
+    if creation.is_some() && (s.attribute("kind") != Some("show") || s.attribute("animates").is_some()) {
+        return fail("a segue action on other than an animated show segue is not supported by this ibtool");
+    }
     if s.attribute("customModuleProvider") == Some("target") {
         return fail("a segue's class in the target's module is not supported by this ibtool");
     }
@@ -163,6 +170,10 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
                 values.push(("UIAnimates", Value::Bool(false)));
             }
             let action = if kind == "show" { "showViewController:sender:" } else { "showDetailViewController:sender:" };
+            // A segue action's selector before the action name (one probe).
+            if let Some(selector) = creation {
+                values.push(("UICustomPrepareForChildViewControllersSegueName", nib.string(selector)));
+            }
             values.push(("UIActionName", nib.string(action)));
             "UIStoryboardShowSegueTemplate"
         }
