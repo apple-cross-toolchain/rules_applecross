@@ -18,12 +18,14 @@ impl Compiled {
     }
 }
 
-/// Compiles image sets, by name, for iOS: universal PNG images at 1x, 2x or
-/// 3x (or none, meaning 1x), for any appearance or one of the colour sets',
-/// with an optional template rendering intent.
+/// Compiles image sets, by name, for iOS: PNG images at 1x, 2x or 3x (or
+/// none, meaning 1x), universal or for the iPhone, iPad or CarPlay (with
+/// `phone_and_pad` targeted; watch, Mac and TV images left out), for any
+/// appearance or one of the colour sets', with an optional template
+/// rendering intent.
 /// Small images are packed into an atlas per scale; anything else is
 /// refused.
-pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
+pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
     for (name, dir) in sets {
@@ -59,8 +61,16 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                     return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
                 }
             }
-            if entry["idiom"].as_str() != Some("universal") {
-                return Err(format!("{}: images for idioms other than universal are not supported by this actool", dir.display()));
+            let idiom = match entry["idiom"].as_str() {
+                Some("universal") => 0,
+                Some("iphone") => 1,
+                Some("ipad") => 2,
+                Some("car") => 4,
+                Some("watch" | "mac" | "tv") => continue,
+                _ => return Err(format!("{}: images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"])),
+            };
+            if idiom != 0 && !phone_and_pad {
+                return Err(format!("{}: images for a device idiom without both --target-device iphone and ipad are not supported by this actool", dir.display()));
             }
             let lower = filename.to_ascii_lowercase();
             let jpeg = lower.ends_with(".jpg") || lower.ends_with(".jpeg");
@@ -73,10 +83,10 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             };
             let appearance = crate::colorset::appearance(entry)
                 .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
-            if scales.contains(&(scale, appearance)) {
-                return Err(format!("{}: two images at scale {scale}x for one appearance", dir.display()));
+            if scales.contains(&(scale, appearance, idiom)) {
+                return Err(format!("{}: two images at scale {scale}x for one appearance and idiom", dir.display()));
             }
-            scales.push((scale, appearance));
+            scales.push((scale, appearance, idiom));
             let path = dir.join(filename);
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             // A JPEG is stored on its own, as it is but for its comments.
@@ -86,6 +96,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                 if appearance != 0 {
                     attrs.push((car::ATTR_APPEARANCE, appearance));
                 }
+                if idiom != 0 {
+                    attrs.push((car::ATTR_IDIOM, idiom));
+                }
                 out.renditions.push(Rendition { attrs, csi: car::jpeg_csi(filename, width, height, scale, flags, &stored) });
                 continue;
             }
@@ -93,13 +106,14 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             if extended.is_some() && img.is_gray() {
                 return Err(format!("{}: a grey image with colours outside sRGB is not supported by this actool", path.display()));
             }
-            images.push(SetImage { scale, appearance, identifier: id, flags, filename: filename.to_string(), image: img, extended });
+            images.push(SetImage { scale, appearance, idiom, identifier: id, flags, filename: filename.to_string(), image: img, extended });
         }
         if !scales.is_empty() {
             out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
         }
     }
-    // Per scale and appearance (each with atlases of its own, keyed by it),
+    // Per scale, appearance and idiom (each with atlases of its own, keyed
+    // by them),
     // translucent colour, translucent grey, opaque colour and
     // opaque grey images (an atlas named for its opacity and greyness), then
     // the 16-bit renditions of colour images from wide-gamut profiles in
@@ -108,15 +122,17 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
     // factor, or a group's only packable one, stored on their own, the rest
     // packed into an atlas, as app icons are. An atlas's dimension1 is its
     // index at its scale.
-    let mut scales: Vec<(u32, u16)> = images.iter().map(|i| (i.scale, i.appearance)).collect();
+    let mut scales: Vec<(u32, u16, u16)> = images.iter().map(|i| (i.scale, i.appearance, i.idiom)).collect();
     scales.sort();
     scales.dedup();
-    for (scale, appearance) in scales {
+    for (scale, appearance, idiom) in scales {
         let mut planned: Vec<(usize, bool, bool, Vec<&SetImage>)> = Vec::new();
         for (gamut, opaque, gray) in [(0, false, false), (0, false, true), (0, true, false), (0, true, true), (1, false, false), (1, true, false)] {
             let mut group: Vec<&SetImage> = images
                 .iter()
-                .filter(|i| i.scale == scale && i.appearance == appearance && is_opaque(i) == opaque && is_gray(i) == gray && (gamut == 0 || i.extended.is_some()))
+                .filter(|i| {
+                    (i.scale, i.appearance, i.idiom) == (scale, appearance, idiom) && is_opaque(i) == opaque && is_gray(i) == gray && (gamut == 0 || i.extended.is_some())
+                })
                 .collect();
             // Equal areas by identifier (12 probes of equal-area shapes).
             group.sort_by_key(|i| (std::cmp::Reverse(i.image.width * i.image.height), i.identifier));
@@ -153,9 +169,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
             for (k, (_, opaque, gray, atlas)) in atlases.into_iter().enumerate() {
                 let index = names.iter().position(|n| *n == k.to_string()).unwrap() as u16;
                 if gamut == 0 {
-                    pack(scale, appearance, *opaque, *gray, index, atlas, &mut out.renditions)?;
+                    pack(scale, (appearance, idiom), *opaque, *gray, index, atlas, &mut out.renditions)?;
                 } else {
-                    pack16(scale, appearance, *opaque, index, atlas, &mut out.renditions)?;
+                    pack16(scale, (appearance, idiom), *opaque, index, atlas, &mut out.renditions)?;
                 }
             }
         }
@@ -218,6 +234,8 @@ struct SetImage {
     scale: u32,
     /// Its appearance's value (0 for any).
     appearance: u16,
+    /// Its idiom's (0 for universal).
+    idiom: u16,
     identifier: u16,
     flags: u32,
     filename: String,
@@ -231,6 +249,9 @@ fn image_attrs(i: &SetImage) -> Vec<(u16, u16)> {
     let mut attrs = vec![(car::ATTR_SCALE, i.scale as u16), (car::ATTR_IDENTIFIER, i.identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
     if i.appearance != 0 {
         attrs.push((car::ATTR_APPEARANCE, i.appearance));
+    }
+    if i.idiom != 0 {
+        attrs.push((car::ATTR_IDIOM, i.idiom));
     }
     attrs
 }
@@ -282,7 +303,7 @@ fn is_opaque(i: &SetImage) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pack(scale: u32, appearance: u16, opaque: bool, gray: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+fn pack(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, gray: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
     let blocks: Vec<(u32, u32)> = images.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
     let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
     let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
@@ -292,11 +313,19 @@ fn pack(scale: u32, appearance: u16, opaque: bool, gray: bool, index: u16, image
     if index > 0 {
         key.push((car::ATTR_DIMENSION1, index));
     }
-    if appearance != 0 {
+    if appearance != 0 || idiom != 0 {
         if index > 0 {
-            return Err(format!("more than one {scale}x atlas for an appearance is not supported by this actool"));
+            return Err(format!("more than one {scale}x atlas for an appearance or idiom is not supported by this actool"));
         }
+        if appearance != 0 && idiom != 0 {
+            return Err("an atlas for both an appearance and an idiom is not supported by this actool".into());
+        }
+    }
+    if appearance != 0 {
         key.push((car::ATTR_APPEARANCE, appearance));
+    }
+    if idiom != 0 {
+        key.push((car::ATTR_IDIOM, idiom));
     }
     for (i, (x, y)) in images.iter().zip(&positions) {
         let (w, h) = (i.image.width as u32, i.image.height as u32);
@@ -321,7 +350,7 @@ fn pack(scale: u32, appearance: u16, opaque: bool, gray: bool, index: u16, image
 
 /// One atlas of a scale's packable 16-bit renditions (gamut 1), packed as
 /// their 8-bit renditions are.
-fn pack16(scale: u32, appearance: u16, opaque: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+fn pack16(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
     let blocks: Vec<(u32, u32)> = images.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
     let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
     let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
@@ -331,11 +360,19 @@ fn pack16(scale: u32, appearance: u16, opaque: bool, index: u16, images: &[&SetI
     if index > 0 {
         key.push((car::ATTR_DIMENSION1, index));
     }
-    if appearance != 0 {
+    if appearance != 0 || idiom != 0 {
         if index > 0 {
-            return Err(format!("more than one {scale}x atlas for an appearance is not supported by this actool"));
+            return Err(format!("more than one {scale}x atlas for an appearance or idiom is not supported by this actool"));
         }
+        if appearance != 0 && idiom != 0 {
+            return Err("an atlas for both an appearance and an idiom is not supported by this actool".into());
+        }
+    }
+    if appearance != 0 {
         key.push((car::ATTR_APPEARANCE, appearance));
+    }
+    if idiom != 0 {
+        key.push((car::ATTR_IDIOM, idiom));
     }
     for (i, (x, y)) in images.iter().zip(&positions) {
         let (w, h) = (i.image.width, i.image.height);

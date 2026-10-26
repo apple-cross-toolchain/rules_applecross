@@ -309,7 +309,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         }
         *o.launch_entries.borrow_mut() = compiled.entries;
     }
-    let mut images = imageset::compile(&scan.image_sets, name_identifier)?;
+    let mut images = imageset::compile(&scan.image_sets, phone && pad, name_identifier)?;
     let (color_facets, colors) = colorset::compile(&scan.color_sets, name_identifier)?;
     images.facets.extend(color_facets);
     images.renditions.extend(colors);

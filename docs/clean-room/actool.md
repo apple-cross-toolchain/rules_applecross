@@ -640,6 +640,14 @@ scale is refused (seven synthetic probes and four of real images, dark and high
 contrast at each scale; byte-identical or equivalent but for the appearance
 blocks' order).
 
+With both `--target-device iphone` and `ipad`, an image may be for the
+iPhone, iPad or CarPlay idiom: its key has idiom 1, 2 or 4 (none for
+universal), and each idiom has atlases of its own, keyed by it, the link
+naming its key in attribute order. Watch, Mac and TV images are left out
+(a set of nothing else has no facet, a catalog of nothing else compiles to
+nothing). Other idioms, device idioms with other target devices, and
+atlases for both an appearance and an idiom are refused (13 probes).
+
 Folders are scanned for image sets: a folder's assets are named as at the
 top, or with its name and a slash before theirs when its `Contents.json`
 says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
@@ -650,7 +658,7 @@ Refused: atlases whose `dmp2` row
 predictors aren't established (common: the row under an atlas's empty top
 row ties between predictors 1 and 2, which Xcode breaks neither by cost,
 summation order, nor compressed size),
-vector images (SVG, PDF), other idioms and other properties,
+vector images (SVG, PDF) and other properties,
 and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,
