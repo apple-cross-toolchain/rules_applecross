@@ -9,9 +9,14 @@ the same values.
 ## CoreFoundation (binary property lists)
 
 Linear probing over bucket counts 3, 7, 13, 23, 41, 71, ... from the
-published CFBasicHash, rehashing in enumeration order when an insertion
-would exceed the capacity (3, 6, 11, 19, 32, 52, ...). The compiled
-storyboard's Info.plist and WatchKit interface follow it. A dictionary
+published CFBasicHash, rehashing in enumeration order. A full 3-bucket
+table grows before the next insertion; larger ones as soon as an insertion
+takes them past their capacity (6, 11, 19, 32, 52, ...), so the entry that
+does so is rehashed with the rest rather than added afterwards. A
+storyboard's 31 identifiers, whose 20th insertion collides, show the
+difference; actool's table of identifiers grows the same way (258
+catalogs). The compiled storyboard's Info.plist and WatchKit interface
+follow it. A dictionary
 created whole (as reading a binary property list creates them) starts at
 the size its entries need and is filled in order without rehashing; a
 linked WatchKit interface follows that.

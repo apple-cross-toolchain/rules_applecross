@@ -1594,10 +1594,12 @@ equal keys and values in those are one string each. A reference nothing
 leads to compiles to nothing. Observed with ten probes. A reference's
 empty navigation item is a `UINavigationItem` (an empty
 `UICenterItemGroups`, `UILargeTitleDisplayMode` 0) after the placeholder
-in its nib's objects; anything else inside a reference is refused. With
-references, the order Xcode adds the Info.plist tables' entries in isn't
+in its nib's objects; anything else inside a reference is refused. The
+order Xcode adds the references' Info.plist table entries in isn't
 established (RxSwift's example, 15 references, fits none tried): where
-their hashes collide so that the order would matter, it is refused.
+their hashes collide so that the order would matter, it is refused. The
+identifiers' table beside them is filled as without references (a corpus
+storyboard with one reference, and RxSwift's 16 identifiers).
 
 Refused for now: custom and popover segues, segues from
 other elements (bar button items, gesture recognizers, a cell's
