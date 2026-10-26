@@ -496,6 +496,9 @@ other values of the attributes these use, is refused. Observed:
   `systemBackgroundColor`, as a plain table's is its own. Secure text
   views (which add more keys), `alwaysBounceVertical` and text in
   localizable storyboards are refused (32 probes).
+- Nothing in the output comes from a plain view's placeholder intrinsic
+  size or a root view's `simulatedAppContext` (two probes), both
+  Interface Builder's alone.
 - Nothing in the output comes from an empty `<gestureRecognizers/>` or `<animations/>`, an empty
   `<constraints/>`, a navigation controller's simulated metrics, a root
   view's `insetsLayoutMarginsFromSafeArea="YES"`, nor from a label's `fixedFrame`, from a label's
@@ -568,7 +571,12 @@ other values of the attributes these use, is refused. Observed:
   and `insetsLayoutMarginsFromSafeArea="NO"` follows the margin flags (two
   probes);
   directional margins add `UIViewLayoutMarginsAreDirectional`
-  after them and after `UIViewLayoutMarginsFollowReadableWidth`. A
+  after them and after `UIViewLayoutMarginsFollowReadableWidth`;
+  preserving its superview's margins adds
+  `UIViewPreservesSuperviewMargins` and
+  `UIViewPreservesSpecificSuperviewMargins` 15 after the margins, before
+  the directional flag (two probes and one of the corpus's; beside a
+  readable width it is refused). A
   background colour comes after its subviews, its own constraints after
   the not-translating key (26 probes).
 - A view's or label's `contentMode` is `UIContentMode` after
@@ -841,7 +849,9 @@ identifier), with `UIClearsSelectionOnViewWillAppear` false after
 `UIKeyAutomaticallyAdjustsScrollViewInsets` when it says NO. Its view nib's
 root view is its `<tableView>`, with no layout guides; the table's
 `dataSource` and `delegate` outlets to the controller are sorted with
-`view` (the upstream placeholder is in the nib for them). Observed with 94
+`view` (the upstream placeholder is in the nib for them). A table view
+with a custom class, here or as a subview, is a `UIClassSwapper` of its
+values and the class names after them (two probes). Observed with 94
 probes:
 
 - The table's values: geometry (the device's size, as a root view's),

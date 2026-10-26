@@ -3057,7 +3057,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
-                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("preservesSuperviewLayoutMargins", Some("YES")), ("id", None),
             ])?;
             only_children(n, &["rect", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
             let pairs = runtime_attributes(nib, n, &name)?;
@@ -3126,6 +3126,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIViewLayoutMargins", doubles(&margins.unwrap_or([0.0; 4]))));
             if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
                 values.push(("UIViewLayoutMarginsFollowReadableWidth", Value::Bool(true)));
+            }
+            // Preserving its superview's margins as a plain view does, but
+            // before its directional flag (one probe and one of the corpus's);
+            // beside a readable width it isn't established.
+            if n.attribute("preservesSuperviewLayoutMargins").is_some() {
+                if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
+                    return fail("a stack view preserving its superview's margins beside a readable width is not supported by this ibtool");
+                }
+                values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
+                values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
             }
             if directional {
                 values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
@@ -3198,6 +3208,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     ("layoutMarginsFollowReadableWidth", Some("YES")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                     ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")), ("alwaysBounceVertical", Some("YES")),
                     ("directionalLockEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None), ("autoresizesSubviews", Some("NO")),
+                    // Its placeholder intrinsic size is Interface Builder's
+                    // alone (one probe).
+                    ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
                 ])?;
                 if scroll && n.attribute("key").is_some() {
                     return fail("a scroll view as a table's header or footer view is not supported by this ibtool");
@@ -4855,6 +4868,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
                 ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                 ("autoresizesSubviews", Some("NO")), ("clipsSubviews", Some("YES")),
+                // A simulated app context is Interface Builder's alone (one
+                // probe).
+                ("simulatedAppContext", None),
             ])?;
         }
         let view_id = attr(view, "id")?;
