@@ -39,6 +39,44 @@ SDKs are from another Xcode release, a local Xcode included:
 `--repo_env=RULES_APPLECROSS_LOCAL_XCODE=0` makes a Mac with another Xcode
 use the pinned one.
 
+### Where the copy is, kept out of the repository
+
+The SDKs are Apple's to distribute, so the copy belongs on a host you
+control, and a public repository shouldn't name anyone's own machines. Name a placeholder in
+`MODULE.bazel` and say where the copy really is in each builder's untracked
+`.bazelrc` (one `try-import`ed, say `.bazelrc.user`):
+
+```starlark
+apple_cross_toolchain.configure(
+    name = "apple_cross_toolchain",
+    xcode_version = "27.0",
+    # A placeholder: .bazelrc.user says where the archive is, with --distdir
+    # or --downloader_config (docs/consumers.md in rules_applecross).
+    apple_sdk_urls = ["https://apple-sdks.invalid/apple-sdks-27.0.tar.gz"],
+    ...
+)
+```
+
+Either of Bazel's own options then supplies it:
+
+- `--distdir=<directory>` for a copy on disk. Bazel looks there first for a
+  file named as the URL ends, `apple-sdks-27.0.tar.gz`, and checks it against
+  the pinned SHA-256.
+- `--downloader_config=<file>` for a copy on a server, with a line such as
+
+  ```
+  rewrite apple-sdks\.invalid/.* http://sdks.internal:8080/apple-sdks-27.0.tar.gz
+  ```
+
+  The pattern is matched against the whole URL without its scheme. Bazel
+  keeps the original scheme (`https`) unless the replacement names one, so
+  write `http://` out for a plain HTTP server. Credentials come from
+  `.netrc` or `--credential_helper` for the rewritten host.
+
+Without either, the fetch fails looking up `apple-sdks.invalid`. Once
+fetched, the archive is in the repository cache by its SHA-256 and neither is
+consulted again.
+
 ## The Apple SDKs from a mounted Xcode
 
 Instead of an SDK archive, the toolchain can read a Mac's Xcode mounted
