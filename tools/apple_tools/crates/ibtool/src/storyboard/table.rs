@@ -3,6 +3,12 @@
 
 use super::*;
 
+/// A table's header or footer view (`key`): a plain view, or for the
+/// header a search bar.
+fn header_or_footer<'a, 'i>(table: Node<'a, 'i>, key: &str) -> Option<Node<'a, 'i>> {
+    table.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("searchBar")) && c.attribute("key") == Some(key))
+}
+
 /// A table's background: a plain table's white, as a system background
 /// or any opaque grey white, is its own `tableBackgroundColor`.
 fn table_background(nib: &mut Nib, n: Node, plain: bool) -> Result<Value, String> {
@@ -35,11 +41,19 @@ fn check_table(table: Node) -> Result<(), String> {
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("restorationIdentifier", None), ("id", None),
     ])?;
-    only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "prototypes", "sections", "connections", "constraints"])?;
+    only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "searchBar", "prototypes", "sections", "connections", "constraints"])?;
     for v in children(table, "view") {
         if !matches!(v.attribute("key"), Some("tableHeaderView" | "tableFooterView")) {
             return fail("a <view> in a table other than its header or footer view is not supported by this ibtool");
         }
+    }
+    for v in children(table, "searchBar") {
+        if v.attribute("key") != Some("tableHeaderView") {
+            return fail("a <searchBar> in a table other than its header view is not supported by this ibtool");
+        }
+    }
+    if children(table, "view").chain(children(table, "searchBar")).filter(|v| v.attribute("key") == Some("tableHeaderView")).count() > 1 {
+        return fail("a table with two header views is not supported by this ibtool");
     }
     for i in children(table, "inset") {
         only_attributes(i, &[("key", Some("separatorInset")), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
@@ -47,7 +61,9 @@ fn check_table(table: Node) -> Result<(), String> {
     if children(table, "inset").next().is_some() && child(table, "color", "sectionIndexBackgroundColor").is_some() {
         return fail("a table with both a separator inset and a section index background is not supported by this ibtool");
     }
-    if children(table, "view").next().is_some() && child(table, "color", "separatorColor").is_some() {
+    if (header_or_footer(table, "tableHeaderView").is_some() || header_or_footer(table, "tableFooterView").is_some())
+        && child(table, "color", "separatorColor").is_some()
+    {
         return fail("a table with both a header or footer view and a separator colour is not supported by this ibtool");
     }
     if !matches!(table.attribute("dataMode"), Some("prototypes" | "static")) {
@@ -127,8 +143,8 @@ fn table_values(
     // out. The footer view is right under it, or at the top; in a grouped
     // table, under the header view or 35 points, and a section footer's
     // height (17 when automatic).
-    let header = child(table, "view", "tableHeaderView");
-    let footer = child(table, "view", "tableFooterView");
+    let header = header_or_footer(table, "tableHeaderView");
+    let footer = header_or_footer(table, "tableFooterView");
     let header_height = header.map(frame).transpose()?.map_or(0.0, |h| h.h);
     let footer_y = if plain {
         header_height
@@ -237,7 +253,7 @@ fn table_values(
     }
     values.push(("UIInsetsContentViewsToSafeArea", Value::Bool(true)));
     for (key, value) in [("tableHeaderView", "UITableHeaderView"), ("tableFooterView", "UITableFooterView")] {
-        if let Some(v) = child(table, "view", key) {
+        if let Some(v) = header_or_footer(table, key) {
             values.push((value, reference(view_name(attr(v, "id")?))));
         }
     }
@@ -358,7 +374,11 @@ pub(super) fn table_view_nib(
                 return fail(format!("a refresh control without {required} is not supported by this ibtool"));
             }
         }
-        if table.attribute("dataMode") != Some("prototypes") || children(table, "view").next().is_some() || table.attribute("keyboardDismissMode").is_some() {
+        if table.attribute("dataMode") != Some("prototypes")
+            || header_or_footer(table, "tableHeaderView").is_some()
+            || header_or_footer(table, "tableFooterView").is_some()
+            || table.attribute("keyboardDismissMode").is_some()
+        {
             return fail("a refresh control in a static table, or with a header or footer view or a keyboard dismiss mode, is not supported by this ibtool");
         }
         for c in children(r, "connections") {

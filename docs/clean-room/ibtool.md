@@ -829,6 +829,29 @@ collection view's siblings) and its automatic estimated item size a pair
 of the layout's; its cells' segues and constraints it holds are refused
 (three probes).
 
+A search bar, in a view or as a table's header view (laid out as a header
+view is), is a `UISearchBar`: `UIOpaque` when not translucent, its mask
+(36 by default), content mode 3 (redraw), hugging `{250, 250}`, then after
+its large content properties `UIBarStyle` 1 for black,
+`UISearchBarTranslucence` (1, or 2 when not translucent), `UIText` (empty
+when it has none), `UIPlaceholder`, `UIEnablesReturnKeyAutomatically` and
+`UISecureTextEntry` false and `UISearchBarStyle` 2 for minimal; its delegate
+outlet is an outlet like any other (six probes).
+
+A picker view is a `UIPickerView`: the view keys (opaque, hidden, mask 36),
+hugging `{250, 250}` and after its large content properties
+`UIAllowSelectingCells` true; its data source and delegate outlets are
+outlets like others (four probes). A visual effect view (non-opaque, with a
+blur effect) is a `UIVisualEffectView`: `UIDeepDrawRect`,
+`UIAutoresizeSubviews`, mask 36, `UIShouldNotAdaptToMaterials`, its
+not-translating key, then after its large content properties
+`UIVisualEffectViewEffect` (a `UIBlurEffect`: extra light 0, light 1, dark 2,
+and regular and prominent 1 and 0 with `UIBlurEffectAutomaticStyle` 4 and 5),
+`UIVisualEffectViewGroupName` nil and `UIVisualEffectViewContentView`, its
+content view as a `_UIVisualEffectContentView` (its subviews, mask 18,
+`UIShouldNotAdaptToMaterials`, content mode 4, clipping), listed as its child
+(seven probes; material styles and constraints it holds are refused).
+
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
 (`UIMultipleTouchEnabled`), in that order after `UIOpaque`; an `alpha`
