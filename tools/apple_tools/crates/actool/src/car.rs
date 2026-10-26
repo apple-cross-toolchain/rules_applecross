@@ -709,8 +709,9 @@ pub fn dmp2_pixels_csi(name: &str, width: u32, height: u32, scale: u32, flags: u
 }
 
 /// A JPEG image (layout 12): no size or colour space in the header, the
-/// slice and metrics of a dmp2 image, and the JPEG itself as `RAWD`.
-pub fn jpeg_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, jpeg: &[u8]) -> Vec<u8> {
+/// slice and metrics of a dmp2 image, its Exif orientation, and the JPEG
+/// itself as `RAWD`.
+pub fn jpeg_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, orientation: u16, jpeg: &[u8]) -> Vec<u8> {
     let mut t = Vec::new();
     let mut slices = Vec::new();
     for v in [1u32, 0, 0, width, height] {
@@ -723,7 +724,7 @@ pub fn jpeg_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, jpe
     }
     tlv(&mut t, 0x3eb, &metrics);
     composition(&mut t);
-    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    tlv(&mut t, 0x3ee, &u32::from(orientation).to_le_bytes());
     let mut payload = b"DWAR".to_vec();
     le32(&mut payload, 0);
     le32(&mut payload, jpeg.len() as u32);
