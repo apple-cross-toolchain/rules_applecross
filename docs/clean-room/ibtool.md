@@ -338,6 +338,13 @@ other values of the attributes these use, is refused. Observed:
 - A controller's own `restorationIdentifier` is `UIRestorationIdentifier`
   after `UINibName` (one probe; beside a storyboard identifier, or in an
   embedded controller, it is refused).
+- A scene controller's `modalTransitionStyle` (flip horizontal 1, cross
+  dissolve 2, partial curl 3; cover vertical left out) and
+  `modalPresentationStyle` (as a navigation controller's) are
+  `UIModalTransitionStyle` and `UIModalPresentationStyle` after its
+  identifiers, before its extended edges and scroll view insets (seven
+  probes); beside segues or gesture recognizers, or in an embedded
+  controller, they are refused.
 - A controller's `title` is its swapper's `UITitle`, first;
   `useStoryboardIdentifierAsRestorationIdentifier` adds
   `UIRestorationIdentifier` (the identifier's string) after

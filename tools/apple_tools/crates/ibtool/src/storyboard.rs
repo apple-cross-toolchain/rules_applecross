@@ -3853,6 +3853,9 @@ fn embedded_controller(
     if vc.attribute("restorationIdentifier").is_some() {
         return fail("an embedded controller's restoration identifier is not supported by this ibtool");
     }
+    if vc.attribute("modalPresentationStyle").is_some() || vc.attribute("modalTransitionStyle").is_some() {
+        return fail("an embedded controller's presentation styles are not supported by this ibtool");
+    }
     // Its title is encoded before its navigation item, which may share the
     // string.
     let title = match vc.attribute("title") {
@@ -4482,7 +4485,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ("storyboardIdentifier", None), ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")), ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")), ("clearsSelectionOnViewWillAppear", Some("NO")), ("userLabel", None),
-            ("restorationIdentifier", None),
+            ("restorationIdentifier", None), ("modalPresentationStyle", None), ("modalTransitionStyle", None),
             ("sceneMemberID", Some("viewController")),
         ])?;
         if !is_table && vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
@@ -5098,12 +5101,32 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         } else if vc.attribute("useStoryboardIdentifierAsRestorationIdentifier").is_some() {
             return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
         }
+        // Its transition and presentation styles after its identifiers,
+        // before its extended edges (six probes); beside segues or gesture
+        // recognizers they are refused.
+        let transition = match vc.attribute("modalTransitionStyle") {
+            None | Some("coverVertical") => None,
+            Some("flipHorizontal") => Some(1),
+            Some("crossDissolve") => Some(2),
+            Some("partialCurl") => Some(3),
+            Some(other) => return fail(format!("modalTransitionStyle=\"{other}\" is not supported by this ibtool")),
+        };
+        let presentation = modal_presentation_style(vc)?;
+        if (transition.is_some() || presentation.is_some()) && (templates.array.is_some() || !recognizers.is_empty()) {
+            return fail("a controller's presentation styles beside segues or gesture recognizers are not supported by this ibtool");
+        }
         if let Some(array) = templates.array {
             swapper.push(("UIStoryboardSegueTemplates", array));
         }
         if !recognizers.is_empty() {
             let alive = recognizers.iter().map(|r| attr(*r, "id").map(|id| reference(format!("gesture {id}")))).collect::<Result<_, _>>()?;
             swapper.push(("UITopLevelObjectsToKeepAliveFromStoryboard", vnib.array("NSArray", alive)));
+        }
+        if let Some(t) = transition {
+            swapper.push(("UIModalTransitionStyle", Value::Int(t)));
+        }
+        if let Some(p) = presentation {
+            swapper.push(("UIModalPresentationStyle", Value::Int(p)));
         }
         if let Some(edges) = extended_edges(vc)? {
             swapper.push(("UIKeyEdgesForExtendedLayout", Value::Int(edges)));
