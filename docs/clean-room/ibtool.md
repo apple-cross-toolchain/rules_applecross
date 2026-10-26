@@ -623,7 +623,12 @@ other values of the attributes these use, is refused. Observed:
   controller's nib lists the recognizers in reverse document order,
   `UITopLevelObjectsToKeepAliveFromStoryboard` in document order, and
   their actions by selector, one selector's in document order (ten
-  probes). A recognizer of two views is refused.
+  probes). A recognizer of two views is refused, and so is a view whose
+  collection names its recognizers in another order than the document's
+  (they are then defined otherwise: one probe). The controller's outlets
+  to its recognizers are in its nib, after its storyboard outlet and
+  before a recognizer's delegate outlet, by name (four probes and one of
+  the corpus's).
 - A navigation controller's root that nothing loads on its own keeps its
   recognizers in the navigation controller's nib: defined in the root's
   `UIExternalObjectsTableForViewLoading` in their placeholders' order,
