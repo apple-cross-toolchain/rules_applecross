@@ -488,6 +488,10 @@ pub(super) fn table_view_nib(
                 only_children(sec, &["cells"])?;
                 let sec_id = attr(sec, "id")?;
                 let mut rows = Vec::new();
+                // Its cells' outlets, which go among the outlets cell by cell
+                // in reverse, as their segues' placeholders do: it decides
+                // between outlets of the same name.
+                let mut section_outlets = Vec::new();
                 for cs in children(sec, "cells") {
                     only_children(cs, &["tableViewCell"])?;
                     for cell in children(cs, "tableViewCell") {
@@ -499,18 +503,21 @@ pub(super) fn table_view_nib(
                             let i = segues.iter().position(|s| s == id).expect("static segues are collected first");
                             segue_outlets.push((i, cell_parts.name.clone()));
                         }
+                        let mut own = Vec::new();
                         for (label, destination) in cell_outlets {
                             let destination = view_name(destination);
                             if !cell_parts.scene.subviews.iter().any(|s| s.1 == destination) {
                                 return fail("a cell's outlets to anything but its content's views are not supported by this ibtool");
                             }
-                            outlets.push((label.to_string(), cell_parts.name.clone(), destination));
+                            own.push((label.to_string(), cell_parts.name.clone(), destination));
                         }
+                        section_outlets.push(own);
                         let height = cell.attribute("rowHeight").map(number).transpose()?.unwrap_or(-1.0);
                         rows.push(Value::New(Object::new("UITableViewRow", vec![("UITableRowCell", cell_value), ("UITableRowHeight", Value::Float(height as f32))])));
                         parts.push(cell_parts);
                     }
                 }
+                outlets.extend(section_outlets.into_iter().rev().flatten());
                 let mut values = Vec::new();
                 if let Some(t) = sec.attribute("headerTitle") {
                     values.push(("UITableSectionHeaderTitle", nib.text(sec_id, "headerTitle", t)));

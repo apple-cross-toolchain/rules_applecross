@@ -1152,6 +1152,14 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             ]);
             children_allowed.push("color");
         }
+        "stepper" => {
+            allowed.extend([
+                ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None),
+                ("minimumValue", None), ("maximumValue", None), ("stepValue", None), ("continuous", Some("NO")), ("autorepeat", Some("NO")),
+                ("wraps", Some("YES")), ("enabled", Some("NO")),
+            ]);
+            children_allowed.push("color");
+        }
         _ => {
             allowed.extend([
                 ("horizontalHuggingPriority", Some("750")), ("verticalHuggingPriority", Some("750")), ("hidesWhenStopped", Some("YES")),
@@ -1179,6 +1187,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     let known: &[&str] = match tag {
         "switch" => &["onTintColor"],
         "slider" => &["minimumTrackTintColor", "maximumTrackTintColor", "thumbTintColor"],
+        "stepper" => &["backgroundColor", "tintColor"],
         _ => &["color"],
     };
     if let Some(other) = colors.iter().find(|c| !known.contains(c)) {
@@ -1190,6 +1199,11 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         return fail("a hidden activity indicator hidden when stopped is not supported by this ibtool");
     }
 
+    if tag == "stepper" {
+        if let Some(c) = child(n, "color", "backgroundColor") {
+            values.push(("UIBackgroundColor", color(nib, c)?));
+        }
+    }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     if hidden_when_stopped {
         values.push(("UIHidden", Value::Bool(true)));
@@ -1198,15 +1212,20 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     values.push(("UIAutoresizingMask", Value::Int(36)));
     alpha(&mut values, n)?;
+    if tag == "stepper" {
+        if let Some(c) = child(n, "color", "tintColor") {
+            values.push(("UITintColor", color(nib, c)?));
+        }
+    }
     if does_not_translate(scene, n) {
         values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
     }
     if let Some(own) = own_constraints(nib, scene, n, name)? {
         values.push(("UIViewAutolayoutConstraints", own));
     }
-    // A slider hugs at 250, which Xcode writes; the others at 750, which it
-    // doesn't.
-    if tag == "slider" {
+    // A slider and a stepper hug at 250, which Xcode writes; the others at
+    // 750, which it doesn't.
+    if tag == "slider" || tag == "stepper" {
         values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -1255,6 +1274,29 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             }
             values.push(("UIBehavioralStyle", Value::Int(0)));
             "UISlider"
+        }
+        "stepper" => {
+            if n.attribute("enabled").is_some() {
+                values.push(("UIDisabled", Value::Bool(true)));
+            }
+            // Each written when it isn't UIStepper's default; a maximum the
+            // document leaves out is 0, not UIStepper's 100.
+            for (k, key, default) in [("value", "UIValue", 0.0), ("minimumValue", "UIMinimumValue", 0.0), ("maximumValue", "UIMaximumValue", 100.0), ("stepValue", "UIStepValue", 1.0)] {
+                let missing = if k == "stepValue" { 1.0 } else { 0.0 };
+                let v = n.attribute(k).map(number).transpose()?.unwrap_or(missing);
+                if v != default {
+                    values.push((key, Value::Double(v)));
+                }
+            }
+            for (k, key) in [("continuous", "UIContinuous"), ("autorepeat", "UIAutorepeat")] {
+                if n.attribute(k).is_some() {
+                    values.push((key, Value::Bool(false)));
+                }
+            }
+            if n.attribute("wraps").is_some() {
+                values.push(("UIWraps", Value::Bool(true)));
+            }
+            "UIStepper"
         }
         _ => {
             // The modern style and the legacy one.
@@ -1508,9 +1550,10 @@ fn listed_segues<'a, 'i>(scene: &Scene, vc: Node<'a, 'i>) -> Vec<(usize, Node<'a
     order.into_iter().filter_map(|i| vc.descendants().find(|d| d.attribute("id") == Some(scene.segues[i].as_str())).map(|n| (i, n))).collect()
 }
 
+/// A view's content hugging priorities, each 250 unless given.
 fn hugging(nib: &mut Nib, n: Node) -> Result<Value, String> {
-    let h = attr(n, "horizontalHuggingPriority")?;
-    let v = attr(n, "verticalHuggingPriority")?;
+    let h = n.attribute("horizontalHuggingPriority").unwrap_or("250");
+    let v = n.attribute("verticalHuggingPriority").unwrap_or("250");
     Ok(nib.string(&format!("{{{h}, {v}}}")))
 }
 
@@ -1570,7 +1613,7 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
     let id = attr(n, "id")?;
     let direct: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
     let mut sizes = Vec::new();
-    let mut others: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, &str)> = Vec::new();
+    let mut others: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, &str)> = Vec::new();
     for c in children(cs, "constraint") {
         only_attributes(c, &[
             ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
@@ -1904,7 +1947,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         "tableView" => table::subview_table(nib, scene, n, &name, &f)?,
         "collectionView" => collection::subview_collection(nib, scene, n, &name, &f)?,
         "visualEffectView" => {
-            only_attributes(n, &[("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None)])?;
+            only_attributes(n, &[
+                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
             only_children(n, &["rect", "view", "blurEffect", "constraints"])?;
             if n.attribute("opaque").is_none() {
                 return fail("an opaque visual effect view is not supported by this ibtool");
@@ -1967,6 +2013,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             values.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
+            if n.attribute("clipsSubviews").is_some() {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -2363,7 +2412,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "subviews", "edgeInsets"])?;
+            only_children(n, &["rect", "subviews", "edgeInsets", "color", "constraints"])?;
             let vertical = n.attribute("axis").is_some();
             let distribution = match n.attribute("distribution") {
                 None | Some("fill") => 0,
@@ -2373,12 +2422,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some("equalCentering") => 4,
                 Some(other) => return fail(format!("stack view distribution {other} is not supported by this ibtool")),
             };
+            // UIStackViewAlignment: leading and top are one value, trailing
+            // and bottom another, whichever the axis.
             let alignment = match (n.attribute("alignment"), vertical) {
                 (None | Some("fill"), _) => 0,
-                (Some("leading"), true) | (Some("top"), false) => 1,
+                (Some("leading" | "top"), _) => 1,
                 (Some("firstBaseline"), false) => 2,
                 (Some("center"), _) => 3,
-                (Some("trailing"), true) | (Some("bottom"), false) => 4,
+                (Some("trailing" | "bottom"), _) => 4,
+                (Some("lastBaseline"), false) => 5,
                 (Some(other), _) => return fail(format!("stack view alignment {other} is not supported by this ibtool here")),
             };
             // Edge insets are its layout margins, which it then arranges
@@ -2399,11 +2451,20 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             let refs = arranged_names(&arranged);
             values.push(("UISubviews", nib.array("NSMutableArray", arranged)));
+            for c in children(n, "color") {
+                if c.attribute("key") != Some("backgroundColor") {
+                    return fail("stack view colours other than a background colour are not supported by this ibtool");
+                }
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
             }
             values.push(("UIViewLayoutMargins", doubles(&margins.unwrap_or([0.0; 4]))));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -2564,13 +2625,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Object::new(original, values)
             }
         }
-        "switch" | "slider" | "activityIndicatorView" => simple_control(nib, scene, n, &name, &f, values)?,
+        "switch" | "slider" | "stepper" | "activityIndicatorView" => simple_control(nib, scene, n, &name, &f, values)?,
         "imageView" => {
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("image", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
-                ("id", None),
+                ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("id", None),
             ])?;
             only_children(n, &["rect", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
@@ -2587,22 +2648,29 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 "center" => 4,
                 other => return fail(format!("contentMode {other} on <imageView> is not supported by this ibtool")),
             };
+            let mut tint = None;
+            for c in children(n, "color") {
+                match c.attribute("key") {
+                    Some("backgroundColor") => values.push(("UIBackgroundColor", color(nib, c)?)),
+                    Some("tintColor") => tint = Some(color(nib, c)?),
+                    _ => return fail("image view colours other than a background or tint colour are not supported by this ibtool"),
+                }
+            }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIOpaque", Value::Bool(true)));
+            hidden_and_tag(&mut values, n)?;
             values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
+            alpha(&mut values, n)?;
             if content_mode != 0 {
                 values.push(("UIContentMode", Value::Int(content_mode)));
             }
             if n.attribute("clipsSubviews").is_some() {
                 values.push(("UIClipsToBounds", Value::Bool(true)));
             }
-            for c in children(n, "color") {
-                if c.attribute("key") != Some("tintColor") {
-                    return fail("image view colours other than a tint colour are not supported by this ibtool");
-                }
-                values.push(("UITintColor", color(nib, c)?));
+            if let Some(tint) = tint {
+                values.push(("UITintColor", tint));
             }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -2610,7 +2678,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
-            values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            if n.attribute("horizontalHuggingPriority").is_some() || n.attribute("verticalHuggingPriority").is_some() {
+                values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             if let Some(image) = n.attribute("image") {
@@ -2681,16 +2751,17 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
 /// grouped by the item other than the root view, or the first item between
 /// siblings, the groups by where their item is (below); in a group,
 /// constraints to a view deeper than the root's subviews (`nested` second
-/// items) first, then those with the root view, by their two attributes in
-/// one order, then those between siblings; those to deeper views and between
-/// siblings by first and second attribute in another. Equal keys are
-/// refused: Xcode's order for them isn't stable.
-fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: bool) -> Result<(&'a str, u8, (usize, usize)), String> {
-    // Margins and baselines placed by two probes of every attribute.
-    const WITH_ROOT: [&str; 19] = [
-        "centerXWithinMargins", "centerX", "centerYWithinMargins", "centerY", "rightMargin", "leftMargin", "right", "left", "trailingMargin",
-        "leadingMargin", "trailing", "leading", "width", "topMargin", "bottomMargin", "bottom", "top", "firstBaseline", "height",
-    ];
+/// items) first, then those with the root view, then those between
+/// siblings. Those with the root view go by kind (horizontal centres,
+/// vertical centres, left and right edges, horizontal edges with a leading
+/// or trailing one, then the rest), then by first and second attribute in
+/// one order, where leading ties with left and trailing with right, and
+/// between a leading and a trailing edge the one whose root view's edge is
+/// trailing first (a 272-constraint probe and 40 random ones). Those to
+/// deeper views and between siblings go by first and second attribute in
+/// another order. Equal keys are refused: Xcode leaves them in the
+/// document's order, which it doesn't keep stably.
+fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: bool) -> Result<(&'a str, u8, [usize; 4]), String> {
     const SIBLINGS: [&str; 19] = [
         "centerXWithinMargins", "centerX", "rightMargin", "leftMargin", "right", "left", "trailingMargin", "leadingMargin", "trailing", "leading",
         "centerYWithinMargins", "centerY", "topMargin", "bottomMargin", "bottom", "top", "firstBaseline", "width", "height",
@@ -2705,13 +2776,52 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
     if a1 != a2 && (axis(a1) != axis(a2) || axis(a1) == 2) {
         return fail(format!("constraints between {a1} and {a2} are not supported by this ibtool"));
     }
+    // Xcode rewrites a left or right edge tied to a leading or trailing one.
+    let absolute = |a: &str| ["left", "right", "leftMargin", "rightMargin"].contains(&a);
+    let directional = |a: &str| ["leading", "trailing", "leadingMargin", "trailingMargin"].contains(&a);
+    if (absolute(a1) && directional(a2)) || (directional(a1) && absolute(a2)) {
+        return fail(format!("constraints between {a1} and {a2} are not supported by this ibtool"));
+    }
     let (group, kind, attributes) = if first == root || second == root {
-        let (r1, r2) = (rank(&WITH_ROOT, a1)?, rank(&WITH_ROOT, a2)?);
-        (if first == root { second } else { first }, 1, (r1.min(r2), r1.max(r2)))
+        (if first == root { second } else { first }, 1, with_root_key(a1, a2, first == root)?)
     } else {
-        (first, if nested { 0 } else { 2 }, (rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?))
+        (first, if nested { 0 } else { 2 }, [rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?, 0, 0])
     };
     Ok((group, kind, attributes))
+}
+
+/// The order of a constraint between a root view and another item, from its
+/// attributes and whether the root view is its first item: see
+/// `constraint_key`.
+fn with_root_key(a1: &str, a2: &str, root_first: bool) -> Result<[usize; 4], String> {
+    // Margins and baselines placed by two probes of every attribute.
+    const WITH_ROOT: [&str; 19] = [
+        "centerXWithinMargins", "centerX", "centerYWithinMargins", "centerY", "rightMargin", "leftMargin", "right", "left", "trailingMargin",
+        "leadingMargin", "trailing", "leading", "width", "topMargin", "bottomMargin", "bottom", "top", "firstBaseline", "height",
+    ];
+    // Leading and trailing edges, each tied with its left or right one.
+    const DIRECTIONAL: [(&str, &str); 4] = [("trailingMargin", "rightMargin"), ("leadingMargin", "leftMargin"), ("trailing", "right"), ("leading", "left")];
+    let rank = |a: &str| WITH_ROOT.iter().position(|o| *o == a).ok_or_else(|| format!("constraints on {a} are not supported by this ibtool"));
+    let (r1, r2) = (rank(a1)?, rank(a2)?);
+    let either = |set: &[&str]| set.contains(&a1) || set.contains(&a2);
+    let directional = |a: &str| DIRECTIONAL.iter().position(|(d, lr)| *d == a || *lr == a);
+    let trailing = |a: &str| directional(a).is_some_and(|i| i % 2 == 0);
+    Ok(if either(&["centerXWithinMargins", "centerX"]) {
+        [0, r1, r2, 0]
+    } else if either(&["centerYWithinMargins", "centerY"]) {
+        [1, r1, r2, 0]
+    } else if [a1, a2].iter().all(|a| ["rightMargin", "leftMargin", "right", "left"].contains(a)) {
+        [2, r1, r2, 0]
+    } else if let (Some(d1), Some(d2)) = (directional(a1), directional(a2)) {
+        let root_edge = if root_first { a1 } else { a2 };
+        // Edges on one side tie whichever way round.
+        let side = usize::from(trailing(a1) != trailing(a2) && !trailing(root_edge));
+        [3, d1, d2, side]
+    } else if a1 == a2 || [a1, a2].iter().all(|a| ["topMargin", "bottomMargin", "bottom", "top"].contains(a)) {
+        [4, r1, r2, 0]
+    } else {
+        return fail(format!("constraints between {a1} and {a2} with a root view are not supported by this ibtool"));
+    })
 }
 
 /// A constraint of the document's: its attributes (a margin's own code,
@@ -3754,7 +3864,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 let f = subview_frame(*v)?;
                 Ok((f.x * f.x + f.y * f.y, f.x))
             };
-            let mut xml_constraints: Vec<((f64, f64), (&str, u8, (usize, usize)), Node, &str, Option<&str>)> = Vec::new();
+            let mut xml_constraints: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, Option<&str>)> = Vec::new();
             for cs in children(view, "constraints") {
                 for c in children(cs, "constraint") {
                     only_attributes(c, &[
