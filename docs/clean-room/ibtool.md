@@ -671,6 +671,27 @@ may reach the cells' views (seven probes, and two corpus storyboards).
 Without `colorMatched`, a grey white background stays as it is rather
 than becoming the table's or text view's system background.
 
+A table's header and footer views (`<view key="tableHeaderView">`,
+`key="tableFooterView"`) are its subviews, the footer view first, and the
+table's `UITableHeaderView` and `UITableFooterView`, after
+`UIInsetsContentViewsToSafeArea`. Xcode lays them out itself: the header
+view at the top, as wide as the table is laid out, whatever its frame
+says; the footer view keeps its x, width and height and is right under the
+header view (or at the top) in a plain table, or in a grouped or inset
+grouped one under the header view (35 points without one) and a section
+footer height (17 when automatic). Rows, section headers and estimates
+don't move it. The objects list goes breadth first through the table's
+views and a static table's data source together, level by level, the
+table's views first in each. A table's `separatorInset` is
+`UISeparatorInset` (top, left, bottom, right), even at the default,
+before `UISeparatorInsetReference` (36 probes in all).
+
+A view's outlets to another view of its nib, or to the controller, are
+sorted by name with the controller's; one between views uses no
+placeholder. A plain view may be `opaque="NO"` (no `UIOpaque`) or clip its
+subviews (`UIClipsToBounds`, after its content mode), and its
+`fixedFrame` changes nothing (seven probes).
+
 ## Collection view controllers
 
 A `<collectionViewController>` whose collection view has a flow layout and
