@@ -65,9 +65,9 @@ _configure_tag = tag_class(
         ),
         "local_xcode": attr.bool(
             default = False,
-            doc = "Read the Apple SDKs from this host's installed Xcode. " +
-                  "macOS hosts only; ignored elsewhere, so one MODULE.bazel " +
-                  "can name both this and an archive source.",
+            doc = "Read the Apple SDKs from this host's Xcode: installed on " +
+                  "macOS, mounted on Linux. A host without one uses the " +
+                  "archive source, so one MODULE.bazel can name both.",
         ),
         "ported_tools_archives": attr.string_dict(
             doc = "Workspace-relative ported Apple tools keyed by Linux " +

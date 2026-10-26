@@ -160,8 +160,9 @@ _SDK_PLATFORM_FOR_OS = {
 
 _LINUX_XCODE_DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
 
-def _local_developer_dir(rctx):
-    """Resolves the Developer directory of the Xcode selected on this host."""
+def _find_local_developer_dir(rctx):
+    """The Developer directory of the Xcode selected on this host, as
+    (directory, None), or (None, why there is no usable one)."""
     developer_dir = rctx.os.environ.get("DEVELOPER_DIR", "").strip()
     if not developer_dir and not rctx.os.name.startswith("mac"):
         # On Linux, an Xcode mounted at the usual place.
@@ -169,9 +170,9 @@ def _local_developer_dir(rctx):
     if not developer_dir:
         result = rctx.execute(["xcode-select", "-p"])
         if result.return_code != 0:
-            fail(
+            return None, (
                 "local_xcode is set but no Xcode was found: `xcode-select -p` " +
-                "failed with: " + (result.stderr.strip() or result.stdout.strip()),
+                "failed with: " + (result.stderr.strip() or result.stdout.strip())
             )
         developer_dir = result.stdout.strip()
 
@@ -181,15 +182,22 @@ def _local_developer_dir(rctx):
         developer_dir += "/Contents/Developer"
 
     if developer_dir.endswith("/CommandLineTools"):
-        fail(
+        return None, (
             "The selected developer directory is " + developer_dir + ", which " +
             "ships no Apple SDKs other than macOS. Select a full Xcode with " +
-            "`sudo xcode-select -s /Applications/Xcode.app` or DEVELOPER_DIR.",
+            "`sudo xcode-select -s /Applications/Xcode.app` or DEVELOPER_DIR."
         )
 
-    if not rctx.path(developer_dir).exists:
-        fail("The selected developer directory does not exist: " + developer_dir)
+    if not rctx.path(developer_dir + "/Platforms").exists:
+        return None, "The selected developer directory has no Xcode at it: " + developer_dir
 
+    return developer_dir, None
+
+def _local_developer_dir(rctx):
+    """Resolves the Developer directory of the Xcode selected on this host."""
+    developer_dir, problem = _find_local_developer_dir(rctx)
+    if problem:
+        fail(problem)
     return developer_dir
 
 def _readtapi(rctx, cpu):
@@ -460,12 +468,14 @@ def _use_local_xcode(rctx):
 
     if not rctx.attr.local_xcode:
         return False
-    if rctx.os.name.startswith("mac"):
-        return True
 
-    # On Linux, only if an Xcode is mounted; otherwise use the archive.
-    developer_dir = rctx.os.environ.get("DEVELOPER_DIR", "").strip() or _LINUX_XCODE_DEVELOPER_DIR
-    return rctx.path(developer_dir + "/Platforms").exists
+    # Only if this host has an Xcode (installed, or mounted on Linux);
+    # otherwise the archive source. With no archive source, the local Xcode
+    # it is, so the failure says why there is none.
+    developer_dir, _ = _find_local_developer_dir(rctx)
+    if developer_dir:
+        return True
+    return not (rctx.attr.apple_sdk_path or rctx.attr.apple_sdk_urls or rctx.attr.xcode_xip_urls)
 
 def _materialize_apple_sdks(rctx, cpu):
     """Populates the repository's Xcode.app tree from the configured source."""
@@ -729,10 +739,11 @@ Read the Apple SDKs from the Xcode installed on this host instead of from
 apple_sdk_path or apple_sdk_urls. The tree is assembled out of symlinks into
 that install, so it costs seconds and tens of megabytes rather than a full copy.
 
-The Xcode is the one DEVELOPER_DIR names, falling back to `xcode-select -p`.
-Only macOS has an Xcode to read, so every other host ignores this and uses the
-archive source instead; that is what lets one MODULE.bazel serve both a Linux CI
-host and a macOS developer host without editing a checked-in file.
+The Xcode is the one DEVELOPER_DIR names, falling back to `xcode-select -p`
+on macOS and to an Xcode mounted at /Applications/Xcode.app on Linux. A host
+without one, a Mac with only the Command Line Tools included, uses the archive
+source instead; that is what lets one MODULE.bazel serve a Linux CI host, a Mac
+without Xcode and a macOS developer host without editing a checked-in file.
 
 Set the repository environment variable RULES_APPLECROSS_LOCAL_XCODE to "0" to
 force the archive source on a macOS host, or to "1" to make a missing Xcode a
