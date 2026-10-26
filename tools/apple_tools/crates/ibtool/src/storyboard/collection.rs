@@ -126,8 +126,15 @@ fn collection_values(
 ) -> Result<(Vec<(&'static str, Value)>, bool), String> {
     let mut values = Vec::new();
     geometry(&mut values, f);
+    // An opaque grey white is the system background colour, as a table's
+    // is its own (with colorMatched).
     if let Some(c) = child(cv, "color", "backgroundColor") {
-        values.push(("UIBackgroundColor", color(nib, c)?));
+        let background = if nib.color_matched && opaque_grey_white(c)? {
+            nib.system_color("systemBackgroundColor", &SystemColor::Gray([1.0, 1.0]))
+        } else {
+            color(nib, c)?
+        };
+        values.push(("UIBackgroundColor", background));
     }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     values.push(("UIOpaque", Value::Bool(true)));

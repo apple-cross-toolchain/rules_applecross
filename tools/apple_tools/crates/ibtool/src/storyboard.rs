@@ -594,7 +594,7 @@ fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &s
 fn bar_button_item<'a, 'i>(
     nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
 ) -> Result<Object, String> {
-    only_attributes(b, &[("key", None), ("title", None), ("style", None), ("systemItem", None), ("id", None)])?;
+    only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("id", None)])?;
     only_children(b, &["connections"])?;
     for c in children(b, "connections") {
         only_children(c, &["action", "segue"])?;
@@ -639,10 +639,18 @@ fn bar_button_item<'a, 'i>(
         Some("done") => values.push(("UIStyle", Value::Int(2))),
         Some(other) => return fail(format!("bar button style {other} is not supported by this ibtool")),
     }
-    match (b.attribute("title"), b.attribute("systemItem")) {
-        (Some(title), None) => values.push(("UITitle", nib.text(attr(b, "id")?, "title", title))),
-        (None, Some(_)) => {}
-        _ => return fail("a bar button item needs a title or a system item for this ibtool"),
+    // A title, an image or both, after the style; or a system item.
+    match (b.attribute("title"), b.attribute("image"), b.attribute("systemItem")) {
+        (title, image, None) if title.is_some() || image.is_some() => {
+            if let Some(title) = title {
+                values.push(("UITitle", nib.text(attr(b, "id")?, "title", title)));
+            }
+            if let Some(image) = image {
+                values.push(("UIImage", nib.image(image)));
+            }
+        }
+        (None, None, Some(_)) => {}
+        _ => return fail("a bar button item needs a title, an image or a system item for this ibtool"),
     }
     Ok(Object::new("UIBarButtonItem", values))
 }
@@ -1154,7 +1162,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         }
         "stepper" => {
             allowed.extend([
-                ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None),
+                ("horizontalHuggingPriority", Some("750")), ("verticalHuggingPriority", Some("750")), ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None),
                 ("minimumValue", None), ("maximumValue", None), ("stepValue", None), ("continuous", Some("NO")), ("autorepeat", Some("NO")),
                 ("wraps", Some("YES")), ("enabled", Some("NO")),
             ]);
@@ -1223,9 +1231,13 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     if let Some(own) = own_constraints(nib, scene, n, name)? {
         values.push(("UIViewAutolayoutConstraints", own));
     }
-    // A slider and a stepper hug at 250, which Xcode writes; the others at
-    // 750, which it doesn't.
-    if tag == "slider" || tag == "stepper" {
+    // A slider and a stepper hug at 250, which Xcode writes; the others,
+    // and a stepper given 750, at 750, which it doesn't.
+    let hugs = (n.attribute("horizontalHuggingPriority").is_some(), n.attribute("verticalHuggingPriority").is_some());
+    if hugs.0 != hugs.1 {
+        return fail(format!("one hugging priority on a {tag} is not supported by this ibtool"));
+    }
+    if tag == "slider" || (tag == "stepper" && !hugs.0) {
         values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -1340,19 +1352,27 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     Ok(Object::new(class, values))
 }
 
+/// The layout margins a view's document gives it, top, left (or leading),
+/// bottom and right (or trailing), and whether they are directional.
+fn layout_margins(n: Node) -> Result<Option<([f64; 4], bool)>, String> {
+    Ok(match (child(n, "edgeInsets", "layoutMargins"), child(n, "directionalEdgeInsets", "directionalLayoutMargins")) {
+        (None, None) => None,
+        (Some(m), None) => Some((insets(m, "left", "right")?, false)),
+        (None, Some(m)) => Some((insets(m, "leading", "trailing")?, true)),
+        _ => return fail("a view with both layout margins and directional ones is not supported by this ibtool"),
+    })
+}
+
 /// A view's layout margins (top, left, bottom, right, or leading and
 /// trailing), whether they follow the readable width, whether it preserves
 /// its superview's and whether it insets them from the safe area, after its
 /// constraints (and a root view's layout guides).
 fn margins(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
-    match (child(n, "edgeInsets", "layoutMargins"), child(n, "directionalEdgeInsets", "directionalLayoutMargins")) {
-        (None, None) => {}
-        (Some(m), None) => values.push(("UIViewLayoutMargins", doubles(&insets(m, "left", "right")?))),
-        (None, Some(m)) => {
-            values.push(("UIViewLayoutMargins", doubles(&insets(m, "leading", "trailing")?)));
+    if let Some((m, directional)) = layout_margins(n)? {
+        values.push(("UIViewLayoutMargins", doubles(&m)));
+        if directional {
             values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
         }
-        _ => return fail("a view with both layout margins and directional ones is not supported by this ibtool"),
     }
     if children(n, "edgeInsets").chain(children(n, "directionalEdgeInsets")).count() > 1 {
         return fail("a view's other edge insets are not supported by this ibtool");
@@ -1949,7 +1969,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         "visualEffectView" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
-                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "view", "blurEffect", "constraints"])?;
             if n.attribute("opaque").is_none() {
@@ -2018,6 +2038,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+                values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -2278,7 +2301,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 None => None,
                 Some(other) => return fail(format!("buttonType=\"{other}\" on <button> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints", "userDefinedRuntimeAttributes", "accessibility"])?;
+            only_children(n, &[
+                "rect", "autoresizingMask", "state", "connections", "fontDescription", "color", "constraints", "userDefinedRuntimeAttributes", "accessibility",
+                "inset",
+            ])?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
@@ -2403,6 +2429,18 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // A custom button's default font is larger.
             let default_size = if button_type.is_some() { 15.0 } else { 18.0 };
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), Some(default_size))?));
+            // Its insets: top, left, bottom and right from the document's
+            // minimum y and x and maximum y and x.
+            if let Some(i) = children(n, "inset").find(|i| !["contentEdgeInsets", "titleEdgeInsets", "imageEdgeInsets"].contains(&i.attribute("key").unwrap_or(""))) {
+                return fail(format!("a button's {} inset is not supported by this ibtool", i.attribute("key").unwrap_or("unkeyed")));
+            }
+            for (k, key) in [("contentEdgeInsets", "UIContentEdgeInsets"), ("titleEdgeInsets", "UITitleEdgeInsets"), ("imageEdgeInsets", "UIImageEdgeInsets")] {
+                if let Some(i) = child(n, "inset", k) {
+                    only_attributes(i, &[("key", None), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
+                    let edge = |a: &str| number(attr(i, a)?);
+                    values.push((key, doubles(&[edge("minY")?, edge("minX")?, edge("maxY")?, edge("maxX")?])));
+                }
+            }
             values.push(("UIButtonConfiguration", Value::Nil));
             Object::new("UIButton", values)
         }
@@ -2495,7 +2533,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 return fail("scrolling attributes on a <view> are not supported by this ibtool");
             }
             if container {
-                only_attributes(n, &[("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None)])?;
+                // Its placeholder's intrinsic size is Interface Builder's alone.
+                only_attributes(n, &[
+                    ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                    ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
+                    ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+                ])?;
                 only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
                 let segues: Vec<Node> = children(n, "connections").flat_map(|c| c.children().filter(|c| c.is_element())).collect();
                 let [sg] = segues[..] else {
@@ -2824,10 +2867,34 @@ fn with_root_key(a1: &str, a2: &str, root_first: bool) -> Result<[usize; 4], Str
     })
 }
 
+/// How far a constraint's legacy constant moves for an item's margin
+/// attribute (`direction` from `attribute_codes`): the item's own layout
+/// margin on that edge when its document gives it margins (leading as left
+/// and trailing as right), otherwise 8. A centre within margins that aren't
+/// even is refused: Xcode's offset for it isn't half their difference.
+fn margin_offset(c: Node, item: Option<&str>, attribute: &str, direction: i64) -> Result<f64, String> {
+    // The item: given, or the view holding the constraint.
+    let view = match item {
+        Some(id) => c.document().descendants().find(|d| d.is_element() && d.attribute("id") == Some(id)),
+        None => c.parent().and_then(|cs| cs.parent()),
+    };
+    let Some((m, _)) = view.map(layout_margins).transpose()?.flatten() else { return Ok(8.0 * direction as f64) };
+    Ok(match attribute {
+        "topMargin" => m[0],
+        "leftMargin" | "leadingMargin" => m[1],
+        "bottomMargin" => -m[2],
+        "rightMargin" | "trailingMargin" => -m[3],
+        "centerXWithinMargins" if m[1] == m[3] => 0.0,
+        "centerYWithinMargins" if m[0] == m[2] => 0.0,
+        "centerXWithinMargins" | "centerYWithinMargins" => return fail("a centre within uneven layout margins is not supported by this ibtool"),
+        _ => 0.0,
+    })
+}
+
 /// A constraint of the document's: its attributes (a margin's own code,
-/// then for the legacy keys the edge's, its constant moved by the margin
-/// of 8), relation, multiplier, constant (a symbolic one is `NSSpace`) and
-/// priority.
+/// then for the legacy keys the edge's, its constant moved by the item's
+/// margin), relation, multiplier, constant (a symbolic one is `NSSpace`)
+/// and priority.
 fn document_constraint(nib: &mut Nib, c: Node, first: Value, second: Option<Value>) -> Result<Value, String> {
     let (v1, l1, s1) = attribute_codes(attr(c, "firstAttribute")?)?;
     let mut values = vec![("NSFirstItem", first), ("NSFirstAttributeV2", Value::Int(v1)), ("NSFirstAttribute", Value::Int(l1))];
@@ -2840,11 +2907,11 @@ fn document_constraint(nib: &mut Nib, c: Node, first: Value, second: Option<Valu
     if let Some(m) = multiplier(c)? {
         values.push(("NSMultiplier", Value::Double(m)));
     }
-    let mut margin = -8.0 * s1 as f64;
+    let mut margin = -margin_offset(c, c.attribute("firstItem"), attr(c, "firstAttribute")?, s1)?;
     if let Some(second) = second {
         let (v2, l2, s2) = attribute_codes(attr(c, "secondAttribute")?)?;
         values.extend([("NSSecondItem", second), ("NSSecondAttributeV2", Value::Int(v2)), ("NSSecondAttribute", Value::Int(l2))]);
-        margin += 8.0 * s2 as f64;
+        margin += margin_offset(c, Some(attr(c, "secondItem")?), attr(c, "secondAttribute")?, s2)?;
     }
     let symbolic = c.attribute("symbolic").is_some();
     let constant = if symbolic { 0.0 } else { c.attribute("constant").map(number).transpose()?.unwrap_or(0.0) };
