@@ -2880,9 +2880,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             Object::new("UIVisualEffectView", values)
         }
         "pickerView" => {
+            // Also a table's header or footer view (a corpus storyboard).
             only_attributes(n, &[
-                ("contentMode", Some("scaleToFill")), ("hidden", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("contentMode", Some("scaleToFill")), ("hidden", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None), ("key", None),
             ])?;
+            if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
+                return fail(format!("key=\"{}\" on <pickerView> is not supported by this ibtool", n.attribute("key").unwrap_or("")));
+            }
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
             view_connections(scene, n, &name)?;
             for c in children(n, "color") {

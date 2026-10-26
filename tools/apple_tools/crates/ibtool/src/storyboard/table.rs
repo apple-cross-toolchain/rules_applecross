@@ -6,7 +6,7 @@ use super::*;
 /// A table's header or footer view (`key`): a plain view, or for the
 /// header a search bar.
 fn header_or_footer<'a, 'i>(table: Node<'a, 'i>, key: &str) -> Option<Node<'a, 'i>> {
-    table.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("searchBar")) && c.attribute("key") == Some(key))
+    table.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("searchBar") || c.has_tag_name("pickerView")) && c.attribute("key") == Some(key))
 }
 
 /// A table's background: a plain table's white, as a system background
@@ -56,8 +56,9 @@ fn check_table(table: Node) -> Result<(), String> {
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("restorationIdentifier", None), ("id", None),
         ("customClass", None), ("customModule", None), ("customModuleProvider", None),
     ])?;
-    only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "searchBar", "prototypes", "sections", "connections", "constraints"])?;
-    for v in children(table, "view") {
+    only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "searchBar", "pickerView", "prototypes", "sections", "connections", "constraints"])?;
+    // A picker as a header or footer view too (a corpus storyboard).
+    for v in children(table, "view").chain(children(table, "pickerView")) {
         if !matches!(v.attribute("key"), Some("tableHeaderView" | "tableFooterView")) {
             return fail("a <view> in a table other than its header or footer view is not supported by this ibtool");
         }
@@ -67,14 +68,15 @@ fn check_table(table: Node) -> Result<(), String> {
             return fail("a <searchBar> in a table other than its header view is not supported by this ibtool");
         }
     }
-    if children(table, "view").chain(children(table, "searchBar")).filter(|v| v.attribute("key") == Some("tableHeaderView")).count() > 1 {
+    let keyed = |key: &str| children(table, "view").chain(children(table, "searchBar")).chain(children(table, "pickerView")).filter(|v| v.attribute("key") == Some(key)).count();
+    if keyed("tableFooterView") > 1 {
+        return fail("a table with two footer views is not supported by this ibtool");
+    }
+    if keyed("tableHeaderView") > 1 {
         return fail("a table with two header views is not supported by this ibtool");
     }
     for i in children(table, "inset") {
         only_attributes(i, &[("key", Some("separatorInset")), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
-    }
-    if children(table, "inset").next().is_some() && child(table, "color", "sectionIndexBackgroundColor").is_some() {
-        return fail("a table with both a separator inset and a section index background is not supported by this ibtool");
     }
     if !matches!(table.attribute("dataMode"), Some("prototypes" | "static")) {
         return fail("a table's dataMode other than prototypes or static is not supported by this ibtool");
@@ -87,9 +89,6 @@ fn check_table(table: Node) -> Result<(), String> {
         if !matches!(c.attribute("key"), Some("backgroundColor" | "sectionIndexBackgroundColor" | "separatorColor")) {
             return fail(format!("a table's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
         }
-    }
-    if child(table, "color", "sectionIndexBackgroundColor").is_some() && child(table, "color", "separatorColor").is_some() {
-        return fail("a table with both a section index background and a separator colour is not supported by this ibtool");
     }
     if table.attribute("key").is_some() && table.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
         return fail("a root table view that doesn't translate its mask is not supported by this ibtool");
@@ -836,12 +835,11 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     if scene.actions.iter().any(|a| a.3 != "upstream") || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
         return fail("actions other than on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
-    // A prototype's nib holds one switch's frame as a key-value pair, as a
-    // controller's view does (five probes); other runtime attributes,
-    // several switches and accessibility configurations are refused.
-    let one_switch = scene.switch_frames.len() == 1 && scene.pairs.iter().all(|p| scene.switch_frames.contains(&p.0));
-    if (!scene.pairs.is_empty() && !one_switch) || !scene.accessibility.is_empty() {
-        return fail("runtime attributes, switches and accessibility settings in a cell are not supported by this ibtool");
+    // A prototype's nib holds its switches' frames and its views' runtime
+    // attributes as key-value pairs, as a controller's view does (five
+    // probes, and see below); accessibility configurations are refused.
+    if !scene.accessibility.is_empty() {
+        return fail("accessibility settings in a cell are not supported by this ibtool");
     }
     // The cell's own accessibility configuration, as a view's, in its nib
     // (three probes); beside its views' it isn't established.
@@ -1047,6 +1045,13 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             ("UIEventMask", Value::Int(*mask)),
         ])));
     }
+    // Pairs of several views go by their views' places in the objects,
+    // counted from 1 and compared as decimal strings, as a view nib's.
+    let listed = |name: &String| objects.iter().position(|o| matches!(o, Value::Ref(r) if r == name)).map(|i| (i + 1).to_string());
+    if scene.pairs.iter().any(|p| listed(&p.0).is_none()) {
+        return fail("key-value pairs of a view a cell's objects don't list are not supported by this ibtool");
+    }
+    scene.pairs.sort_by_key(|p| listed(&p.0));
     let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
     let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
     nib::archive(root_object_full(&mut nib, top, objects, connections, accessibility, pairs))
