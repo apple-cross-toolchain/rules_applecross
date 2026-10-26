@@ -189,8 +189,12 @@ other values of the attributes these use, is refused. Observed:
   labels at one frame told apart by id, and probes that tell the distance
   from x + y, the centre and y then x). A view nested in plain views, with
   the root view as its constraint's other item either way round, goes by
-  its origin in the root view's coordinates (four probes; one whose root
-  subview is resized where it is laid out is refused). In a group, constraints whose
+  its origin in the root view's coordinates (four probes; a label or text
+  field nested so goes the same way, two probes and one of the corpus's,
+  and so do views in stack and scroll views, their document frames summed
+  whatever the scroll view's content, five probes and one of the corpus's;
+  one whose root subview is resized where it is laid out is refused, as
+  are container views). In a group, constraints whose
   second item is deeper than the root's subviews come first, by first and
   then second attribute in the siblings' order below (eleven probes; a
   deeper view as the first item, which would group them by it, is refused),
@@ -690,7 +694,9 @@ objects (its own nib's, or its navigation controller's).
   without a mask.
 - **Segues.** An item's segue is a template in the controller's nib, after
   its own and its view's in the templates array and objects, with a
-  `perform:` event connection from the item.
+  `perform:` event connection from the item. An item with both an action
+  and a segue compiles as with the segue alone: the action is dropped,
+  whichever comes first (two probes, two of the corpus's storyboards).
 - **Order.** These connections come after the templates' outlets, by
   selector: actions with one selector the right item's first, and the
   `perform:`s in the order of their templates' outlets.
