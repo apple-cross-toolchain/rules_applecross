@@ -1196,6 +1196,16 @@ without a mask, which sorts before the controls' actions (one probe).
 Items with segues, opaque toolbars and toolbars in tables, cells or
 collection views are refused.
 
+A navigation bar in a view (not translucent) is a `UINavigationBar`:
+opaque, mask 36, its constraint keys, hugging `{250, 250}`, zero
+directional layout margins, semantic content and large content
+properties, then `UIItems` (an `NSMutableArray` of its navigation items,
+each as a controller's with `UINavigationBar` referring back to the bar),
+`UIBarPosition` 2 and `UIBarTranslucence` 2. The objects list each item
+and then its bar button items in the bar's turn (two probes and two of the
+corpus's). Its items' actions, on the controller or the first responder,
+and a toolbar's, are event connections without a mask (two probes).
+
 A web view is a `WKWebView`: a background colour if any, opaque unless it
 says NO, mask 36, its constraint keys, semantic content and large content
 properties, then `configuration`, a `WKWebViewConfiguration` of WebKit's
