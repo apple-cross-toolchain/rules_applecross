@@ -35,7 +35,21 @@ fn check_table(table: Node) -> Result<(), String> {
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("id", None),
     ])?;
-    only_children(table, &["rect", "autoresizingMask", "color", "prototypes", "sections", "connections", "constraints"])?;
+    only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "prototypes", "sections", "connections", "constraints"])?;
+    for v in children(table, "view") {
+        if !matches!(v.attribute("key"), Some("tableHeaderView" | "tableFooterView")) {
+            return fail("a <view> in a table other than its header or footer view is not supported by this ibtool");
+        }
+    }
+    for i in children(table, "inset") {
+        only_attributes(i, &[("key", Some("separatorInset")), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
+    }
+    if children(table, "inset").next().is_some() && child(table, "color", "sectionIndexBackgroundColor").is_some() {
+        return fail("a table with both a separator inset and a section index background is not supported by this ibtool");
+    }
+    if children(table, "view").next().is_some() && child(table, "color", "separatorColor").is_some() {
+        return fail("a table with both a header or footer view and a separator colour is not supported by this ibtool");
+    }
     if !matches!(table.attribute("dataMode"), Some("prototypes" | "static")) {
         return fail("a table's dataMode other than prototypes or static is not supported by this ibtool");
     }
@@ -91,9 +105,11 @@ fn prototypes<'a, 'i>(table: Node<'a, 'i>) -> Result<(Vec<(&'a str, Node<'a, 'i>
 
 /// A table's values, from its geometry to its separator inset reference:
 /// `mask_default` when it gives no autoresizing mask, `layout` (a subview's
-/// constraint values) after its clipping.
+/// constraint values) after its clipping. Its header and footer views,
+/// named `name`'s subviews, join `scene`.
+#[allow(clippy::too_many_arguments)]
 fn table_values(
-    nib: &mut Nib, module: Option<&str>, table: Node, f: &Frame, cells: &[(&str, Node, Option<String>)], mask_default: i64,
+    nib: &mut Nib, scene: &mut Scene, name: &str, table: Node, f: &Frame, cells: &[(&str, Node, Option<String>)], mask_default: i64,
     layout: Vec<(&'static str, Value)>,
 ) -> Result<Vec<(&'static str, Value)>, String> {
     let (style, ui_style) = match attr(table, "style")? {
@@ -106,6 +122,39 @@ fn table_values(
 
     let mut values = Vec::new();
     geometry(&mut values, f);
+    // The footer view before the header view, wherever they are in the
+    // document. The header view is at the top, as wide as the table is laid
+    // out. The footer view is right under it, or at the top; in a grouped
+    // table, under the header view or 35 points, and a section footer's
+    // height (17 when automatic).
+    let header = child(table, "view", "tableHeaderView");
+    let footer = child(table, "view", "tableFooterView");
+    let header_height = header.map(frame).transpose()?.map_or(0.0, |h| h.h);
+    let footer_y = if plain {
+        header_height
+    } else {
+        let section_footer = match height(table, "sectionFooterHeight", None)? {
+            -1.0 => 17.0,
+            h if h >= 0.0 => h as f64,
+            h => return fail(format!("a section footer height of {h} is not supported by this ibtool")),
+        };
+        (if header.is_some() { header_height } else { 35.0 }) + section_footer
+    };
+    let mut inner = Vec::new();
+    for (v, placed) in [
+        (footer, footer.map(frame).transpose()?.map(|ff| Frame { y: footer_y, ..ff })),
+        (header, Some(Frame { x: 0.0, y: 0.0, w: f.w, h: header_height })),
+    ] {
+        if let (Some(v), Some(placed)) = (v, placed) {
+            let outer = scene.parent.replace(name.to_string());
+            let compiled = placed_subview(nib, scene, v, placed);
+            scene.parent = outer;
+            inner.push(compiled?);
+        }
+    }
+    if !inner.is_empty() {
+        values.push(("UISubviews", nib.array("NSMutableArray", inner)));
+    }
     if let Some(c) = child(table, "color", "backgroundColor") {
         values.push(("UIBackgroundColor", table_background(nib, c, plain)?));
     }
@@ -183,6 +232,11 @@ fn table_values(
         values.push(("UIAllowsSelectionDuringEditing", Value::Bool(true)));
     }
     values.push(("UIInsetsContentViewsToSafeArea", Value::Bool(true)));
+    for (key, value) in [("tableHeaderView", "UITableHeaderView"), ("tableFooterView", "UITableFooterView")] {
+        if let Some(v) = child(table, "view", key) {
+            values.push((value, reference(view_name(attr(v, "id")?))));
+        }
+    }
     if let Some(c) = child(table, "color", "separatorColor") {
         values.push(("UISeparatorColor", color(nib, c)?));
     }
@@ -190,7 +244,7 @@ fn table_values(
     if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
-            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, module, *c, placeholder.is_some())?;
+            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, scene.module, *c, placeholder.is_some())?;
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -211,6 +265,12 @@ fn table_values(
     }
     if let Some(c) = child(table, "color", "sectionIndexBackgroundColor") {
         values.push(("UISectionIndexBackgroundColor", color(nib, c)?));
+    }
+    // Top, left, bottom, right; written even when it is the default.
+    if let Some(i) = child(table, "inset", "separatorInset") {
+        let edges = ["minY", "minX", "maxY", "maxX"].map(|e| attr(i, e).and_then(number));
+        let [top, left, bottom, right] = edges;
+        values.push(("UISeparatorInset", doubles(&[top?, left?, bottom?, right?])));
     }
     values.push(("UISeparatorInsetReference", Value::Int(0)));
     Ok(values)
@@ -242,7 +302,7 @@ pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &st
     if let Some(own) = own_constraints(nib, scene, n, name)? {
         layout.push(("UIViewAutolayoutConstraints", own));
     }
-    let values = table_values(nib, scene.module, n, f, &cells, 36, layout)?;
+    let values = table_values(nib, scene, name, n, f, &cells, 36, layout)?;
     Ok(Object::new("UITableView", values))
 }
 
@@ -259,7 +319,8 @@ pub(super) fn table_view_nib(
     }
     let table_id = attr(table, "id")?;
     // The table's outlets, to its controller.
-    let mut outlets: Vec<(String, &str, String)> = vc_outlets.iter().map(|(l, d)| (l.clone(), "upstream", d.clone())).collect();
+    let root_name = view_name(table_id);
+    let mut outlets: Vec<(String, String, String)> = vc_outlets.iter().map(|(l, d)| (l.clone(), "upstream".to_string(), d.clone())).collect();
     for c in children(table, "connections") {
         only_children(c, &["outlet"])?;
         for o in children(c, "outlet") {
@@ -267,16 +328,10 @@ pub(super) fn table_view_nib(
             if attr(o, "destination")? != vc_id {
                 return fail("a table's outlets to anything but its controller are not supported by this ibtool");
             }
-            outlets.push((attr(o, "property")?.to_string(), "table", "upstream".to_string()));
+            outlets.push((attr(o, "property")?.to_string(), root_name.clone(), "upstream".to_string()));
         }
     }
-    let root_name = view_name(table_id);
     let static_table = table.attribute("dataMode") == Some("static");
-    for (_, destination) in vc_outlets {
-        if *destination != root_name && !static_table {
-            return fail("a table view controller's outlets into anything but its table are not supported by this ibtool");
-        }
-    }
     let upstream_used = !outlets.is_empty();
 
     let (cells, segues) = prototypes(table)?;
@@ -295,9 +350,26 @@ pub(super) fn table_view_nib(
         objects.push(reference(name));
     }
 
-    let values = table_values(&mut nib, module, table, f, &cells, 0, Vec::new())?;
+    // The header and footer views, and the views in them.
+    let mut scene = Scene::new(vc_id, module, table, Some(root_name.clone()));
+    let values = table_values(&mut nib, &mut scene, &root_name, table, f, &cells, 0, Vec::new())?;
+    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.gesture_views.is_empty() {
+        return fail("actions, outlets to the controller, gestures and segues in a table's header or footer are not supported by this ibtool");
+    }
     top.push(Value::New(Object::new("UITableView", values).named(root_name.clone())));
     objects.push(reference(root_name.clone()));
+    // After the table (and a static table's data source), breadth first
+    // through the table's views and the data source's sections and cells,
+    // level by level, the table's first in each: (level, object).
+    let mut levels: Vec<(usize, String)> = Vec::new();
+    let mut queue: std::collections::VecDeque<(usize, &String)> = [(0, &root_name)].into();
+    while let Some((depth, v)) = queue.pop_front() {
+        levels.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| (depth + 1, c.1.clone())));
+        for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == Some(v)) {
+            levels.push((depth + 1, s.clone()));
+            queue.push_back((depth + 1, s));
+        }
+    }
 
     // A static table's sections and their cells, as its data source holds
     // them; its cells are in the table's nib.
@@ -340,41 +412,53 @@ pub(super) fn table_view_nib(
         }
         let sections = nib.array("NSArray", sections);
         top.push(Value::New(Object::new("UITableViewDataSource", vec![("UITableSections", sections)]).named("static data source")));
-        // The data source, the sections, the cells, then each cell's content
-        // view and views as a prototype's nib lists them.
+        // The data source; the sections (level 1); the cells (2); each cell's
+        // content view and its views (3), as a prototype's nib lists them.
         objects.push(reference("static data source"));
-        objects.extend(section_names.into_iter().map(reference));
-        objects.extend(parts.iter().map(|p| reference(p.name.clone())));
+        levels.extend(section_names.into_iter().map(|n| (1, n)));
+        levels.extend(parts.iter().map(|p| (2, p.name.clone())));
         for p in &parts {
-            objects.push(reference(p.content.clone()));
+            levels.push((3, p.content.clone()));
             let content_parent = Some(p.content.clone());
-            objects.extend(p.scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| reference(s.1.clone())));
+            levels.extend(p.scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| (3, s.1.clone())));
         }
         // Then breadth first across the cells: each view's constraints and
         // its subviews, the content views' already listed.
-        let mut queue: std::collections::VecDeque<(&CellParts, &String)> = parts.iter().map(|p| (p, &p.content)).collect();
-        while let Some((p, v)) = queue.pop_front() {
-            objects.extend(p.scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
+        let mut queue: std::collections::VecDeque<(usize, &CellParts, &String)> = parts.iter().map(|p| (3, p, &p.content)).collect();
+        while let Some((depth, p, v)) = queue.pop_front() {
+            levels.extend(p.scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| (depth + 1, c.1.clone())));
             for (_, sv) in p.scene.subviews.iter().filter(|sv| sv.0.as_ref() == Some(v)) {
-                if *v != p.content {
-                    objects.push(reference(sv.clone()));
+                if *v == p.content {
+                    queue.push_back((depth, p, sv));
+                } else {
+                    levels.push((depth + 1, sv.clone()));
+                    queue.push_back((depth + 1, p, sv));
                 }
-                queue.push_back((p, sv));
-            }
-        }
-        for (_, destination) in vc_outlets {
-            if *destination != root_name && !parts.iter().any(|p| p.scene.subviews.iter().any(|sv| sv.1 == *destination)) {
-                return fail("a table view controller's outlets into anything but its table and static cells' views are not supported by this ibtool");
             }
         }
         connections.push(outlet(&mut nib, "staticDataSource", "owner", "static data source"));
     }
 
+    levels.sort_by_key(|l| l.0);
+    objects.extend(levels.iter().map(|l| reference(l.1.clone())));
+    for (_, destination) in vc_outlets {
+        if *destination != root_name && !levels.iter().any(|l| l.1 == *destination) {
+            return fail("a table view controller's outlets into anything but its table and its views are not supported by this ibtool");
+        }
+    }
+
+    // The header's and footer's views' outlets among them.
+    for (label, source, destination) in scene.view_outlets {
+        if !levels.iter().any(|l| l.1 == destination) {
+            return fail("a header or footer view's outlets to anything but its table's views are not supported by this ibtool");
+        }
+        outlets.push((label, source, destination));
+    }
+
     // Outlets, `view` among them, in byte order of their names.
-    outlets.push(("view".to_string(), "owner", root_name.clone()));
+    outlets.push(("view".to_string(), "owner".to_string(), root_name.clone()));
     outlets.sort_by(|a, b| a.0.cmp(&b.0));
     for (label, source, destination) in &outlets {
-        let source = if *source == "table" { root_name.as_str() } else { source };
         connections.push(outlet(&mut nib, label, source, destination));
     }
     Ok((root_object(&mut nib, top, objects, connections), upstream_used, segues))
@@ -431,21 +515,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, h
     let content_name = view_name(content_id);
 
     // The content view and its subviews, compiled as a container's are.
-    let mut scene = Scene {
-        vc_id: "",
-        module,
-        own_constraints: Vec::new(),
-        constrained: constrained_views(content),
-        subviews: Vec::new(),
-        parent: Some(content_name.clone()),
-        actions: Vec::new(),
-        segues: Vec::new(),
-        containers: Vec::new(),
-        control_outlets: Vec::new(),
-        gesture: None,
-        gesture_views: Vec::new(),
-        guides: Vec::new(),
-    };
+    let mut scene = Scene::new("", module, content, Some(content_name.clone()));
     let cf = frame(content)?;
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
@@ -455,7 +525,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, h
             subviews.push(subview(nib, &mut scene, c)?);
         }
     }
-    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() {
+    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
         return fail("actions, outlets and segues in a cell are not supported by this ibtool");
     }
     if !subviews.is_empty() {
