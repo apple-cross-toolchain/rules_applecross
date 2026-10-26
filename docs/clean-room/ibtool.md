@@ -294,6 +294,42 @@ other values of the attributes these use, is refused. Observed:
   subviews, which join the queue (six probes nesting views two deep beside
   image views with their own constraints; depth first and level by level
   each fail one).
+- A constraint a view's default variation excludes (`<variation
+  key="default"><mask key="constraints"><exclude reference=…/>`,
+  Interface Builder's Installed unchecked) is left out of the view's
+  `UIViewAutolayoutConstraints` (none if it was the only one) but keeps
+  its place in the objects, where it is archived; an outlet to it is as to
+  any constraint. The safe-area guide is then archived where an installed
+  constraint first uses it, or else in the view's `UIViewLayoutGuides`.
+  The nib's `UINibTraitStorageListsKey` holds a `_UITraitStorageList`:
+  `UITopLevelObject` the root view; `UITraitStorages` an array of a
+  `_UIRelationshipTraitStorage` per view with an exclusion, in the
+  document's order depth first (not the objects' breadth-first order):
+  `UIObject` the view, `UIKeyPath` `traitStorageConstraints`, `UIRecords`
+  a mutable array of one `_UIRelationshipTraitStorageRecord`
+  (`UITraitCollection` an empty `UITraitCollection`, one for the nib;
+  `UIAddedObjects` an empty `NSSet`; `UIRemovedObjects` an `NSSet` of the
+  excluded constraints) and `UIRelationshipCandidates` an `NSOrderedSet`
+  of all the view's constraints in the objects' order; then
+  `UIDescendants`, an `NSSet` of the items those constraints relate, but
+  the root view, in the order they first appear across the storages. The
+  safe-area guide is there as its placeholder in the objects, a legacy
+  guide as itself; a legacy guide's own constraints aren't candidates.
+  Sets are keyed `NS.object.<i>` and not inlined. The removed constraints
+  go by places counted from 1 and compared as decimal strings (the 10th
+  before the 9th), in the objects with each run of constraints moved
+  after the run of other objects that follows it (a view's constraints
+  after its subviews) and, within a run, each view's installed
+  constraints before its excluded ones. 198 probes, among them views
+  nested two deep with exclusions at several levels, size and aspect
+  constraints, legacy guides and outlets, and 150 with several exclusions
+  in one view, whose order is a rotation of the objects' order where those
+  places cross 10 (a colour, another scene or other ids don't move it;
+  more views or installed constraints do); and a corpus storyboard. This
+  is not the order of key-value pairs, which go by the objects' own places
+  (eight probes with runtime attributes behind root constraints). Variations for
+  size classes are refused, as are variations anywhere but in a plain
+  controller's view nib.
 - A storyboard in a `Base.lproj` directory has its translatable strings
   archived as `NSLocalizableString`s: the string inline (`NS.bytes`),
   `NSKey` `<id>.<property>` and `NSDev` the string (shared as strings
