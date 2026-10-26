@@ -711,10 +711,18 @@ it holds JFIF, tables, frames (baseline or progressive), a restart
 interval, the scan and the standard 3,144-byte sRGB IEC61966-2.1 profile,
 and drops comments (seven probes, and all 24 of the corpus's JPEGs that hold no more).
 
-It rewrites other metadata: of the corpus's JPEGs, Exif, XMP, Photoshop
-(APP13), Ducky (APP12) and Adobe (APP14) segments were dropped, kept or
-moved with no rule these files settle, and those with Adobe RGB or other
-profiles were re-encoded. Those are refused.
+Other metadata goes through ImageIO. Ducky (APP12) segments are dropped and
+Adobe (APP14) segments kept as they are (two probes). Exif of no entries
+is dropped (two of the corpus's), and Exif of only an orientation, as
+ImageIO writes it (big-endian, its first IFD at 8), kept as it is, the
+orientation also recorded in the rendition's 0x3ee TLV (1 otherwise; two
+probes). A Photoshop (APP13) segment of only an empty IPTC record, its
+digest or both is dropped (one probe, one of the corpus's), and so is XMP
+without properties (two probes). Other Exif is rewritten (little-endian
+Exif comes out big-endian, some entries dropped and values changed), and
+XMP's properties become Exif and IPTC (an XMP orientation becomes Exif's;
+a title and byline, IPTC's): those are refused, as are JPEGs with Adobe
+RGB or other profiles, which were re-encoded.
 
 ### PDF images
 

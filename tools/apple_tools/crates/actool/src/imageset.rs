@@ -92,7 +92,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             // A JPEG is stored on its own, as it is but for its comments.
             if jpeg {
-                let (stored, width, height) = stored_jpeg(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+                let (stored, width, height, orientation) = stored_jpeg(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
                 let mut attrs = vec![(car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
                 if appearance != 0 {
                     attrs.push((car::ATTR_APPEARANCE, appearance));
@@ -100,7 +100,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
                 if idiom != 0 {
                     attrs.push((car::ATTR_IDIOM, idiom));
                 }
-                out.renditions.push(Rendition { attrs, csi: car::jpeg_csi(filename, width, height, scale, flags, &stored) });
+                out.renditions.push(Rendition { attrs, csi: car::jpeg_csi(filename, width, height, scale, flags, orientation, &stored) });
                 continue;
             }
             let (img, extended) = image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -185,13 +185,14 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
 /// as it is (JFIF, tables, frame, restart interval, scan, and the standard
 /// sRGB profile); other metadata Xcode rewrites, and other profiles it
 /// converts.
-fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
+fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32, u16), String> {
     const SRGB_PROFILE_LEN: usize = 3144;
     if !j.starts_with(&[0xff, 0xd8]) {
         return Err("not a JPEG".into());
     }
     let mut out = j[..2].to_vec();
     let mut size = None;
+    let mut orientation = 1;
     let mut i = 2;
     loop {
         if i + 4 > j.len() || j[i] != 0xff {
@@ -206,7 +207,32 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
                 out.extend_from_slice(&j[i..]);
                 break;
             }
-            0xfe => {}
+            // Xcode passes metadata through ImageIO, which rewrites Exif,
+            // and turns XMP's properties into Exif and IPTC. Comments and
+            // Ducky (APP12) segments are dropped, Adobe (APP14) segments
+            // kept, and these, established, as they are; others are refused
+            // (ten probes, and the corpus's JPEGs).
+            0xfe | 0xec => {}
+            0xee if segment.get(4..9) == Some(b"Adobe") => out.extend_from_slice(segment),
+            // XMP without properties is dropped.
+            0xe1 if segment.get(4..33) == Some(b"http://ns.adobe.com/xap/1.0/\0") => {
+                if segment.windows(15).any(|w| w == b"rdf:Description") {
+                    return Err("a JPEG with XMP properties (which Xcode turns into Exif and IPTC) is not supported by this actool".into());
+                }
+            }
+            // Exif with no entries is dropped; one of only an orientation,
+            // as ImageIO writes it, kept, its orientation recorded.
+            0xe1 if segment.get(4..10) == Some(b"Exif\0\0") => match exif(&segment[10..]) {
+                Some(Exif::Empty) => {}
+                Some(Exif::Orientation(o)) => {
+                    orientation = o;
+                    out.extend_from_slice(segment);
+                }
+                None => return Err("a JPEG with Exif other than an orientation (which Xcode rewrites) is not supported by this actool".into()),
+            },
+            // Photoshop's (APP13) of only an empty IPTC record and its
+            // digest is dropped (one probe, one of the corpus's).
+            0xed if segment.get(4..18) == Some(b"Photoshop 3.0\0") && is_empty_iptc(&segment[18..]) => {}
             0xe0 if segment.get(4..9) == Some(b"JFIF\0") => out.extend_from_slice(segment),
             0xe2 if segment.get(4..16) == Some(b"ICC_PROFILE\0") => {
                 let profile = &segment[18..];
@@ -228,7 +254,50 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
         i += 2 + len;
     }
     let (w, h) = size.ok_or("a JPEG without a frame")?;
-    Ok((out, w, h))
+    Ok((out, w, h, orientation))
+}
+
+enum Exif {
+    Empty,
+    Orientation(u16),
+}
+
+/// An Exif TIFF of no entries, or of only an orientation (one of the eight)
+/// as ImageIO writes it: big-endian, its first IFD at 8, no next IFD.
+fn exif(tiff: &[u8]) -> Option<Exif> {
+    let ifd = |o: usize| -> Option<usize> {
+        let b = tiff.get(o..o + 4)?;
+        Some(if tiff.starts_with(b"MM") { u32::from_be_bytes([b[0], b[1], b[2], b[3]]) } else { u32::from_le_bytes([b[0], b[1], b[2], b[3]]) } as usize)
+    };
+    if !(tiff.starts_with(b"MM\0\x2a") || tiff.starts_with(b"II\x2a\0")) || ifd(4)? != 8 {
+        return None;
+    }
+    match tiff.get(8..) {
+        Some([0, 0, ..]) => Some(Exif::Empty),
+        Some([0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0, rest @ ..]) if tiff.starts_with(b"MM") && (1..=8).contains(o) && rest.iter().all(|&b| b == 0) => Some(Exif::Orientation(u16::from(*o))),
+        _ => None,
+    }
+}
+
+/// Photoshop image resources of only an empty IPTC record (0x404), its
+/// digest (0x425), or both.
+fn is_empty_iptc(resources: &[u8]) -> bool {
+    let mut i = 0;
+    let mut ids = Vec::new();
+    while i < resources.len() {
+        let Some(r) = resources.get(i..i + 12) else { return false };
+        if &r[..4] != b"8BIM" || r[6..8] != [0, 0] {
+            return false;
+        }
+        let len = u32::from_be_bytes([r[8], r[9], r[10], r[11]]) as usize;
+        let id = u16::from_be_bytes([r[4], r[5]]);
+        if id == 0x404 && len != 0 {
+            return false;
+        }
+        ids.push(id);
+        i += 12 + len + len % 2;
+    }
+    !ids.is_empty() && ids.iter().all(|id| [0x404, 0x425].contains(id))
 }
 
 struct SetImage {
