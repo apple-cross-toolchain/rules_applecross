@@ -321,7 +321,14 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     // An Icon Composer document is an input of its own; catalogs are the rest.
     let is_document = |p: &PathBuf| p.extension().is_some_and(|e| e == "icon");
     let catalogs: Vec<PathBuf> = o.inputs.iter().filter(|p| !is_document(p)).cloned().collect();
-    let scan = scan(&catalogs)?;
+    let mut scan = scan(&catalogs)?;
+    // An iOS build leaves out tvOS brand assets and visionOS solid image
+    // stacks that --app-icon doesn't name (two probes).
+    if platform == "ios" {
+        let named = |list: &mut Vec<(String, PathBuf)>| list.retain(|(n, _)| o.app_icon.as_deref() == Some(n.as_str()));
+        named(&mut scan.brand_assets);
+        named(&mut scan.solid_stacks);
+    }
     let document = o.inputs.iter().find(|p| is_document(p) && o.app_icon.as_deref().is_some_and(|n| p.file_stem().is_some_and(|s| s.to_string_lossy() == n)));
     if let Some(p) = o.inputs.iter().find(|p| is_document(p) && Some(*p) != document) {
         return Err(format!("{}: only the app icon's own Icon Composer document is supported by this actool", p.display()));
