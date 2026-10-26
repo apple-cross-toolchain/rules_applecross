@@ -1825,13 +1825,27 @@ fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
 /// aspect ratio; then, for a container, those between it
 /// and its subviews or among them, ordered as a root view's are.
 fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Result<Option<Value>, String> {
-    let Some(cs) = children(n, "constraints").next() else { return Ok(None) };
-    only_children(cs, &["constraint"])?;
     let id = attr(n, "id")?;
+    // Its aspect ratios its superview holds are its own, as Xcode moves them
+    // (one probe).
+    let superview = n.parent().filter(|p| p.has_tag_name("subviews")).and_then(|p| p.parent());
+    let held: Vec<Node> = superview
+        .into_iter()
+        .flat_map(|v| children(v, "constraints"))
+        .flat_map(|cs| children(cs, "constraint"))
+        .filter(|c| c.attribute("firstItem") == Some(id) && c.attribute("secondItem") == Some(id))
+        .collect();
+    let own: Vec<Node> = children(n, "constraints").flat_map(|cs| children(cs, "constraint")).collect();
+    if own.is_empty() && held.is_empty() {
+        return Ok(None);
+    }
+    for cs in children(n, "constraints") {
+        only_children(cs, &["constraint"])?;
+    }
     let direct: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
     let mut sizes = Vec::new();
     let mut others: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, &str)> = Vec::new();
-    for c in children(cs, "constraint") {
+    for c in own.into_iter().chain(held) {
         only_attributes(c, &[
             ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
             ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("identifier", None), ("placeholder", Some("YES")), ("id", None),
@@ -2108,7 +2122,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("contentHorizontalAlignment", Some("left")), ("contentVerticalAlignment", Some("center")), ("borderStyle", None),
                 ("textAlignment", None), ("minimumFontSize", None), ("clearButtonMode", None), ("placeholder", None), ("text", None), ("enabled", Some("NO")),
                 ("hidden", Some("YES")), ("restorationIdentifier", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
-                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("horizontalHuggingPriority", None),
+                ("verticalHuggingPriority", None),
             ])?;
             let border = match n.attribute("borderStyle") {
                 None => None,
@@ -2171,6 +2186,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
+            }
+            // Its hugging when given, each 250 unless given (two probes);
+            // beside a restoration identifier it isn't established.
+            if n.attribute("horizontalHuggingPriority").is_some() || n.attribute("verticalHuggingPriority").is_some() {
+                if n.attribute("restorationIdentifier").is_some() {
+                    return fail("a text field's hugging beside a restoration identifier is not supported by this ibtool");
+                }
+                values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
             }
             restoration_identifier(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -2776,6 +2799,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("customModuleProvider", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
                 ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
+                ("showsTouchWhenHighlighted", Some("YES")),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
             // the centre left out.
@@ -2972,6 +2996,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 values.push(("UILineBreakMode", Value::Int(mode)));
             }
+            // Showing touches when highlighted, after its states (two
+            // probes); beside a line break mode it isn't established.
+            if n.attribute("showsTouchWhenHighlighted").is_some() {
+                if line_break.is_some() {
+                    return fail("a button showing touches beside a line break mode is not supported by this ibtool");
+                }
+                values.push(("UIShowsTouchWhenHighlighted", Value::Bool(true)));
+            }
             values.push(("UIAdjustsImageWhenHighlighted", Value::Bool(true)));
             values.push(("UIAdjustsImageWhenDisabled", Value::Bool(true)));
             if let Some(t) = button_type {
@@ -3154,7 +3186,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     ("preservesSuperviewLayoutMargins", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("restorationIdentifier", None),
                     ("layoutMarginsFollowReadableWidth", Some("YES")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                     ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")), ("alwaysBounceVertical", Some("YES")),
-                    ("directionalLockEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None),
+                    ("directionalLockEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None), ("autoresizesSubviews", Some("NO")),
                 ])?;
                 if scroll && n.attribute("key").is_some() {
                     return fail("a scroll view as a table's header or footer view is not supported by this ibtool");
@@ -3211,7 +3243,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("multipleTouchEnabled").is_some() {
                 values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
             }
-            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            // Not autoresizing its subviews leaves the key out (one probe).
+            if n.attribute("autoresizesSubviews").is_none() {
+                values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            }
             let mask = match children(n, "autoresizingMask").next() {
                 Some(m) => autoresizing_mask(m)?,
                 None => 36,
@@ -5137,6 +5172,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                         return fail("a root view constraint without a second item is not supported by this ibtool");
                     }
                     if first == second {
+                        // A subview's aspect ratio the root view holds is the
+                        // subview's own (one probe).
+                        if first != view_id && direct.iter().any(|v| v.attribute("id") == Some(first)) {
+                            continue;
+                        }
                         return fail("a constraint between an item and itself is not supported by this ibtool");
                     }
                     // Where a legacy guide's own constraints go isn't established;
