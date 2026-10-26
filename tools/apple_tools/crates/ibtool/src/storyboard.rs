@@ -646,6 +646,23 @@ fn bar_button_item<'a, 'i>(
     Ok(Object::new("UIBarButtonItem", values))
 }
 
+/// A text style's default point size, as a minimum font size scales it
+/// (ten probes).
+fn text_style_size(style: &str) -> Result<f64, String> {
+    Ok(match style {
+        "UICTFontTextStyleBody" | "UICTFontTextStyleHeadline" => 17.0,
+        "UICTFontTextStyleCallout" => 16.0,
+        "UICTFontTextStyleSubhead" => 15.0,
+        "UICTFontTextStyleFootnote" => 13.0,
+        "UICTFontTextStyleCaption1" => 12.0,
+        "UICTFontTextStyleCaption2" => 11.0,
+        "UICTFontTextStyleTitle1" => 28.0,
+        "UICTFontTextStyleTitle2" => 22.0,
+        "UICTFontTextStyleTitle3" => 20.0,
+        other => return fail(format!("a minimum font size with the {other} text style is not supported by this ibtool")),
+    })
+}
+
 /// A text style's font as Xcode archives it: name, traits and the size
 /// recorded for NSFont, per platform.
 fn text_style(platform: Platform, style: &str) -> Result<(&'static str, i64, f64), String> {
@@ -893,10 +910,13 @@ fn minimum_font_size(n: Node) -> Result<Option<(f32, f32)>, String> {
     if factor.is_none() && size.map_or(true, |s| number(s) == Ok(0.0)) {
         return Ok(None);
     }
-    let font_size = child(n, "fontDescription", "fontDescription")
-        .and_then(|f| f.attribute("pointSize"))
-        .ok_or("a minimum font size without the font's point size is not supported by this ibtool")?;
-    let font_size = number(font_size)?;
+    // A text style's size is its default Dynamic Type size.
+    let description = child(n, "fontDescription", "fontDescription");
+    let font_size = match (description.and_then(|f| f.attribute("pointSize")), description.and_then(|f| f.attribute("style"))) {
+        (Some(size), _) => number(size)?,
+        (None, Some(style)) => text_style_size(style)?,
+        (None, None) => return fail("a minimum font size without the font's point size is not supported by this ibtool"),
+    };
     Ok(Some(match (factor, size) {
         (Some(factor), _) => {
             let factor = number(factor)? as f32;
@@ -1104,6 +1124,192 @@ fn runtime_attributes(nib: &mut Nib, n: Node, name: &str) -> Result<Vec<Value>, 
         }
     }
     Ok(pairs)
+}
+
+/// A switch, slider or activity indicator: a non-opaque view laid out as
+/// usual, with its own values after its large content properties, and
+/// its value-changed actions on the controller.
+fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame, mut values: Vec<(&'static str, Value)>) -> Result<Object, String> {
+    let tag = n.tag_name().name();
+    let mut allowed = vec![
+        ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
+        ("fixedFrame", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+    ];
+    let mut children_allowed = vec!["rect", "autoresizingMask", "constraints", "connections"];
+    match tag {
+        "switch" => {
+            allowed.extend([
+                ("horizontalHuggingPriority", Some("750")), ("verticalHuggingPriority", Some("750")), ("contentHorizontalAlignment", Some("center")),
+                ("contentVerticalAlignment", Some("center")), ("on", Some("YES")), ("enabled", Some("NO")),
+            ]);
+            children_allowed.push("color");
+        }
+        "slider" => {
+            allowed.extend([
+                ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("value", None), ("minValue", None),
+                ("maxValue", None), ("continuous", Some("NO")),
+            ]);
+            children_allowed.push("color");
+        }
+        _ => {
+            allowed.extend([
+                ("horizontalHuggingPriority", Some("750")), ("verticalHuggingPriority", Some("750")), ("hidesWhenStopped", Some("YES")),
+                ("animating", Some("YES")), ("style", None),
+            ]);
+            children_allowed.push("color");
+        }
+    }
+    only_attributes(n, &allowed)?;
+    only_children(n, &children_allowed)?;
+    for c in children(n, "connections") {
+        only_children(c, &["action"])?;
+        if tag == "activityIndicatorView" && c.has_children() {
+            return fail("an activity indicator's actions are not supported by this ibtool");
+        }
+        for a in children(c, "action") {
+            only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("valueChanged")), ("id", None)])?;
+            if attr(a, "destination")? != scene.vc_id {
+                return fail("actions that don't target the scene's view controller are not supported by this ibtool");
+            }
+            scene.actions.push((attr(a, "selector")?.to_string(), name.to_string(), 4096, "upstream".into()));
+        }
+    }
+    let colors: Vec<&str> = children(n, "color").map(|c| c.attribute("key").unwrap_or("")).collect();
+    let known: &[&str] = match tag {
+        "switch" => &["onTintColor"],
+        "slider" => &["minimumTrackTintColor", "maximumTrackTintColor", "thumbTintColor"],
+        _ => &["color"],
+    };
+    if let Some(other) = colors.iter().find(|c| !known.contains(c)) {
+        return fail(format!("a {tag}'s {other} colour is not supported by this ibtool"));
+    }
+    // An activity indicator hidden when stopped and not animating is hidden.
+    let hidden_when_stopped = tag == "activityIndicatorView" && n.attribute("hidesWhenStopped").is_some() && n.attribute("animating").is_none();
+    if hidden_when_stopped && n.attribute("hidden").is_some() {
+        return fail("a hidden activity indicator hidden when stopped is not supported by this ibtool");
+    }
+
+    values.push(("UIDeepDrawRect", Value::Bool(true)));
+    if hidden_when_stopped {
+        values.push(("UIHidden", Value::Bool(true)));
+    }
+    hidden_and_tag(&mut values, n)?;
+    values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+    values.push(("UIAutoresizingMask", Value::Int(36)));
+    alpha(&mut values, n)?;
+    if does_not_translate(scene, n) {
+        values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+    }
+    if let Some(own) = own_constraints(nib, scene, n, name)? {
+        values.push(("UIViewAutolayoutConstraints", own));
+    }
+    // A slider hugs at 250, which Xcode writes; the others at 750, which it
+    // doesn't.
+    if tag == "slider" {
+        values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+    }
+    values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+    nib.large_content(&mut values);
+    let class = match tag {
+        "switch" => {
+            if n.attribute("enabled").is_some() {
+                values.push(("UIDisabled", Value::Bool(true)));
+            } else {
+                values.push(("UISwitchEnabled", Value::Bool(true)));
+            }
+            if n.attribute("on").is_some() {
+                values.push(("UISwitchOn", Value::Bool(true)));
+            }
+            if let Some(c) = child(n, "color", "onTintColor") {
+                values.push(("UISwitchOnTintColor", color(nib, c)?));
+            }
+            // Its fixed size is set back to its frame as the nib loads.
+            let rect = nib.string(&format!("{{{{{}, {}}}, {{{}, {}}}}}", f.x, f.y, f.w, f.h));
+            let value = Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(3)), ("NS.rectval", rect)]));
+            let key_path = nib.string("frame");
+            scene.pairs.push(Value::New(Object::new("UINibKeyValuePair", vec![("UIObject", reference(name)), ("UIValue", value), ("UIKeyPath", key_path)])));
+            "UISwitch"
+        }
+        "slider" => {
+            let value = |k: &str, default: f64| n.attribute(k).map(number).transpose().map(|v| v.unwrap_or(default));
+            values.push(("UIValue", Value::Float(value("value", 0.5)? as f32)));
+            let (min, max) = (value("minValue", 0.0)?, value("maxValue", 1.0)?);
+            if min != 0.0 {
+                values.push(("UIMinValue", Value::Float(min as f32)));
+            }
+            if max != 1.0 {
+                values.push(("UIMaxValue", Value::Float(max as f32)));
+            }
+            if n.attribute("continuous").is_some() {
+                values.push(("UIContinuous", Value::Bool(false)));
+            }
+            for (key, value_key) in [("minimumTrackTintColor", "UIMinimumTintColor"), ("maximumTrackTintColor", "UIMaximumTintColor"), ("thumbTintColor", "UIThumbTintColor")] {
+                if let Some(c) = child(n, "color", key) {
+                    values.push((value_key, color(nib, c)?));
+                }
+            }
+            values.push(("UIBehavioralStyle", Value::Int(0)));
+            "UISlider"
+        }
+        _ => {
+            // The modern style and the legacy one.
+            let (modern, legacy) = match attr(n, "style")? {
+                "medium" => (100, 1),
+                "large" => (101, 0),
+                "whiteLarge" => (0, 0),
+                "white" => (1, 1),
+                "gray" => (2, 2),
+                other => return fail(format!("activity indicator style {other} is not supported by this ibtool")),
+            };
+            values.push(("UIActivityIndicatorViewStyle-Modern", Value::Int(modern)));
+            values.push(("UIActivityIndicatorViewStyle", Value::Int(legacy)));
+            if n.attribute("animating").is_some() {
+                values.push(("UIAnimating", Value::Bool(true)));
+            }
+            if n.attribute("hidesWhenStopped").is_none() {
+                values.push(("UIHidesWhenStopped", Value::Bool(false)));
+            }
+            // A colour is its tint too; a modern style's tint is otherwise
+            // the secondary label colour.
+            match child(n, "color", "color") {
+                Some(c) => {
+                    let c = color(nib, c)?;
+                    let Value::New(o) = c else { return fail("a shared activity indicator colour is not supported by this ibtool") };
+                    let colour_name = o.name.clone().unwrap_or_else(|| nib.fresh());
+                    values.push(("UIColor", Value::New(o.named(colour_name.clone()))));
+                    values.push(("UITintColor", reference(colour_name)));
+                    values.push(("UIDisableUpdateColorOnTraitCollectionChange", Value::Bool(true)));
+                }
+                None => {
+                    values.push(("UIColor", Value::Nil));
+                    if modern >= 100 {
+                        values.push(("UITintColor", system_color_named(nib, "secondaryLabelColor")?));
+                    }
+                }
+            }
+            "UIActivityIndicatorView"
+        }
+    };
+    Ok(Object::new(class, values))
+}
+
+/// A view's `UIHidden` and `UITag`, after `UIOpaque`.
+fn hidden_and_tag(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
+    if n.attribute("hidden").is_some() {
+        values.push(("UIHidden", Value::Bool(true)));
+    }
+    if let Some(tag) = n.attribute("tag") {
+        values.push(("UITag", Value::Int(tag.parse().map_err(|_| format!("not a number: {tag}"))?)));
+    }
+    Ok(())
+}
+
+/// A view's `UIAlpha`, after its autoresizing mask.
+fn alpha(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
+    if let Some(alpha) = n.attribute("alpha") {
+        values.push(("UIAlpha", Value::Float(number(alpha)? as f32)));
+    }
+    Ok(())
 }
 
 /// An `<edgeInsets>` or `<directionalEdgeInsets>` as top, `left`, bottom,
@@ -1348,13 +1554,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         "label" => {
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")),
-                ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
+                ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("alpha", None), ("hidden", Some("YES")), ("tag", None),
                 ("fixedFrame", Some("YES")), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("text", None), ("textAlignment", None),
                 ("lineBreakMode", None), ("numberOfLines", None), ("baselineAdjustment", Some("alignBaselines")),
                 ("adjustsFontSizeToFit", Some("NO")), ("minimumFontSize", None), ("minimumScaleFactor", None),
                 ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections"])?;
+            only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections", "string"])?;
             view_connections(scene, n, &name)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
@@ -1368,6 +1574,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 _ => return fail("a label needs one text colour or nil"),
             };
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            hidden_and_tag(&mut values, n)?;
             if n.attribute("userInteractionEnabled").is_some() {
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             }
@@ -1385,6 +1592,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if mask != 0 {
                 values.push(("UIAutoresizingMask", Value::Int(mask)));
             }
+            alpha(&mut values, n)?;
             let mode = content_mode(n.attribute("contentMode").unwrap_or("left"))?;
             if mode != 0 {
                 values.push(("UIContentMode", Value::Int(mode)));
@@ -1408,7 +1616,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
-            values.push(("UIText", nib.text(id, "text", attr(n, "text")?)));
+            // Long text is a <string> rather than an attribute.
+            let text = match (n.attribute("text"), child(n, "string", "text")) {
+                (Some(t), None) => t,
+                (None, Some(s)) => {
+                    only_children(s, &[])?;
+                    s.text().unwrap_or("")
+                }
+                _ => return fail("a label needs one text for this ibtool"),
+            };
+            values.push(("UIText", nib.text(id, "text", text)));
             values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
             // A declared text colour, even labelColor, stays as it is when
             // the trait collection changes.
@@ -1913,12 +2130,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("opaque").is_none() {
                 values.push(("UIOpaque", Value::Bool(true)));
             }
-            if n.attribute("hidden").is_some() {
-                values.push(("UIHidden", Value::Bool(true)));
-            }
-            if let Some(tag) = n.attribute("tag") {
-                values.push(("UITag", Value::Int(tag.parse().map_err(|_| format!("not a number: {tag}"))?)));
-            }
+            hidden_and_tag(&mut values, n)?;
             if n.attribute("userInteractionEnabled").is_some() {
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             }
@@ -1931,9 +2143,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 None => 36,
             };
             values.push(("UIAutoresizingMask", Value::Int(mask)));
-            if let Some(alpha) = n.attribute("alpha") {
-                values.push(("UIAlpha", Value::Float(number(alpha)? as f32)));
-            }
+            alpha(&mut values, n)?;
             if n.attribute("clearsContextBeforeDrawing").is_some() {
                 values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
             }
@@ -1985,6 +2195,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Object::new("UIView", values)
             }
         }
+        "switch" | "slider" | "activityIndicatorView" => simple_control(nib, scene, n, &name, &f, values)?,
         "imageView" => {
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")), ("contentMode", None),

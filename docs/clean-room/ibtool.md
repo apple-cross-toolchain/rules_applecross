@@ -748,6 +748,33 @@ with `UIViewLayoutMarginsAreDirectional`), `preservesSuperviewLayoutMargins`
 (`UIViewInsetsLayoutMarginsFromSafeArea` 0). `exclusiveTouch` is refused
 (13 probes).
 
+Labels take `hidden`, `tag` and `alpha` as plain views do, and their text
+may be a `<string key="text">` rather than an attribute. A minimum scale
+factor with a text style font scales the style's default size (Body and
+Headline 17, Callout 16, Subhead 15, Footnote 13, Caption1 12, Caption2 11,
+Title1 28, Title2 22, Title3 20), to a quarter point (19 probes).
+
+Switches, sliders and activity indicators (23 probes):
+- **Common.** Each is a non-opaque view: `UIDeepDrawRect`, hidden and tag,
+  `UIAutoresizeSubviews`, mask 36, alpha, the constraint keys, then (a
+  slider only) hugging `{250, 250}`, `UIViewSemanticContentAttribute` and
+  the large content properties, before its own values. A switch's and an
+  activity indicator's hugging is 750, which Xcode doesn't write. Their
+  value-changed actions are event connections with mask 4096.
+- **A switch.** `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
+  `UISwitchOnTintColor`. Its frame is also a key-value pair, `frame`
+  (`NS.special` 3, `{{x, y}, {w, h}}`), however it is laid out.
+- **A slider.** `UIValue` (a float), `UIMinValue` and `UIMaxValue` unless 0
+  and 1, `UIContinuous` false, the minimum, maximum and thumb tint
+  colours, and `UIBehavioralStyle` 0.
+- **An activity indicator.** `UIActivityIndicatorViewStyle-Modern` and
+  `UIActivityIndicatorViewStyle` (medium 100 and 1, large 101 and 0,
+  whiteLarge 0 and 0, white 1 and 1, gray 2 and 2), `UIAnimating`,
+  `UIHidesWhenStopped` false unless set, and `UIColor`. A colour is also
+  `UITintColor`, with `UIDisableUpdateColorOnTraitCollectionChange`;
+  without one, a modern style's tint is the secondary label colour. One
+  hidden when stopped and not animating is `UIHidden`.
+
 User-defined runtime attributes of a view, the root view or a controller
 are its nib's `UINibKeyValuePair`s (`UIObject`, `UIValue`, `UIKeyPath`), in
 document order, the root view's before its subviews'; a controller's are in
