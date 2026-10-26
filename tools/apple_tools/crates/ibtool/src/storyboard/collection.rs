@@ -16,7 +16,7 @@ pub(super) fn collection_view_nib(
         ("key", Some("view")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")),
         ("dataMode", Some("prototypes")), ("id", None),
     ])?;
-    only_children(cv, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "connections"])?;
+    only_children(cv, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "collectionReusableView", "connections"])?;
     for c in children(cv, "color") {
         if c.attribute("key") != Some("backgroundColor") {
             return fail(format!("a collection view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
@@ -195,6 +195,30 @@ fn collection_values(
             external.push(nib.array("NSMutableDictionary", objects));
         }
         values.push(("UICollectionViewCellPrototypeNibExternalObjects", nib.array("NSMutableDictionary", external)));
+    }
+    // Section headers and footers: by kind and reuse identifier, an empty
+    // table of external objects after the cells' and a nib after theirs
+    // (three probes).
+    let mut supplementary = Vec::new();
+    for v in children(cv, "collectionReusableView") {
+        let kind = match v.attribute("key") {
+            Some("sectionHeaderView") => "UICollectionElementKindSectionHeader",
+            Some("sectionFooterView") => "UICollectionElementKindSectionFooter",
+            _ => return fail("a collection reusable view other than a section header or footer is not supported by this ibtool"),
+        };
+        supplementary.push((format!("{kind}/{}", attr(v, "reuseIdentifier")?), v));
+    }
+    // In byte order of their keys (one probe of a header and a footer).
+    supplementary.sort_by(|a, b| a.0.cmp(&b.0));
+    if !supplementary.is_empty() {
+        let mut external = Vec::new();
+        for (key, _) in &supplementary {
+            external.push(nib.string(key));
+            external.push(nib.array("NSMutableDictionary", Vec::new()));
+        }
+        values.push(("UICollectionViewSupplementaryViewPrototypeNibExternalObjects", nib.array("NSMutableDictionary", external)));
+    }
+    if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
             let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, module, *c, placeholder.is_some())?;
@@ -203,6 +227,16 @@ fn collection_values(
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
         }
         values.push(("UICollectionViewCellNibDict", nib.array("NSMutableDictionary", nibs)));
+    }
+    if !supplementary.is_empty() {
+        let mut nibs = Vec::new();
+        for (key, v) in &supplementary {
+            let bytes = reusable_view_nib(nib.platform, nib.color_matched, nib.localizable, module, *v)?;
+            nibs.push(nib.string(key));
+            let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
+            nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
+        }
+        values.push(("UICollectionViewSupplementaryViewNibDict", nib.array("NSMutableDictionary", nibs)));
     }
     values.push(("UICollectionViewPrefetchingEnabled", Value::Bool(true)));
     Ok((values, estimated))
@@ -218,7 +252,7 @@ pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name
         ("pagingEnabled", Some("YES")), ("alwaysBounceVertical", Some("YES")), ("showsHorizontalScrollIndicator", Some("NO")),
         ("showsVerticalScrollIndicator", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
     ])?;
-    only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "connections", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "collectionReusableView", "connections", "constraints"])?;
     for c in children(n, "color") {
         if c.attribute("key") != Some("backgroundColor") {
             return fail(format!("a collection view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
@@ -268,11 +302,14 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
     ])?;
     only_children(layout, &["size", "inset"])?;
     let mut item = None;
+    let (mut header, mut footer) = (None, None);
     for s in children(layout, "size") {
         let (w, h) = (number(attr(s, "width")?)?, number(attr(s, "height")?)?);
         match s.attribute("key") {
             Some("itemSize") => item = Some((w, h)),
             Some("headerReferenceSize" | "footerReferenceSize") if (w, h) == (0.0, 0.0) => {}
+            Some("headerReferenceSize") => header = Some((w, h)),
+            Some("footerReferenceSize") => footer = Some((w, h)),
             _ => return fail("a flow layout's sizes other than its item size are not supported by this ibtool"),
         }
     }
@@ -304,6 +341,17 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
     let (w, h) = item.ok_or("a flow layout without an item size is not supported by this ibtool")?;
     if (w, h) != (50.0, 50.0) {
         values.push(("UIItemSize", doubles(&[w, h])));
+    }
+    // Its header and footer reference sizes, unless zero, after its item
+    // size (two probes); beside a section inset or a horizontal scroll
+    // direction they aren't established.
+    if (header.is_some() || footer.is_some()) && (section_inset.is_some() || layout.attribute("scrollDirection").is_some()) {
+        return fail("a flow layout's header or footer size beside a section inset or horizontal scrolling is not supported by this ibtool");
+    }
+    for (size, key) in [(header, "UIHeaderReferenceSize"), (footer, "UIFooterReferenceSize")] {
+        if let Some((w, h)) = size {
+            values.push((key, doubles(&[w, h])));
+        }
     }
     if let Some(inset) = section_inset {
         values.push(("UISectionInset", doubles(&inset)));
@@ -553,6 +601,78 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         ])));
     }
     nib::archive(root_object(&mut nib, top, objects, connections))
+}
+
+/// A section header's or footer's nib: the owner, the first responder and
+/// the view (`UICollectionReusableView`), its subviews compiled as a
+/// container's, then the flags and its reuse identifier; the objects list a
+/// safe-area guide after it (one probe). Its own constraints, outlets,
+/// actions, colours and a custom class are refused.
+fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, v: Node) -> Result<Vec<u8>, String> {
+    only_attributes(v, &[
+        ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
+        ("reuseIdentifier", None), ("id", None),
+    ])?;
+    only_children(v, &["rect", "autoresizingMask", "subviews"])?;
+    for required in ["opaque", "multipleTouchEnabled", "contentMode"] {
+        if v.attribute(required).is_none() {
+            return fail(format!("a collection reusable view without {required} is not supported by this ibtool"));
+        }
+    }
+    for m in children(v, "autoresizingMask") {
+        if m.has_children() || autoresizing_mask(m)? != 0 {
+            return fail("a collection reusable view with an autoresizing mask is not supported by this ibtool");
+        }
+    }
+    let name = view_name(attr(v, "id")?);
+    let mut nib = Nib::new(platform, color_matched, localizable);
+    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+    let mut scene = Scene::new(attr(v, "id")?, module, v, Some(name.clone()));
+    let mut subviews = Vec::new();
+    for s in children(v, "subviews") {
+        for c in s.children().filter(|c| c.is_element()) {
+            subviews.push(subview(&mut nib, &mut scene, c)?);
+        }
+    }
+    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() || !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
+        return fail("actions, outlets, segues, runtime attributes and accessibility settings in a collection reusable view are not supported by this ibtool");
+    }
+    let f = frame(v)?;
+    let mut values = Vec::new();
+    geometry(&mut values, &f);
+    if !subviews.is_empty() {
+        values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
+    }
+    values.push(("UIDeepDrawRect", Value::Bool(true)));
+    values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
+    values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+    values.push(("UIContentMode", Value::Int(4)));
+    if v.attribute("clipsSubviews").is_some() {
+        values.push(("UIClipsToBounds", Value::Bool(true)));
+    }
+    values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+    nib.large_content(&mut values);
+    values.push(("UIReuseIdentifier", nib.string(attr(v, "reuseIdentifier")?)));
+    let top = vec![owner, responder, Value::New(Object::new("UICollectionReusableView", values).named(name.clone()))];
+    let identifier = nib.string("");
+    let guide = Value::New(Object::new("UILayoutGuide", vec![
+        ("UILayoutGuideOwningView", Value::Nil),
+        ("UILayoutGuideIdentifier", identifier),
+        ("UILayoutGuideOwningViewIsLocked", Value::Bool(false)),
+        ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
+        ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
+    ]));
+    let mut objects = vec![reference("owner"), reference("responder"), reference(name.clone()), guide];
+    let mut queue: std::collections::VecDeque<String> = [name.clone()].into();
+    while let Some(view) = queue.pop_front() {
+        objects.extend(scene.own_constraints.iter().filter(|c| c.0 == view).map(|c| reference(c.1.clone())));
+        for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == Some(&view)) {
+            objects.push(reference(s.clone()));
+            queue.push_back(s.clone());
+        }
+    }
+    nib::archive(root_object(&mut nib, top, objects, Vec::new()))
 }
 
 /// A constraint Xcode makes between the cell's and its content view's
