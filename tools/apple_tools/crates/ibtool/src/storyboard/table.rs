@@ -383,7 +383,7 @@ pub(super) fn table_view_nib(
             ("key", Some("refreshControl")), ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
             ("enabled", Some("NO")), ("contentHorizontalAlignment", Some("center")), ("contentVerticalAlignment", Some("center")), ("id", None),
         ])?;
-        only_children(r, &["rect", "autoresizingMask", "connections"])?;
+        only_children(r, &["rect", "autoresizingMask", "connections", "attributedString"])?;
         for m in children(r, "autoresizingMask") {
             if autoresizing_mask(m)? != 0 || m.has_children() {
                 return fail("a refresh control with an autoresizing mask is not supported by this ibtool");
@@ -483,13 +483,22 @@ pub(super) fn table_view_nib(
     let refresh_value = match refresh {
         Some(r) => {
             let mut values = Vec::new();
-            geometry(&mut values, &frame(r)?);
+            // Without a frame, 1000x1000 at the origin, as a subview (two
+            // corpus storyboards).
+            let f = match child(r, "rect", "frame") {
+                Some(_) => frame(r)?,
+                None => Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 },
+            };
+            geometry(&mut values, &f);
             values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIMultipleTouchEnabled", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
             values.push(("UIContentMode", Value::Int(4)));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIDisabled", Value::Bool(true)));
             values.push(("UIRefreshControlStyle", Value::Int(2)));
+            if let Some(title) = child(r, "attributedString", "attributedTitle") {
+                values.push(("UIAttributedTitle", refresh_title(&mut nib, title)?));
+            }
             Some(Value::New(Object::new("UIRefreshControl", values).named("refresh control")))
         }
         None => None,
@@ -1031,4 +1040,65 @@ fn system_background_view(nib: &mut Nib, f: &Frame) -> Value {
     ]);
     values.push(("configurationAPI", Value::New(configuration)));
     Value::New(Object::new("_UISystemBackgroundView", values))
+}
+
+/// A refresh control's attributed title: one fragment with a font and
+/// perhaps a paragraph style, an `NSAttributedString` of the text and an
+/// `NSFont` (the system font: 11 points for the small system font, 13 for
+/// the message and system fonts unless sized) then an `NSParagraphStyle`
+/// of its alignment (left left out, right 1, centre 2, natural 4) and no
+/// tab stops (eight probes, two corpus storyboards).
+fn refresh_title(nib: &mut Nib, title: Node) -> Result<Value, String> {
+    only_attributes(title, &[("key", Some("attributedTitle"))])?;
+    only_children(title, &["fragment"])?;
+    let fragments: Vec<Node> = children(title, "fragment").collect();
+    let [fragment] = fragments[..] else { return fail("a refresh control's title of other than one fragment is not supported by this ibtool") };
+    only_attributes(fragment, &[("content", None)])?;
+    only_children(fragment, &["attributes"])?;
+    let attributes: Vec<Node> = children(fragment, "attributes").flat_map(|a| a.children().filter(|c| c.is_element())).collect();
+    let mut font_size = None;
+    let mut alignment = None;
+    let mut paragraph = false;
+    for a in attributes {
+        match (a.tag_name().name(), a.attribute("key")) {
+            ("font", Some("NSFont")) => {
+                only_attributes(a, &[("key", None), ("metaFont", None), ("size", None)])?;
+                let size = match (attr(a, "metaFont")?, a.attribute("size")) {
+                    ("smallSystem", None) => 11.0,
+                    ("message" | "system", None) => 13.0,
+                    ("message" | "system", Some(size)) => number(size)?,
+                    (meta, _) => return fail(format!("a refresh control's {meta} font is not supported by this ibtool")),
+                };
+                font_size = Some(size);
+            }
+            ("paragraphStyle", Some("NSParagraphStyle")) => {
+                only_attributes(a, &[
+                    ("key", None), ("alignment", None), ("lineBreakMode", Some("wordWrapping")), ("baseWritingDirection", Some("natural")),
+                    ("tighteningFactorForTruncation", Some("0.0")),
+                ])?;
+                paragraph = true;
+                alignment = match a.attribute("alignment") {
+                    None | Some("left") => None,
+                    Some("right") => Some(1),
+                    Some("center") => Some(2),
+                    Some("natural") => Some(4),
+                    Some(other) => return fail(format!("a refresh control's title alignment {other} is not supported by this ibtool")),
+                };
+            }
+            (tag, key) => return fail(format!("a refresh control's title attribute <{tag}> {} is not supported by this ibtool", key.unwrap_or("unkeyed"))),
+        }
+    }
+    let size = font_size.ok_or("a refresh control's title without a font is not supported by this ibtool")?;
+    let mut entries = vec![nib.string("NSFont"), font(nib, None, Some(size))?];
+    if paragraph {
+        let mut style = Vec::new();
+        if let Some(a) = alignment {
+            style.push(("NSAlignment", Value::Int(a)));
+        }
+        style.push(("NSTabStops", Value::Nil));
+        entries.extend([nib.string("NSParagraphStyle"), Value::New(Object::new("NSParagraphStyle", style))]);
+    }
+    let text = nib.string(attr(fragment, "content")?);
+    let dictionary = nib.array("NSDictionary", entries);
+    Ok(Value::New(Object::new("NSAttributedString", vec![("NSString", text), ("NSAttributes", dictionary)])))
 }

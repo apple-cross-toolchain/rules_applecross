@@ -437,8 +437,8 @@ other values of the attributes these use, is refused. Observed:
   `UINumberOfLines`, then `UIMinimumFontSize` (a 32-bit float) before
   `UITextAlignment` and `UIMinimumScaleFactor` (also 32-bit) after it.
   A `preferredMaxLayoutWidth` is `UIPreferredMaxLayoutWidth`, a 32-bit
-  float, after the alignment (one probe; beside a scale factor or letter
-  spacing it is refused).
+  float, after the alignment and any `UIMinimumScaleFactor` (three probes
+  and a corpus storyboard; beside letter spacing it is refused).
   With `minimumScaleFactor` (which wins over `minimumFontSize`) the factor
   is kept and the size is factor times the font's point size rounded to
   the nearest quarter point, halves up (0.33 of 17 is 5.5, 0.375 of 17 is
@@ -1152,8 +1152,15 @@ writes it) is its table's `UIRefreshControl`, after
 touches, content mode 4, `UIDisabled` and `UIRefreshControlStyle` 2, after
 the table in the objects, its value-changed actions event connections
 (mask 4096) after the outlets; in a static table, beside header and footer
-views, a keyboard dismiss mode or with an attributed title it is refused
-(two probes).
+views or a keyboard dismiss mode it is refused (two probes). Without a
+frame it is 1000x1000 at the origin. Its attributed title (one fragment)
+is `UIAttributedTitle` after the style: an `NSAttributedString` of the
+text and attributes `NSFont`, the system font (11 points for
+`metaFont="smallSystem"`, 13 for `message` and `system` unless sized), then
+`NSParagraphStyle`, an `NSParagraphStyle` of its alignment (left left out,
+right 1, centre 2, natural 4) and nil `NSTabStops`, when the document has
+one (eight probes, two corpus storyboards). Other fonts, attributes and
+paragraph settings are refused.
 
 A collection view in a view is compiled as a collection view controller's
 (mask 36 when none is given, its constraint keys after its clipping), its
