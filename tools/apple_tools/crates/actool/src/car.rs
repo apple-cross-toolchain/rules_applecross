@@ -665,7 +665,18 @@ const LAYOUT_COLOR: u16 = 1009;
 
 /// A colour (layout 1009, no size or pixel format): `RLOC`, version 1,
 /// the colour space's code and the components as doubles.
+/// A system colour a colour set refers to is its resolved components with a
+/// reference flag after the space's code, then `RLOC`, version 1 and the
+/// system colour's name.
 pub fn color_csi(name: &str, space: u32, components: &[f64]) -> Vec<u8> {
+    color_payload_csi(name, space, components, None)
+}
+
+pub fn color_reference_csi(name: &str, space: u32, components: &[f64], reference: &str) -> Vec<u8> {
+    color_payload_csi(name, space, components, Some(reference))
+}
+
+fn color_payload_csi(name: &str, space: u32, components: &[f64], reference: Option<&str>) -> Vec<u8> {
     let mut t = Vec::new();
     let mut c = Vec::new();
     le32(&mut c, 0);
@@ -674,10 +685,16 @@ pub fn color_csi(name: &str, space: u32, components: &[f64]) -> Vec<u8> {
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     let mut payload = b"RLOC".to_vec();
     le32(&mut payload, 1);
-    le32(&mut payload, space);
+    le32(&mut payload, space | u32::from(reference.is_some()) << 8);
     le32(&mut payload, components.len() as u32);
     for v in components {
         payload.extend_from_slice(&v.to_le_bytes());
+    }
+    if let Some(reference) = reference {
+        payload.extend_from_slice(b"RLOC");
+        le32(&mut payload, 1);
+        le32(&mut payload, reference.len() as u32);
+        payload.extend_from_slice(reference.as_bytes());
     }
     csi(&CsiHeader { flags: 0, width: 0, height: 0, scale: 0, pixel_format: &[0; 4], color_space: 0, layout: LAYOUT_COLOR, name }, &t, &payload)
 }

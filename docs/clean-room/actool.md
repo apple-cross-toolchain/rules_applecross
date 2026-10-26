@@ -589,12 +589,18 @@ were byte-identical with it (25 of 54 like them had identifiers sharing a
 bucket, which the earlier model refused).
 
 Refused: idioms other than universal (Xcode thins them by target device: an
-iPhone build kept iphone and car and dropped universal), system colour
-references (`"reference": "systemBlueColor"`, stored resolved, code 257,
-with their name), macOS catalogs, and keys not above. In the 350-catalog
-comparison 13 more catalogs now match: 8 byte-identical and 5 matching but
-for the appearance blocks' order. Two still stop at system colour
-references.
+iPhone build kept iphone and car and dropped universal), macOS catalogs,
+and keys not above. In the 350-catalog comparison 13 more catalogs matched:
+8 byte-identical and 5 matching but for the appearance blocks' order.
+
+A colour may refer to a system colour (`"reference"`, with platform
+universal or ios): its rendition holds the colour as Xcode resolves it for
+the appearance (a table of the 39 it knows, from one probe of each in each
+appearance; light is resolved as dark and high-contrast light as
+high-contrast dark, all 39 checked), with a reference flag (1) in the byte
+after the space's code, then `RLOC`, version 1, the name's length and the
+name. Names Xcode doesn't know (`whiteColor`) resolve to a placeholder
+colour; they are refused (ten probes).
 
 ## Image sets
 
