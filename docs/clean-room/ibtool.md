@@ -644,7 +644,10 @@ other values of the attributes these use, is refused. Observed:
   (they are then defined otherwise: one probe). The controller's outlets
   to its recognizers are in its nib, after its storyboard outlet and
   before a recognizer's delegate outlet, by name (four probes and one of
-  the corpus's).
+  the corpus's). Beside bar button items in the controller's own nib, the
+  recognizers' actions and the items' go together by selector (two probes
+  and two random storyboards); bar items' segues and custom views' actions
+  there, and a selector both share, are refused.
 - A navigation controller's root that nothing loads on its own keeps its
   recognizers in the navigation controller's nib: defined in the root's
   `UIExternalObjectsTableForViewLoading` in their placeholders' order,
@@ -776,7 +779,7 @@ selector in their order (seven probes, and 150 random storyboards). A
 child that also has a tab bar item has no nib of its own to refuse them
 in. Bar items with segues or custom views' actions, two actions of one
 child sharing a selector, and bar items beside a child's segues are
-refused, as are bar button items beside gesture recognizers and with
+refused, as are a child's bar button items beside gesture recognizers and with
 images (46 probes).
 
 ## Page view controllers

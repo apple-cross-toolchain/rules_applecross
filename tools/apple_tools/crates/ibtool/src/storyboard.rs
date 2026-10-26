@@ -6244,11 +6244,17 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         for t in &templates.outlets {
             connections.push(outlet(&mut vnib, "viewController", t, "controller"));
         }
-        connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, "controller")?);
-        let mut top = vec![owner, responder, storyboard];
-        if !recognizers.is_empty() && !bar_items.is_empty() {
-            return fail("a gesture recognizer with bar button items is not supported by this ibtool");
+        // Beside gesture recognizers, the bar items' actions and theirs go
+        // together by selector (two probes); bar segues, custom views'
+        // actions and shared selectors are refused there.
+        let merged = !recognizers.is_empty() && !bar_items.is_empty();
+        if merged && (!templates.performs.is_empty() || bar_actions.iter().any(|a| a.2 != 0)) {
+            return fail("a gesture recognizer beside bar button items' segues or custom views' actions is not supported by this ibtool");
         }
+        if !merged {
+            connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, "controller")?);
+        }
+        let mut top = vec![owner, responder, storyboard];
         let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard")];
         // Their actions by selector, those with one selector in document
         // order (two probes).
@@ -6259,8 +6265,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             top.push(object);
             objects.push(reference(format!("gesture {id}")));
         }
-        for (selector, id) in gesture_actions {
-            connections.push(event_connection(&mut vnib, &selector, &format!("gesture {id}"), "controller"));
+        let mut events: Vec<(String, String)> = gesture_actions.into_iter().map(|(selector, id)| (selector, format!("gesture {id}"))).collect();
+        if merged {
+            events.extend(bar_actions.iter().map(|(selector, item, _)| (selector.clone(), item.clone())));
+            events.sort_by(|a, b| a.0.cmp(&b.0));
+            if events.windows(2).any(|w| w[0].0 == w[1].0) {
+                return fail("gesture recognizers' and bar button items' actions sharing a selector are not supported by this ibtool");
+            }
+        }
+        for (selector, source) in events {
+            connections.push(event_connection(&mut vnib, &selector, &source, "controller"));
         }
         objects.push(reference("controller"));
         if child(vc, "navigationItem", "navigationItem").is_some() {
