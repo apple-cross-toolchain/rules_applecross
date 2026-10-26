@@ -838,6 +838,20 @@ when it has none), `UIPlaceholder`, `UIEnablesReturnKeyAutomatically` and
 `UISecureTextEntry` false and `UISearchBarStyle` 2 for minimal; its delegate
 outlet is an outlet like any other (six probes).
 
+A picker view is a `UIPickerView`: the view keys (opaque, hidden, mask 36),
+hugging `{250, 250}` and after its large content properties
+`UIAllowSelectingCells` true; its data source and delegate outlets are
+outlets like others (four probes). A visual effect view (non-opaque, with a
+blur effect) is a `UIVisualEffectView`: `UIDeepDrawRect`,
+`UIAutoresizeSubviews`, mask 36, `UIShouldNotAdaptToMaterials`, its
+not-translating key, then after its large content properties
+`UIVisualEffectViewEffect` (a `UIBlurEffect`: extra light 0, light 1, dark 2,
+and regular and prominent 1 and 0 with `UIBlurEffectAutomaticStyle` 4 and 5),
+`UIVisualEffectViewGroupName` nil and `UIVisualEffectViewContentView`, its
+content view as a `_UIVisualEffectContentView` (its subviews, mask 18,
+`UIShouldNotAdaptToMaterials`, content mode 4, clipping), listed as its child
+(seven probes; material styles and constraints it holds are refused).
+
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
 (`UIMultipleTouchEnabled`), in that order after `UIOpaque`; an `alpha`

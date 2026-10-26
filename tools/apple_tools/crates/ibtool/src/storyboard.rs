@@ -1903,6 +1903,115 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         }
         "tableView" => table::subview_table(nib, scene, n, &name, &f)?,
         "collectionView" => collection::subview_collection(nib, scene, n, &name, &f)?,
+        "visualEffectView" => {
+            only_attributes(n, &[("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None)])?;
+            only_children(n, &["rect", "view", "blurEffect", "constraints"])?;
+            if n.attribute("opaque").is_none() {
+                return fail("an opaque visual effect view is not supported by this ibtool");
+            }
+            let blur = children(n, "blurEffect").next().ok_or("a visual effect view without a blur effect is not supported by this ibtool")?;
+            only_attributes(blur, &[("style", None)])?;
+            // UIBlurEffectStyle, and for the newer styles the automatic one.
+            let (automatic, style) = match attr(blur, "style")? {
+                "extraLight" => (None, 0),
+                "light" => (None, 1),
+                "dark" => (None, 2),
+                "regular" => (Some(4), 1),
+                "prominent" => (Some(5), 0),
+                other => return fail(format!("blur style {other} is not supported by this ibtool")),
+            };
+            let content = child(n, "view", "contentView").ok_or("a visual effect view without a content view")?;
+            only_attributes(content, &[
+                ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
+                ("id", None),
+            ])?;
+            only_children(content, &["rect", "autoresizingMask", "subviews"])?;
+            for required in ["opaque", "clipsSubviews", "multipleTouchEnabled", "contentMode"] {
+                if content.attribute(required).is_none() {
+                    return fail(format!("a visual effect view's content view without {required} is not supported by this ibtool"));
+                }
+            }
+            for m in children(content, "autoresizingMask") {
+                if autoresizing_mask(m)? != 18 {
+                    return fail("a visual effect view's content view with another autoresizing mask is not supported by this ibtool");
+                }
+            }
+            if children(n, "constraints").next().is_some() {
+                return fail("constraints held by a visual effect view are not supported by this ibtool");
+            }
+            // Its content view is its child, holding its subviews.
+            let content_name = view_name(attr(content, "id")?);
+            scene.subviews.push((Some(name.clone()), content_name.clone()));
+            let mut cv = Vec::new();
+            geometry(&mut cv, &frame(content)?);
+            let mut inner = Vec::new();
+            for s in children(content, "subviews") {
+                for c in s.children().filter(|c| c.is_element()) {
+                    let outer = scene.parent.replace(content_name.clone());
+                    let v = subview(nib, scene, c);
+                    scene.parent = outer;
+                    inner.push(v?);
+                }
+            }
+            if !inner.is_empty() {
+                cv.push(("UISubviews", nib.array("NSMutableArray", inner)));
+            }
+            cv.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIMultipleTouchEnabled", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+            cv.push(("UIAutoresizingMask", Value::Int(18)));
+            cv.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
+            cv.push(("UIContentMode", Value::Int(4)));
+            cv.push(("UIClipsToBounds", Value::Bool(true)));
+            cv.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut cv);
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            values.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            let mut effect = Vec::new();
+            if let Some(a) = automatic {
+                effect.push(("UIBlurEffectAutomaticStyle", Value::Int(a)));
+            }
+            effect.push(("UIBlurEffectStyle", Value::Int(style)));
+            values.push(("UIVisualEffectViewEffect", Value::New(Object::new("UIBlurEffect", effect))));
+            values.push(("UIVisualEffectViewGroupName", Value::Nil));
+            values.push(("UIVisualEffectViewContentView", Value::New(Object::new("_UIVisualEffectContentView", cv).named(content_name))));
+            Object::new("UIVisualEffectView", values)
+        }
+        "pickerView" => {
+            only_attributes(n, &[
+                ("contentMode", Some("scaleToFill")), ("hidden", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
+            view_connections(scene, n, &name)?;
+            ignored_autoresizing_mask(n)?;
+            for c in children(n, "color") {
+                if c.attribute("key") != Some("backgroundColor") {
+                    return fail("picker view colours other than a background colour are not supported by this ibtool");
+                }
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            values.push(("UIOpaque", Value::Bool(true)));
+            hidden_and_tag(&mut values, n)?;
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            values.push(("UIAutoresizingMask", Value::Int(36)));
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.push(("UIAllowSelectingCells", Value::Bool(true)));
+            Object::new("UIPickerView", values)
+        }
         "searchBar" => {
             only_attributes(n, &[
                 ("key", Some("tableHeaderView")), ("contentMode", Some("redraw")), ("text", None), ("placeholder", None), ("barStyle", Some("black")),
