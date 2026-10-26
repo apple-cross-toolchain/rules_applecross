@@ -228,7 +228,8 @@ offset (an equal row further up doesn't). A run is taken, greedily from the
 left, where it spans more bytes than its pixel and two counts: four pixels
 and up in BGRA, six in GA8 (a run at a row's start, middle and end, two
 runs side by side, rows of runs from 1 to 20 pixels; 13 probes). Xcode ignores entries that aren't iOS icon slots (Flutter's
-iPhone 40 and 60 pt at 1x, iPad 76 pt at 3x); this actool compiles the
+iPhone 40 and 60 pt at 1x, iPad 76 pt at 3x, which this actool leaves out
+too: one probe of a Flutter set, byte-identical); this actool compiles the
 current and legacy slots (iPhone 20, 40 and 60 pt at 2x and 3x, 29 pt at
 1x to 3x, 57 pt at 1x and 2x; iPad 20, 29, 40, 50, 72 and 76 pt at 1x and
 2x, 83.5 pt at 2x) and the App Store's 1024 pt, and refuses the rest.
@@ -682,7 +683,9 @@ Folders are scanned for image sets: a folder's assets are named as at the
 top, or with its name and a slash before theirs when its `Contents.json`
 says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
 identifier is the hash of that full name. Other assets in folders, and
-other folder properties, are refused.
+other folder properties, are refused. Files that aren't assets (a README,
+with or without an extension, at the top or in a folder) are ignored
+(three probes).
 
 Refused: atlases whose `dmp2` row
 predictors aren't established (common: the row under an atlas's empty top

@@ -401,10 +401,15 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             return Err(format!("{filename}: icon set entries with other properties are not supported by this actool"));
         }
         // Xcode ignores entries that aren't iOS icon slots (Flutter's icon
-        // sets have iPhone 40 and 60 pt at 1x and iPad 76 pt at 3x); which
-        // it ignores isn't established beyond those, so only the current
-        // slots, the legacy ones (iPhone 57 pt, iPad 50 and 72 pt, compiled
-        // as any other) and the App Store's 1024 pt are compiled.
+        // sets have iPhone 40 and 60 pt at 1x and iPad 76 pt at 3x, which
+        // are left out here too); which it ignores isn't established beyond
+        // those, so only the current slots, the legacy ones (iPhone 57 pt,
+        // iPad 50 and 72 pt, compiled as any other) and the App Store's
+        // 1024 pt are compiled, and other slots refused.
+        const IGNORED: [(&str, f64, u32); 3] = [("iphone", 40.0, 1), ("iphone", 60.0, 1), ("ipad", 76.0, 3)];
+        if IGNORED.contains(&(idiom, size, scale)) {
+            continue;
+        }
         const PHONE: [(f64, u32); 11] = [(20.0, 2), (20.0, 3), (29.0, 1), (29.0, 2), (29.0, 3), (40.0, 2), (40.0, 3), (57.0, 1), (57.0, 2), (60.0, 2), (60.0, 3)];
         const PAD: [(f64, u32); 13] = [
             (20.0, 1), (20.0, 2), (29.0, 1), (29.0, 2), (40.0, 1), (40.0, 2), (50.0, 1), (50.0, 2), (72.0, 1), (72.0, 2), (76.0, 1), (76.0, 2), (83.5, 2),
