@@ -198,8 +198,17 @@ other values of the attributes these use, is refused. Observed:
   field nested so goes the same way, two probes and one of the corpus's,
   and so do views in stack and scroll views, their document frames summed
   whatever the scroll view's content, five probes and one of the corpus's;
-  one whose root subview is resized where it is laid out is refused, as
-  are container views). In a group, constraints whose
+  one whose root subview is resized where it is laid out is refused). A
+  container view nested so goes the same way (40 random probes in plain
+  and stack views, and two corpus storyboards). But Xcode compares two
+  views nested in one of the root's subviews by their places in the
+  nearest view holding both, and other pairs by their places in the root
+  view: two children of a view at (33, 249), at (4, 77) and (58, 60),
+  come in that order although the second is nearer the root's origin,
+  and a sibling of their parent at (0, 324) comes before both, at
+  (0, 330) after both. That comparison needn't be an order, so where the
+  two places of two such views disagree the storyboard is refused (13
+  probes). In a group, constraints whose
   second item is deeper than the root's subviews come first, by first and
   then second attribute in the siblings' order below (eleven probes; a
   deeper view as the first item, which would group them by it, is refused),
