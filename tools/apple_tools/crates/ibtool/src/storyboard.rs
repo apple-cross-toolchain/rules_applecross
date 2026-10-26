@@ -2861,6 +2861,67 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("findInteractionEnabled", Value::Bool(false)));
             Object::new("WKWebView", values)
         }
+        "arscnView" => {
+            // An ARSCNView: a view's keys, its background white unless the
+            // document gives one, then SceneKit's with their defaults, its
+            // `backgroundColor` the document's background or nil (two
+            // probes, two corpus storyboards).
+            only_attributes(n, &[
+                ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
+            for required in ["clipsSubviews", "multipleTouchEnabled"] {
+                if n.attribute(required).is_none() {
+                    return fail(format!("a SceneKit view without {required} is not supported by this ibtool"));
+                }
+            }
+            if children(n, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
+                return fail("a SceneKit view's colours other than its background are not supported by this ibtool");
+            }
+            view_connections(scene, n, &name)?;
+            let background = match child(n, "color", "backgroundColor") {
+                Some(c) => {
+                    let Value::New(o) = color(nib, c)? else { return fail("a shared SceneKit view background is not supported by this ibtool") };
+                    let colour_name = o.name.clone().unwrap_or_else(|| nib.fresh());
+                    values.push(("UIBackgroundColor", Value::New(o.named(colour_name.clone()))));
+                    reference(colour_name)
+                }
+                None => {
+                    values.push(("UIBackgroundColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))));
+                    Value::Nil
+                }
+            };
+            values.extend([
+                ("UIDeepDrawRect", Value::Bool(true)),
+                ("UIOpaque", Value::Bool(true)),
+                ("UIMultipleTouchEnabled", Value::Bool(true)),
+                ("UIAutoresizeSubviews", Value::Bool(true)),
+                ("UIAutoresizingMask", Value::Int(document_mask(scene, n)?)),
+                ("UIClipsToBounds", Value::Bool(true)),
+            ]);
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.extend([
+                ("loops", Value::Bool(true)),
+                ("playing", Value::Bool(false)),
+                ("autoenablesDefaultLighting", Value::Bool(false)),
+                ("jitteringEnabled", Value::Bool(false)),
+                ("temporalAntialiasingEnabled", Value::Bool(false)),
+                ("allowsCameraControl", Value::Bool(false)),
+                ("backgroundColor", background),
+                ("ibSceneName", Value::Nil),
+                ("ibWantsMultisampling", Value::Bool(false)),
+                ("ibPreferredRenderingAPI", Value::Int(0)),
+            ]);
+            Object::new("ARSCNView", values)
+        }
         "mapView" => {
             // An MKMapView: a view's keys, zero layout margins, then MapKit's
             // with their defaults but for the scale and compass (five
@@ -3248,6 +3309,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 for sg in children(c, "segue") {
                     let placeholder = format!("upstream segue {}", scene.segues.len());
                     scene.segues.push(attr(sg, "id")?.to_string());
+                    // A popover's anchor view, an outlet from its placeholder.
+                    if let Some(anchor) = sg.attribute("popoverAnchorView") {
+                        scene.view_outlets.push(("anchorView".into(), placeholder.clone(), view_name(anchor)));
+                    }
                     scene.actions.push(("perform:".into(), name.clone(), 64, placeholder));
                 }
             }
@@ -5295,7 +5360,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail("the clearsSelectionOnViewWillAppear attribute of <viewController> is not supported by this ibtool");
         }
         let class_name = runtime_class_name(vc, module, original_class)?;
-        only_children(vc, &[view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems", "extendedEdge", "userDefinedRuntimeAttributes", "refreshControl"])?;
+        only_children(vc, &[
+            view_key, "layoutGuides", "connections", "navigationItem", "tabBarItem", "size", "toolbarItems", "extendedEdge", "userDefinedRuntimeAttributes",
+            "refreshControl", "value",
+        ])?;
         if !is_table && children(vc, "refreshControl").next().is_some() {
             return fail("a refresh control outside a table view controller is not supported by this ibtool");
         }
@@ -5559,6 +5627,36 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let numbered = gesture_order(&scene.gesture_views);
             if numbered.len() != gesture {
                 return fail("a gesture recognizer no view has is not supported by this ibtool");
+            }
+            // Popover segues' placeholders come first, in reverse document
+            // order, then the others in document order; their templates
+            // stay listed in document order (six probes, one corpus
+            // storyboard). Beside container views it isn't established.
+            let is_popover = |id: &String| view.descendants().any(|d| d.has_tag_name("segue") && d.attribute("id") == Some(id) && d.attribute("kind") == Some("popoverPresentation"));
+            let popovers: Vec<usize> = (0..scene.segues.len()).filter(|&i| is_popover(&scene.segues[i])).collect();
+            if !popovers.is_empty() {
+                if !scene.containers.is_empty() {
+                    return fail("popover segues beside container views are not supported by this ibtool");
+                }
+                let mut placed: Vec<usize> = popovers.iter().rev().copied().collect();
+                placed.extend((0..scene.segues.len()).filter(|i| !popovers.contains(i)));
+                let new_index = |doc: usize| placed.iter().position(|&p| p == doc).expect("every segue is placed");
+                let rename = |old: &str| -> String {
+                    match old.strip_prefix("upstream segue ").and_then(|i| i.parse::<usize>().ok()) {
+                        Some(doc) => format!("upstream segue {}", new_index(doc)),
+                        None => old.to_string(),
+                    }
+                };
+                for a in &mut scene.actions {
+                    a.3 = rename(&a.3);
+                }
+                for o in &mut scene.view_outlets {
+                    o.1 = rename(&o.1);
+                }
+                // Their anchor outlets in placeholder order too.
+                scene.view_outlets.sort_by_key(|o| o.1.strip_prefix("upstream segue ").and_then(|i| i.parse::<usize>().ok()));
+                scene.segues = placed.iter().map(|&doc| scene.segues[doc].clone()).collect();
+                scene.segue_listing = Some((0..placed.len()).map(new_index).collect());
             }
             let gesture_proxies: Vec<Value> =
                 numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1), &format!("gesture {g}"))).collect();
@@ -6077,6 +6175,18 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
         if vc.attribute("clearsSelectionOnViewWillAppear").is_some() {
             swapper.push(("UIClearsSelectionOnViewWillAppear", Value::Bool(false)));
+        }
+        // Its size in a popover, after its identifiers and segue templates
+        // (three probes, one corpus storyboard); beside the keys after the
+        // templates, or embedded, its place isn't established.
+        for v in children(vc, "value") {
+            only_attributes(v, &[("key", Some("contentSizeForViewInPopover")), ("type", Some("size")), ("width", None), ("height", None)])?;
+            let later = !recognizers.is_empty() || transition.is_some() || presentation.is_some() || extended_edges(vc)?.is_some()
+                || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() || vc.attribute("clearsSelectionOnViewWillAppear").is_some();
+            if later || embedded {
+                return fail("a controller's popover size beside these settings, or embedded, is not supported by this ibtool");
+            }
+            swapper.push(("UIPreferredContentSize", doubles(&[number(attr(v, "width")?)?, number(attr(v, "height")?)?])));
         }
         let controller = if swapped {
             swapper.push(("UIClassName", vnib.string(&class_name)));

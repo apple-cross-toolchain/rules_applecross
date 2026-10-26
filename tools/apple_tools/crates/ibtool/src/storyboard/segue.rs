@@ -137,8 +137,12 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
     only_attributes(s, &[
         ("destination", None), ("kind", None), ("identifier", None), ("animates", Some("NO")), ("modalPresentationStyle", None),
         ("modalTransitionStyle", Some("crossDissolve")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
-        ("destinationCreationSelector", None),
+        ("destinationCreationSelector", None), ("popoverAnchorView", None),
     ])?;
+    only_children(s, &["popoverArrowDirection"])?;
+    if s.attribute("kind") != Some("popoverPresentation") && (s.attribute("popoverAnchorView").is_some() || s.has_children()) {
+        return fail("a popover's settings on another kind of segue are not supported by this ibtool");
+    }
     let creation = s.attribute("destinationCreationSelector");
     if creation.is_some() && (s.attribute("kind") != Some("show") || s.attribute("animates").is_some()) {
         return fail("a segue action on other than an animated show segue is not supported by this ibtool");
@@ -218,6 +222,28 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
             values.push(("UIDestinationContainmentContext", Value::Int(0)));
             values.push(("UISplitViewControllerIndex", Value::Int(0)));
             "UIStoryboardPushSegueTemplate"
+        }
+        // A popover from a control: its permitted arrow directions (up 1,
+        // down 2, left 4, right 8; none given 0), then nil passthrough
+        // views and anchors; its anchor view is an outlet from its
+        // placeholder (four probes, one corpus storyboard).
+        "popoverPresentation" => {
+            let from_button = s.parent_element().and_then(|c| c.parent_element()).is_some_and(|b| b.has_tag_name("button"));
+            if animates || s.attribute("popoverAnchorView").is_none() || !from_button {
+                return fail("a popover segue from other than a button, without an anchor view, or that doesn't animate, is not supported by this ibtool");
+            }
+            let mut arrows = 0;
+            for d in children(s, "popoverArrowDirection") {
+                only_attributes(d, &[("key", Some("popoverArrowDirection")), ("up", Some("YES")), ("down", Some("YES")), ("left", Some("YES")), ("right", Some("YES"))])?;
+                for (side, bit) in [("up", 1), ("down", 2), ("left", 4), ("right", 8)] {
+                    if d.attribute(side).is_some() {
+                        arrows |= bit;
+                    }
+                }
+            }
+            values.push(("UIPermittedArrowDirections", Value::Int(arrows)));
+            values.extend([("UIPassthroughViews", Value::Nil), ("UIAnchorBarButtonItem", Value::Nil), ("UIAnchorView", Value::Nil)]);
+            "UIStoryboardPopoverPresentationSegueTemplate"
         }
         // A custom segue is its class's alone (three probes).
         "custom" if s.attribute("customClass").is_some() && !animates => "UIStoryboardSegueTemplate",
