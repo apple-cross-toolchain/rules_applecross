@@ -940,7 +940,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     }
     outlets.sort_by(|a, b| a.0.cmp(b.0));
     let connections = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
-    Ok(nib::archive(root_object(&mut nib, top, objects, connections)))
+    nib::archive(root_object(&mut nib, top, objects, connections))
 }
 
 /// A cell's own connections: its selection segue's id, if it has one, and

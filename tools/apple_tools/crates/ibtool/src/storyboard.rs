@@ -253,7 +253,8 @@ impl Nib {
         if let Some(name) = self.shared.get(&key) {
             return reference(name.clone());
         }
-        let name = self.fresh();
+        self.next += 1;
+        let name = format!("{}{}", nib::SHARED, self.next);
         self.shared.insert(key, name.clone());
         Value::New(make().named(name))
     }
@@ -4414,7 +4415,7 @@ fn navigation_controller_nib(
     }
     let mut top = vec![root_storyboard, owner, responder, storyboard, controller];
     top.extend(gestures.iter().map(|g| reference(g.clone())));
-    Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))))
+    Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))?))
 }
 
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
@@ -4600,7 +4601,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             let objects = vec![reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
             let connections = vec![outlet(&mut nib, "storyboard", "controller", "storyboard"), outlet(&mut nib, "sceneViewController", "owner", "controller")];
             let root = root_object(&mut nib, vec![owner, responder, storyboard, controller], objects, connections);
-            outputs.push((index, vec![(format!("{identifier}.nib"), nib::archive(root))], Some((identifier.to_string(), false, true))));
+            outputs.push((index, vec![(format!("{identifier}.nib"), nib::archive(root)?)], Some((identifier.to_string(), false, true))));
             continue;
         }
         if let Some(placeholder) = children(objects_node, "viewControllerPlaceholder").next() {
@@ -4636,7 +4637,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             let connections = vec![outlet(&mut nib, "sceneViewController", "owner", "controller")];
             let root = root_object(&mut nib, vec![owner, responder, storyboard, controller], objects, connections);
-            outputs.push((index, vec![(format!("{name}.nib"), nib::archive(root))], Some((name.clone(), false, false))));
+            outputs.push((index, vec![(format!("{name}.nib"), nib::archive(root)?)], Some((name.clone(), false, false))));
             let mut target = Vec::new();
             if let Some(bundle) = placeholder.attribute("bundleIdentifier") {
                 target.push(("UIReferencedBundleIdentifier", cf::Value::string(bundle)));
@@ -5154,10 +5155,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             // Runtime attributes and accessibility configurations go in that
             // order too, each view's as the document gives them (eight
-            // probes, and six of accessibility on several views), but one
-            // corpus storyboard's views' attributes don't, for reasons not
-            // established: attributes of more than one view, or beside a
-            // switch's frame, are refused.
+            // probes, and six of accessibility on several views), but
+            // attributes of several views don't always: their order changes
+            // with unrelated views added, and not with ids (docs), so they
+            // are refused, as are attributes beside a switch's frame.
             let distinct = |names: Vec<&String>| names.into_iter().collect::<std::collections::HashSet<_>>().len();
             let user_views = distinct(scene.pairs.iter().map(|p| &p.0).filter(|n| !scene.switch_frames.contains(n)).collect());
             if user_views > 1 || (user_views == 1 && !scene.switch_frames.is_empty()) {
@@ -5450,10 +5451,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         if !is_initial && !identified && !segue_destination && !embedded {
             continue;
         }
-        let mut scene_files = vec![(format!("{view_nib_name}.nib"), nib::archive(view_root))];
+        let mut scene_files = vec![(format!("{view_nib_name}.nib"), nib::archive(view_root)?)];
         let mut entry = None;
         if is_initial || identified || segue_destination {
-            scene_files.push((format!("{vc_nib_name}.nib"), nib::archive(vc_root)));
+            scene_files.push((format!("{vc_nib_name}.nib"), nib::archive(vc_root)?));
             entry = Some((vc_nib_name.clone(), is_initial, identified));
         }
         outputs.push((index, scene_files, entry));

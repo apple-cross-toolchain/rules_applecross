@@ -49,7 +49,11 @@ trailer. Observed from Xcode's nibs:
   -2); rects and points are data: 7 then doubles;
   booleans are type 4 (false) and 5 (true);
 - one object per distinct string or number, encoded where first used (the
-  hugging priority `{251, 251}`, a font name, `labelColor` are shared);
+  hugging priority `{251, 251}`, a font name, `labelColor` are shared),
+  in encoding order rather than the order the document gives them: a root
+  view's runtime attribute of 0, listed in the nib's key-value pairs at its
+  end, refers back to the 0 a later button's states are keyed by (one
+  probe);
 - classes are listed in first use, then the fallback classes not already
   listed (UIColor's NSColor, UIFont's NSFont), which the class entry
   references, in byte order: NSColor, NSFont, then UIView for a table
@@ -1218,9 +1222,12 @@ view in a nib, or beside a switch's frame pair, are refused: probes put
 them in the objects' order (siblings, a container and its subview with
 its list before or after its subviews, the root view and a subview,
 custom classes, a stack view or another view between, outlets to either:
-fifteen probes), but one corpus storyboard's (TreasureHunt's claim
-button) follow the document's order of their lists instead, for reasons
-not established. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
+fifteen probes, and four of the corpus's storyboards), but not always.
+In one corpus storyboard (TreasureHunt's claim button) a container's
+come after its subviews'. Adding one to five unrelated labels to a
+variant flips the order and flips it back, while renaming the views (eight
+probes) changes nothing, as if a table of the objects themselves, not
+their ids, ordered them. A number is an `NSNumber` (`NS.intval` or `NS.dblval`), a
 boolean one of 0 or 1, a string the string, a colour the colour, an image the
 `UIImageNibPlaceholder` an image view's image would be, declared or not (two
 probes), and a size an

@@ -271,5 +271,5 @@ pub(super) fn parent_controller_nib(
     for (template, root) in &template_outlets {
         connections.push(outlet(&mut nib, "viewController", template, root));
     }
-    Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))))
+    Ok((name, nib::archive(root_object(&mut nib, top, objects, connections))?))
 }
