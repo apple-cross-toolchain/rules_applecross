@@ -250,21 +250,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
 
     // The content view and its subviews, compiled as a container's are.
-    let mut scene = Scene {
-        vc_id: "",
-        module,
-        own_constraints: Vec::new(),
-        constrained: constrained_views(content),
-        subviews: Vec::new(),
-        parent: Some(content_name.clone()),
-        actions: Vec::new(),
-        segues: Vec::new(),
-        containers: Vec::new(),
-        control_outlets: Vec::new(),
-        gesture: None,
-        gesture_views: Vec::new(),
-        guides: Vec::new(),
-    };
+    let mut scene = Scene::new("", module, content, Some(content_name.clone()));
     // A content view holding constraints is pinned to its cell's edges by
     // constraints Xcode makes, which the objects leave out.
     let pinned = children(content, "constraints").any(|c| c.has_children());
@@ -277,7 +263,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             subviews.push(subview(&mut nib, &mut scene, c)?);
         }
     }
-    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() {
+    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
         return fail("actions, outlets and segues in a cell are not supported by this ibtool");
     }
     if !subviews.is_empty() {

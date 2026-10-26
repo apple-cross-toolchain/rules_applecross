@@ -586,9 +586,20 @@ fn extended_edges(vc: Node) -> Result<Option<i64>, String> {
 
 /// A view's `gestureRecognizers` outlet collection to its scene's
 /// recognizer, from its `<connections>`.
-fn gesture_outlets(scene: &mut Scene, n: Node, name: &str) -> Result<(), String> {
+/// A view's connections: its outlets, to the controller or another view
+/// of the nib, and its gesture recognizer outlet collection.
+fn view_connections(scene: &mut Scene, n: Node, name: &str) -> Result<(), String> {
     for c in children(n, "connections") {
-        only_children(c, &["outletCollection"])?;
+        only_children(c, &["outlet", "outletCollection"])?;
+        for o in children(c, "outlet") {
+            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
+            let (label, destination) = (attr(o, "property")?.to_string(), attr(o, "destination")?);
+            if destination == scene.vc_id {
+                scene.control_outlets.push((label, name.to_string()));
+            } else {
+                scene.view_outlets.push((label, name.to_string(), view_name(destination)));
+            }
+        }
         for o in children(c, "outletCollection") {
             only_attributes(o, &[("property", Some("gestureRecognizers")), ("destination", None), ("appends", Some("YES")), ("id", None)])?;
             if scene.gesture.as_deref() != Some(attr(o, "destination")?) {
@@ -986,6 +997,8 @@ struct Scene<'a> {
     /// `gestureRecognizers` it is.
     gesture: Option<String>,
     gesture_views: Vec<String>,
+    /// Views' outlets to other views: (label, the view, the destination).
+    view_outlets: Vec<(String, String, String)>,
     /// The constraints subviews hold, with the holder's name, for the nib's
     /// objects.
     own_constraints: Vec<(String, String)>,
@@ -993,6 +1006,29 @@ struct Scene<'a> {
     constrained: Vec<&'a str>,
     /// Ids of the legacy top and bottom layout guides.
     guides: Vec<(&'a str, &'static str)>,
+}
+
+impl<'a> Scene<'a> {
+    /// A scene compiling `view`'s subviews into `parent` (None for a root
+    /// view's).
+    fn new(vc_id: &'a str, module: Option<&'a str>, view: Node<'a, '_>, parent: Option<String>) -> Self {
+        Scene {
+            vc_id,
+            module,
+            own_constraints: Vec::new(),
+            constrained: constrained_views(view),
+            subviews: Vec::new(),
+            parent,
+            actions: Vec::new(),
+            segues: Vec::new(),
+            containers: Vec::new(),
+            control_outlets: Vec::new(),
+            gesture: None,
+            gesture_views: Vec::new(),
+            view_outlets: Vec::new(),
+            guides: Vec::new(),
+        }
+    }
 }
 
 fn hugging(nib: &mut Nib, n: Node) -> Result<Value, String> {
@@ -1126,10 +1162,15 @@ fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Res
 }
 
 fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
+    let f = subview_frame(n)?;
+    placed_subview(nib, scene, n, f)
+}
+
+/// A subview where its superview lays it out.
+fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result<Value, String> {
     let id = attr(n, "id")?;
     let name = view_name(id);
     scene.subviews.push((scene.parent.clone(), name.clone()));
-    let f = subview_frame(n)?;
     let mut values = Vec::new();
     geometry(&mut values, &f);
     let object = match n.tag_name().name() {
@@ -1142,7 +1183,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 ("adjustsLetterSpacingToFitWidth", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections"])?;
-            gesture_outlets(scene, n, &name)?;
+            view_connections(scene, n, &name)?;
             ignored_autoresizing_mask(n)?;
             if child(n, "nil", "highlightedColor").is_none() {
                 return fail("labels with a highlighted colour are not supported by this ibtool");
@@ -1643,12 +1684,17 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 scene.segues.push(attr(sg, "id")?.to_string());
                 scene.containers.push((placeholder, name.clone()));
             } else {
+                // A table's header and footer views are its subviews.
                 only_attributes(n, &[
-                    ("contentMode", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+                    ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", None), ("fixedFrame", Some("YES")),
+                    ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
                     ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                 ])?;
+                if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
+                    return fail(format!("key=\"{}\" on <view> is not supported by this ibtool", n.attribute("key").unwrap_or("")));
+                }
                 only_children(n, &["rect", "autoresizingMask", "color", "subviews", "constraints", "connections"])?;
-                gesture_outlets(scene, n, &name)?;
+                view_connections(scene, n, &name)?;
             }
             let mut inner = Vec::new();
             for s in children(n, "subviews") {
@@ -1682,6 +1728,9 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
             if mode != 0 {
                 values.push(("UIContentMode", Value::Int(mode)));
             }
+            if n.attribute("clipsSubviews").is_some() {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -1710,7 +1759,7 @@ fn subview(nib: &mut Nib, scene: &mut Scene, n: Node) -> Result<Value, String> {
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "color", "constraints", "connections"])?;
-            gesture_outlets(scene, n, &name)?;
+            view_connections(scene, n, &name)?;
             if n.attribute("userInteractionEnabled").is_none() {
                 return fail("image views with user interaction are not supported by this ibtool");
             }
@@ -2581,7 +2630,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
 
-        let mut scene = Scene { vc_id, module, own_constraints: Vec::new(), constrained: constrained_views(view), subviews: Vec::new(), parent: None, actions: Vec::new(), segues: Vec::new(), containers: Vec::new(), control_outlets: Vec::new(), gesture: None, gesture_views: Vec::new(), guides: Vec::new() };
+        let mut scene = Scene::new(vc_id, module, view, None);
         // One gesture recognizer, which the view nib reaches through the
         // first placeholder.
         let recognizers: Vec<Node> = objects_node.children().filter(|c| c.tag_name().name().ends_with("GestureRecognizer")).collect();
@@ -2693,7 +2742,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // The view's nib, in encoding order.
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
             let responder = proxy(&mut nib, "IBFirstResponder", "responder");
-            let upstream_used = !vc_outlets.is_empty() || view.descendants().any(|d| d.has_tag_name("action") || d.has_tag_name("outlet"));
+            let upstream_used = !vc_outlets.is_empty()
+                || view.descendants().any(|d| d.has_tag_name("action") || (d.has_tag_name("outlet") && d.attribute("destination") == Some(vc_id)));
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
             if gesture == 1 {
@@ -2715,7 +2765,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             }
             // Each control's segue has a placeholder of its own, after the
             // controller's.
-            gesture_outlets(&mut scene, view, &root_name)?;
+            view_connections(&mut scene, view, &root_name)?;
             if recognizer.is_some() && scene.gesture_views.is_empty() {
                 return fail("a gesture recognizer no view has is not supported by this ibtool");
             }
@@ -2878,6 +2928,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             outlets.push(("view", "owner", &root_name));
             outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
             outlets.extend(scene.control_outlets.iter().map(|(l, v)| (l.as_str(), v.as_str(), "upstream")));
+            for (label, source, destination) in &scene.view_outlets {
+                if *destination != root_name && !scene.subviews.iter().any(|s| s.1 == *destination) {
+                    return fail("a view's outlets to anything but the controller and its views are not supported by this ibtool");
+                }
+                outlets.push((label, source, destination));
+            }
             outlets.sort_by(|a, b| a.0.cmp(b.0));
             // A view's gesture recognizers are an outlet collection, before
             // the outlets.
