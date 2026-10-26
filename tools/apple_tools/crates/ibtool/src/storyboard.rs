@@ -287,6 +287,34 @@ impl Nib {
         ]))
     }
 
+    /// A system symbol (`catalog="system"`), as the nib refers to it: a
+    /// placeholder of no size naming it as a resource and a symbol, one per
+    /// name (one probe).
+    fn system_image(&mut self, name: &str) -> Value {
+        if let Some(v) = self.existing(&format!("symbol:{name}")) {
+            return v;
+        }
+        let (resource, symbol) = (self.string(name), self.string(name));
+        self.shared(format!("symbol:{name}"), || Object::new("UIImageNibPlaceholder", vec![
+            ("UIImageWidth", Value::Float(0.0)),
+            ("UIImageHeight", Value::Float(0.0)),
+            ("UIResourceName", resource),
+            ("UISystemSymbolResourceName", symbol),
+            ("UISymbolImageConfiguration", Value::Nil),
+            ("UIResourceCatalogName", Value::Nil),
+        ]))
+    }
+
+    /// An image by name from the document's catalog: its own, or the
+    /// system's symbols.
+    fn image_in(&mut self, name: &str, catalog: Option<&str>) -> Result<Value, String> {
+        match catalog {
+            None => Ok(self.image(name)),
+            Some("system") => Ok(self.system_image(name)),
+            Some(other) => fail(format!("images from the catalog {other} are not supported by this ibtool")),
+        }
+    }
+
     /// A string a translation replaces, the `property` of the object `id`:
     /// in `Base.lproj` an `NSLocalizableString` keyed `<id>.<property>`
     /// with the string as its development value. An empty string is never
@@ -1279,10 +1307,8 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         return fail(format!("a {tag}'s {other} colour is not supported by this ibtool"));
     }
     // An activity indicator hidden when stopped and not animating is hidden.
+    // Hidden as well, it is hidden once (two probes).
     let hidden_when_stopped = tag == "activityIndicatorView" && n.attribute("hidesWhenStopped").is_some() && n.attribute("animating").is_none();
-    if hidden_when_stopped && n.attribute("hidden").is_some() {
-        return fail("a hidden activity indicator hidden when stopped is not supported by this ibtool");
-    }
 
     if tag == "stepper" {
         if let Some(c) = child(n, "color", "backgroundColor") {
@@ -1294,6 +1320,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         values.push(("UIHidden", Value::Bool(true)));
     }
     hidden_and_tag(&mut values, n)?;
+    values.dedup_by(|a, b| a.0 == "UIHidden" && b.0 == "UIHidden");
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     values.push(("UIAutoresizingMask", Value::Int(36)));
     alpha(&mut values, n)?;
@@ -2674,7 +2701,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if states.iter().any(|s| s.0 == value) {
                     return fail("a button with two of one state is not supported by this ibtool");
                 }
-                only_attributes(st, &[("key", None), ("title", None), ("image", None), ("backgroundImage", None)])?;
+                only_attributes(st, &[("key", None), ("title", None), ("image", None), ("backgroundImage", None), ("catalog", Some("system"))])?;
+                if st.attribute("catalog").is_some() && (st.attribute("image").is_none() || st.attribute("backgroundImage").is_some()) {
+                    return fail("a button state's system catalog beside a background image, or without an image, is not supported by this ibtool");
+                }
                 only_children(st, &["color"])?;
                 for c in children(st, "color") {
                     if !matches!(c.attribute("key"), Some("titleColor" | "titleShadowColor")) {
@@ -2783,7 +2813,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     content.push(("UITitle", nib.text(id, &format!("{key}Title"), title)));
                 }
                 if let Some(image) = st.attribute("image") {
-                    content.push(("UIImage", nib.image(image)));
+                    content.push(("UIImage", nib.image_in(image, st.attribute("catalog"))?));
                 }
                 if let Some(image) = st.attribute("backgroundImage") {
                     content.push(("UIBackgroundImage", nib.image(image)));
@@ -3113,7 +3143,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
                 ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")),
-                ("fixedFrame", Some("YES")), ("id", None),
+                ("fixedFrame", Some("YES")), ("catalog", Some("system")), ("id", None),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
@@ -3178,7 +3208,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             if let Some(image) = n.attribute("image") {
-                values.push(("UIImage", nib.image(image)));
+                values.push(("UIImage", nib.image_in(image, n.attribute("catalog"))?));
             }
             // One probe.
             if n.attribute("adjustsImageSizeForAccessibilityContentSizeCategory").is_some() {
