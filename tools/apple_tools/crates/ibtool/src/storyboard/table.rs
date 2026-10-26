@@ -190,6 +190,12 @@ fn table_values(
     if table.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }
+    // A root table takes the document's tint.
+    if table.attribute("key") == Some("view") {
+        if let Some(tint) = document_tint(table)? {
+            values.push(("UITintColor", color(nib, tint)?));
+        }
+    }
     values.extend(layout);
     restoration_identifier(nib, &mut values, table);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -613,7 +619,8 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
         ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
         ("accessoryType", None), ("reuseIdentifier", None), ("rowHeight", None), ("customClass", None), ("customModule", None),
-        ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("id", None),
+        ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("restorationIdentifier", None),
+        ("id", None),
     ])?;
     only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections"])?;
     // A built-in style's labels, the content view's.
@@ -771,6 +778,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
         values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
         values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
     }
+    restoration_identifier(nib, &mut values, cell);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     // A static table's cell has no reuse identifier.

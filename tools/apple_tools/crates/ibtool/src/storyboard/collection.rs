@@ -150,10 +150,19 @@ fn collection_values(
     if cv.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }
+    // A root collection view takes the document's tint.
+    if cv.attribute("key") == Some("view") {
+        if let Some(tint) = document_tint(cv)? {
+            values.push(("UITintColor", color(nib, tint)?));
+        }
+    }
     values.extend(layout_keys);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+    if cv.attribute("pagingEnabled").is_some() {
+        values.push(("UIPagingEnabled", Value::Bool(true)));
+    }
     values.push(("UIBouncesZoom", Value::Bool(true)));
     values.push(("UIDelegate", Value::Nil));
     values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
@@ -193,7 +202,7 @@ fn collection_values(
 pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame) -> Result<Object, String> {
     only_attributes(n, &[
         ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("dataMode", Some("prototypes")),
-        ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+        ("pagingEnabled", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
     ])?;
     only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "cells", "connections", "constraints"])?;
     for c in children(n, "color") {
