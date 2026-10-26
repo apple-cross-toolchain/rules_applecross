@@ -1797,7 +1797,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             ])?;
             only_children(n, &[
                 "rect", "autoresizingMask", "fontDescription", "nil", "color", "constraints", "connections", "string", "userDefinedRuntimeAttributes",
-                "accessibility",
+                "accessibility", "size",
             ])?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
@@ -1818,7 +1818,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             };
             // Its colours: text, highlighted and background, the background
             // before `UIDeepDrawRect` (one corpus storyboard).
-            if let Some(c) = children(n, "color").find(|c| !matches!(c.attribute("key"), Some("textColor" | "highlightedColor" | "backgroundColor"))) {
+            if let Some(c) = children(n, "color").find(|c| !matches!(c.attribute("key"), Some("textColor" | "highlightedColor" | "backgroundColor" | "shadowColor"))) {
                 return fail(format!("a label's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
             }
             if let Some(c) = child(n, "color", "backgroundColor") {
@@ -1902,7 +1902,17 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(c) = highlighted {
                 values.push(("UIHighlightedColor", color(nib, c)?));
             }
-            values.push(("UIShadowOffset", doubles(&[0.0, -1.0])));
+            // A shadow colour, then its offset, (0, -1) unless given (two
+            // probes).
+            if let Some(c) = child(n, "color", "shadowColor") {
+                values.push(("UIShadowColor", color(nib, c)?));
+            }
+            let offset = match children(n, "size").next() {
+                None => [0.0, -1.0],
+                Some(sz) if sz.attribute("key") == Some("shadowOffset") => [number(attr(sz, "width")?)?, number(attr(sz, "height")?)?],
+                Some(_) => return fail("a label's sizes other than its shadow offset are not supported by this ibtool"),
+            };
+            values.push(("UIShadowOffset", doubles(&offset)));
             if let Some(lines) = n.attribute("numberOfLines") {
                 values.push(("UINumberOfLines", Value::Int(lines.parse().map_err(|_| format!("not a number: {lines}"))?)));
             }
@@ -2558,7 +2568,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // is archived as a rounded-rect one; a custom one has no type.
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")), ("contentHorizontalAlignment", None),
-                ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", Some("middleTruncation")), ("enabled", Some("NO")),
+                ("contentVerticalAlignment", None), ("buttonType", None), ("lineBreakMode", None), ("enabled", Some("NO")), ("selected", Some("YES")),
                 ("clipsSubviews", Some("YES")), ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("customClass", None), ("customModule", None),
                 ("customModuleProvider", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
                 ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
@@ -2691,6 +2701,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
+            // Selected, then disabled (two probes).
+            if n.attribute("selected").is_some() {
+                values.push(("UISelected", Value::Bool(true)));
+            }
             if n.attribute("enabled").is_some() {
                 values.push(("UIDisabled", Value::Bool(true)));
             }
@@ -2729,6 +2743,20 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if configuration.is_none() {
                 values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", stateful)));
+            }
+            // NSLineBreakMode unless the default middle truncation (two
+            // probes).
+            let line_break = match n.attribute("lineBreakMode") {
+                None | Some("middleTruncation") => None,
+                Some("wordWrap") => Some(0),
+                Some("tailTruncation") => Some(4),
+                Some(other) => return fail(format!("a button's lineBreakMode {other} is not supported by this ibtool")),
+            };
+            if let Some(mode) = line_break {
+                if configuration.is_some() {
+                    return fail("a button configuration beside a line break mode is not supported by this ibtool");
+                }
+                values.push(("UILineBreakMode", Value::Int(mode)));
             }
             values.push(("UIAdjustsImageWhenHighlighted", Value::Bool(true)));
             values.push(("UIAdjustsImageWhenDisabled", Value::Bool(true)));
@@ -2770,7 +2798,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", Some("vertical")), ("distribution", None), ("alignment", None),
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
-                ("layoutMarginsFollowReadableWidth", Some("YES")),
+                ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
@@ -2822,6 +2850,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIBackgroundColor", color(nib, c)?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            if n.attribute("hidden").is_some() {
+                values.push(("UIHidden", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             if does_not_translate(scene, n) {

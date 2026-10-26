@@ -263,7 +263,8 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
     let layout = child(cv, "collectionViewFlowLayout", "collectionViewLayout").ok_or("a collection view without a flow layout is not supported by this ibtool")?;
     only_attributes(layout, &[
         ("key", Some("collectionViewLayout")), ("automaticEstimatedItemSize", Some("YES")), ("minimumLineSpacing", None),
-        ("minimumInteritemSpacing", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+        ("minimumInteritemSpacing", None), ("scrollDirection", Some("horizontal")), ("customClass", None), ("customModule", None),
+        ("customModuleProvider", None), ("id", None),
     ])?;
     only_children(layout, &["size", "inset"])?;
     let mut item = None;
@@ -296,6 +297,10 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
     let (w, h) = item.ok_or("a flow layout without an item size is not supported by this ibtool")?;
     if (w, h) != (50.0, 50.0) {
         values.push(("UIItemSize", doubles(&[w, h])));
+    }
+    // A horizontal scroll direction after the item size (one probe).
+    if layout.attribute("scrollDirection").is_some() {
+        values.push(("UIScrollDirection", Value::Int(1)));
     }
     let estimated = layout.attribute("automaticEstimatedItemSize").is_some();
     // A custom class is swapped in after its values (one probe).

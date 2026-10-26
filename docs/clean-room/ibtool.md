@@ -457,7 +457,8 @@ other values of the attributes these use, is refused. Observed:
   insets are its `UIViewLayoutMargins` and set
   `UIStackViewLayoutMarginsRelative` whether or not
   `layoutMarginsRelativeArrangement` does, which without them changes
-  nothing; directional margins add `UIViewLayoutMarginsAreDirectional`
+  nothing; a hidden one has `UIHidden` after `UIDeepDrawRect` (one probe);
+  directional margins add `UIViewLayoutMarginsAreDirectional`
   after them and after `UIViewLayoutMarginsFollowReadableWidth`. A
   background colour comes after its subviews, its own constraints after
   the not-translating key (26 probes).
@@ -891,7 +892,10 @@ refused). A button may be hidden, tagged (both after `UIOpaque`) and
 have an alpha (after its mask), as a plain view (two probes), and given
 hugging (each 250 unless given) or compression resistance (each 750
 unless given) priorities, written when given, before its semantic content
-attribute (three probes).
+attribute (three probes). A selected button has `UISelected` before
+`UIDisabled`, and a line break mode other than middle truncation is
+`UILineBreakMode` (word wrap 0, tail truncation 4) after its stateful
+content (four probes).
 
 A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
@@ -1020,8 +1024,10 @@ and a corpus storyboard), `preservesSuperviewLayoutMargins`
 
 Labels take `hidden`, `tag` and `alpha` as plain views do, `UIOpaque`
 after `UIDeepDrawRect` unless `opaque="NO"` (one probe), and a
-background colour before `UIDeepDrawRect` (other colours than text,
-highlighted and background are refused); without a `baselineAdjustment`
+background colour before `UIDeepDrawRect` and a shadow colour
+(`UIShadowColor`, before `UIShadowOffset`, which is (0, -1) unless a
+`shadowOffset` size gives it: two probes; other colours than text,
+highlighted, background and shadow are refused); without a `baselineAdjustment`
 (older documents) they have `UIBaselineAdjustment` 1 after the number of
 lines (one probe); a missing
 hugging priority is 250, and without either there is no
@@ -1106,7 +1112,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
   the layout but a key-value pair of the nib (`UINibKeyValuePairsKey`):
   `estimatedItemSize` set to an `NSValue` size of the largest doubles.
 - A flow layout with a custom class is swapped in after its values (one
-  probe).
+  probe); a horizontal one has `UIScrollDirection` 1 after its item size
+  (one probe).
 - A custom layout (`<collectionViewLayout>` with a custom class) is a
   `UIClassSwapper` of `UICollectionViewLayout` with nothing else, at the
   root or in a view (three probes).
