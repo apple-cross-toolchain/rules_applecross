@@ -93,7 +93,8 @@ other values of the attributes these use, is refused. Observed:
   probes and RxSwift's ImagePicker) whatever its
   frame says when the deployment target is below iOS 17.0, and at its frame
   from 17.0 on (`resources/Launch`, at 12.0, 16.99, 17.0 and 26.0); Xcode's
-  ibtool fails on a tvOS storyboard without one.
+  ibtool fails on a tvOS storyboard without one. A tvOS device without an
+  orientation is landscape (a probe and a corpus storyboard).
 - Colour components are kept to 10 significant digits (`%.10g`). Each is
   archived as a float (`UIRed`, `UIWhite`, `UIAlpha`, ...) followed, when
   the float isn't exactly that value, by a `-Double` key with it; the text

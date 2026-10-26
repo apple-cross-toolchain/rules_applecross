@@ -5565,8 +5565,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     let device = children(root, "device").next();
     let has_device = device.is_some();
     let device_size = match device {
-        // No orientation is portrait (one probe).
-        Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or("portrait"))?,
+        // No orientation is portrait (one probe), on tvOS landscape (a
+        // probe and a corpus storyboard).
+        Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or(if platform == Platform::Tvos { "landscape" } else { "portrait" }))?,
         None => None,
     };
     let generic_canvas = if has_device {
