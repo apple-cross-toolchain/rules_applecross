@@ -151,7 +151,9 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
     entries.sort();
     for p in entries {
         let name = p.file_name().unwrap().to_string_lossy().into_owned();
-        if name == "Contents.json" || name.starts_with('.') {
+        // Xcode ignores files that aren't assets, such as a README beside
+        // them (three probes).
+        if name == "Contents.json" || name.starts_with('.') || p.is_file() {
             continue;
         }
         match name.rsplit_once('.') {
