@@ -1430,9 +1430,15 @@ inside it. Observed with 15 probes and one corpus storyboard:
   action on the cell itself is an event connection after the cell's
   outlets, the cell its destination (one corpus storyboard).
 - An old-format content view (`<view key="contentView">`, no id) is not
-  the document's: an empty one compiles to a plain opaque view the
-  objects leave out. One with subviews keeps its constraints on the cell,
-  and is refused.
+  the document's: it compiles to a plain opaque view the objects leave
+  out, its subviews compiled as usual. The constraints the cell holds are
+  that view's (the cell's id in them, explicit or implied, is the view,
+  margins included). Then the view doesn't translate its mask and is
+  pinned to the cell, as a new-format content view holding constraints is.
+  The objects list its subviews before its constraints, then go on
+  breadth first (six probes, among them two labels, a label's own width,
+  and the cell named explicitly). Constraints a new-format cell holds
+  itself are refused.
 - Cell outlets and a cell's segue work as a table cell's.
 - An object without values (a flow layout with every default) is written
   with its first value index 0, not the running index.

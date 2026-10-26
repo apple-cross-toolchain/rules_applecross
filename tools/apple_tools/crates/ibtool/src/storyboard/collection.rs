@@ -390,7 +390,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections"])?;
+    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections", "constraints"])?;
     if let Some(c) = children(cell, "color").find(|c| c.attribute("key") != Some("backgroundColor")) {
         return fail(format!("a collection view cell's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
     }
@@ -429,10 +429,16 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         }
     }
     // The old format's content view (a `<view>` without an id) is not the
-    // document's: Xcode makes a plain one, which the objects leave out.
+    // document's: Xcode makes a plain one, which the objects leave out. The
+    // constraints the cell holds are that view's, as is the cell's id in
+    // them, and pin it to the cell (four probes).
     let old = content.has_tag_name("view");
-    if old && (content.attribute("id").is_some() || children(content, "subviews").next().is_some()) {
-        return fail("a collection view cell's old-format content view with subviews is not supported by this ibtool");
+    if old && content.attribute("id").is_some() {
+        return fail("a collection view cell's old-format content view with an id is not supported by this ibtool");
+    }
+    let held = children(cell, "constraints").any(|c| c.has_children());
+    if held && !old {
+        return fail("constraints held by a collection view cell are not supported by this ibtool");
     }
     let content_name = match content.attribute("id") {
         Some(id) => view_name(id),
@@ -449,10 +455,10 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     // Its controls' actions may target the cell, as the scene's do its
     // controller.
     let cell_id = attr(cell, "id")?;
-    let mut scene = Scene::new(cell_id, module, content, Some(content_name.clone()));
+    let mut scene = Scene::new(cell_id, module, if old { cell } else { content }, Some(content_name.clone()));
     // A content view holding constraints is pinned to its cell's edges by
     // constraints Xcode makes, which the objects leave out.
-    let pinned = children(content, "constraints").any(|c| c.has_children());
+    let pinned = held || children(content, "constraints").any(|c| c.has_children());
     let cf = frame(content)?;
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
@@ -477,6 +483,12 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     if old {
         cv.push(("UIOpaque", Value::Bool(true)));
         cv.push(("UIAutoresizeSubviews", Value::Bool(true)));
+        if pinned {
+            cv.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+        }
+        if let Some(own) = held_constraints(&mut nib, &mut scene, cell, content, &content_name)? {
+            cv.push(("UIViewAutolayoutConstraints", own));
+        }
     } else {
         cv.push(("UIMultipleTouchEnabled", Value::Bool(true)));
         cv.push(("UIAutoresizeSubviews", Value::Bool(true)));
@@ -559,12 +571,21 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     if !old {
         objects.push(reference(content_name.clone()));
     }
+    // The old format's content view lists its subviews before its
+    // constraints (two probes).
     let mut queue: std::collections::VecDeque<&String> = [&content_name].into();
     while let Some(v) = queue.pop_front() {
-        objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
+        let constraints = || scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone()));
+        let subviews_first = old && v == &content_name;
+        if !subviews_first {
+            objects.extend(constraints());
+        }
         for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == Some(v)) {
             objects.push(reference(s.clone()));
             queue.push_back(s);
+        }
+        if subviews_first {
+            objects.extend(constraints());
         }
     }
 
