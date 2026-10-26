@@ -21,15 +21,11 @@ fn height(n: Node, name: &str, default: Option<f32>) -> Result<f32, String> {
     }
 }
 
-/// A table view controller's view nib: its table, the root view, holding
-/// its prototype cells' nibs. Returns the nib's root, whether it uses the
-/// controller's placeholder, and the ids of the segues its cells trigger.
-pub(super) fn table_view_nib(
-    platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, table: Node, f: &Frame,
-    vc_outlets: &[(String, String)],
-) -> Result<(Object, bool, Vec<String>), String> {
+/// Checks a table's attributes and children, as the root view (`key`
+/// view) or a subview.
+fn check_table(table: Node) -> Result<(), String> {
     only_attributes(table, &[
-        ("key", Some("view")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
+        ("key", Some("view")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
         ("contentMode", Some("scaleToFill")), ("alwaysBounceVertical", None), ("showsHorizontalScrollIndicator", Some("NO")),
         ("showsVerticalScrollIndicator", Some("NO")),
         ("keyboardDismissMode", None), ("dataMode", Some("prototypes")), ("style", None), ("separatorStyle", None),
@@ -37,7 +33,7 @@ pub(super) fn table_view_nib(
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("id", None),
     ])?;
-    only_children(table, &["rect", "autoresizingMask", "color", "prototypes", "connections"])?;
+    only_children(table, &["rect", "autoresizingMask", "color", "prototypes", "connections", "constraints"])?;
     let selection_keys = ["allowsSelection", "allowsMultipleSelection", "allowsSelectionDuringEditing"];
     if selection_keys.iter().filter(|k| table.attribute(**k).is_some()).count() > 1 {
         return fail("more than one of a table's selection settings is not supported by this ibtool");
@@ -50,35 +46,16 @@ pub(super) fn table_view_nib(
     if child(table, "color", "sectionIndexBackgroundColor").is_some() && child(table, "color", "separatorColor").is_some() {
         return fail("a table with both a section index background and a separator colour is not supported by this ibtool");
     }
-    let table_id = attr(table, "id")?;
-    let (style, ui_style) = match attr(table, "style")? {
-        "plain" => (0, 0),
-        "grouped" => (1, 1),
-        "insetGrouped" => (2, 1),
-        other => return fail(format!("table style {other} is not supported by this ibtool")),
-    };
-    let plain = style == 0;
-
-    // The table's outlets, to its controller.
-    let mut outlets: Vec<(String, &str, String)> = vc_outlets.iter().map(|(l, d)| (l.clone(), "upstream", d.clone())).collect();
-    for c in children(table, "connections") {
-        only_children(c, &["outlet"])?;
-        for o in children(c, "outlet") {
-            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
-            if attr(o, "destination")? != vc_id {
-                return fail("a table's outlets to anything but its controller are not supported by this ibtool");
-            }
-            outlets.push((attr(o, "property")?.to_string(), "table", "upstream".to_string()));
-        }
+    if table.attribute("key").is_some() && table.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+        return fail("a root table view that doesn't translate its mask is not supported by this ibtool");
     }
-    let root_name = view_name(table_id);
-    for (_, destination) in vc_outlets {
-        if *destination != root_name {
-            return fail("a table view controller's outlets into anything but its table are not supported by this ibtool");
-        }
-    }
-    let upstream_used = !outlets.is_empty();
+    Ok(())
+}
 
+/// A table's prototype cells with reuse identifiers, in byte order of
+/// those, with the placeholder of each one's segue; and the segues' ids.
+#[allow(clippy::type_complexity)]
+fn prototypes<'a, 'i>(table: Node<'a, 'i>) -> Result<(Vec<(&'a str, Node<'a, 'i>, Option<String>)>, Vec<String>), String> {
     // Each prototype with a reuse identifier is a nib of its own, in byte
     // order of the identifiers; one without is left out. A cell's segue
     // is a placeholder of the table's nib, after the controller's, in
@@ -104,26 +81,28 @@ pub(super) fn table_view_nib(
         }
     }
     cells.sort_by(|a, b| a.0.cmp(b.0));
+    Ok((cells, segues))
+}
 
-    let mut nib = Nib::new(platform, color_matched, localizable);
-    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
-    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
-    let mut top = vec![owner, responder];
-    let mut objects = vec![reference("owner"), reference("responder")];
-    if upstream_used {
-        top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
-        objects.push(reference("upstream"));
-    }
-    for i in 0..segues.len() {
-        let name = format!("upstream segue {i}");
-        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1 + usize::from(upstream_used)), &name));
-        objects.push(reference(name));
-    }
+/// A table's values, from its geometry to its separator inset reference:
+/// `mask_default` when it gives no autoresizing mask, `layout` (a subview's
+/// constraint values) after its clipping.
+fn table_values(
+    nib: &mut Nib, module: Option<&str>, table: Node, f: &Frame, cells: &[(&str, Node, Option<String>)], mask_default: i64,
+    layout: Vec<(&'static str, Value)>,
+) -> Result<Vec<(&'static str, Value)>, String> {
+    let (style, ui_style) = match attr(table, "style")? {
+        "plain" => (0, 0),
+        "grouped" => (1, 1),
+        "insetGrouped" => (2, 1),
+        other => return fail(format!("table style {other} is not supported by this ibtool")),
+    };
+    let plain = style == 0;
 
     let mut values = Vec::new();
     geometry(&mut values, f);
     if let Some(c) = child(table, "color", "backgroundColor") {
-        values.push(("UIBackgroundColor", table_background(&mut nib, c, plain)?));
+        values.push(("UIBackgroundColor", table_background(nib, c, plain)?));
     }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     if table.attribute("opaque").is_none() {
@@ -132,7 +111,7 @@ pub(super) fn table_view_nib(
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     let mask = match children(table, "autoresizingMask").next() {
         Some(m) => autoresizing_mask(m)?,
-        None => 0,
+        None => mask_default,
     };
     values.push(("UIAutoresizingMask", Value::Int(mask)));
     if table.attribute("clearsContextBeforeDrawing").is_some() {
@@ -141,6 +120,7 @@ pub(super) fn table_view_nib(
     if table.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }
+    values.extend(layout);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
@@ -199,13 +179,13 @@ pub(super) fn table_view_nib(
     }
     values.push(("UIInsetsContentViewsToSafeArea", Value::Bool(true)));
     if let Some(c) = child(table, "color", "separatorColor") {
-        values.push(("UISeparatorColor", color(&mut nib, c)?));
+        values.push(("UISeparatorColor", color(nib, c)?));
     }
 
     if !cells.is_empty() {
         let mut nibs = Vec::new();
-        for (reuse, c, placeholder) in &cells {
-            let bytes = cell_nib(platform, color_matched, localizable, module, *c, placeholder.is_some())?;
+        for (reuse, c, placeholder) in cells {
+            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, module, *c, placeholder.is_some())?;
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -214,7 +194,7 @@ pub(super) fn table_view_nib(
         // A cell's external objects: its own nib's placeholder for its
         // segue's.
         let mut external = Vec::new();
-        for (reuse, _, placeholder) in &cells {
+        for (reuse, _, placeholder) in cells {
             external.push(nib.string(reuse));
             let objects = match placeholder {
                 Some(p) => vec![nib.string("UpstreamPlaceholder-1"), reference(p.clone())],
@@ -225,9 +205,91 @@ pub(super) fn table_view_nib(
         values.push(("UITableViewCellPrototypeNibExternalObjects", nib.array("NSMutableDictionary", external)));
     }
     if let Some(c) = child(table, "color", "sectionIndexBackgroundColor") {
-        values.push(("UISectionIndexBackgroundColor", color(&mut nib, c)?));
+        values.push(("UISectionIndexBackgroundColor", color(nib, c)?));
     }
     values.push(("UISeparatorInsetReference", Value::Int(0)));
+    Ok(values)
+}
+
+/// A table view as a subview of a controller's view: its cells' nibs
+/// inside it as in a table view controller's, its outlets to the
+/// controller. Its cells' segues are not supported.
+pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame) -> Result<Object, String> {
+    check_table(n)?;
+    let (cells, segues) = prototypes(n)?;
+    if !segues.is_empty() {
+        return fail("segues from the cells of a table view in a view are not supported by this ibtool");
+    }
+    for c in children(n, "connections") {
+        only_children(c, &["outlet"])?;
+        for o in children(c, "outlet") {
+            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
+            if attr(o, "destination")? != scene.vc_id {
+                return fail("a table's outlets to anything but its controller are not supported by this ibtool");
+            }
+            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string()));
+        }
+    }
+    let mut layout = Vec::new();
+    if does_not_translate(scene, n) {
+        layout.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+    }
+    if let Some(own) = own_constraints(nib, scene, n, name)? {
+        layout.push(("UIViewAutolayoutConstraints", own));
+    }
+    let values = table_values(nib, scene.module, n, f, &cells, 36, layout)?;
+    Ok(Object::new("UITableView", values))
+}
+
+/// A table view controller's view nib: its table, the root view, holding
+/// its prototype cells' nibs. Returns the nib's root, whether it uses the
+/// controller's placeholder, and the ids of the segues its cells trigger.
+pub(super) fn table_view_nib(
+    platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, table: Node, f: &Frame,
+    vc_outlets: &[(String, String)],
+) -> Result<(Object, bool, Vec<String>), String> {
+    check_table(table)?;
+    if table.attribute("key").is_none() {
+        return fail("a table view controller's table view needs key=\"view\"");
+    }
+    let table_id = attr(table, "id")?;
+    // The table's outlets, to its controller.
+    let mut outlets: Vec<(String, &str, String)> = vc_outlets.iter().map(|(l, d)| (l.clone(), "upstream", d.clone())).collect();
+    for c in children(table, "connections") {
+        only_children(c, &["outlet"])?;
+        for o in children(c, "outlet") {
+            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
+            if attr(o, "destination")? != vc_id {
+                return fail("a table's outlets to anything but its controller are not supported by this ibtool");
+            }
+            outlets.push((attr(o, "property")?.to_string(), "table", "upstream".to_string()));
+        }
+    }
+    let root_name = view_name(table_id);
+    for (_, destination) in vc_outlets {
+        if *destination != root_name {
+            return fail("a table view controller's outlets into anything but its table are not supported by this ibtool");
+        }
+    }
+    let upstream_used = !outlets.is_empty();
+
+    let (cells, segues) = prototypes(table)?;
+    let mut nib = Nib::new(platform, color_matched, localizable);
+    let owner = proxy(&mut nib, "IBFilesOwner", "owner");
+    let responder = proxy(&mut nib, "IBFirstResponder", "responder");
+    let mut top = vec![owner, responder];
+    let mut objects = vec![reference("owner"), reference("responder")];
+    if upstream_used {
+        top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
+        objects.push(reference("upstream"));
+    }
+    for i in 0..segues.len() {
+        let name = format!("upstream segue {i}");
+        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1 + usize::from(upstream_used)), &name));
+        objects.push(reference(name));
+    }
+
+    let values = table_values(&mut nib, module, table, f, &cells, 0, Vec::new())?;
     top.push(Value::New(Object::new("UITableView", values).named(root_name.clone())));
     objects.push(reference(root_name.clone()));
 
