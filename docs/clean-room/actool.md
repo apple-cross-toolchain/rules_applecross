@@ -70,7 +70,9 @@ re-encoded source is copied as given).
 An app icon set whose entries name no files, and a colour set with no colour
 components, compile to nothing: no `Assets.car`, and an empty dictionary as
 the partial Info.plist, with or without `--app-icon`
-(`examples/ios/HelloWorldSwiftUI`).
+(`examples/ios/HelloWorldSwiftUI`). An image set or app icon set whose
+`Contents.json` has no `images` list at all is as one with an empty list
+(two probes, one of them a Flutter catalog with both).
 
 ## Assets.car
 

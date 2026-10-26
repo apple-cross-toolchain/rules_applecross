@@ -378,7 +378,7 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
 
 pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, String> {
     let mut out = Vec::new();
-    for i in images.as_array().ok_or("app icon set has no images list")? {
+    for i in images.as_array().map(Vec::as_slice).unwrap_or_default() {
         let Some(filename) = i["filename"].as_str() else { continue };
         // An image the set has but no slot uses (a file name, perhaps marked
         // unassigned): Xcode ignores it.
