@@ -292,9 +292,6 @@ fn app_icon_set(icon_dir: &Path, ios: bool) -> Result<Option<IconSource>, String
     };
     let icon = any[0];
     let src = read(icon)?;
-    if src.is_gray() {
-        return Err(format!("{}: a greyscale icon, which Xcode stores as GA8, is not supported by this actool", icon.file.display()));
-    }
     let mut variants = Vec::new();
     for i in universal.iter().filter(|i| i.appearance != Some(0)) {
         let appearance = i.appearance.expect("checked above");
@@ -445,7 +442,14 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
 
     // Assets.car: per idiom, the 1024 px image and the index of its sizes.
     let id = name_identifier(&icon_name);
-    let image_csi = car::icon_image_csi(&filename, 1024, 1024, 1, &bgra.data, car::MlecVersions::for_platform(platform));
+    // A grey image is stored as GA8, as its dark and tinted ones are (two
+    // probes); its bundle PNGs are RGBA as any other's.
+    let image_csi = if src.is_gray() {
+        let ga: Vec<u8> = src.premultiplied_bgra().chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect();
+        car::icon_image_gray_csi(&filename, 1024, 1024, 1, &ga, car::MlecVersions::for_platform(platform))
+    } else {
+        car::icon_image_csi(&filename, 1024, 1024, 1, &bgra.data, car::MlecVersions::for_platform(platform))
+    };
     let multi_csi = car::multisized_csi(&icon_name, &[(1024, 1024, 1)]);
     let rendition = |idiom: u16, part: u16, dim2: u16, csi: &Vec<u8>| car::Rendition {
         attrs: vec![(car::ATTR_SCALE, 1), (car::ATTR_IDIOM, idiom), (car::ATTR_DIMENSION2, dim2), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, part)],

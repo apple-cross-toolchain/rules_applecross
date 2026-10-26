@@ -168,7 +168,9 @@ image keyed by its appearance (dark 1, tinted 10, named
 `ISAppearanceTintable` in the appearance table), its MLEC versions saying
 whether it is opaque (2 and 3, or 0 and 1, as other iOS icons'), and stored
 as GA8 when its every pixel is grey (2 bytes a pixel, rows 32-byte aligned,
-coded as BGRA ones are; a coloured tinted image stays BGRA). The bundle's
+coded as BGRA ones are; a coloured tinted image stays BGRA). So is a grey
+1024 px image itself, its bundle PNGs RGBA as any other's (two probes,
+simulator and device). The bundle's
 icons and the partial Info.plist are the plain icon's. Other appearances are
 refused (four probes and Chromium's legacy icons, equivalent but for the
 appearance blocks' order).
@@ -203,8 +205,16 @@ nothing (no Assets.car, an empty partial Info.plist; Flutter's macOS
 template). With no image for any target device, Xcode compiles another
 device's (an iPad set for iPhone alone); that is refused. A grey icon (every
 pixel R = G = B, whatever the PNG's colour type) is stored as GA8, as
-image sets' are, in atlases named `S.O.1`; this actool refuses those for
-icons. A watch app's partial Info.plist names the icon only. A
+image sets' are: GA8 atlases named `S.O.1` (rows 32-byte aligned; an
+opaque one's padding is alpha 255, but not the bytes aligning its rows)
+and links of pixel format GA8. Icons under 40 pixels are packed too. An
+opaque GA8 bitmap is chunked from 8 KiB, one chunk more for every 8 KiB
+up to three (one stream at 4,224 bytes, two from 8,192 to 13,888, three
+above); a translucent one as a colour one is (one stream at 11,648 bytes).
+That is the corpus's two grey icon sets, Lynx's (RGB files) and QReader's
+(greyscale PNGs and a colour-mapped one), byte-identical. Sets mixing grey
+and colour icons, grey ones for macOS, and a grey icon under 40 pixels
+stored on its own are refused. A watch app's partial Info.plist names the icon only. A
 macOS catalog has no appearance table, key semantics 1, the key format
 (appearance, localization, element, part, size, identifier, dimension2,
 layer, scale) and no idiom or subtype; `NAME.icns` holds the 16pt and

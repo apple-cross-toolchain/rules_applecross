@@ -311,13 +311,6 @@ fn csi(h: &CsiHeader, tlvs: &[u8], payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Rows per LZFSE chunk: the bitmap in as many chunks as it has 8 KiB (part
-/// chunks counting), at most three, each a whole number of rows, the
-/// remainder in a fourth.
-fn rows_per_chunk(bytes_per_row: usize, height: usize) -> usize {
-    let chunks = std::cmp::min(3, (bytes_per_row * height).div_ceil(8192));
-    std::cmp::max(1, height / chunks)
-}
 
 /// Bitmaps smaller than this are one LZFSE stream (MLEC version 2).
 const CHUNKED_FROM: usize = 16384;
@@ -374,10 +367,32 @@ pub fn subtype_bit(subtype: u16) -> u32 {
 
 /// The payload of an LZFSE-compressed ARGB rendition: an MLEC header and
 /// one LZFSE stream, or for larger bitmaps one KCBC chunk per group of rows,
-/// each its own LZFSE stream. `bgra` rows are `stride` bytes.
+/// each its own LZFSE stream. `bgra` rows are `stride` bytes. From 16 KiB
+/// the bitmap is in as many chunks as it has 8 KiB (part chunks counting),
+/// at most three, each a whole number of rows, the remainder in a fourth.
 fn lzfse_bitmap(bgra: &[u8], stride: usize, height: usize, versions: MlecVersions) -> Vec<u8> {
+    let chunks = if stride * height < CHUNKED_FROM { 1 } else { std::cmp::min(3, (stride * height).div_ceil(8192)) };
+    lzfse_bitmap_chunks(bgra, stride, height, versions, chunks)
+}
+
+/// An opaque grey (GA8) bitmap's: chunked from 8 KiB, one chunk more for
+/// every 8 KiB, up to three (the corpus's two grey icon sets: opaque atlases
+/// of 4,224 bytes in one stream, of 8,192 to 13,888 bytes in two, and more
+/// in three). A translucent one's go as a colour one's (one atlas of 11,648
+/// bytes in one stream).
+fn lzfse_gray_bitmap(ga: &[u8], row: usize, height: usize, versions: MlecVersions) -> Vec<u8> {
+    if versions.single == 2 {
+        let chunks = std::cmp::min(3, row * height / 8192 + 1);
+        lzfse_bitmap_chunks(ga, row, height, versions, chunks)
+    } else {
+        lzfse_bitmap(ga, row, height, versions)
+    }
+}
+
+/// [`lzfse_bitmap`] in `chunks` chunks, one a single stream.
+fn lzfse_bitmap_chunks(bgra: &[u8], stride: usize, height: usize, versions: MlecVersions, chunks: usize) -> Vec<u8> {
     let mut out = b"MLEC".to_vec();
-    if stride * height < CHUNKED_FROM {
+    if chunks == 1 {
         let data = lzfse::encode_stream(&bgra[..stride * height]);
         le32(&mut out, versions.single);
         le32(&mut out, 4); // LZFSE
@@ -385,7 +400,7 @@ fn lzfse_bitmap(bgra: &[u8], stride: usize, height: usize, versions: MlecVersion
         out.extend_from_slice(&data);
         return out;
     }
-    let per = rows_per_chunk(stride, height);
+    let per = std::cmp::max(1, height / chunks);
     let version = versions.chunked;
     let mut chunks = Vec::new();
     let mut y = 0;
@@ -523,7 +538,7 @@ pub fn icon_image_gray_csi(name: &str, width: u32, height: u32, scale: u32, ga: 
         rows[y * row..y * row + w * 2].copy_from_slice(&ga[y * w * 2..(y + 1) * w * 2]);
     }
     let t = icon_image_tlvs(width, height, row);
-    let payload = lzfse_bitmap(&rows, row, h, versions);
+    let payload = lzfse_gray_bitmap(&rows, row, h, versions);
     let (pixel_format, color_space) = Pixels::Gray.format();
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
 }
@@ -569,6 +584,23 @@ pub fn packed_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], 
     tlv(&mut t, 0x3ef, &(s as u32).to_le_bytes());
     let payload = lzfse_bitmap(bgra, s, height as usize, versions);
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_PACKED_IMAGE, name }, &t, &payload)
+}
+
+/// An icon atlas of grey icons: GA8 rows, each 32-byte aligned, as a grey
+/// icon's are.
+pub fn packed_gray_csi(name: &str, width: u32, height: u32, scale: u32, ga: &[u8], row: usize, versions: MlecVersions) -> Vec<u8> {
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, 0, 0] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    tlv(&mut t, 0x3ef, &(row as u32).to_le_bytes());
+    let payload = lzfse_gray_bitmap(ga, row, height as usize, versions);
+    let (pixel_format, color_space) = Pixels::Gray.format();
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_PACKED_IMAGE, name }, &t, &payload)
 }
 
 /// An image set's atlas (layout 1004), its `dmp2` payload given: BGRA, or
