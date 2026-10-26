@@ -5315,7 +5315,24 @@ fn text_attributes(nib: &mut Nib, t: Node) -> Result<Value, String> {
 /// `<id>.configuration.title`, and an empty subtitle (four probes).
 fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, String> {
     only_attributes(c, &[("key", Some("configuration")), ("style", None), ("image", None), ("catalog", Some("system")), ("title", None)])?;
-    only_children(c, &[])?;
+    only_children(c, &["backgroundConfiguration", "color"])?;
+    // Its background's corner radius and colour, each customized when
+    // given, and its base foreground colour (seven probes and a corpus
+    // storyboard); a base background colour, which also fills the
+    // background uncustomized, is refused.
+    if let Some(other) = children(c, "color").find(|k| k.attribute("key") != Some("baseForegroundColor")) {
+        return fail(format!("a button configuration's {} is not supported by this ibtool", other.attribute("key").unwrap_or("colour")));
+    }
+    let background_node = child(c, "backgroundConfiguration", "background");
+    if let Some(b) = background_node {
+        only_attributes(b, &[("key", Some("background")), ("cornerRadius", None)])?;
+        only_children(b, &["color"])?;
+        if children(b, "color").any(|k| k.attribute("key") != Some("backgroundColor")) {
+            return fail("a button background's colours other than its background colour are not supported by this ibtool");
+        }
+    }
+    let corner_radius = background_node.and_then(|b| b.attribute("cornerRadius")).map(number).transpose()?;
+    let background_color = background_node.and_then(|b| child(b, "color", "backgroundColor"));
     // Its style, and the background colour each but plain has: the tint
     // blue (0, 136/255, 1), translucent when tinted, and a translucent grey
     // (four probes).
@@ -5326,9 +5343,11 @@ fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, Strin
         "filled" => (3, Some([0.0, 136.0 / 255.0, 1.0, 1.0])),
         other => return fail(format!("style=\"{other}\" on <buttonConfiguration> is not supported by this ibtool")),
     };
-    let clear = match fill {
-        None => nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0])),
-        Some(c) => {
+    let clear = match (background_color, fill) {
+        // A background colour of its own replaces the style's (two probes).
+        (Some(k), _) => color(nib, k)?,
+        (None, None) => nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0])),
+        (None, Some(c)) => {
             let (components, text) = exact_color_components(&RGB_KEYS, &c);
             let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
             keys.extend(components);
@@ -5342,12 +5361,12 @@ fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, Strin
     let background = Object::new("UIBackgroundConfiguration", vec![
         ("customView", Value::Nil),
         ("hasCustomized-customView", Value::Bool(false)),
-        ("cornerRadius", Value::Double(17.0)),
-        ("hasCustomized-cornerRadius", Value::Bool(false)),
+        ("cornerRadius", Value::Double(corner_radius.unwrap_or(17.0))),
+        ("hasCustomized-cornerRadius", Value::Bool(corner_radius.is_some())),
         ("maskedCorners", Value::Int(15)),
         ("hasCustomized-maskedCorners", Value::Bool(false)),
         ("backgroundColor", clear),
-        ("hasCustomized-backgroundColor", Value::Bool(false)),
+        ("hasCustomized-backgroundColor", Value::Bool(background_color.is_some())),
         ("backgroundColorTransformerIdentifier", Value::Int(0)),
         ("hasCustomized-backgroundColorTransformerIdentifier", Value::Bool(false)),
         ("visualEffect", Value::Nil),
@@ -5381,6 +5400,10 @@ fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, Strin
         (Some(name), Some(_)) => nib.system_image(name),
         _ => return fail("a button configuration's image other than a system symbol is not supported by this ibtool"),
     };
+    let foreground = match child(c, "color", "baseForegroundColor") {
+        Some(k) => color(nib, k)?,
+        None => Value::Nil,
+    };
     let title = nib.text(id, "configuration.title", c.attribute("title").unwrap_or(""));
     let attributes = nib.shared("empty attributes".into(), || Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]));
     let subtitle = nib.string("");
@@ -5391,7 +5414,7 @@ fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, Strin
         ("UIButtonConfigurationButtonSize", Value::Int(0)),
         ("UIButtonConfigurationMacIdiomStyle", Value::Int(0)),
         ("UIButtonConfigurationBaseBackgroundColor", Value::Nil),
-        ("UIButtonConfigurationBaseForegroundColor", Value::Nil),
+        ("UIButtonConfigurationBaseForegroundColor", foreground),
         ("UIButtonConfigurationImage", image),
         ("UIButtonConfigurationPreferredSymbolConfigurationForImage", Value::Nil),
         ("UIButtonConfigurationSymbolContentTransition", Value::Nil),
