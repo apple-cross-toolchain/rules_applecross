@@ -654,7 +654,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
         ("accessoryType", None), ("reuseIdentifier", None), ("rowHeight", None), ("customClass", None), ("customModule", None),
         ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("restorationIdentifier", None),
-        ("id", None),
+        ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
     ])?;
     only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections"])?;
     // A built-in style's labels, the content view's.
@@ -811,6 +811,10 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>) -
     if cell.attribute("preservesSuperviewLayoutMargins").is_some() {
         values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
         values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
+    }
+    // One probe.
+    if cell.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+        values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
     }
     restoration_identifier(nib, &mut values, cell);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));

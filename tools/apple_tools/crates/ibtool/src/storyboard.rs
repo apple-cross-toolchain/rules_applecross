@@ -1182,7 +1182,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("horizontalCompressionResistancePriority", None),
         ("verticalCompressionResistancePriority", None),
     ];
-    let mut children_allowed = vec!["rect", "autoresizingMask", "constraints", "connections"];
+    let mut children_allowed = vec!["rect", "autoresizingMask", "constraints", "connections", "accessibility"];
     match tag {
         "switch" => {
             allowed.extend([
@@ -1216,6 +1216,8 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
     }
     only_attributes(n, &allowed)?;
     only_children(n, &children_allowed)?;
+    // An accessibility configuration as any view's (two probes).
+    accessibility(nib, scene, n, name)?;
     for c in children(n, "connections") {
         only_children(c, &["action"])?;
         if tag == "activityIndicatorView" && c.has_children() {
@@ -1308,7 +1310,11 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
                 values.push(("UIDisabled", Value::Bool(true)));
             }
             let value = |k: &str, default: f64| n.attribute(k).map(number).transpose().map(|v| v.unwrap_or(default));
-            values.push(("UIValue", Value::Float(value("value", 0.5)? as f32)));
+            // A value of 0, or none, is left out (two probes).
+            let current = value("value", 0.0)?;
+            if current != 0.0 {
+                values.push(("UIValue", Value::Float(current as f32)));
+            }
             let (min, max) = (value("minValue", 0.0)?, value("maxValue", 1.0)?);
             if min != 0.0 {
                 values.push(("UIMinValue", Value::Float(min as f32)));
@@ -1567,6 +1573,9 @@ struct Scene<'a> {
     /// pairs, and their accessibility configurations, each with the view's
     /// name: the nib lists them in the order of its objects.
     pairs: Vec<(String, Value)>,
+    /// Visual effect content views, whose subviews the objects list before
+    /// their constraints.
+    effect_contents: Vec<String>,
     accessibility: Vec<(String, Value)>,
     /// The switches whose frames are among the pairs.
     switch_frames: Vec<String>,
@@ -1599,6 +1608,7 @@ impl<'a> Scene<'a> {
             gesture_views: Vec::new(),
             view_outlets: Vec::new(),
             pairs: Vec::new(),
+            effect_contents: Vec::new(),
             accessibility: Vec::new(),
             switch_frames: Vec::new(),
             guides: Vec::new(),
@@ -2045,7 +2055,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("key", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
                 ("id", None),
             ])?;
-            only_children(content, &["rect", "autoresizingMask", "subviews"])?;
+            only_children(content, &["rect", "autoresizingMask", "subviews", "constraints"])?;
             for required in ["opaque", "clipsSubviews", "multipleTouchEnabled", "contentMode"] {
                 if content.attribute(required).is_none() {
                     return fail(format!("a visual effect view's content view without {required} is not supported by this ibtool"));
@@ -2081,6 +2091,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             cv.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
             cv.push(("UIContentMode", Value::Int(4)));
             cv.push(("UIClipsToBounds", Value::Bool(true)));
+            // Its constraints with its subviews, as a container's, listed
+            // after its subviews (one probe).
+            if let Some(own) = own_constraints(nib, scene, content, &content_name)? {
+                cv.push(("UIViewAutolayoutConstraints", own));
+                scene.effect_contents.push(content_name.clone());
+            }
             if content.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
                 cv.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
             }
@@ -4516,13 +4532,18 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // The views in the objects' order: the root, then breadth first.
             let mut order = vec![root_name.clone()];
             while let Some(v) = queue.pop_front() {
-                if let Some(v) = v {
-                    objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
+                let subviews_first = v.is_some_and(|v| scene.effect_contents.contains(v));
+                let constraints = |v: &String| scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())).collect::<Vec<_>>();
+                if let Some(v) = v.filter(|_| !subviews_first) {
+                    objects.extend(constraints(v));
                 }
                 for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1)) {
                     objects.push(reference(s.clone()));
                     order.push(s.clone());
                     queue.push_back(Some(s));
+                }
+                if let Some(v) = v.filter(|_| subviews_first) {
+                    objects.extend(constraints(v));
                 }
                 if v.is_none() {
                     for p in &pulled {

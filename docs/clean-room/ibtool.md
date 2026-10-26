@@ -703,6 +703,7 @@ probes:
   `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, `UIClipsToBounds`
   when clipping, `UIViewPreservesSuperviewMargins` and
   `UIViewPreservesSpecificSuperviewMargins` 15 when preserving margins,
+  `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off (one probe),
   the semantic content attribute, large content, `UIReuseIdentifier`,
   `UIIndentationLevel` when not 0, `UISelectionStyle` (none 0, blue 1,
   gray 2; left out for default), `UIAccessoryType` (disclosureIndicator 1,
@@ -869,7 +870,8 @@ probes; a localizable build's titles for other states than normal are
 refused). A button may be hidden, tagged (both after `UIOpaque`) and
 have an alpha (after its mask), as a plain view (two probes).
 
-A label's, plain view's or button's `<accessibility>` is a
+A label's, plain view's, button's or control's (a switch or slider: two
+probes) `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
 `UINibAccessibilityConfigurationsKey` (one view's in a nib; more are
 refused, as runtime attributes are):
@@ -972,8 +974,10 @@ its not-translating key, no `insetsLayoutMarginsFromSafeArea`
 and regular and prominent 1 and 0 with `UIBlurEffectAutomaticStyle` 4 and 5),
 `UIVisualEffectViewGroupName` nil and `UIVisualEffectViewContentView`, its
 content view as a `_UIVisualEffectContentView` (its subviews, mask 18,
-`UIShouldNotAdaptToMaterials`, content mode 4, clipping, then
-`UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off), listed as its child
+`UIShouldNotAdaptToMaterials`, content mode 4, clipping, its constraints
+with its subviews as a container's, then
+`UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off), listed as its
+child; the objects list its subviews before its constraints (one probe)
 (seven probes; material styles and constraints it holds are refused).
 
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
@@ -1009,8 +1013,8 @@ Switches, sliders, steppers and activity indicators (29 probes):
 - **A switch.** `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
   `UISwitchOnTintColor`. Its frame is also a key-value pair, `frame`
   (`NS.special` 3, `{{x, y}, {w, h}}`), however it is laid out.
-- **A slider.** `UIValue` (a float), `UIMinValue` and `UIMaxValue` unless 0
-  and 1, `UIContinuous` false, the minimum, maximum and thumb tint
+- **A slider.** `UIValue` (a float) unless 0 or not given, `UIMinValue`
+  and `UIMaxValue` unless 0 and 1, `UIContinuous` false, the minimum, maximum and thumb tint
   colours, and `UIBehavioralStyle` 0.
 - **A stepper.** A background colour before `UIDeepDrawRect`, a tint after
   the alpha; then `UIDisabled`, `UIValue`, `UIMinimumValue`,
