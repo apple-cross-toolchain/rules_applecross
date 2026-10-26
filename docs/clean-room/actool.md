@@ -589,12 +589,18 @@ were byte-identical with it (25 of 54 like them had identifiers sharing a
 bucket, which the earlier model refused).
 
 Refused: idioms other than universal (Xcode thins them by target device: an
-iPhone build kept iphone and car and dropped universal), system colour
-references (`"reference": "systemBlueColor"`, stored resolved, code 257,
-with their name), macOS catalogs, and keys not above. In the 350-catalog
-comparison 13 more catalogs now match: 8 byte-identical and 5 matching but
-for the appearance blocks' order. Two still stop at system colour
-references.
+iPhone build kept iphone and car and dropped universal), macOS catalogs,
+and keys not above. In the 350-catalog comparison 13 more catalogs matched:
+8 byte-identical and 5 matching but for the appearance blocks' order.
+
+A colour may refer to a system colour (`"reference"`, with platform
+universal or ios): its rendition holds the colour as Xcode resolves it for
+the appearance (a table of the 39 it knows, from one probe of each in each
+appearance; light is resolved as dark and high-contrast light as
+high-contrast dark, all 39 checked), with a reference flag (1) in the byte
+after the space's code, then `RLOC`, version 1, the name's length and the
+name. Names Xcode doesn't know (`whiteColor`) resolve to a placeholder
+colour; they are refused (ten probes).
 
 ## Image sets
 
@@ -640,6 +646,14 @@ scale is refused (seven synthetic probes and four of real images, dark and high
 contrast at each scale; byte-identical or equivalent but for the appearance
 blocks' order).
 
+With both `--target-device iphone` and `ipad`, an image may be for the
+iPhone, iPad or CarPlay idiom: its key has idiom 1, 2 or 4 (none for
+universal), and each idiom has atlases of its own, keyed by it, the link
+naming its key in attribute order. Watch, Mac and TV images are left out
+(a set of nothing else has no facet, a catalog of nothing else compiles to
+nothing). Other idioms, device idioms with other target devices, and
+atlases for both an appearance and an idiom are refused (13 probes).
+
 Folders are scanned for image sets: a folder's assets are named as at the
 top, or with its name and a slash before theirs when its `Contents.json`
 says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
@@ -650,7 +664,7 @@ Refused: atlases whose `dmp2` row
 predictors aren't established (common: the row under an atlas's empty top
 row ties between predictors 1 and 2, which Xcode breaks neither by cost,
 summation order, nor compressed size),
-vector images (SVG, PDF), other idioms and other properties,
+vector images (SVG, PDF) and other properties,
 and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,
@@ -680,6 +694,19 @@ also rasterizes it at 1x, 2x and 3x into `dmp2` renditions (grey and alpha
 for a black drawing). Matching those needs CoreGraphics' rasterizer and
 antialiasing, which this actool doesn't reproduce: PDF image sets are
 refused, with or without `preserves-vector-representation`.
+
+## Data sets
+
+A data set's file (one, universal, with its `universal-type-identifier`) is
+a rendition keyed as an image set's at scale 1, with a facet as an image
+set's: layout 1000, flags 0, no size, scale 100, pixel format `DATA`
+(stored `ATAD`), colour space 0, named `CoreStructuredImage`. Its TLVs are
+the composition, 0x3ed (the identifier's length with its NUL, 0, then the
+identifier and a NUL) and 0x3ee 1, and its payload the file as `RAWD`
+(version 0, length, bytes), whatever its size. A catalog of data alone has
+no appearance table. Without a type identifier Xcode looks one up for the
+file's extension (`.drawing` is `com.apple.drawing`), which this actool
+refuses, as it does several files or other idioms (eight probes).
 
 ## Launch images
 

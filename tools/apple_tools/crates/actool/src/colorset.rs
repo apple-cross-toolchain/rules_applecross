@@ -94,9 +94,33 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                 return unsupported("two colours for one appearance".into());
             }
             seen.push(appearance);
+            let mut attrs = vec![(car::ATTR_SCALE, 1), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_COLOR)];
+            if appearance != 0 {
+                attrs.push((car::ATTR_APPEARANCE, appearance));
+            }
+            // A system colour, as Xcode resolves it for the appearance.
+            if let Some(reference) = color.get("reference") {
+                for (k, v) in color {
+                    match (k.as_str(), v.as_str()) {
+                        ("reference", Some(_)) | ("platform", Some("universal" | "ios")) => {}
+                        _ => return unsupported(format!("a system colour's {k} {v}")),
+                    }
+                }
+                let reference = reference.as_str().unwrap();
+                let Some((_, resolved)) = SYSTEM_COLORS.iter().find(|c| c.0 == reference) else {
+                    return unsupported(format!("the system colour {reference}"));
+                };
+                // Xcode resolves light as dark, and high-contrast light as
+                // high-contrast dark (every system colour, light and
+                // high-contrast light).
+                let (code, components) = resolved[[0, 1, 2, 3, 1, 3][appearance as usize]];
+                let components: Vec<f64> = components.iter().map(|c| f64::from(*c)).collect();
+                renditions.push(Rendition { attrs, csi: car::color_reference_csi(name, code.into(), &components, reference) });
+                continue;
+            }
             for k in color.keys() {
                 if !["color-space", "components"].contains(&k.as_str()) {
-                    return unsupported(format!("a colour's {k} key (system colours among them)"));
+                    return unsupported(format!("a colour's {k} key"));
                 }
             }
             // Display P3 when none is named.
@@ -115,10 +139,6 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
                     None => return unsupported(format!("the {n} component {:?}", given.get(*n))),
                 }
             }
-            let mut attrs = vec![(car::ATTR_SCALE, 1), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_COLOR)];
-            if appearance != 0 {
-                attrs.push((car::ATTR_APPEARANCE, appearance));
-            }
             renditions.push(Rendition { attrs, csi: car::color_csi(name, code, &components) });
         }
         if !seen.is_empty() {
@@ -127,6 +147,56 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
     }
     Ok((facets, renditions))
 }
+
+/// A system colour's space code and components per appearance.
+type Resolved = [(u8, &'static [f32]); 4];
+
+/// System colours a colour set may refer to, as Xcode 27.0 resolves them for
+/// the any, dark, high-contrast and high-contrast dark appearances: the
+/// colour space's code and the components, in single precision (one probe
+/// of each; Xcode resolves names it doesn't know to a placeholder).
+#[rustfmt::skip]
+pub const SYSTEM_COLORS: [(&str, Resolved); 39] = [
+    ("darkTextColor", [(6, &[0.0, 1.0]), (6, &[0.0, 1.0]), (6, &[0.0, 1.0]), (6, &[0.0, 1.0])]),
+    ("labelColor", [(2, &[0.0, 1.0]), (2, &[1.0, 1.0]), (2, &[0.0, 1.0]), (2, &[1.0, 1.0])]),
+    ("lightTextColor", [(6, &[1.0, 0.6]), (6, &[1.0, 0.6]), (6, &[1.0, 0.6]), (6, &[1.0, 0.6])]),
+    ("linkColor", [(4, &[0.0, 0.478, 1.0, 1.0]), (4, &[0.035, 0.518, 1.0, 1.0]), (4, &[0.0, 0.478, 1.0, 1.0]), (4, &[0.035, 0.518, 1.0, 1.0])]),
+    ("opaqueSeparatorColor", [(4, &[0.776, 0.776, 0.784, 1.0]), (4, &[0.22, 0.22, 0.227, 1.0]), (4, &[0.776, 0.776, 0.784, 1.0]), (4, &[0.22, 0.22, 0.227, 1.0])]),
+    ("placeholderTextColor", [(1, &[0.235, 0.235, 0.263, 0.298]), (1, &[0.922, 0.922, 0.961, 0.298]), (1, &[0.235, 0.235, 0.263, 0.698]), (1, &[0.922, 0.922, 0.961, 0.549])]),
+    ("quaternaryLabelColor", [(1, &[0.235, 0.235, 0.263, 0.176]), (1, &[0.922, 0.922, 0.961, 0.157]), (1, &[0.235, 0.235, 0.263, 0.549]), (1, &[0.922, 0.922, 0.961, 0.4])]),
+    ("quaternarySystemFillColor", [(4, &[0.455, 0.455, 0.502, 0.08]), (4, &[0.463, 0.463, 0.502, 0.18]), (4, &[0.455, 0.455, 0.502, 0.16]), (4, &[0.463, 0.463, 0.502, 0.26])]),
+    ("secondaryLabelColor", [(1, &[0.235, 0.235, 0.263, 0.6]), (1, &[0.922, 0.922, 0.961, 0.6]), (1, &[0.235, 0.235, 0.263, 0.8]), (1, &[0.922, 0.922, 0.961, 0.698])]),
+    ("secondarySystemBackgroundColor", [(4, &[0.949, 0.949, 0.969, 1.0]), (4, &[0.11, 0.11, 0.118, 1.0]), (4, &[0.922, 0.922, 0.941, 1.0]), (4, &[0.141, 0.141, 0.149, 1.0])]),
+    ("secondarySystemFillColor", [(4, &[0.471, 0.471, 0.502, 0.16]), (4, &[0.471, 0.471, 0.502, 0.32]), (4, &[0.471, 0.471, 0.502, 0.24]), (4, &[0.471, 0.471, 0.502, 0.4])]),
+    ("secondarySystemGroupedBackgroundColor", [(6, &[1.0, 1.0]), (4, &[0.11, 0.11, 0.118, 1.0]), (6, &[1.0, 1.0]), (4, &[0.141, 0.141, 0.149, 1.0])]),
+    ("separatorColor", [(4, &[0.235, 0.235, 0.263, 0.12]), (4, &[0.329, 0.329, 0.345, 0.5]), (4, &[0.235, 0.235, 0.263, 0.12]), (4, &[0.329, 0.329, 0.345, 0.5])]),
+    ("systemBackgroundColor", [(6, &[1.0, 1.0]), (6, &[0.0, 1.0]), (6, &[1.0, 1.0]), (6, &[0.0, 1.0])]),
+    ("systemBlueColor", [(1, &[0.0, 0.533, 1.0, 1.0]), (1, &[0.0, 0.569, 1.0, 1.0]), (1, &[0.118, 0.431, 0.957, 1.0]), (1, &[0.361, 0.722, 1.0, 1.0])]),
+    ("systemBrownColor", [(1, &[0.675, 0.498, 0.369, 1.0]), (1, &[0.718, 0.541, 0.4, 1.0]), (1, &[0.584, 0.427, 0.318, 1.0]), (1, &[0.859, 0.651, 0.475, 1.0])]),
+    ("systemCyanColor", [(1, &[0.0, 0.753, 0.91, 1.0]), (1, &[0.235, 0.827, 0.996, 1.0]), (1, &[0.0, 0.494, 0.682, 1.0]), (1, &[0.427, 0.851, 1.0, 1.0])]),
+    ("systemFillColor", [(4, &[0.471, 0.471, 0.502, 0.2]), (4, &[0.471, 0.471, 0.502, 0.36]), (4, &[0.471, 0.471, 0.502, 0.28]), (4, &[0.471, 0.471, 0.502, 0.44])]),
+    ("systemGray2Color", [(4, &[0.682, 0.682, 0.698, 1.0]), (4, &[0.388, 0.388, 0.4, 1.0]), (4, &[0.557, 0.557, 0.576, 1.0]), (4, &[0.486, 0.486, 0.502, 1.0])]),
+    ("systemGray3Color", [(4, &[0.78, 0.78, 0.8, 1.0]), (4, &[0.282, 0.282, 0.29, 1.0]), (4, &[0.682, 0.682, 0.698, 1.0]), (4, &[0.329, 0.329, 0.337, 1.0])]),
+    ("systemGray4Color", [(4, &[0.82, 0.82, 0.839, 1.0]), (4, &[0.227, 0.227, 0.235, 1.0]), (4, &[0.737, 0.737, 0.753, 1.0]), (4, &[0.267, 0.267, 0.275, 1.0])]),
+    ("systemGray5Color", [(4, &[0.898, 0.898, 0.918, 1.0]), (4, &[0.173, 0.173, 0.18, 1.0]), (4, &[0.847, 0.847, 0.863, 1.0]), (4, &[0.212, 0.212, 0.22, 1.0])]),
+    ("systemGray6Color", [(4, &[0.949, 0.949, 0.969, 1.0]), (4, &[0.11, 0.11, 0.118, 1.0]), (4, &[0.922, 0.922, 0.941, 1.0]), (4, &[0.141, 0.141, 0.149, 1.0])]),
+    ("systemGrayColor", [(1, &[0.557, 0.557, 0.576, 1.0]), (1, &[0.557, 0.557, 0.576, 1.0]), (1, &[0.424, 0.424, 0.439, 1.0]), (1, &[0.682, 0.682, 0.698, 1.0])]),
+    ("systemGreenColor", [(1, &[0.204, 0.78, 0.349, 1.0]), (1, &[0.188, 0.82, 0.345, 1.0]), (1, &[0.0, 0.537, 0.196, 1.0]), (1, &[0.29, 0.851, 0.408, 1.0])]),
+    ("systemGroupedBackgroundColor", [(4, &[0.949, 0.949, 0.969, 1.0]), (6, &[0.0, 1.0]), (4, &[0.922, 0.922, 0.941, 1.0]), (6, &[0.0, 1.0])]),
+    ("systemIndigoColor", [(1, &[0.38, 0.333, 0.961, 1.0]), (1, &[0.42, 0.365, 1.0, 1.0]), (1, &[0.337, 0.29, 0.871, 1.0]), (1, &[0.655, 0.667, 1.0, 1.0])]),
+    ("systemMintColor", [(1, &[0.0, 0.784, 0.702, 1.0]), (1, &[0.0, 0.855, 0.765, 1.0]), (1, &[0.0, 0.522, 0.459, 1.0]), (1, &[0.329, 0.875, 0.796, 1.0])]),
+    ("systemOrangeColor", [(1, &[1.0, 0.553, 0.157, 1.0]), (1, &[1.0, 0.573, 0.188, 1.0]), (1, &[0.773, 0.325, 0.0, 1.0]), (1, &[1.0, 0.627, 0.337, 1.0])]),
+    ("systemPinkColor", [(1, &[1.0, 0.176, 0.333, 1.0]), (1, &[1.0, 0.216, 0.373, 1.0]), (1, &[0.906, 0.071, 0.302, 1.0]), (1, &[1.0, 0.541, 0.769, 1.0])]),
+    ("systemPurpleColor", [(1, &[0.796, 0.188, 0.878, 1.0]), (1, &[0.859, 0.204, 0.949, 1.0]), (1, &[0.69, 0.184, 0.761, 1.0]), (1, &[0.918, 0.553, 1.0, 1.0])]),
+    ("systemRedColor", [(1, &[1.0, 0.22, 0.235, 1.0]), (1, &[1.0, 0.259, 0.271, 1.0]), (1, &[0.914, 0.082, 0.176, 1.0]), (1, &[1.0, 0.38, 0.396, 1.0])]),
+    ("systemTealColor", [(1, &[0.0, 0.765, 0.816, 1.0]), (1, &[0.0, 0.824, 0.878, 1.0]), (1, &[0.0, 0.506, 0.596, 1.0]), (1, &[0.231, 0.867, 0.925, 1.0])]),
+    ("systemYellowColor", [(1, &[1.0, 0.8, 0.0, 1.0]), (1, &[1.0, 0.839, 0.0, 1.0]), (1, &[0.631, 0.416, 0.0, 1.0]), (1, &[0.996, 0.875, 0.263, 1.0])]),
+    ("tertiaryLabelColor", [(1, &[0.235, 0.235, 0.263, 0.298]), (1, &[0.922, 0.922, 0.961, 0.298]), (1, &[0.235, 0.235, 0.263, 0.698]), (1, &[0.922, 0.922, 0.961, 0.549])]),
+    ("tertiarySystemBackgroundColor", [(6, &[1.0, 1.0]), (4, &[0.173, 0.173, 0.18, 1.0]), (6, &[1.0, 1.0]), (4, &[0.212, 0.212, 0.22, 1.0])]),
+    ("tertiarySystemFillColor", [(4, &[0.463, 0.463, 0.502, 0.12]), (4, &[0.463, 0.463, 0.502, 0.24]), (4, &[0.463, 0.463, 0.502, 0.2]), (4, &[0.463, 0.463, 0.502, 0.32])]),
+    ("tertiarySystemGroupedBackgroundColor", [(4, &[0.949, 0.949, 0.969, 1.0]), (4, &[0.173, 0.173, 0.18, 1.0]), (4, &[0.922, 0.922, 0.941, 1.0]), (4, &[0.212, 0.212, 0.22, 1.0])]),
+    ("tintColor", [(1, &[0.0, 0.533, 1.0, 1.0]), (1, &[0.0, 0.569, 1.0, 1.0]), (1, &[0.118, 0.431, 0.957, 1.0]), (1, &[0.361, 0.722, 1.0, 1.0])]),
+];
 
 #[cfg(test)]
 mod tests {

@@ -52,6 +52,13 @@ pub struct Rendition {
     pub csi: Vec<u8>,
 }
 
+impl Rendition {
+    /// Whether it holds a data set's file (pixel format `DATA`).
+    pub fn is_data(&self) -> bool {
+        self.csi.get(24..28) == Some(b"ATAD")
+    }
+}
+
 pub struct Facet {
     pub name: String,
     pub attrs: Vec<(u16, u16)>,
@@ -632,13 +639,44 @@ pub fn jpeg_csi(name: &str, width: u32, height: u32, scale: u32, flags: u32, jpe
     csi(&CsiHeader { flags, width: 0, height: 0, scale: scale * 100, pixel_format: b"GEPJ", color_space: 0, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
 }
 
+/// A data set's file (layout 1000, no size, scale or colour space, pixel
+/// format `DATA`): its type identifier and the file as a `RAWD` payload.
+pub fn data_csi(uti: &str, data: &[u8]) -> Vec<u8> {
+    let mut t = Vec::new();
+    composition(&mut t);
+    let mut identifier = Vec::new();
+    le32(&mut identifier, uti.len() as u32 + 1);
+    le32(&mut identifier, 0);
+    identifier.extend_from_slice(uti.as_bytes());
+    identifier.push(0);
+    tlv(&mut t, 0x3ed, &identifier);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let mut payload = b"DWAR".to_vec();
+    le32(&mut payload, 0);
+    le32(&mut payload, data.len() as u32);
+    payload.extend_from_slice(data);
+    csi(&CsiHeader { flags: 0, width: 0, height: 0, scale: 100, pixel_format: b"ATAD", color_space: 0, layout: LAYOUT_DATA, name: "CoreStructuredImage" }, &t, &payload)
+}
+const LAYOUT_DATA: u16 = 1000;
+
 /// A colour set's colours (element 85, as image sets').
 pub const PART_COLOR: u16 = 217;
 const LAYOUT_COLOR: u16 = 1009;
 
 /// A colour (layout 1009, no size or pixel format): `RLOC`, version 1,
 /// the colour space's code and the components as doubles.
+/// A system colour a colour set refers to is its resolved components with a
+/// reference flag after the space's code, then `RLOC`, version 1 and the
+/// system colour's name.
 pub fn color_csi(name: &str, space: u32, components: &[f64]) -> Vec<u8> {
+    color_payload_csi(name, space, components, None)
+}
+
+pub fn color_reference_csi(name: &str, space: u32, components: &[f64], reference: &str) -> Vec<u8> {
+    color_payload_csi(name, space, components, Some(reference))
+}
+
+fn color_payload_csi(name: &str, space: u32, components: &[f64], reference: Option<&str>) -> Vec<u8> {
     let mut t = Vec::new();
     let mut c = Vec::new();
     le32(&mut c, 0);
@@ -647,10 +685,16 @@ pub fn color_csi(name: &str, space: u32, components: &[f64]) -> Vec<u8> {
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     let mut payload = b"RLOC".to_vec();
     le32(&mut payload, 1);
-    le32(&mut payload, space);
+    le32(&mut payload, space | u32::from(reference.is_some()) << 8);
     le32(&mut payload, components.len() as u32);
     for v in components {
         payload.extend_from_slice(&v.to_le_bytes());
+    }
+    if let Some(reference) = reference {
+        payload.extend_from_slice(b"RLOC");
+        le32(&mut payload, 1);
+        le32(&mut payload, reference.len() as u32);
+        payload.extend_from_slice(reference.as_bytes());
     }
     csi(&CsiHeader { flags: 0, width: 0, height: 0, scale: 0, pixel_format: &[0; 4], color_space: 0, layout: LAYOUT_COLOR, name }, &t, &payload)
 }
