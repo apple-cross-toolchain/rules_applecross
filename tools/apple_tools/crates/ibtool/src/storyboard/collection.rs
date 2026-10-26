@@ -524,11 +524,14 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+    // Its mask, left out when empty (one corpus storyboard).
     let mask = match children(cell, "autoresizingMask").next() {
         Some(m) => autoresizing_mask(m)?,
         None => 0,
     };
-    values.push(("UIAutoresizingMask", Value::Int(mask)));
+    if mask != 0 {
+        values.push(("UIAutoresizingMask", Value::Int(mask)));
+    }
     values.push(("UIContentMode", Value::Int(4)));
     if cell.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
