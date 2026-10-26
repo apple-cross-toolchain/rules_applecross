@@ -1903,6 +1903,50 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         }
         "tableView" => table::subview_table(nib, scene, n, &name, &f)?,
         "collectionView" => collection::subview_collection(nib, scene, n, &name, &f)?,
+        "searchBar" => {
+            only_attributes(n, &[
+                ("key", Some("tableHeaderView")), ("contentMode", Some("redraw")), ("text", None), ("placeholder", None), ("barStyle", Some("black")),
+                ("searchBarStyle", Some("minimal")), ("translucent", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "autoresizingMask", "textInputTraits", "constraints", "connections"])?;
+            view_connections(scene, n, &name)?;
+            let traits = child(n, "textInputTraits", "textInputTraits").ok_or("a search bar without text input traits")?;
+            only_attributes(traits, &[("key", None)])?;
+            values.push(("UIDeepDrawRect", Value::Bool(true)));
+            if n.attribute("translucent").is_some() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
+            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) if n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() => autoresizing_mask(m)?,
+                _ => 36,
+            };
+            values.push(("UIAutoresizingMask", Value::Int(mask)));
+            values.push(("UIContentMode", Value::Int(3)));
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            if n.attribute("barStyle").is_some() {
+                values.push(("UIBarStyle", Value::Int(1)));
+            }
+            values.push(("UISearchBarTranslucence", Value::Int(if n.attribute("translucent").is_some() { 2 } else { 1 })));
+            values.push(("UIText", nib.text(id, "text", n.attribute("text").unwrap_or(""))));
+            if let Some(p) = n.attribute("placeholder") {
+                values.push(("UIPlaceholder", nib.text(id, "placeholder", p)));
+            }
+            values.push(("UIEnablesReturnKeyAutomatically", Value::Bool(false)));
+            values.push(("UISecureTextEntry", Value::Bool(false)));
+            if n.attribute("searchBarStyle").is_some() {
+                values.push(("UISearchBarStyle", Value::Int(2)));
+            }
+            Object::new("UISearchBar", values)
+        }
         "textView" => {
             only_attributes(n, &[
                 ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("textAlignment", None),

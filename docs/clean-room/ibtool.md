@@ -829,6 +829,15 @@ collection view's siblings) and its automatic estimated item size a pair
 of the layout's; its cells' segues and constraints it holds are refused
 (three probes).
 
+A search bar, in a view or as a table's header view (laid out as a header
+view is), is a `UISearchBar`: `UIOpaque` when not translucent, its mask
+(36 by default), content mode 3 (redraw), hugging `{250, 250}`, then after
+its large content properties `UIBarStyle` 1 for black,
+`UISearchBarTranslucence` (1, or 2 when not translucent), `UIText` (empty
+when it has none), `UIPlaceholder`, `UIEnablesReturnKeyAutomatically` and
+`UISecureTextEntry` false and `UISearchBarStyle` 2 for minimal; its delegate
+outlet is an outlet like any other (six probes).
+
 A plain view may also be hidden (`UIHidden`), tagged (`UITag`), have no
 user interaction (`UIUserInteractionDisabled`) or multiple touches
 (`UIMultipleTouchEnabled`), in that order after `UIOpaque`; an `alpha`
