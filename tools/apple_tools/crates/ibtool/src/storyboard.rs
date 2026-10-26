@@ -1708,6 +1708,8 @@ struct Scene<'a> {
     /// Visual effect views and their content views, whose subviews the
     /// objects list before their constraints.
     effect_contents: Vec<String>,
+    /// Subviews with a safe-area guide no constraint uses.
+    unused_guides: Vec<String>,
     accessibility: Vec<(String, Value)>,
     /// The switches whose frames are among the pairs.
     switch_frames: Vec<String>,
@@ -1741,6 +1743,7 @@ impl<'a> Scene<'a> {
             view_outlets: Vec::new(),
             pairs: Vec::new(),
             effect_contents: Vec::new(),
+            unused_guides: Vec::new(),
             accessibility: Vec::new(),
             switch_frames: Vec::new(),
             guides: Vec::new(),
@@ -3157,8 +3160,19 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 only_children(n, &[
                     "rect", "autoresizingMask", "color", "subviews", "constraints", "connections", "edgeInsets", "directionalEdgeInsets",
-                    "userDefinedRuntimeAttributes", "accessibility",
+                    "userDefinedRuntimeAttributes", "accessibility", "viewLayoutGuide",
                 ])?;
+                // Its own safe-area guide, which no constraint uses, is only
+                // listed among the objects (two probes); one in use is
+                // refused.
+                for g in children(n, "viewLayoutGuide") {
+                    only_attributes(g, &[("key", Some("safeArea")), ("id", None)])?;
+                    let id = attr(g, "id")?;
+                    if scroll || n.document().descendants().any(|d| d != g && d.attributes().any(|a| a.value() == id)) {
+                        return fail("a subview's safe-area guide in use, or a scroll view's, is not supported by this ibtool");
+                    }
+                    scene.unused_guides.push(name.clone());
+                }
                 view_connections(scene, n, &name)?;
                 let pairs = runtime_attributes(nib, n, &name)?;
                 scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
@@ -5194,15 +5208,18 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
 
             objects.push(reference(root_name.clone()));
             // The safe-area guide follows the root view.
-            if has_safe_area {
+            let placeholder = |nib: &mut Nib| {
                 let identifier = nib.string("");
-                objects.push(Value::New(Object::new("UILayoutGuide", vec![
+                Object::new("UILayoutGuide", vec![
                     ("UILayoutGuideOwningView", Value::Nil),
                     ("UILayoutGuideIdentifier", identifier),
                     ("UILayoutGuideOwningViewIsLocked", Value::Bool(false)),
                     ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
                     ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
-                ]).named("safe area")));
+                ])
+            };
+            if has_safe_area {
+                objects.push(Value::New(placeholder(&mut nib).named("safe area")));
             }
             objects.extend(constraint_names.iter().map(|n| reference(n.clone())));
             objects.extend(scene.guides.iter().map(|g| reference(format!("guide {}", g.1))));
@@ -5214,6 +5231,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             while let Some(v) = queue.pop_front() {
                 let subviews_first = v.is_some_and(|v| scene.effect_contents.contains(v));
                 let constraints = |v: &String| scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())).collect::<Vec<_>>();
+                // A subview's own safe-area guide comes first in its turn.
+                if v.is_some_and(|v| scene.unused_guides.contains(v)) {
+                    if subviews_first {
+                        return fail("a visual effect view's safe-area guide is not supported by this ibtool");
+                    }
+                    objects.push(Value::New(placeholder(&mut nib)));
+                }
                 if let Some(v) = v.filter(|_| !subviews_first) {
                     objects.extend(constraints(v));
                 }
