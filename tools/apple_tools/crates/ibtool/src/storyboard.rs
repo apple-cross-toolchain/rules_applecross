@@ -611,6 +611,8 @@ struct NavigationItem<'a, 'i> {
     segues: Vec<(Node<'a, 'i>, String)>,
     /// Actions on the first responder, when allowed.
     responder_actions: Vec<(String, String)>,
+    /// Its bar button items' (id, name).
+    item_ids: Vec<(String, String)>,
 }
 
 fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str) -> Result<NavigationItem<'a, 'i>, String> {
@@ -658,6 +660,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
     let mut actions = Vec::new();
     let mut responder_actions = Vec::new();
     let mut segues = Vec::new();
+    let mut item_ids = Vec::new();
     // Its back item, as any other, comes first, before the other items in
     // its values and the objects, wherever the document has it (six
     // probes); one with connections or a custom view is refused.
@@ -687,6 +690,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
         for (i, b) in items.iter().enumerate() {
             let item_name = if i == 0 { format!("{name} {key}") } else { format!("{name} {key} {i}") };
             let object = Value::New(bar_button_item(nib, *b, &item_name, vc_id, &mut actions, &mut segues, responder, &mut responder_actions)?.named(item_name.clone()));
+            item_ids.push((attr(*b, "id")?.to_string(), item_name.clone()));
             if i == 0 {
                 values.push((single, object));
                 entries.push(reference(item_name.clone()));
@@ -747,7 +751,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
         Some(other) => return fail(format!("largeTitleDisplayMode {other} is not supported by this ibtool")),
     };
     values.push(("UILargeTitleDisplayMode", Value::Int(mode)));
-    Ok(NavigationItem { value: Value::New(Object::new("UINavigationItem", values).named(name)), bar_items, actions, segues, responder_actions })
+    Ok(NavigationItem { value: Value::New(Object::new("UINavigationItem", values).named(name)), bar_items, actions, segues, responder_actions, item_ids })
 }
 
 /// A bar button item with a title or a system item, and its actions on the
@@ -4751,7 +4755,11 @@ fn outlet_collection(nib: &mut Nib, label: &str, source: &str, destinations: Vec
 /// Custom views' actions, with their masks, follow them by mask and then
 /// selector, whatever their items' sides (nine probes); two with one mask
 /// and selector are refused.
-fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String, i64)], performs: &[(String, String)], controller: &str) -> Result<Vec<Value>, String> {
+/// Its first responder actions (`responder`: selector, item) go to the
+/// `responder` proxy, with the others by selector (one corpus storyboard).
+fn bar_events(
+    nib: &mut Nib, items: &[String], actions: &[(String, String, i64)], performs: &[(String, String)], responder: &[(String, String)], controller: &str,
+) -> Result<Vec<Value>, String> {
     let mut events: Vec<(&str, usize, &str, &str)> = Vec::new();
     let mut masked: Vec<_> = actions.iter().filter(|a| a.2 != 0).collect();
     masked.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
@@ -4763,6 +4771,10 @@ fn bar_events(nib: &mut Nib, items: &[String], actions: &[(String, String, i64)]
         events.push((selector, from_right, item, controller));
     }
     events.extend(performs.iter().enumerate().map(|(i, (item, template))| ("perform:", i, item.as_str(), template.as_str())));
+    for (selector, item) in responder {
+        let from_right = items.len() - items.iter().position(|i| i == item).unwrap_or(0);
+        events.push((selector, from_right, item, "responder"));
+    }
     events.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     let mut connections: Vec<Value> = events.into_iter().map(|(selector, _, item, destination)| event_connection(nib, selector, item, destination)).collect();
     for (selector, view, mask) in masked {
@@ -5566,7 +5578,7 @@ fn navigation_controller_nib(
     for t in &templates_outlets {
         connections.push(outlet(&mut nib, "viewController", t, "root"));
     }
-    connections.extend(bar_events(&mut nib, &bar_items, &bar_actions, &templates_performs, "root")?);
+    connections.extend(bar_events(&mut nib, &bar_items, &bar_actions, &templates_performs, &[], "root")?);
     for (selector, gesture) in &gesture_actions {
         connections.push(event_connection(&mut nib, selector, gesture, "root"));
     }
@@ -6009,6 +6021,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut vc_outlets = Vec::new();
         // Outlets to the scene's gesture recognizers, (property, id).
         let mut gesture_outlets: Vec<(String, String)> = Vec::new();
+        // Outlets to its navigation item's bar button items, (property, id).
+        let mut bar_outlets: Vec<(String, String)> = Vec::new();
         // Outlets to the scene's custom objects, (property, id).
         let mut object_outlets: Vec<(String, String)> = Vec::new();
         // Outlets to its navigation item's custom views, (property, name).
@@ -6045,6 +6059,13 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                         gesture_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
                         continue;
                     }
+                    // One to its own navigation item's bar button item is in
+                    // its nib, by name after its storyboard outlet (a corpus
+                    // storyboard).
+                    Some(b) if b.has_tag_name("barButtonItem") && b.ancestors().find(|a| a.has_tag_name("navigationItem")).and_then(|i| i.parent_element()) == Some(vc) => {
+                        bar_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
+                        continue;
+                    }
                     // And one to a custom view of its navigation item's bar
                     // button items in the nib that holds the item, after
                     // the controller's storyboard outlet (two probes).
@@ -6078,8 +6099,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut nib = Nib::new(platform, color_matched, localizable);
         // A controller's freeform size (`<size key="freeformSize">`, the
         // simulated metrics' own size) replaces the device's or the generic
-        // canvas's, but not the frame a device-less view from iOS 17 keeps.
+        // canvas's, but not the frame a device-less view from iOS 17 keeps,
+        // nor a device Xcode doesn't know's (three probes).
         let freeform = match child(vc, "size", "freeformSize") {
+            Some(_) if has_device && device_size.is_none() => None,
             Some(s) => Some((number(attr(s, "width")?)?, number(attr(s, "height")?)?)),
             None => None,
         };
@@ -6741,12 +6764,16 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let mut bar_items = Vec::new();
         let mut bar_actions = Vec::new();
         let mut bar_segues = Vec::new();
+        let mut bar_responder = Vec::new();
+        let mut item_ids = Vec::new();
         if let Some(item) = child(vc, "navigationItem", "navigationItem") {
-            let parts = navigation_item(&mut vnib, item, "navigation item", vc_id)?;
+            let parts = navigation_item_with(&mut vnib, item, "navigation item", vc_id, first_responder(vc))?;
             swapper.push(("UINavigationItem", parts.value));
             bar_items = parts.bar_items;
             bar_actions = parts.actions;
             bar_segues = parts.segues;
+            bar_responder = parts.responder_actions;
+            item_ids = parts.item_ids;
             // In its own nib only; a tab's child held by its parent alone
             // has none (one probe).
             if has_tab_item && !bar_items.is_empty() && (is_initial || identified || segue_destination) {
@@ -6922,6 +6949,21 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         for r in delegates {
             connections.push(outlet(&mut vnib, "delegate", &format!("gesture {}", attr(*r, "id")?), "controller"));
         }
+        if !bar_outlets.is_empty() && (!gesture_outlets.is_empty() || !item_outlets.is_empty() || !object_outlets.is_empty() || embedded_here) {
+            return fail("outlets to bar button items beside other outlets in the controller's nib, or of an embedded controller, are not supported by this ibtool");
+        }
+        bar_outlets.sort();
+        for (property, id) in &bar_outlets {
+            let name = item_ids.iter().find(|i| i.0 == *id).map(|i| i.1.clone()).ok_or("an outlet to a bar button item this ibtool doesn't compile is not supported")?;
+            connections.push(outlet(&mut vnib, property, "controller", &name));
+        }
+        // A popover from a bar button item anchored on it: an outlet from
+        // its template after the controller's (a corpus storyboard).
+        for (i, (sg, item)) in bar_segues.iter().enumerate() {
+            if sg.attribute("kind") == Some("popoverPresentation") {
+                connections.push(outlet(&mut vnib, "anchorBarButtonItem", &format!("controller bar segue {i}"), item));
+            }
+        }
         connections.push(outlet(&mut vnib, "sceneViewController", "owner", "controller"));
         for t in &templates.outlets {
             connections.push(outlet(&mut vnib, "viewController", t, "controller"));
@@ -6930,11 +6972,11 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // together by selector (two probes); bar segues, custom views'
         // actions and shared selectors are refused there.
         let merged = !recognizers.is_empty() && !bar_items.is_empty();
-        if merged && (!templates.performs.is_empty() || bar_actions.iter().any(|a| a.2 != 0)) {
+        if merged && (!templates.performs.is_empty() || bar_actions.iter().any(|a| a.2 != 0) || !bar_responder.is_empty()) {
             return fail("a gesture recognizer beside bar button items' segues or custom views' actions is not supported by this ibtool");
         }
         if !merged {
-            connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, "controller")?);
+            connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, &bar_responder, "controller")?);
         }
         let mut top = vec![owner, responder, storyboard];
         let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard")];
