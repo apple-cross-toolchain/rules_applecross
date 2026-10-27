@@ -39,6 +39,8 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "xcode_xip_urls": config.xcode_xip_urls,
                 "local_xcode": config.local_xcode,
                 "ported_tools_archives": config.ported_tools_archives,
+                "ported_tools_manifest": config.ported_tools_manifest,
+                "ported_tools_urls": config.ported_tools_urls,
                 "swift_tools": config.swift_tools,
                 "swift_tools_macos": config.swift_tools_macos,
             }
@@ -74,6 +76,15 @@ _configure_tag = tag_class(
                   "CPU (\"x86_64\", \"aarch64\"): a directory of " +
                   "<tool>-linux-<cpu>.tar.zst archives or a single archive. " +
                   "CPUs without one download the ones this repository releases.",
+        ),
+        "ported_tools_manifest": attr.label(
+            doc = "The ported tools to download instead of this repository's " +
+                  "release: a file of \"<sha256>  <tool>-linux-<cpu>.tar.zst\" " +
+                  "lines like toolchain/ported_tools.sha256.",
+        ),
+        "ported_tools_urls": attr.string_list(
+            doc = "URL templates for the ported tools, tried in order, with " +
+                  "{name} and {sha256}. Defaults to this repository's release.",
         ),
         "swift_tools": attr.string_dict(
             mandatory = True,

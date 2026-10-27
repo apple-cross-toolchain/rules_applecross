@@ -77,6 +77,26 @@ Without either, the fetch fails looking up `apple-sdks.invalid`. Once
 fetched, the archive is in the repository cache by its SHA-256 and neither is
 consulted again.
 
+### Ported tools newer than their release
+
+The toolchain downloads its ported Apple tools (the clean-room actool, ibtool
+and codesign among them) from this repository's release, as
+`toolchain/ported_tools.sha256` lists them. Tools built from a later commit,
+such as the `ported-tools` workflow's artifacts on `main`, can stand in until
+the next release, the same way as the SDK copy:
+
+```starlark
+apple_cross_toolchain.configure(
+    ...
+    # "<sha256>  <tool>-linux-<cpu>.tar.zst" lines, as in ported_tools.sha256.
+    ported_tools_manifest = "//third_party:ported_tools.sha256",
+    ported_tools_urls = ["https://ported-tools.invalid/sha256/{sha256}"],
+)
+```
+
+With `{sha256}` in the URL, `--distdir` takes a directory of the archives named
+by their SHA-256, and a content-addressed server takes one `rewrite` line.
+
 ## The Apple SDKs from a mounted Xcode
 
 Instead of an SDK archive, the toolchain can read a Mac's Xcode mounted
