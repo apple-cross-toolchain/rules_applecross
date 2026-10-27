@@ -70,8 +70,12 @@ Either of Bazel's own options then supplies it:
 
   The pattern is matched against the whole URL without its scheme. Bazel
   keeps the original scheme (`https`) unless the replacement names one, so
-  write `http://` out for a plain HTTP server. Credentials come from
-  `.netrc` or `--credential_helper` for the rewritten host.
+  write `http://` out for a plain HTTP server. Bazel's downloader sends the
+  rewritten host's credentials itself, from the Bazel client's `.netrc`
+  (`~/.netrc`, or the file `NETRC` names in the client's environment) or a
+  `--credential_helper`; `--repo_env=NETRC` doesn't reach it. The archive's
+  type comes from the URL in `MODULE.bazel`, so a rewrite to a URL without a
+  suffix still extracts.
 
 Without either, the fetch fails looking up `apple-sdks.invalid`. Once
 fetched, the archive is in the repository cache by its SHA-256 and neither is

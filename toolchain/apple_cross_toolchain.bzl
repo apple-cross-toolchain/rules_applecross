@@ -9,6 +9,19 @@ def _download_auth(rctx, urls):
     netrc = read_netrc(rctx, netrc_file) if netrc_file else read_user_netrc(rctx)
     return use_netrc(netrc, urls, {"api.github.com": "token <password>"})
 
+# Archive types download_and_extract takes, longest suffix first.
+_ARCHIVE_TYPES = ["tar.gz", "tar.zst", "tar.xz", "tar.bz2", "tgz", "tzst", "txz", "tbz", "zip", "tar"]
+
+def _archive_type(urls):
+    """The archive type the configured URLs name, so a --downloader_config
+    rewrite to a content-addressed URL (no suffix) still extracts."""
+    for url in urls:
+        path = url.split("?")[0].split("#")[0]
+        for archive_type in _ARCHIVE_TYPES:
+            if path.endswith("." + archive_type):
+                return archive_type
+    return ""
+
 def _sdk_download(rctx, urls, sha256, strip_prefix):
     """Download and extract an SDK archive, with auth support for private hosts."""
     kwargs = {
@@ -17,8 +30,9 @@ def _sdk_download(rctx, urls, sha256, strip_prefix):
         "stripPrefix": strip_prefix or "",
         "auth": _download_auth(rctx, urls),
     }
-    if rctx.attr.apple_sdk_archive_type:
-        kwargs["type"] = rctx.attr.apple_sdk_archive_type
+    archive_type = rctx.attr.apple_sdk_archive_type or _archive_type(urls)
+    if archive_type:
+        kwargs["type"] = archive_type
     if [u for u in urls if "api.github.com" in u]:
         # GitHub's release asset API answers with the asset only when asked.
         kwargs["headers"] = {"Accept": "application/octet-stream"}
