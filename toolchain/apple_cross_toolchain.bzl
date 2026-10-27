@@ -423,6 +423,8 @@ if llvm and xcode:
 def _prefetch_rule_inputs(rctx, cpu):
     for f in _RULE_INPUT_FILES:
         _toolchain_path(rctx, f)
+    if rctx.attr.ported_tools_manifest:
+        rctx.path(rctx.attr.ported_tools_manifest)
     rctx.path(Label(_LLVM_PREBUILT[cpu]))
     if rctx.os.name.startswith("mac"):
         rctx.path(Label(_LLVM_PREBUILT_MACOS))
@@ -497,8 +499,13 @@ def _install_ported_tools(rctx, cpu, destination):
             rctx.extract(archive = archive, output = _ported_tool_destination(archive.basename, destination))
         return
 
+    if rctx.attr.ported_tools_manifest:
+        manifest = rctx.path(rctx.attr.ported_tools_manifest)
+        rctx.watch(manifest)
+    else:
+        manifest = _toolchain_path(rctx, "ported_tools.sha256")
     archives = {}
-    for line in rctx.read(_toolchain_path(rctx, "ported_tools.sha256")).splitlines():
+    for line in rctx.read(manifest).splitlines():
         fields = [field for field in line.split(" ") if field]
         if len(fields) == 2 and fields[1].endswith(suffix):
             archives[fields[1]] = fields[0]
@@ -507,15 +514,17 @@ def _install_ported_tools(rctx, cpu, destination):
             ("No ported Apple tools are published for linux-{0}; set " +
              "ported_tools_archives on apple_cross_toolchain.configure().").format(cpu),
         )
-    downloads = [
-        rctx.download(
-            url = _PORTED_TOOLS_URL + name,
+    url_templates = rctx.attr.ported_tools_urls or [_PORTED_TOOLS_URL + "{name}"]
+    downloads = []
+    for name, sha256 in archives.items():
+        urls = [t.format(name = name, sha256 = sha256) for t in url_templates]
+        downloads.append(rctx.download(
+            url = urls,
             output = "_ported_tools/" + name,
             sha256 = sha256,
+            auth = _download_auth(rctx, urls),
             block = False,
-        )
-        for name, sha256 in archives.items()
-    ]
+        ))
     for download in downloads:
         download.wait()
     for name in archives:
@@ -753,6 +762,22 @@ Workspace-relative ported Apple tools keyed by Linux CPU ("x86_64",
 "aarch64"), used instead of the ones this repository releases: a directory of
 <tool>-linux-<cpu>.tar.zst archives, as tools/build-ported-tools.sh writes
 them, or a single archive.
+""",
+        ),
+        "ported_tools_manifest": attr.label(
+            allow_single_file = True,
+            doc = """\
+The ported Apple tools to download, as lines of "<sha256>  <tool>-linux-<cpu>.tar.zst"
+like toolchain/ported_tools.sha256, which is the default: tools built from a
+newer commit than the published release, for instance.
+""",
+        ),
+        "ported_tools_urls": attr.string_list(
+            doc = """\
+URL templates for the ported Apple tools, tried in order, with {name} for an
+archive's file name and {sha256} for its SHA-256. Defaults to this
+repository's release. A content-addressed server takes
+"https://ported-tools.invalid/sha256/{sha256}" with --downloader_config.
 """,
         ),
         "swift_tools": attr.string_dict(
