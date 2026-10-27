@@ -143,6 +143,13 @@ libstdc++-13-dev, libxml2-dev, libz3-dev, pkg-config, tzdata, unzip,
 zlib1g-dev. Newer releases may lack libraries it links (Ubuntu 26.04 has no
 `libxml2.so.2`).
 
+rules_applecross depends on the `llvm` module, whose `MODULE.bazel` asks for
+rules_go 0.62.0 without depending on it. A graph without rules_go is
+unaffected. One that has rules_go anyway (flatbuffers, googleapis, envoy and
+others bring it) is raised to rules_go 0.62 and, through it, gazelle 0.51, whose
+repository tooling needs Go 1.24.12 or later: register a Go SDK at least that
+new in the root module (`go_sdk.download(version = "1.24.12")`).
+
 On a Linux host macOS targets build for arm64 (Apple silicon) unless
 `--macos_cpus` says otherwise: rules_apple alone would choose x86_64 there,
 which a Mac without Rosetta refuses to open, so rules_applecross patches the
