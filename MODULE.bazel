@@ -29,7 +29,7 @@ single_version_override(
         "//patches:rules_apple_codesign_inputs_sdk_tools.patch",
         "//patches:rules_apple_alticonstool_missing_icons.patch",
         "//patches:rules_apple_xctoolrunner_sorted_listdir.patch",
-        "//patches:rules_apple_macos_arm64_default.patch",
+        "//patches:rules_apple_arm64_default.patch",
     ],
     version = "5.3.1",
 )

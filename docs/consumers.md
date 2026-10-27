@@ -150,10 +150,11 @@ others bring it) is raised to rules_go 0.62 and, through it, gazelle 0.51, whose
 repository tooling needs Go 1.24.12 or later: register a Go SDK at least that
 new in the root module (`go_sdk.download(version = "1.24.12")`).
 
-On a Linux host macOS targets build for arm64 (Apple silicon) unless
-`--macos_cpus` says otherwise: rules_apple alone would choose x86_64 there,
-which a Mac without Rosetta refuses to open, so rules_applecross patches the
-default (patches/rules_apple_macos_arm64_default.patch).
+On a Linux host Apple targets build for Apple silicon unless a `--*_cpus`
+flag says otherwise: macOS for arm64, and iOS, tvOS and watchOS for their arm64
+simulators. rules_apple alone would choose x86_64 there, which a Mac without
+Rosetta refuses to open and its simulators refuse to install, so
+rules_applecross patches the default (patches/rules_apple_arm64_default.patch).
 
 ## Swift packages
 
