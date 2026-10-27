@@ -6,6 +6,7 @@
 //! `RULES_APPLECROSS_CODESIGN_CERTIFICATES` the certificates (PEM, in any
 //! order): the key's certificate and those it chains to.
 
+use crate::requirement::{self, Expr};
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::traits::PublicKeyParts;
@@ -16,6 +17,16 @@ use x509_cert::Certificate;
 
 pub const KEY_ENV: &str = "RULES_APPLECROSS_CODESIGN_KEY";
 pub const CERTIFICATES_ENV: &str = "RULES_APPLECROSS_CODESIGN_CERTIFICATES";
+
+/// What issued an identity, which decides its designated requirement.
+#[derive(Debug, PartialEq)]
+pub enum Kind {
+    /// Not Apple: the requirement anchors to the root's hash.
+    SelfIssued,
+    /// Apple Development or Apple Distribution, issued by Apple's WWDR.
+    AppleDevelopment,
+    DeveloperId,
+}
 
 pub struct Identity {
     pub key: RsaPrivateKey,
@@ -122,13 +133,69 @@ impl Identity {
         Sha1::digest(self.chain.last().unwrap()).into()
     }
 
-    /// Whether the chain ends in one of Apple's roots (organization "Apple
-    /// Inc."), whose designated requirement codesign writes differently.
-    pub fn apple_anchored(&self) -> bool {
-        const O: &str = "2.5.4.10";
-        let Ok(root) = Certificate::from_der(self.chain.last().unwrap()) else { return false };
-        root.tbs_certificate.subject.0.iter().flat_map(|rdn| rdn.0.iter()).any(|atv| {
-            atv.oid.to_string() == O && atv.value.value() == b"Apple Inc."
+    fn certificate(&self, index: usize) -> Option<Certificate> {
+        Certificate::from_der(self.chain.get(index)?).ok()
+    }
+
+    fn has_extension(&self, index: usize, oid: &str) -> bool {
+        self.certificate(index)
+            .and_then(|c| c.tbs_certificate.extensions)
+            .is_some_and(|exts| exts.iter().any(|e| e.extn_id.to_string() == oid))
+    }
+
+    fn subject_attribute(&self, index: usize, oid: &str) -> Option<String> {
+        let cert = self.certificate(index)?;
+        cert.tbs_certificate.subject.0.iter().flat_map(|rdn| rdn.0.iter()).find(|atv| atv.oid.to_string() == oid).map(|atv| String::from_utf8_lossy(atv.value.value()).into_owned())
+    }
+
+    /// Whether the chain ends in one of Apple's roots (organization "Apple Inc.").
+    fn apple_anchored(&self) -> bool {
+        self.subject_attribute(self.chain.len() - 1, "2.5.4.10").as_deref() == Some("Apple Inc.")
+    }
+
+    pub fn kind(&self) -> Result<Kind, String> {
+        if !self.apple_anchored() {
+            return Ok(Kind::SelfIssued);
+        }
+        // Apple's intermediates mark what they issue: WWDR's development and
+        // distribution certificates, and Developer ID's.
+        if self.has_extension(1, "1.2.840.113635.100.6.2.1") {
+            Ok(Kind::AppleDevelopment)
+        } else if self.has_extension(1, "1.2.840.113635.100.6.2.6") && self.has_extension(0, "1.2.840.113635.100.6.1.13") {
+            Ok(Kind::DeveloperId)
+        } else {
+            Err("this Apple-issued identity's kind is not one this codesign supports (Apple Development, Apple Distribution or Developer ID)".into())
+        }
+    }
+
+    /// The team identifier codesign records: the leaf's organizational unit,
+    /// for identities Apple issued.
+    pub fn team(&self) -> Option<String> {
+        self.apple_anchored().then(|| self.subject_attribute(0, "2.5.4.11")).flatten()
+    }
+
+    /// The designated requirement codesign writes for code signed by this
+    /// identity under `identifier`.
+    pub fn designated(&self, identifier: &str) -> Result<Expr, String> {
+        // DER contents of 1.2.840.113635.100.6.{2.1, 2.6, 1.13}.
+        const APPLE_6: [u8; 8] = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x63, 0x64, 0x06];
+        let apple = |a: u8, b: u8| [&APPLE_6[..], &[a, b]].concat();
+        let ident = Expr::Identifier(identifier.into());
+        Ok(match self.kind()? {
+            Kind::SelfIssued => requirement::and(vec![ident, Expr::AnchorHash { slot: requirement::ROOT, hash: self.anchor_sha1().to_vec() }]),
+            Kind::AppleDevelopment => requirement::and(vec![
+                ident,
+                Expr::AppleGenericAnchor,
+                Expr::CertField { slot: requirement::LEAF, field: "subject.CN".into(), value: self.common_name.clone() },
+                Expr::CertExtension { slot: 1, oid: apple(0x02, 0x01) },
+            ]),
+            Kind::DeveloperId => requirement::and(vec![
+                ident,
+                Expr::AppleGenericAnchor,
+                Expr::CertExtension { slot: 1, oid: apple(0x02, 0x06) },
+                Expr::CertExtension { slot: requirement::LEAF, oid: apple(0x01, 0x0d) },
+                Expr::CertField { slot: requirement::LEAF, field: "subject.OU".into(), value: self.team().unwrap_or_default() },
+            ]),
         })
     }
 }

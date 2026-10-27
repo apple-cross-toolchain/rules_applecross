@@ -4,6 +4,7 @@
 mod cms;
 mod der;
 mod identity;
+mod requirement;
 mod resources;
 mod sign;
 
@@ -19,9 +20,9 @@ struct Options {
     force: bool,
     /// `--options runtime`.
     runtime: bool,
-    /// `--timestamp` or `--timestamp=URL`: a secure timestamp asked for.
-    /// codesign adds none by default for an identity that isn't Apple's.
-    timestamp: bool,
+    /// `--timestamp[=URL]` (Some(true)) or `--timestamp=none` (Some(false));
+    /// unset, codesign's default, which depends on the identity.
+    timestamp: Option<bool>,
     verify: bool,
     verbose: bool,
     paths: Vec<PathBuf>,
@@ -51,8 +52,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
                 o.verbose = true;
             }
             "--verify" => o.verify = true,
-            "--timestamp=none" => o.timestamp = false,
-            "--timestamp" => o.timestamp = true,
+            "--timestamp=none" => o.timestamp = Some(false),
+            "--timestamp" => o.timestamp = Some(true),
             "--deep" | "--strict" => {}
             "--keychain" => {
                 // Identities come from the environment on Linux.
@@ -70,7 +71,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
                     }
                 }
             }
-            s if s.starts_with("--timestamp=") => o.timestamp = true,
+            s if s.starts_with("--timestamp=") => o.timestamp = Some(true),
             s if s.starts_with("--preserve-metadata") => {}
             s if s.starts_with("-v") && s.chars().skip(1).all(|c| c == 'v') => o.verbose = true,
             s if s.starts_with('-') => return Err(format!("unsupported option {s}\n{}", usage())),
@@ -158,8 +159,17 @@ fn file_identifier(path: &Path, image: &macho::Image, ad_hoc: bool) -> Result<St
 }
 
 fn sign_path(path: &Path, o: &Options, signer: Option<&identity::Identity>) -> Result<(), String> {
-    if o.timestamp && signer.is_some() {
-        return Err(format!("{}: secure timestamps are not supported by this codesign yet", path.display()));
+    if let Some(id) = signer {
+        // codesign timestamps Developer ID signatures unless told not to, and
+        // others only when asked.
+        let developer_id = id.kind() == Ok(identity::Kind::DeveloperId);
+        if o.timestamp.unwrap_or(developer_id) {
+            return Err(format!(
+                "{}: secure timestamps are not supported by this codesign yet{}",
+                path.display(),
+                if o.timestamp.is_none() { " (codesign adds one to Developer ID signatures unless given --timestamp=none)" } else { "" }
+            ));
+        }
     }
     let entitlements = match &o.entitlements {
         Some(p) => Some(std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?),
@@ -208,6 +218,7 @@ fn sign_path(path: &Path, o: &Options, signer: Option<&identity::Identity>) -> R
             (identifier, embedded)
         }
     };
+    let team = signer.and_then(|s| s.team());
     for image in universal.images_mut() {
         if image.code_signature.is_some() && !o.force {
             let cd = sign::existing_code_directory(image);
@@ -227,6 +238,7 @@ fn sign_path(path: &Path, o: &Options, signer: Option<&identity::Identity>) -> R
             runtime: o.runtime,
             identity: signer,
             signing_time: cms::signing_time(),
+            team: team.as_deref(),
         };
         sign::sign(image, &inputs).map_err(|e| format!("{}: {e}", exe_path.display()))?;
     }
@@ -282,8 +294,8 @@ fn main() -> ExitCode {
     // An identity other than "-" must be the one the environment provides.
     let signer = match o.identity.as_deref() {
         Some(name) if name != "-" && !o.verify => match identity::Identity::from_environment() {
-            Ok(Some(id)) if id.matches(name) && id.apple_anchored() => {
-                eprintln!("{name}: identities issued by Apple are not supported by this codesign yet");
+            Ok(Some(id)) if id.matches(name) && id.kind().is_err() => {
+                eprintln!("{name}: {}", id.kind().unwrap_err());
                 return ExitCode::FAILURE;
             }
             Ok(Some(id)) if id.matches(name) => Some(id),

@@ -8,11 +8,9 @@ use sha2::{Digest, Sha256};
 
 const CSMAGIC_EMBEDDED_SIGNATURE: u32 = 0xfade_0cc0;
 const CSMAGIC_CODEDIRECTORY: u32 = 0xfade_0c02;
-const CSMAGIC_REQUIREMENTS: u32 = 0xfade_0c01;
 const CSMAGIC_EMBEDDED_ENTITLEMENTS: u32 = 0xfade_7171;
 const CSMAGIC_EMBEDDED_DER_ENTITLEMENTS: u32 = 0xfade_7172;
 const CSMAGIC_BLOBWRAPPER: u32 = 0xfade_0b01;
-const CSMAGIC_REQUIREMENT: u32 = 0xfade_0c00;
 
 const CS_ADHOC: u32 = 0x2;
 const CS_RUNTIME: u32 = 0x10000;
@@ -55,41 +53,10 @@ pub struct Inputs<'a> {
     pub identity: Option<&'a Identity>,
     /// Seconds since the Unix epoch, for an identity signature's signingTime.
     pub signing_time: u64,
+    /// The team identifier, which Apple-issued identities carry.
+    pub team: Option<&'a str>,
 }
 
-/// A requirement set holding one designated requirement, as codesign makes it
-/// for an identity whose chain isn't Apple's: the identifier, and the chain's
-/// root by SHA-1 (`identifier "ID" and certificate root = H"..."`).
-pub fn designated_requirement(identifier: &str, root_sha1: &[u8; 20]) -> Vec<u8> {
-    const OP_AND: u32 = 6;
-    const OP_IDENT: u32 = 2;
-    const OP_ANCHOR_HASH: u32 = 4;
-    const ROOT_SLOT: u32 = 0xffff_ffff;
-    const KIND_EXPR: u32 = 1;
-    const DESIGNATED: u32 = 3;
-    fn data(out: &mut Vec<u8>, d: &[u8]) {
-        be32(out, d.len() as u32);
-        out.extend_from_slice(d);
-        out.resize(out.len().next_multiple_of(4), 0);
-    }
-    let mut expr = Vec::new();
-    be32(&mut expr, OP_AND);
-    be32(&mut expr, OP_IDENT);
-    data(&mut expr, identifier.as_bytes());
-    be32(&mut expr, OP_ANCHOR_HASH);
-    be32(&mut expr, ROOT_SLOT);
-    data(&mut expr, root_sha1);
-    let mut req = Vec::new();
-    be32(&mut req, KIND_EXPR);
-    req.extend(expr);
-    let req = blob(CSMAGIC_REQUIREMENT, &req);
-    let mut set = Vec::new();
-    be32(&mut set, 1);
-    be32(&mut set, DESIGNATED);
-    be32(&mut set, 20);
-    set.extend(req);
-    blob(CSMAGIC_REQUIREMENTS, &set)
-}
 
 pub fn exec_seg_flags(entitlements: Option<&cf::Value>) -> u64 {
     let Some(e) = entitlements else { return 0 };
@@ -168,7 +135,9 @@ fn code_directory(image: &Image, code_limit: usize, inputs: &Inputs, requirement
 
     let header_len = if inputs.runtime { 96usize } else { 88usize };
     let ident_offset = header_len;
-    let hash_offset = ident_offset + inputs.identifier.len() + 1 + 32 * n_special;
+    let team_offset = ident_offset + inputs.identifier.len() + 1;
+    let team_len = inputs.team.map_or(0, |t| t.len() + 1);
+    let hash_offset = team_offset + team_len + 32 * n_special;
     let length = hash_offset + 32 * n_code;
 
     let text = image.segment("__TEXT");
@@ -197,7 +166,7 @@ fn code_directory(image: &Image, code_limit: usize, inputs: &Inputs, requirement
     cd.push(page.trailing_zeros() as u8);
     be32(&mut cd, 0); // spare2
     be32(&mut cd, 0); // scatterOffset
-    be32(&mut cd, 0); // teamOffset
+    be32(&mut cd, if inputs.team.is_some() { team_offset as u32 } else { 0 });
     be32(&mut cd, 0); // spare3
     be64(&mut cd, 0); // codeLimit64
     be64(&mut cd, text.map_or(0, |t| t.fileoff));
@@ -211,6 +180,10 @@ fn code_directory(image: &Image, code_limit: usize, inputs: &Inputs, requirement
     debug_assert_eq!(cd.len(), header_len);
     cd.extend_from_slice(inputs.identifier.as_bytes());
     cd.push(0);
+    if let Some(team) = inputs.team {
+        cd.extend_from_slice(team.as_bytes());
+        cd.push(0);
+    }
     for slot in (1..=n_special).rev() {
         cd.extend_from_slice(&special[slot].unwrap_or([0; 32]));
     }
@@ -247,8 +220,8 @@ fn super_blob(blobs: &[(u32, Vec<u8>)]) -> Vec<u8> {
 /// image's cdhash.
 pub fn sign(image: &mut Image, inputs: &Inputs) -> Result<Vec<u8>, String> {
     let requirements = match inputs.identity {
-        Some(id) => designated_requirement(inputs.identifier, &id.anchor_sha1()),
-        None => blob(CSMAGIC_REQUIREMENTS, &0u32.to_be_bytes()),
+        Some(id) => crate::requirement::designated_set(&id.designated(inputs.identifier)?),
+        None => crate::requirement::empty_set(),
     };
     let code_limit = image.unsigned_end();
     // The code directory hashes the image with its load commands already
@@ -278,7 +251,7 @@ pub fn sign(image: &mut Image, inputs: &Inputs) -> Result<Vec<u8>, String> {
         n_special = n_special.max(SLOT_DER_ENTITLEMENTS);
     }
     let header_len = if inputs.runtime { 96 } else { 88 };
-    let cd_len = header_len + inputs.identifier.len() + 1 + 32 * (n_special + n_code);
+    let cd_len = header_len + inputs.identifier.len() + 1 + inputs.team.map_or(0, |t| t.len() + 1) + 32 * (n_special + n_code);
     let mut lengths = vec![cd_len, requirements.len()];
     if let Some(e) = inputs.entitlements {
         lengths.push(e.len() + 8);
@@ -368,56 +341,19 @@ pub fn code_directories(image: &Image) -> Vec<(u32, Vec<u8>)> {
 
 /// An already signed image's designated requirement in codesign's text form,
 /// if its requirement set has one: what a bundle's seal records for it.
-/// Only the forms this codesign writes are understood; others are refused.
 pub fn designated_requirement_text(image: &Image) -> Result<Option<String>, String> {
     let Some((_, dataoff, datasize)) = image.code_signature else { return Ok(None) };
     let Some(sig) = image.data.get(dataoff as usize..(dataoff + datasize) as usize) else { return Ok(None) };
-    let be = |b: &[u8], o: usize| b.get(o..o + 4).map(|x| u32::from_be_bytes(x.try_into().unwrap()));
-    let mut set = None;
-    for i in 0..be(sig, 8).unwrap_or(0) as usize {
-        if be(sig, 12 + 8 * i) == Some(2) {
-            let off = be(sig, 16 + 8 * i).unwrap_or(0) as usize;
-            let len = be(sig, off + 4).unwrap_or(0) as usize;
-            set = sig.get(off..off + len);
+    let be = |o: usize| sig.get(o..o + 4).map(|x| u32::from_be_bytes(x.try_into().unwrap()));
+    for i in 0..be(8).unwrap_or(0) as usize {
+        if be(12 + 8 * i) == Some(2) {
+            let off = be(16 + 8 * i).unwrap_or(0) as usize;
+            let len = be(off + 4).unwrap_or(0) as usize;
+            let set = sig.get(off..off + len).ok_or("nested code's requirement set is truncated")?;
+            return Ok(crate::requirement::designated_in_set(set)?.as_ref().map(crate::requirement::text));
         }
     }
-    let Some(set) = set else { return Ok(None) };
-    let refused = || "nested code's designated requirement is not one this codesign understands".to_string();
-    // A set of (type, offset); type 3 is the designated requirement.
-    let count = be(set, 8).ok_or_else(refused)? as usize;
-    let Some(off) = (0..count).find(|&i| be(set, 12 + 8 * i) == Some(3)).and_then(|i| be(set, 16 + 8 * i)) else {
-        return Ok(None);
-    };
-    let req = set.get(off as usize..).ok_or_else(refused)?;
-    if be(req, 0) != Some(CSMAGIC_REQUIREMENT) || be(req, 8) != Some(1) {
-        return Err(refused());
-    }
-    let len = be(req, 4).ok_or_else(refused)? as usize;
-    let expr = req.get(12..len).ok_or_else(refused)?;
-    // and(identifier ID, anchor hash of the root)
-    let data = |o: usize| -> Option<(&[u8], usize)> {
-        let n = be(expr, o)? as usize;
-        Some((expr.get(o + 4..o + 4 + n)?, o + 4 + n.next_multiple_of(4)))
-    };
-    if be(expr, 0) != Some(6) || be(expr, 4) != Some(2) {
-        return Err(refused());
-    }
-    let (ident, next) = data(8).ok_or_else(refused)?;
-    if be(expr, next) != Some(4) || be(expr, next + 4) != Some(0xffff_ffff) {
-        return Err(refused());
-    }
-    let (hash, end) = data(next + 8).ok_or_else(refused)?;
-    if end != expr.len() {
-        return Err(refused());
-    }
-    let ident = std::str::from_utf8(ident).map_err(|_| refused())?;
-    let quoted = if !ident.is_empty() && ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        ident.to_string()
-    } else {
-        format!("\"{ident}\"")
-    };
-    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(Some(format!("identifier {quoted} and certificate root = H\"{hex}\"")))
+    Ok(None)
 }
 
 /// A code directory's cdhash: its digest by its own hash type, the first 20
@@ -457,7 +393,7 @@ mod tests {
         assert!(identity.matches("RAC Test Developer"));
         assert!(!identity.matches("Apple Development"));
         assert_eq!(
-            designated_requirement("com.example.CleanRoom", &identity.anchor_sha1()),
+            crate::requirement::designated_set(&identity.designated("com.example.CleanRoom").unwrap()),
             include_bytes!("../tests/data/identity/apple-requirements.bin").to_vec()
         );
     }

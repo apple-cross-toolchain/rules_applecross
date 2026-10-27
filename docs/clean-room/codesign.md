@@ -65,8 +65,7 @@ SuperBlob reserve 480). Other `--options` flags are refused.
 
 Observed by signing, in a VM, with a throwaway RSA identity: a leaf
 certificate (code signing extended key usage) issued by a self-signed test
-CA, both trusted for code signing. Apple-issued identities are not covered
-yet and are refused. Inputs: rules_applecross's iOS and macOS examples, a
+CA, both trusted for code signing (Apple-issued identities: below). Inputs: rules_applecross's iOS and macOS examples, a
 macOS app holding a universal dylib in `Contents/Frameworks` (signed first,
 as rules_apple does), `/bin/echo` (three slices), and a sweep of
 identifier lengths 1-48 with and without `--options runtime`. All were
@@ -83,8 +82,8 @@ Differences from an ad hoc signature:
   identifier: codesign takes that from Apple-issued certificates only.
 - The requirement set holds the designated requirement (type 3):
   `identifier ID and certificate root = H"SHA-1 of the chain's root"`,
-  compiled as and(ident, anchor hash with slot -1). In text, an identifier
-  of letters, digits and `_` only is left unquoted (`identifier echo1`).
+  compiled as and(ident, anchor hash with slot -1). In text, a string of
+  letters, digits and `_` only is left unquoted (`identifier echo1`).
 - A Mach-O file named by its file name keeps the bare name; the `-UUID…`
   suffix is for ad hoc signatures only.
 - The CMS blob is a SignedData, BER with indefinite lengths for the
@@ -105,6 +104,35 @@ Differences from an ad hoc signature:
 - A bundle's seal records nested code signed by an identity with its
   designated requirement in text, e.g. `identifier "com.apple.dt.runtime.swiftCompatibilitySpan"
   and certificate root = H"4b76…"` (hex in lowercase), beside its cdhash.
+
+### Apple-issued identities
+
+Observed from apps codesign had signed with Apple Development and Developer
+ID identities (no private key needed to read them), and checked by signing
+those apps' inputs again with their certificate chains and another key:
+everything matched but the 256 bytes of the RSA signature value.
+
+- The chain in the CMS is the leaf, its Apple intermediate and the Apple
+  Root CA.
+- The team identifier, the leaf's organizational unit, follows the
+  identifier in the code directory (`teamOffset`), and the hash slots follow
+  it.
+- Which designated requirement depends on the intermediate's marker
+  extension, compiled as right-nested `and`s:
+  - WWDR (1.2.840.113635.100.6.2.1; Apple Development and Distribution):
+    `identifier ID and anchor apple generic and certificate leaf[subject.CN]
+    = "CN" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */`;
+  - Developer ID (1.2.840.113635.100.6.2.6, leaf 1.2.840.113635.100.6.1.13):
+    `identifier ID and anchor apple generic and certificate
+    1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate
+    leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate
+    leaf[subject.OU] = TEAM`.
+  Other Apple-issued identities are refused.
+- Apple Development signatures carried no timestamp. Developer ID ones are
+  timestamped unless `--timestamp=none` is given, so this codesign refuses
+  Developer ID without it.
+- The text of these forms in a bundle's seal matched the 38 requirements
+  codesign recorded for Developer ID nested code in two apps.
 
 ## CodeResources
 
