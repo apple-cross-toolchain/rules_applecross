@@ -101,6 +101,21 @@ apple_cross_toolchain.configure(
 With `{sha256}` in the URL, `--distdir` takes a directory of the archives named
 by their SHA-256, and a content-addressed server takes one `rewrite` line.
 
+
+## Pinning rules_applecross through a registry
+
+rules_applecross's rules_apple patch (patches/rules_apple_execution_platform.patch)
+makes rules_apple itself depend on `rules_applecross` 0.0.3, the version in
+this repository's `MODULE.bazel`, for its bundling toolchain type. A
+`git_override` or `local_path_override` answers that request. A registry
+version of any other number doesn't: module discovery then looks for 0.0.3 in
+the registries and fails. Pin one version for every request:
+
+```starlark
+bazel_dep(name = "rules_applecross", version = "0.0.3.cc07dde")
+single_version_override(module_name = "rules_applecross", version = "0.0.3.cc07dde")
+```
+
 ## The Apple SDKs from a mounted Xcode
 
 Instead of an SDK archive, the toolchain can read a Mac's Xcode mounted
