@@ -69,6 +69,8 @@ pub struct Image {
     pub code_signature: Option<(usize, u32, u32)>,
     /// (platform, minos) from LC_BUILD_VERSION.
     pub build_version: Option<(u32, u32)>,
+    /// The SDK version from LC_BUILD_VERSION, as X.Y.Z nibbles (xxxx.yy.zz).
+    pub sdk_version: Option<u32>,
     /// The install names of the dylibs the image links, in load command
     /// order.
     pub dylibs: Vec<String>,
@@ -90,6 +92,7 @@ impl Image {
         let mut segments = Vec::new();
         let mut code_signature = None;
         let mut build_version = None;
+        let mut sdk_version = None;
         let mut dylibs = Vec::new();
         let mut uuid = None;
         let mut off = 32usize;
@@ -115,7 +118,10 @@ impl Image {
                     });
                 }
                 LC_CODE_SIGNATURE => code_signature = Some((off, u32le(&data, off + 8), u32le(&data, off + 12))),
-                LC_BUILD_VERSION => build_version = Some((u32le(&data, off + 8), u32le(&data, off + 12))),
+                LC_BUILD_VERSION => {
+                    build_version = Some((u32le(&data, off + 8), u32le(&data, off + 12)));
+                    sdk_version = Some(u32le(&data, off + 16));
+                }
                 LC_UUID if size >= 24 => uuid = Some(data[off + 8..off + 24].try_into().unwrap()),
                 c if LC_DYLIB_LINKS.contains(&c) => {
                     let name_off = u32le(&data, off + 8) as usize;
@@ -130,7 +136,7 @@ impl Image {
             }
             off += size;
         }
-        Ok(Image { data, cputype, cpusubtype, filetype, segments, code_signature, build_version, dylibs, uuid, ncmds, sizeofcmds })
+        Ok(Image { data, cputype, cpusubtype, filetype, segments, code_signature, build_version, sdk_version, dylibs, uuid, ncmds, sizeofcmds })
     }
 
     pub fn segment(&self, name: &str) -> Option<&Segment> {

@@ -35,10 +35,12 @@ flate2 = "1"
 lzfse = { path = "crates/lzfse" }
 macho = { path = "crates/macho" }
 plist = "1"
+rsa = { version = "0.9", features = ["sha2", "pem"] }
 rustyline = "15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+x509-cert = { version = "0.2", features = ["pem"] }
 xcbuild-acdriver = { path = "xcbuild/crates/xcbuild-acdriver" }
 
 [profile.release]
