@@ -19,6 +19,13 @@ py_binary(
     deps = ["@rules_python//python/runfiles"],
 )
 
+# bazel run //tools:staple -- <App.app>: a notarized Mac app's ticket, from
+# Apple's public lookup, stapled as `xcrun stapler staple` does.
+py_binary(
+    name = "staple",
+    srcs = ["staple.py"],
+)
+
 # The LLVM the repository rule stubs Mach-O binaries with, for this host.
 alias(
     name = "llvm_readtapi",

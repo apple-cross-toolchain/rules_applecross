@@ -186,6 +186,11 @@ them, unless `--timestamp=none` is among the bundle's codesign options;
 others get one with `--timestamp`. Asking for it needs the network from the
 signing action, and makes the signature differ from build to build.
 
+A notarized Mac app's ticket can be stapled off a Mac too:
+`bazel run @rules_applecross//tools:staple -- path/to/App.app` fetches it
+from Apple's public lookup by the app's code directory hash and writes it to
+`Contents/CodeResources`, as `xcrun stapler staple` does.
+
 ## The Linux host
 
 The toolchain fetches LLVM, swift.org's Swift and the ported tools itself.
