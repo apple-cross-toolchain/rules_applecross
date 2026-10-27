@@ -181,8 +181,10 @@ therefore runs on the machine holding the key, not on a remote executor.
 Point the paths elsewhere to change identity: Bazel reruns signing when
 they change, but not when the files at the same paths do.
 
-Secure timestamps are not supported yet, so Developer ID signing needs
-`--timestamp=none` among the bundle's codesign options until they are.
+Developer ID signatures get a secure timestamp from Apple, as codesign gives
+them, unless `--timestamp=none` is among the bundle's codesign options;
+others get one with `--timestamp`. Asking for it needs the network from the
+signing action, and makes the signature differ from build to build.
 
 ## The Linux host
 
