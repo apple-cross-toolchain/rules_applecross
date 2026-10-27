@@ -26,6 +26,13 @@ py_binary(
     srcs = ["staple.py"],
 )
 
+# bazel run //tools:notarize -- --key AuthKey.p8 --key-id ID --issuer ISSUER
+# App.app: Apple's notary service through its web API, from any host.
+py_binary(
+    name = "notarize",
+    srcs = ["notarize.py"],
+)
+
 # The LLVM the repository rule stubs Mach-O binaries with, for this host.
 alias(
     name = "llvm_readtapi",
