@@ -55,6 +55,8 @@ pub struct Inputs<'a> {
     pub signing_time: u64,
     /// The team identifier, which Apple-issued identities carry.
     pub team: Option<&'a str>,
+    /// The timestamp authority to ask, for a secure timestamp.
+    pub timestamp_url: Option<&'a str>,
 }
 
 
@@ -285,7 +287,7 @@ pub fn sign(image: &mut Image, inputs: &Inputs) -> Result<Vec<u8>, String> {
         blobs.push((7, blob(CSMAGIC_EMBEDDED_DER_ENTITLEMENTS, e)));
     }
     let cms = match inputs.identity {
-        Some(id) => crate::cms::signed_data(&cd, id, inputs.signing_time)?,
+        Some(id) => crate::cms::signed_data(&cd, id, inputs.signing_time, inputs.timestamp_url)?,
         None => Vec::new(),
     };
     if 8 + cms.len() > CMS_RESERVATION {

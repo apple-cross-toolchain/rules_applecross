@@ -97,8 +97,7 @@ Differences from an ad hoc signature:
   directory's SHA-256) and 1.2.840.113635.100.9.1 (an XML property list,
   `cdhashes`, of that hash's first 20 bytes). PKCS#1 v1.5 signatures are
   deterministic, so the same key and time give the same bytes.
-- No secure timestamp is added unless asked for (`--timestamp`), which this
-  codesign refuses for now.
+- No secure timestamp is added unless asked for (`--timestamp[=URL]`; below).
 - Space reserved: everything before the CMS blob, plus 18000 bytes for it,
   plus 8, rounded up to 16.
 - A bundle's seal records nested code signed by an identity with its
@@ -129,10 +128,23 @@ everything matched but the 256 bytes of the RSA signature value.
     leaf[subject.OU] = TEAM`.
   Other Apple-issued identities are refused.
 - Apple Development signatures carried no timestamp. Developer ID ones are
-  timestamped unless `--timestamp=none` is given, so this codesign refuses
-  Developer ID without it.
+  timestamped unless `--timestamp=none` is given.
 - The text of these forms in a bundle's seal matched the 38 requirements
   codesign recorded for Developer ID nested code in two apps.
+
+### Secure timestamps
+
+`--timestamp` asks Apple's authority, `http://timestamp.apple.com/ts01`, and
+`--timestamp=URL` another, by RFC 3161 over HTTP: a TimeStampReq of version
+1, the SHA-256 (with a NULL parameter) of the RSA signature value, a 64-bit
+nonce and certReq true. The token returned, with the authority's
+certificates, is the SignerInfo's one unsigned attribute,
+id-aa-timeStampToken (1.2.840.113549.1.9.16.2.14), in a definite-length [1]
+after the signature. Compared with codesign's for the same input, the CMS
+had the same structure throughout; tokens differ from request to request
+(time, serial, nonce, and which of Apple's signers answered), and Apple's
+codesign showed `Timestamp=` for and verified the one this codesign got. The
+space reserved is unchanged: 18000 bytes cover a timestamp.
 
 ## CodeResources
 

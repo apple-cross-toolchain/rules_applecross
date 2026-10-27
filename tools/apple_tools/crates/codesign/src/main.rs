@@ -7,6 +7,7 @@ mod identity;
 mod requirement;
 mod resources;
 mod sign;
+mod timestamp;
 
 use cf::Value;
 use std::path::{Path, PathBuf};
@@ -20,9 +21,10 @@ struct Options {
     force: bool,
     /// `--options runtime`.
     runtime: bool,
-    /// `--timestamp[=URL]` (Some(true)) or `--timestamp=none` (Some(false));
-    /// unset, codesign's default, which depends on the identity.
-    timestamp: Option<bool>,
+    /// `--timestamp[=URL]` (Some(Some(URL)), Apple's authority without one)
+    /// or `--timestamp=none` (Some(None)); unset, codesign's default, which
+    /// depends on the identity.
+    timestamp: Option<Option<String>>,
     verify: bool,
     verbose: bool,
     paths: Vec<PathBuf>,
@@ -52,8 +54,8 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
                 o.verbose = true;
             }
             "--verify" => o.verify = true,
-            "--timestamp=none" => o.timestamp = Some(false),
-            "--timestamp" => o.timestamp = Some(true),
+            "--timestamp=none" => o.timestamp = Some(None),
+            "--timestamp" => o.timestamp = Some(Some(timestamp::APPLE.to_string())),
             "--deep" | "--strict" => {}
             "--keychain" => {
                 // Identities come from the environment on Linux.
@@ -71,7 +73,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
                     }
                 }
             }
-            s if s.starts_with("--timestamp=") => o.timestamp = Some(true),
+            s if s.starts_with("--timestamp=") => o.timestamp = Some(Some(s["--timestamp=".len()..].to_string())),
             s if s.starts_with("--preserve-metadata") => {}
             s if s.starts_with("-v") && s.chars().skip(1).all(|c| c == 'v') => o.verbose = true,
             s if s.starts_with('-') => return Err(format!("unsupported option {s}\n{}", usage())),
@@ -159,18 +161,13 @@ fn file_identifier(path: &Path, image: &macho::Image, ad_hoc: bool) -> Result<St
 }
 
 fn sign_path(path: &Path, o: &Options, signer: Option<&identity::Identity>) -> Result<(), String> {
-    if let Some(id) = signer {
-        // codesign timestamps Developer ID signatures unless told not to, and
-        // others only when asked.
-        let developer_id = id.kind() == Ok(identity::Kind::DeveloperId);
-        if o.timestamp.unwrap_or(developer_id) {
-            return Err(format!(
-                "{}: secure timestamps are not supported by this codesign yet{}",
-                path.display(),
-                if o.timestamp.is_none() { " (codesign adds one to Developer ID signatures unless given --timestamp=none)" } else { "" }
-            ));
-        }
-    }
+    // codesign timestamps Developer ID signatures unless told not to, and
+    // others only when asked; ad hoc signatures never.
+    let timestamp_url = match (signer, &o.timestamp) {
+        (None, _) => None,
+        (Some(_), Some(choice)) => choice.clone(),
+        (Some(id), None) => (id.kind() == Ok(identity::Kind::DeveloperId)).then(|| timestamp::APPLE.to_string()),
+    };
     let entitlements = match &o.entitlements {
         Some(p) => Some(std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?),
         None => None,
@@ -239,6 +236,7 @@ fn sign_path(path: &Path, o: &Options, signer: Option<&identity::Identity>) -> R
             identity: signer,
             signing_time: cms::signing_time(),
             team: team.as_deref(),
+            timestamp_url: timestamp_url.as_deref(),
         };
         sign::sign(image, &inputs).map_err(|e| format!("{}: {e}", exe_path.display()))?;
     }

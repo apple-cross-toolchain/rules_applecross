@@ -20,6 +20,7 @@ const OID_SHA256: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01
 const OID_SHA256_RSA: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b];
 const OID_APPLE_CDHASHES_PLIST: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x63, 0x64, 0x09, 0x01];
 const OID_APPLE_CDHASHES: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x63, 0x64, 0x09, 0x02];
+const OID_TIMESTAMP_TOKEN: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x10, 0x02, 0x0e];
 
 fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
     let mut out = vec![tag];
@@ -101,8 +102,9 @@ pub fn signing_time() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// The SignedData signing `cd`, the image's (only) SHA-256 code directory.
-pub fn signed_data(cd: &[u8], identity: &Identity, time: u64) -> Result<Vec<u8>, String> {
+/// The SignedData signing `cd`, the image's (only) SHA-256 code directory,
+/// with a secure timestamp from the authority at `timestamp_url`, if given.
+pub fn signed_data(cd: &[u8], identity: &Identity, time: u64, timestamp_url: Option<&str>) -> Result<Vec<u8>, String> {
     let cd_digest = Sha256::digest(cd);
     let plist = cf::xml::to_bytes(&cf::Value::dict([(
         "cdhashes",
@@ -125,6 +127,11 @@ pub fn signed_data(cd: &[u8], identity: &Identity, time: u64) -> Result<Vec<u8>,
         .map_err(|e| format!("signing: {e}"))?;
     let mut implicit = signed_attrs.clone();
     implicit[0] = 0xa0;
+    // A timestamp is an unsigned attribute: [1] IMPLICIT SET OF Attribute.
+    let unsigned = match timestamp_url {
+        Some(url) => tlv(0xa1, &seq(&[&oid(OID_TIMESTAMP_TOKEN), &set_of(0x31, vec![crate::timestamp::timestamp(url, &signature)?])])),
+        None => Vec::new(),
+    };
     let signer_info = seq(&[
         &integer(&[1]),
         &seq(&[&identity.issuer, &integer(&identity.serial)]),
@@ -132,6 +139,7 @@ pub fn signed_data(cd: &[u8], identity: &Identity, time: u64) -> Result<Vec<u8>,
         &implicit,
         &algorithm(OID_SHA256_RSA),
         &tlv(0x04, &signature),
+        &unsigned,
     ]);
     let signed = indefinite(0x30, &[
         &integer(&[1]),
@@ -158,7 +166,7 @@ mod tests {
         .unwrap();
         let cd = include_bytes!("../tests/data/identity/apple-cd.bin");
         let apple = include_bytes!("../tests/data/identity/apple-cms.der");
-        assert_eq!(signed_data(cd, &identity, 1_793_079_973).unwrap(), apple.to_vec());
+        assert_eq!(signed_data(cd, &identity, 1_793_079_973, None).unwrap(), apple.to_vec());
     }
 
     #[test]
