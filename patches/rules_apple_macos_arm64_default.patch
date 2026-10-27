@@ -1,0 +1,27 @@
+Build macOS apps for arm64 when nothing names a macOS CPU, as on a Linux host.
+rules_apple chose x86_64 there unless the minimum OS was 27.0, and an Apple
+silicon Mac without Rosetta refuses to open an x86_64-only app (LaunchServices
+-10669). A Mac host still builds for its own CPU, and --macos_cpus still wins.
+
+diff --git a/apple/internal/transition_support.bzl b/apple/internal/transition_support.bzl
+--- a/apple/internal/transition_support.bzl
++++ b/apple/internal/transition_support.bzl
+@@ -106,13 +106,11 @@
+ }
+ 
+ def _macos_default_arch(*, minimum_os_version):
+-    # There is no Intel version of macOS 27, so default to arm64 when the minimum OS version is
+-    # 27.0 or higher. Fall back to x86_64 for earlier minimum OS versions until we're ready to
+-    # switch the default for all macOS builds to Apple Silicon (arm64).
+-    if (minimum_os_version and
+-        apple_common.dotted_version(minimum_os_version) >= apple_common.dotted_version("27.0")):
+-        return "arm64"
+-    return "x86_64"
++    # Reached only when nothing names a macOS CPU: no --macos_cpus, no macOS
++    # platform and no darwin --cpu, as on a Linux host. A Mac builds for its
++    # own CPU. Default to Apple silicon, which every macOS since 27 requires;
++    # an x86_64-only app needs Rosetta on the Macs people have.
++    return "arm64"
+ 
+ def _platform_specific_cpu_setting_name(platform_type):
+     """Returns the name of a platform-specific CPU setting.

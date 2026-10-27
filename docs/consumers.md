@@ -143,8 +143,10 @@ libstdc++-13-dev, libxml2-dev, libz3-dev, pkg-config, tzdata, unzip,
 zlib1g-dev. Newer releases may lack libraries it links (Ubuntu 26.04 has no
 `libxml2.so.2`).
 
-On a Linux host rules_apple builds macOS targets for x86_64 unless told
-otherwise; pass `--macos_cpus=arm64` for Apple silicon.
+On a Linux host macOS targets build for arm64 (Apple silicon) unless
+`--macos_cpus` says otherwise: rules_apple alone would choose x86_64 there,
+which a Mac without Rosetta refuses to open, so rules_applecross patches the
+default (patches/rules_apple_macos_arm64_default.patch).
 
 ## Swift packages
 
