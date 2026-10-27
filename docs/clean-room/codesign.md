@@ -5,9 +5,11 @@ F] --force --timestamp=none PATH`, as rules_apple runs it, for iOS-style
 and macOS bundles and Mach-O files. Output was byte-identical to Xcode 27.0's codesign
 on the first comparison, and Apple's `codesign --verify --strict` accepts it.
 
-Observed: two ad hoc signatures of the same input are identical; two
-identity signatures are not (their CMS blob records the signing time), so a
-signed `.ipa` can only be reproduced byte for byte when signed ad hoc.
+Also reproduced: signing with an identity (below), with and without
+`--options runtime`. Observed: two ad hoc signatures of the same input are
+identical; two identity signatures differ only in the signing time their CMS
+blob records. This codesign takes that time from `SOURCE_DATE_EPOCH` when it
+is set, so an identity-signed `.ipa` can be reproduced byte for byte too.
 
 ## The signature
 
@@ -19,7 +21,8 @@ flags adhoc, SHA-256, identifier from `CFBundleIdentifier`, special slots
 CodeResources, -5 entitlements, -7 DER entitlements (blob hashes for 5 and
 7), the executable segment from `__TEXT` with main-binary and
 get-task-allow flags. Space reserved: the SuperBlob's length plus 8,
-rounded up to 16 (sweeping identifier lengths 1-48). Like
+rounded up to 16 (sweeping identifier lengths 1-48), the length counted with
+an 88-byte code directory header whatever the version written. Like
 `codesign_allocate`, a missing `LC_CODE_SIGNATURE` is added after the load
 commands and the signature placed 16-byte aligned after `__LINKEDIT`, which
 grows to cover it. An existing signature is written over in place: bytes of
@@ -48,6 +51,60 @@ Entitlements are embedded in DER as well as XML with or without
 
 DER entitlements: `[APPLICATION 16] { INTEGER 1, [CONTEXT 16] { SEQUENCE {
 UTF8String key, value } ... } }`, keys in byte order.
+
+## The hardened runtime
+
+`--options runtime` sets flag 0x10000 and writes code directory version
+0x20500, whose header adds `runtime`, the SDK version from
+`LC_BUILD_VERSION` (0x1b0000 for the 27.0 SDK), and a zero
+`preEncryptOffset`: 96 bytes instead of 88. The space reserved is still
+reckoned with 88, 8 bytes short of the header written (476 bytes of
+SuperBlob reserve 480). Other `--options` flags are refused.
+
+## Identity signatures
+
+Observed by signing, in a VM, with a throwaway RSA identity: a leaf
+certificate (code signing extended key usage) issued by a self-signed test
+CA, both trusted for code signing. Apple-issued identities are not covered
+yet and are refused. Inputs: rules_applecross's iOS and macOS examples, a
+macOS app holding a universal dylib in `Contents/Frameworks` (signed first,
+as rules_apple does), `/bin/echo` (three slices), and a sweep of
+identifier lengths 1-48 with and without `--options runtime`. All were
+reproduced byte for byte, given codesign's signing time.
+
+This codesign reads the identity from `RULES_APPLECROSS_CODESIGN_KEY` (the
+private key, PEM) and `RULES_APPLECROSS_CODESIGN_CERTIFICATES` (its
+certificate and those it chains to, PEM), and matches `-s NAME` as codesign
+does: the certificate's SHA-1 in hex, or its common name or a prefix of it.
+
+Differences from an ad hoc signature:
+
+- The code directory has no adhoc flag (0 without the runtime) and no team
+  identifier: codesign takes that from Apple-issued certificates only.
+- The requirement set holds the designated requirement (type 3):
+  `identifier ID and certificate root = H"SHA-1 of the chain's root"`,
+  compiled as and(ident, anchor hash with slot -1). In text, an identifier
+  of letters, digits and `_` only is left unquoted (`identifier echo1`).
+- A Mach-O file named by its file name keeps the bare name; the `-UUID…`
+  suffix is for ad hoc signatures only.
+- The CMS blob is a SignedData, BER with indefinite lengths for the
+  ContentInfo, its `[0]`, the SignedData and the encapsulated content info,
+  definite DER within: version 1, digest SHA-256, detached content (the code
+  directory), the whole chain root included as a DER SET OF, and one
+  SignerInfo (issuer and serial, SHA-256, sha256WithRSAEncryption) whose
+  signed attributes, in DER order, are contentType (data), signingTime
+  (UTCTime), messageDigest (the code directory's SHA-256),
+  1.2.840.113635.100.9.2 (a SEQUENCE of the SHA-256 OID and the code
+  directory's SHA-256) and 1.2.840.113635.100.9.1 (an XML property list,
+  `cdhashes`, of that hash's first 20 bytes). PKCS#1 v1.5 signatures are
+  deterministic, so the same key and time give the same bytes.
+- No secure timestamp is added unless asked for (`--timestamp`), which this
+  codesign refuses for now.
+- Space reserved: everything before the CMS blob, plus 18000 bytes for it,
+  plus 8, rounded up to 16.
+- A bundle's seal records nested code signed by an identity with its
+  designated requirement in text, e.g. `identifier "com.apple.dt.runtime.swiftCompatibilitySpan"
+  and certificate root = H"4b76…"` (hex in lowercase), beside its cdhash.
 
 ## CodeResources
 

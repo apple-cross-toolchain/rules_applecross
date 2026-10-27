@@ -1,7 +1,9 @@
-//! Clean-room `codesign` for Linux: ad hoc signing and `--verify`; see
-//! docs/clean-room/codesign.md.
+//! Clean-room `codesign` for Linux: ad hoc and identity signing, and
+//! `--verify`; see docs/clean-room/codesign.md.
 
+mod cms;
 mod der;
+mod identity;
 mod resources;
 mod sign;
 
@@ -15,6 +17,11 @@ struct Options {
     identifier: Option<String>,
     entitlements: Option<PathBuf>,
     force: bool,
+    /// `--options runtime`.
+    runtime: bool,
+    /// `--timestamp` or `--timestamp=URL`: a secure timestamp asked for.
+    /// codesign adds none by default for an identity that isn't Apple's.
+    timestamp: bool,
     verify: bool,
     verbose: bool,
     paths: Vec<PathBuf>,
@@ -44,12 +51,27 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
                 o.verbose = true;
             }
             "--verify" => o.verify = true,
-            "--timestamp=none" | "--timestamp" | "--deep" | "--strict" => {}
-            s if s.starts_with("--timestamp=") || s.starts_with("--preserve-metadata") || s.starts_with("--options") => {
-                if s == "--options" {
-                    value(&a)?;
+            "--timestamp=none" => o.timestamp = false,
+            "--timestamp" => o.timestamp = true,
+            "--deep" | "--strict" => {}
+            "--keychain" => {
+                // Identities come from the environment on Linux.
+                value(&a)?;
+            }
+            s if s == "-o" || s == "--options" || s.starts_with("--options=") => {
+                let list = match s.strip_prefix("--options=") {
+                    Some(v) => v.to_string(),
+                    None => value(&a)?,
+                };
+                for flag in list.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+                    match flag {
+                        "runtime" => o.runtime = true,
+                        f => return Err(format!("unsupported --options flag {f}: this codesign supports runtime")),
+                    }
                 }
             }
+            s if s.starts_with("--timestamp=") => o.timestamp = true,
+            s if s.starts_with("--preserve-metadata") => {}
             s if s.starts_with("-v") && s.chars().skip(1).all(|c| c == 'v') => o.verbose = true,
             s if s.starts_with('-') => return Err(format!("unsupported option {s}\n{}", usage())),
             _ => o.paths.push(PathBuf::from(a)),
@@ -122,11 +144,12 @@ fn default_identifier(path: &Path) -> String {
 }
 
 /// The identifier codesign gives a Mach-O file with none of its own: the
-/// file name without its extension, made unique when it has no dot by
-/// appending "-", then "UUID" and the image's LC_UUID, in hex.
-fn file_identifier(path: &Path, image: &macho::Image) -> Result<String, String> {
+/// file name without its extension, made unique, when signing ad hoc and it
+/// has no dot, by appending "-", then "UUID" and the image's LC_UUID, in hex.
+/// An identity signature keeps the bare name.
+fn file_identifier(path: &Path, image: &macho::Image, ad_hoc: bool) -> Result<String, String> {
     let stem = default_identifier(path);
-    if stem.contains('.') {
+    if stem.contains('.') || !ad_hoc {
         return Ok(stem);
     }
     let uuid = image.uuid.ok_or_else(|| format!("{}: has no LC_UUID to derive an identifier from; pass -i", path.display()))?;
@@ -134,13 +157,9 @@ fn file_identifier(path: &Path, image: &macho::Image) -> Result<String, String> 
     Ok(format!("{stem}-{hex}"))
 }
 
-fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
-    let identity = o.identity.as_deref().unwrap();
-    if identity != "-" {
-        return Err(format!(
-            "{}: signing with identity \"{identity}\" needs a private key; this codesign signs ad hoc only (-s -)",
-            path.display()
-        ));
+fn sign_path(path: &Path, o: &Options, signer: Option<&identity::Identity>) -> Result<(), String> {
+    if o.timestamp && signer.is_some() {
+        return Err(format!("{}: secure timestamps are not supported by this codesign yet", path.display()));
     }
     let entitlements = match &o.entitlements {
         Some(p) => Some(std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?),
@@ -184,7 +203,7 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
             let embedded_id = embedded.as_ref().and_then(|e| Value::parse(e).ok()).and_then(|v| v.get("CFBundleIdentifier").and_then(|i| i.as_str()).map(String::from));
             let identifier = match o.identifier.clone().or(embedded_id) {
                 Some(i) => i,
-                None => file_identifier(path, first)?,
+                None => file_identifier(path, first, signer.is_none())?,
             };
             (identifier, embedded)
         }
@@ -205,6 +224,9 @@ fn sign_path(path: &Path, o: &Options) -> Result<(), String> {
             entitlements: entitlements.as_deref(),
             der_entitlements: der.as_deref(),
             entitlement_flags: sign::exec_seg_flags(entitlements_value.as_ref()),
+            runtime: o.runtime,
+            identity: signer,
+            signing_time: cms::signing_time(),
         };
         sign::sign(image, &inputs).map_err(|e| format!("{}: {e}", exe_path.display()))?;
     }
@@ -257,9 +279,36 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // An identity other than "-" must be the one the environment provides.
+    let signer = match o.identity.as_deref() {
+        Some(name) if name != "-" && !o.verify => match identity::Identity::from_environment() {
+            Ok(Some(id)) if id.matches(name) && id.apple_anchored() => {
+                eprintln!("{name}: identities issued by Apple are not supported by this codesign yet");
+                return ExitCode::FAILURE;
+            }
+            Ok(Some(id)) if id.matches(name) => Some(id),
+            Ok(Some(_)) => {
+                eprintln!("{name}: no identity found");
+                return ExitCode::FAILURE;
+            }
+            Ok(None) => {
+                eprintln!(
+                    "{name}: no identity found: this codesign reads its identity from {} (the private key, PEM) and {} (its certificates, PEM)",
+                    identity::KEY_ENV,
+                    identity::CERTIFICATES_ENV
+                );
+                return ExitCode::FAILURE;
+            }
+            Err(e) => {
+                eprintln!("{name}: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        _ => None,
+    };
     let mut status = ExitCode::SUCCESS;
     for p in &o.paths {
-        let r = if o.verify { verify_path(p) } else if o.identity.is_some() { sign_path(p, &o) } else { Err(usage()) };
+        let r = if o.verify { verify_path(p) } else if o.identity.is_some() { sign_path(p, &o, signer.as_ref()) } else { Err(usage()) };
         if let Err(e) = r {
             eprintln!("{e}");
             status = ExitCode::FAILURE;

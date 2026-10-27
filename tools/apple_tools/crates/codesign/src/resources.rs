@@ -216,8 +216,9 @@ pub fn build(entries: &[(String, Entry)], layout: Layout) -> Result<Value, Strin
 }
 
 /// The seal of nested code, which must already be signed: the cdhash of its
-/// preferred architecture and, as its designated requirement, the cdhash of
-/// each architecture. Ad hoc signatures have no other requirement.
+/// preferred architecture and its designated requirement: the one it was
+/// signed with, or for ad hoc code, which has none, the cdhash of each
+/// architecture.
 fn nested_seal(path: &Path) -> Result<Vec<(String, Value)>, String> {
     let executable = if path.is_dir() { bundle_executable(path)? } else { path.to_path_buf() };
     let data = std::fs::read(&executable).map_err(|e| format!("{}: {e}", executable.display()))?;
@@ -239,7 +240,12 @@ fn nested_seal(path: &Path) -> Result<Vec<(String, Value)>, String> {
     let first = crate::sign::preferred_slice(&images).ok_or("nested universal code without an arm64 slice is not supported by this codesign")?;
     let order: Vec<usize> = std::iter::once(first).chain((0..images.len()).filter(|&i| i != first)).collect();
     let hex = |h: &[u8]| h.iter().map(|b| format!("{b:02x}")).collect::<String>();
-    let requirement = order.iter().map(|&i| format!("cdhash H\"{}\"", hex(&hashes[i]))).collect::<Vec<_>>().join(" or ");
+    // Code signed by an identity carries a designated requirement of its own;
+    // ad hoc code is required by its cdhashes.
+    let requirement = match crate::sign::designated_requirement_text(images[first])? {
+        Some(text) => text,
+        None => order.iter().map(|&i| format!("cdhash H\"{}\"", hex(&hashes[i]))).collect::<Vec<_>>().join(" or "),
+    };
     Ok(vec![("cdhash".into(), Value::Data(hashes[first].clone())), ("requirement".into(), Value::string(requirement))])
 }
 

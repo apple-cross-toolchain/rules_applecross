@@ -1,4 +1,5 @@
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 
 rust_binary(
     name = "codesign",
@@ -8,7 +9,16 @@ rust_binary(
         "//crates/cf",
         "//crates/macho",
         "@crates//:regex",
+        "@crates//:rsa",
         "@crates//:sha1",
         "@crates//:sha2",
+        "@crates//:x509-cert",
     ],
+)
+
+rust_test(
+    name = "test",
+    # Apple's codesign output the identity signature is checked against.
+    compile_data = glob(["tests/data/**"]),
+    crate = ":codesign",
 )
