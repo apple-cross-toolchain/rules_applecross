@@ -148,6 +148,42 @@ Xcode 27.0's SDKs were built by Swift 6.4.0, which this repository's
 `apple_cross_toolchain.swift()` to match; a mismatch fails as `this SDK is
 not supported by the compiler`.
 
+
+## Signing with an identity on Linux
+
+The clean-room codesign signs ad hoc, or with an identity given as two PEM
+files: its private key (RSA) and its certificate with the chain above it.
+Apple Development, Apple Distribution and Developer ID identities get the
+team identifier and designated requirement codesign gives them;
+docs/clean-room/codesign.md has the details. Export the identity once, on
+the Mac that holds it (Keychain Access › Export, as a `.p12`), then:
+
+```sh
+openssl pkcs12 -in identity.p12 -nocerts -nodes -out identity.key
+openssl pkcs12 -in identity.p12 -nokeys -out identity.pem   # leaf, and add
+# Apple's intermediate (AppleWWDRCAG3.cer or DeveloperIDG2CA.cer) and the
+# Apple Root CA, as PEM, to identity.pem
+```
+
+and in the builder's untracked `.bazelrc.user`:
+
+```
+common --repo_env=RULES_APPLECROSS_CODESIGN_KEY=/abs/path/identity.key
+common --repo_env=RULES_APPLECROSS_CODESIGN_CERTIFICATES=/abs/path/identity.pem
+```
+
+rules_apple then finds the identity as on a Mac: by name
+(`--@build_bazel_rules_apple//apple/build_settings:signing_certificate_name`,
+or `--ios_signing_cert_name` for iOS) or by a provisioning profile's
+certificate. The files are referenced where they are, never copied into a
+repository, so the key is no action input and reaches no cache; signing
+therefore runs on the machine holding the key, not on a remote executor.
+Point the paths elsewhere to change identity: Bazel reruns signing when
+they change, but not when the files at the same paths do.
+
+Secure timestamps are not supported yet, so Developer ID signing needs
+`--timestamp=none` among the bundle's codesign options until they are.
+
 ## The Linux host
 
 The toolchain fetches LLVM, swift.org's Swift and the ported tools itself.

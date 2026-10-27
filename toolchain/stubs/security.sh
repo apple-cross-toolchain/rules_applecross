@@ -29,8 +29,24 @@ if [[ "$1" == "cms" ]]; then
 fi
 
 if [[ "$1" == "find-identity" ]]; then
-  echo '  1) AABBCCDDAABBCCDDAABBCCDDAABBCCDDAABBCCDD "Apple Development: Cross Compilation"'
-  echo '     1 valid identities found'
+  # The certificates of the identity configured for codesign, by SHA-1 and
+  # common name as security lists them, for rules_apple to match; without one,
+  # a placeholder for ad hoc signing.
+  certificates="%{certificates}"
+  if [[ -n "$certificates" ]]; then
+    n=0
+    while IFS= read -r -d '' pem; do
+      [[ -z "$pem" ]] && continue
+      sha1=$(printf '%s\n' "$pem" | openssl x509 -noout -fingerprint -sha1 | sed -e 's/^.*=//' -e 's/://g')
+      cn=$(printf '%s\n' "$pem" | openssl x509 -noout -subject -nameopt multiline | sed -n 's/^ *commonName *= *//p')
+      n=$((n + 1))
+      echo "  $n) $sha1 \"$cn\""
+    done < <(awk '/-----BEGIN CERTIFICATE-----/{c=""} {c=c $0 "\n"} /-----END CERTIFICATE-----/{printf "%s%c", c, 0}' "$certificates")
+    echo "     $n valid identities found"
+  else
+    echo '  1) AABBCCDDAABBCCDDAABBCCDDAABBCCDDAABBCCDD "Apple Development: Cross Compilation"'
+    echo '     1 valid identities found'
+  fi
 fi
 
 exit 0

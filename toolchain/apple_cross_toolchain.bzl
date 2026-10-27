@@ -379,6 +379,7 @@ _RULE_INPUT_FILES = [
     "stubs/empty_output_tool.sh",
     "stubs/intentbuilderc.py",
     "stubs/intentbuilderc.sh",
+    "stubs/codesign_identity.sh",
     "stubs/noop_tool.sh",
     "stubs/security.sh",
     "stubs/strip.sh",
@@ -690,8 +691,28 @@ def _apple_cross_toolchain_impl(rctx):
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
     # Stub codesign unless the ported tools carry one.
     _codesign_path = xcode_toolchain_bindir + "codesign"
-    if not rctx.path(_codesign_path).exists:
+    _codesign_stubbed = not rctx.path(_codesign_path).exists
+    if _codesign_stubbed:
         _install_executable(rctx, "stubs/noop_tool.sh", _codesign_path)
+
+    # A signing identity for `codesign -s NAME`: the paths of its private key
+    # and certificates, PEM. They are referenced, never copied into the
+    # repository, so the key is no action input and reaches no cache.
+    _signing_key = rctx.os.environ.get("RULES_APPLECROSS_CODESIGN_KEY", "").strip()
+    _signing_certificates = rctx.os.environ.get("RULES_APPLECROSS_CODESIGN_CERTIFICATES", "").strip()
+    if (_signing_key or _signing_certificates) and not rctx.os.name.startswith("mac"):
+        if not (_signing_key.startswith("/") and _signing_certificates.startswith("/")):
+            fail("RULES_APPLECROSS_CODESIGN_KEY and RULES_APPLECROSS_CODESIGN_CERTIFICATES must both be set, to absolute paths")
+        for _f in (_signing_key, _signing_certificates):
+            if not rctx.path(_f).exists:
+                fail("No such file: " + _f)
+        if _codesign_stubbed:
+            fail("Signing with an identity needs the clean-room codesign, which these ported tools lack")
+        rctx.execute(["mv", _codesign_path, _codesign_path + ".bin"])
+        rctx.template(_codesign_path, _toolchain_path(rctx, "stubs/codesign_identity.sh"), {
+            "%{certificates}": _signing_certificates,
+            "%{key}": _signing_key,
+        }, executable = True)
 
     _codesign_allocate_path = xcode_toolchain_bindir + "codesign_allocate"
     _install_executable(rctx, "stubs/noop_tool.sh", _codesign_allocate_path)
@@ -711,7 +732,9 @@ def _apple_cross_toolchain_impl(rctx):
     _security_path = xcode_toolchain_bindir + "security"
     result = rctx.execute(["test", "-e", _security_path])
     if result.return_code != 0:
-        _install_executable(rctx, "stubs/security.sh", _security_path)
+        rctx.template(_security_path, _toolchain_path(rctx, "stubs/security.sh"), {
+            "%{certificates}": _signing_certificates if not rctx.os.name.startswith("mac") else "",
+        }, executable = True)
 
     # Create arm64 swiftinterface files for arm64e-only frameworks.
     _patch_swiftinterfaces(rctx, [
@@ -810,6 +833,8 @@ repository's release. A content-addressed server takes
         "NETRC",
         "PATH",
         "RULES_APPLECROSS_BUILD_MACHINE_OS_BUILD",
+        "RULES_APPLECROSS_CODESIGN_CERTIFICATES",
+        "RULES_APPLECROSS_CODESIGN_KEY",
         "RULES_APPLECROSS_LOCAL_XCODE",
     ],
     implementation = _apple_cross_toolchain_impl,
