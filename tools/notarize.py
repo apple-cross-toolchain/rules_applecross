@@ -5,7 +5,9 @@ as `xcrun notarytool submit --wait` does, from any host.
         --issuer 01234567-89ab-cdef-0123-456789abcdef path/to/App.app
 
 It authenticates with an App Store Connect API key (the .p8 file, its key ID
-and its issuer ID), as notarytool's --key, --key-id and --issuer do, through
+and its issuer ID), as notarytool's --key, --key-id and --issuer do (or
+APP_STORE_CONNECT_KEY_PATH, APP_STORE_CONNECT_KEY_ID and
+APP_STORE_CONNECT_ISSUER_ID), through
 Apple's notary web API: it creates a submission, uploads the file to the
 storage Apple names for it, waits for a decision, and prints Apple's log. An
 .app is zipped first, symbolic links kept, as `ditto -c -k --keepParent`
@@ -210,9 +212,13 @@ def zip_app(app, out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--key", required=True, help="App Store Connect API key (.p8)")
-    parser.add_argument("--key-id", required=True)
-    parser.add_argument("--issuer", required=True)
+    # The key's flags default to the environment, so that none of it need
+    # appear on a command line.
+    for flag, env, what in (("--key", "APP_STORE_CONNECT_KEY_PATH", "App Store Connect API key (.p8)"),
+                            ("--key-id", "APP_STORE_CONNECT_KEY_ID", "the key's ID"),
+                            ("--issuer", "APP_STORE_CONNECT_ISSUER_ID", "the key's issuer ID")):
+        parser.add_argument(flag, default=os.environ.get(env), required=not os.environ.get(env),
+                            help="{} (default: ${})".format(what, env))
     parser.add_argument("--timeout", type=int, default=3600, help="seconds to wait for a decision")
     parser.add_argument("path", help=".app, .zip, .dmg or .pkg")
     args = parser.parse_args()

@@ -186,6 +186,14 @@ them, unless `--timestamp=none` is among the bundle's codesign options;
 others get one with `--timestamp`. Asking for it needs the network from the
 signing action, and makes the signature differ from build to build.
 
+A Developer ID-signed Mac app can be notarized off a Mac:
+`bazel run @rules_applecross//tools:notarize -- path/to/App.app` (or a
+`.zip`, `.dmg` or `.pkg`) submits it as `xcrun notarytool submit --wait`
+does, through Apple's notary web API. It authenticates with an App Store
+Connect API key, given as `--key AuthKey.p8 --key-id ID --issuer ISSUER` or
+by `APP_STORE_CONNECT_KEY_PATH`, `APP_STORE_CONNECT_KEY_ID` and
+`APP_STORE_CONNECT_ISSUER_ID`.
+
 A notarized Mac app's ticket can be stapled off a Mac too:
 `bazel run @rules_applecross//tools:staple -- path/to/App.app` fetches it
 from Apple's public lookup by the app's code directory hash and writes it to
