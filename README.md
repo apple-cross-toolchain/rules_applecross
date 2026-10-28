@@ -37,10 +37,10 @@ one fails:
   entities, queries and App Shortcuts compile as Xcode compiles them
   ([docs/clean-room/appintentsmetadataprocessor.md](docs/clean-room/appintentsmetadataprocessor.md));
 - Core Data models (`momc`, `mapc`);
-- Core ML's Create ML tree ensembles, and older neural networks. ML Programs
-  (`.mlpackage`) and Create ML's text classifiers, word taggers, image
-  classifiers and linear tabular models compile, and get their generated
-  classes, as Xcode makes them
+- Core ML's older neural networks. ML Programs (`.mlpackage`), tree
+  ensembles, and Create ML's text classifiers, word taggers, image
+  classifiers and tabular models compile, and get their generated classes,
+  as Xcode makes them
   ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
 - Reality Composer content (`realitytool`), DocC, and `.xib` files;
 - tvOS app icons and Icon Composer icons

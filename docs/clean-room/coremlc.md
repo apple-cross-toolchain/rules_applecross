@@ -1,8 +1,9 @@
 # coremlc
 
 Reproduced: `coremlc compile` and `coremlc generate` of ML Programs
-(`.mlpackage`) and of Create ML's text classifiers, word taggers, linear
-tabular models and image classifiers (`.mlmodel`), as rules_apple runs them. Compiling writes `<Name>.mlmodelc/`
+(`.mlpackage`), of tree ensembles, and of Create ML's text classifiers, word
+taggers, tabular models and image classifiers (`.mlmodel`), as rules_apple
+runs them. Compiling writes `<Name>.mlmodelc/`
 and the partial Info.plist. Generating writes the Swift class
 (`--public-access --language Swift`) or the Objective-C pair. The
 implementation is `toolchain/stubs/coremlc.py`, pure Python, with its
@@ -147,6 +148,58 @@ kinds of metadata, and four more from earlier probes. Every compiled and
 generated file matched, up to Xcode's map order for the two with two
 metadata entries; `tests/coremlc` keeps those two for generating only.
 
+## Tree ensembles
+
+Tree ensembles (`treeEnsembleRegressor` and `treeEnsembleClassifier`) come
+on their own, from coremltools's converters, or as the last part of Create
+ML's boosted tree, random forest and decision tree pipelines. Either way
+they compile to a `coremldata.bin` and a `_B0000.DAT` (in a pipeline,
+`model<N>/`, its tag `model<N>v1.0.0generic`).
+
+`coremldata.bin` has the `generic` header (u32 302 or 402, the specification
+version as given), the model description re-encoded (fields in number
+order, empty strings dropped, empty metadata always written), then u64 0,
+the length-prefixed name `_B0000.DAT` and the number of prediction
+dimensions. A classifier adds its string labels and its integer labels,
+each counted (one of the two empty). On its own, the model's analytics hold
+only `SpecificationDetails`.
+
+`_B0000.DAT` is the trees in a packed form (little-endian):
+- the base prediction, to which every tree that is only a leaf is added
+  (in tree id order) and then dropped;
+- a 12-byte header of field widths: record size, feature index, flags,
+  child, record count, dimension and sparse index, and a code for the
+  comparisons used;
+- one record per branch node, in preorder, true child first: the feature
+  index, two leaf flags, the missing-value flag and the comparison (a
+  negation bit, or the comparison itself when they're mixed or equality),
+  then the false child's offset or the leaf's number, then the threshold.
+  A branch whose only leaf child is the true one is written swapped, its
+  comparison negated and its missing-value flag inverted;
+- each tree's root, the leaves' values (dense; sparse when few leaves have
+  a value for every dimension; or one value per leaf) and offsets, in
+  packed arrays of the narrowest width that holds them;
+- the post-evaluation transform.
+
+Values are float32 unless some threshold or leaf value isn't exactly a
+float32, when all are float64.
+
+The layout was fitted to 479 models built to vary one thing each (tree
+counts and depths, node and tree ids, every comparison, missing-value
+flags, feature indices, dimensions, base values, leaf values, transforms,
+string and integer labels), then checked against 180 random ensembles made
+afterwards. Those caught one rule (when values go sparse), fixed before the
+last 100 were made. [coremlc-trees/](coremlc-trees/README.md) has every rule
+with the probes that establish it, and the scripts that make them. All 714 compiled models match, the 48 Create ML
+pipelines (boosted trees, random forests, decision trees, classifiers and
+regressors) included, as do the generated classes of those 48 and of 96
+others. Compiling the same model twice gives the same bytes.
+
+Not reproduced: updatable trees, transforms other than the four the
+specification defines, trees that aren't well formed (no single root,
+unreachable or missing nodes), and descriptions whose features' own
+fields are out of order.
+
 ## Image classifiers
 
 Create ML's image classifiers are pipeline classifiers of a Vision scene
@@ -159,6 +212,8 @@ scene print a part like the others. Xcode treats them as their own kind:
   `API_UNAVAILABLE(watchos)`) in place of a watchOS version;
 - before specification 4, the image conveniences (from a `CGImage` or a URL)
   are marked iOS 13.
+
+Before specification 6, the `MLShapedArray` conveniences are marked iOS 15.
 
 Nine models compared: two and three classes, labels with spaces and
 non-ASCII letters, both revisions, specification 1 as well, with and without
@@ -187,11 +242,9 @@ seen kept as they are.
 Refused, strict or relaxed:
 - **Older neural networks** (`neuralNetwork`, `.mlmodel`), with a message to
   convert the model to an ML Program.
-- **The other `.mlmodel` types** Create ML still produces: its tree
-  ensembles (boosted trees, random forests and decision trees, and the
-  `MLClassifier` or `MLRegressor` that picks one). These are the next step. Text classifiers and word taggers of
+- **Other `.mlmodel` types**, and text classifiers and word taggers of
   specifications other than 3, and pipelines of other parts or
-  specifications, are refused too.
+  specifications.
 - **Unestablished ML Program features:**
   - states, multiple functions, updatable models;
   - flexible shapes and default values;
