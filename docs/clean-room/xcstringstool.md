@@ -8,6 +8,11 @@ byte-identical to Xcode 27.0's. `toolchain/stubs/xcstringstool.py` is the
 implementation. It's pure Python, run by the ported tools' Python, so it
 behaves the same on any host.
 
+Provenance: black-box, as [README.md](README.md) describes. Everything below
+comes from Xcode 27.0's `xcstringstool` compiling catalogs written for the
+purpose and from its `--help`. No published source was needed, and no Apple
+binary was read.
+
 Method: Xcode 27.0's `xcstringstool` compiled constructed catalogs (about
 380 written to isolate one behaviour each, and about 1,400 generated at
 random), and this one compiled the same. Where both succeeded, every output
