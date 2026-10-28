@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>1&amp;&lt;&gt; %lld %%Ü</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>i</string>
+			<key>few</key>
+			<string>q"uote_kback\slash %i tab	q"uote</string>
+			<key>other</key>
+			<string>nl
+%% %i Ütab	Ü</string>
+		</dict>
+	</dict>
+	<key>back\slash</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>appletv</key>
+			<dict>
+				<key>NSStringLocalizedFormatKey</key>
+				<string>%2$#@value@</string>
+				<key>value</key>
+				<dict>
+					<key>NSStringFormatSpecTypeKey</key>
+					<string>NSStringPluralRuleType</string>
+					<key>NSStringFormatValueTypeKey</key>
+					<string>lld</string>
+					<key>one</key>
+					<string>q"uote %1$@ nl
+q"uoteHello %2$lld nl
+%%</string>
+					<key>other</key>
+					<string>Ütab	a %1$@ %%ax y %2$lld aHello</string>
+				</dict>
+			</dict>
+			<key>applewatch</key>
+			<string>Hellotab	Ü</string>
+			<key>mac</key>
+			<dict>
+				<key>NSStringLocalizedFormatKey</key>
+				<string>%2$#@value@</string>
+				<key>value</key>
+				<dict>
+					<key>NSStringFormatSpecTypeKey</key>
+					<string>NSStringPluralRuleType</string>
+					<key>NSStringFormatValueTypeKey</key>
+					<string>lld</string>
+					<key>many</key>
+					<string>ÜZ %1$@ &amp;&lt;&gt;Z_k %2$lld q"uote</string>
+				</dict>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>

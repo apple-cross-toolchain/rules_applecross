@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>10</key>
+	<string>v10</string>
+	<key>9</key>
+	<string>v9</string>
+	<key>B</key>
+	<string>vB</string>
+	<key>Z</key>
+	<string>vZ</string>
+	<key>_</key>
+	<string>v_</string>
+	<key>a</key>
+	<string>va</string>
+	<key>a b</key>
+	<string>va b</string>
+	<key>ab</key>
+	<string>vab</string>
+	<key>b</key>
+	<string>vb</string>
+	<key>é</key>
+	<string>vé</string>
+</dict>
+</plist>

@@ -1,0 +1,38 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "s": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "S",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "%lld p": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "%lld P",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "value": "%lld Ps",
+                  "state": "translated"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

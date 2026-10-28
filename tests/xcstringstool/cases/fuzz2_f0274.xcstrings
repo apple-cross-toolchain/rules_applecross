@@ -1,0 +1,10 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "q\"uoteq\"uote": {
+      "comment": "a",
+      "shouldTranslate": false
+    }
+  },
+  "version": "1.0"
+}

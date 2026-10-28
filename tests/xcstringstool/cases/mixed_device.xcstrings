@@ -1,0 +1,58 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "tap": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "device": {
+              "iphone": {
+                "stringUnit": {
+                  "value": "Tippen",
+                  "state": "translated"
+                }
+              },
+              "ipad": {
+                "stringUnit": {
+                  "value": "Tippen iPad",
+                  "state": "translated"
+                }
+              },
+              "mac": {
+                "stringUnit": {
+                  "value": "Klicken",
+                  "state": "translated"
+                }
+              },
+              "applewatch": {
+                "stringUnit": {
+                  "value": "W",
+                  "state": "translated"
+                }
+              },
+              "appletv": {
+                "stringUnit": {
+                  "value": "TV",
+                  "state": "translated"
+                }
+              },
+              "applevision": {
+                "stringUnit": {
+                  "value": "V",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "value": "Andere",
+                  "state": "translated"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

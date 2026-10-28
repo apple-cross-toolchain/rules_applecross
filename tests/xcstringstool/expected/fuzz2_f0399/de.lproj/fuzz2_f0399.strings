@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>%%back\slash%% %x Helloa</key>
+	<string>11&amp;&lt;&gt; %u Üa</string>
+	<key>%%x y</key>
+	<string>aZ %f 😀&amp;&lt;&gt;q"uote</string>
+</dict>
+</plist>

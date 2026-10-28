@@ -1,0 +1,102 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "nl\n %ld &<>Hello": {},
+    "Helloback\\slash %llu Z": {
+      "comment": "a",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "stale",
+            "value": "a😀"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "_k%%Hello %#@x@"
+          },
+          "substitutions": {
+            "x": {
+              "formatSpecifier": "f",
+              "variations": {
+                "plural": {
+                  "other": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "q\"uote %arg Üa"
+                    }
+                  },
+                  "few": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "😀tab\t %arg a"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "1Z&<> %lld _k%%tab\t": {
+      "localizations": {
+        "pt-BR": {
+          "variations": {
+            "plural": {
+              "many": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "Ü1 %1$lu back\\slashq\"uote%%"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "nl\nnl\n %1$lu Hello"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "x y %d %%%%": {
+      "comment": "q\"uote😀back\\slash",
+      "localizations": {
+        "en-GB": {
+          "variations": {
+            "plural": {
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ZZnl\n %1$u &<>nl\n_k"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "1Hello😀 %1$u a"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "_kZnl\n %1$u 1😀Z"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "tab\t %1$u Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

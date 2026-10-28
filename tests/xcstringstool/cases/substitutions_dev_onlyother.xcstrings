@@ -1,0 +1,22 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "o": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "device": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "O"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

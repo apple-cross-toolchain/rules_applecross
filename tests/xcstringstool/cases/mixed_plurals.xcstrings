@@ -1,0 +1,140 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%@ items": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "%@ Ding",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "value": "%@ Dinge",
+                  "state": "translated"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%d x": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "zero": {
+                "stringUnit": {
+                  "value": "keine",
+                  "state": "translated"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "value": "%d x",
+                  "state": "translated"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "value": "%d xx",
+                  "state": "translated"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "value": "%d f",
+                  "state": "translated"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "value": "%d m",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "value": "%d o",
+                  "state": "translated"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%1$@ has %2$lld": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "%1$@ hat %2$lld",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "value": "%1$@ haben %2$lld",
+                  "state": "translated"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld of %lld": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "%lld von %lld",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "value": "%lld von %lld!",
+                  "state": "translated"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "no args": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "eins",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "value": "viele",
+                  "state": "translated"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

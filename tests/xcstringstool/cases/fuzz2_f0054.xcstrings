@@ -1,0 +1,109 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "x y": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "device": {
+              "iphone": {
+                "variations": {
+                  "plural": {
+                    "few": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "1nl\n %@ Z %lld a_k1"
+                      }
+                    },
+                    "zero": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "nl\na😀 %lld nl\nq\"uote %@ 1Hello😀"
+                      }
+                    },
+                    "many": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "nl\n %@ Hello %lld 1Ü%%"
+                      }
+                    }
+                  }
+                }
+              },
+              "ipad": {
+                "variations": {
+                  "plural": {
+                    "many": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "%% %@ %%tab\tZ %lld 😀😀_k"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "stale",
+                        "value": "back\\slashHelloa %@ q\"uoteHello %lld back\\slash"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "a": {
+      "comment": "back\\slash",
+      "localizations": {
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "&<> %@ %% %llu &<>"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Zq\"uote %@ Ü %llu x y😀"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nl\n😀 %5d 😀": {
+      "localizations": {
+        "en-GB": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "&<> %.1f HelloZ1"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "new",
+            "value": "1tab\ta %llu 1&<>1"
+          }
+        },
+        "en": {
+          "variations": {
+            "device": {
+              "appletv": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "nl\nHello"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

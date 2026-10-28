@@ -1,0 +1,139 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "1a %llu 1ax y": {
+      "localizations": {
+        "Base": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "aÜ %#@x@"
+          },
+          "substitutions": {
+            "x": {
+              "formatSpecifier": "d",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "Ü %arg Hello"
+                    }
+                  },
+                  "few": {
+                    "stringUnit": {
+                      "state": "new",
+                      "value": "_k %arg &<>x y"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "%% %s 11 %x &<>nl\n_k"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "x y %s tab\ta %x %%&<>back\\slash"
+                }
+              }
+            }
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "😀%% %#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "formatSpecifier": "d",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "aq\"uote %arg _k"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "Hello😀1 %arg ÜZ"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "back\\slash": {
+      "localizations": {
+        "en-GB": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Z_k"
+          }
+        }
+      }
+    },
+    "%%q\"uote %f 😀Hello": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "stale",
+            "value": "back\\slash"
+          }
+        },
+        "Base": {
+          "variations": {
+            "device": {
+              "ipad": {
+                "variations": {
+                  "plural": {
+                    "few": {
+                      "stringUnit": {
+                        "state": "new",
+                        "value": "nl\n %@ nl\nq\"uote %llu tab\t"
+                      }
+                    },
+                    "one": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "😀 %@ Ü%%back\\slash %llu x y"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "%%Z_k %@ tab\t %llu 😀nl\n"
+                      }
+                    }
+                  }
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "x y&<>nl\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

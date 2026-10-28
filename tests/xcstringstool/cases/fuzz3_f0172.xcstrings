@@ -1,0 +1,40 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "😀Hello": {},
+    "Ü %d tab\t&<>": {
+      "comment": "q\"uoteHelloback\\slash",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ %%%%q\"uote %#@x@"
+          },
+          "substitutions": {
+            "x": {
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "back\\slash1tab\t %arg back\\slash"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "%% %arg nl\n"
+                    }
+                  }
+                }
+              },
+              "argNum": 2
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

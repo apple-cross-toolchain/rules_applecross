@@ -1,0 +1,238 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "ÜZ": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "😀"
+          }
+        },
+        "en-GB": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Zq\"uote😀"
+          }
+        },
+        "Base": {
+          "variations": {
+            "device": {
+              "applewatch": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "back\\slashHellotab\t"
+                }
+              },
+              "applevision": {
+                "variations": {
+                  "plural": {
+                    "other": {
+                      "stringUnit": {
+                        "state": "new",
+                        "value": "Hello1Ü %@ nl\nÜ %i tab\tnl\n"
+                      }
+                    },
+                    "one": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "Ü %@ _k %i 1nl\n"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "q\"uote": {
+      "localizations": {
+        "Base": {
+          "variations": {
+            "device": {
+              "ipad": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "tab\t1"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "Ü"
+                }
+              },
+              "iphone": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "nl\nnl\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Hellotab\t%%": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "device": {
+              "mac": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "1😀back\\slash"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "ÜHello"
+                }
+              }
+            }
+          }
+        },
+        "Base": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "Z1q\"uote %5d q\"uoteback\\slashtab\t"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "nl\n %5d back\\slash"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "1 %5d x y1Z"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "q\"uote %5d Zback\\slashx y"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tab\ttab\ttab\t": {
+      "localizations": {
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%%a %f x y"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "Z %f back\\slasha"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "ZÜ %f Z"
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "two": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "nl\nback\\slash %u nl\n"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "Ü1Z %u &<>_k%%"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "_knl\n %u %%tab\t"
+                }
+              },
+              "zero": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "Ü"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "x yx ya %#@files@ %#@n@"
+          },
+          "substitutions": {
+            "files": {
+              "formatSpecifier": "ld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "a😀 %arg _k_k"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "1_k1 %arg tab\t"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            },
+            "n": {
+              "formatSpecifier": "ld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "new",
+                      "value": "nl\n_k %arg Üq\"uote😀"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "q\"uote %arg nl\n%%x y"
+                    }
+                  }
+                }
+              },
+              "argNum": 2
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

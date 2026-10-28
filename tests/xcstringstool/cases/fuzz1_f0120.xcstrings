@@ -1,0 +1,99 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "😀😀😀": {
+      "comment": "q\"uote😀"
+    },
+    "x yq\"uote": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%%"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a%% %#@n@"
+          },
+          "substitutions": {
+            "n": {
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "few": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "q\"uotex y %arg back\\slasha"
+                    }
+                  },
+                  "one": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "_knl\n%% %arg _k%%"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            }
+          }
+        }
+      }
+    },
+    "nl\n1": {},
+    "Z&<>": {
+      "localizations": {
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Ü %llu nl\n"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "nl\n %llu Ü"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "_kZ %llu back\\slash1"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "atab\ttab\t %.1f _kaa": {
+      "comment": "Ü",
+      "localizations": {
+        "zh-Hans": {
+          "variations": {
+            "device": {
+              "ipad": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "q\"uoteq\"uoteZ"
+                }
+              }
+            }
+          }
+        },
+        "en-GB": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "_k_kx y"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

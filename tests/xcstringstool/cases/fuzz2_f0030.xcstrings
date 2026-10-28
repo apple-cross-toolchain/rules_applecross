@@ -1,0 +1,106 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "1&<>%%": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "stale",
+            "value": "tab\tHello"
+          }
+        }
+      }
+    },
+    "back\\slash😀%% %lu _kaÜ": {
+      "comment": "%%",
+      "localizations": {
+        "de": {
+          "variations": {
+            "device": {
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "aa"
+                }
+              },
+              "applewatch": {
+                "variations": {
+                  "plural": {
+                    "zero": {
+                      "stringUnit": {
+                        "state": "stale",
+                        "value": "Hellotab\t %.1f nl\nHelloq\"uote"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "new",
+                        "value": "q\"uoteZ&<> %.1f Hello😀1"
+                      }
+                    }
+                  }
+                }
+              },
+              "iphone": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "nl\ntab\t"
+                }
+              },
+              "mac": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "Helloback\\slashtab\t"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "1 %x 😀Üa"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "nl\n %x 1a"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "_ktab\t%% %x Z"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "😀Hello_k %x tab\tback\\slash"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "aZa": {
+      "extractionState": "manual"
+    },
+    "nl\n1Ü %llu %%1": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "back\\slashtab\t %f q\"uote"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

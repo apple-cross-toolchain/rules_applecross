@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>&amp;&lt;&gt;</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>applewatch</key>
+			<string>a</string>
+			<key>mac</key>
+			<dict>
+				<key>NSStringLocalizedFormatKey</key>
+				<string>%2$#@value@</string>
+				<key>value</key>
+				<dict>
+					<key>NSStringFormatSpecTypeKey</key>
+					<string>NSStringPluralRuleType</string>
+					<key>NSStringFormatValueTypeKey</key>
+					<string>x</string>
+					<key>few</key>
+					<string>😀tab	</string>
+					<key>one</key>
+					<string>%%tab	 %1$s tab	Z %2$x anl
+</string>
+					<key>other</key>
+					<string>tab	Z %1$s %%q"uote %2$x _k%%</string>
+					<key>two</key>
+					<string>_kHello %1$s Hello&amp;&lt;&gt;%% %2$x Ütab	😀</string>
+				</dict>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>

@@ -1,0 +1,116 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "😀a&<>": {
+      "localizations": {
+        "ja": {
+          "variations": {
+            "plural": {
+              "zero": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "Zx y😀 %i tab\tq\"uote%%"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "&<>x yZ %i x y"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "1 %i Hello"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "&<>Z %i 😀"
+                }
+              }
+            }
+          }
+        },
+        "en-GB": {
+          "variations": {
+            "plural": {
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Üx y"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "q\"uote %f q\"uote%%tab\t %@ 😀"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nl\n": {},
+    "anl\n": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "a"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "stale",
+            "value": "_kback\\slashq\"uote %ld x ya"
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "_k %1$.1f 😀nl\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tab\tZ😀 %i x y": {
+      "comment": "tab\tÜ",
+      "localizations": {
+        "en-GB": {
+          "variations": {
+            "device": {
+              "mac": {
+                "variations": {
+                  "plural": {
+                    "many": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "Ü1Hello %llu HelloHelloZ"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "😀 %llu 😀_k"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -1,0 +1,11 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Helloq\"uote1 %lu 1": {
+      "comment": "%%1",
+      "extractionState": "extracted_with_value",
+      "shouldTranslate": false
+    }
+  },
+  "version": "1.0"
+}

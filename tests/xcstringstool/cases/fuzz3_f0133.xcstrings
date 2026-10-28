@@ -1,0 +1,135 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "back\\slash %f nl\n1_k": {
+      "extractionState": "extracted_with_value",
+      "shouldTranslate": false
+    },
+    "😀😀 %.1f _k": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "😀 %#@count@"
+          },
+          "substitutions": {
+            "count": {
+              "formatSpecifier": "f",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "x yq\"uotenl\n %arg 1"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "Ü&<> %arg Üback\\slashÜ"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            }
+          }
+        }
+      }
+    },
+    "%%tab\t%% %u 😀back\\slashx y": {},
+    "😀q\"uote %x Z": {},
+    "x yback\\slash": {
+      "comment": "q\"uoteback\\slash",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "stale",
+            "value": "_kHello"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "nl\n %#@count@"
+          },
+          "substitutions": {
+            "count": {
+              "formatSpecifier": "ld",
+              "variations": {
+                "plural": {
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "nl\n&<>x y %arg %%"
+                    }
+                  },
+                  "few": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "_k %arg _k"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            }
+          }
+        },
+        "Base": {
+          "variations": {
+            "device": {
+              "mac": {
+                "variations": {
+                  "plural": {
+                    "two": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "q\"uotex y %s &<>😀 %i anl\n"
+                      }
+                    },
+                    "many": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "tab\t %s &<>1 %i q\"uote"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "😀Ü&<> %s x y %i Ü1a"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Z %u %%Ü": {
+      "localizations": {
+        "en-GB": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "aHello %1$s q\"uotex y%% %2$lu 😀"
+                }
+              },
+              "zero": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "q\"uotenl\n %2$lu q\"uote %1$s nl\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

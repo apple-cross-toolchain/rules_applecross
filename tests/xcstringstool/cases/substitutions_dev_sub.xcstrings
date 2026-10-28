@@ -1,0 +1,50 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%lld d": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "device": {
+              "iphone": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%#@n@ iPhone"
+                },
+                "substitutions": {
+                  "n": {
+                    "formatSpecifier": "lld",
+                    "variations": {
+                      "plural": {
+                        "one": {
+                          "stringUnit": {
+                            "state": "translated",
+                            "value": "%arg D"
+                          }
+                        },
+                        "other": {
+                          "stringUnit": {
+                            "state": "translated",
+                            "value": "%arg Ds"
+                          }
+                        }
+                      }
+                    },
+                    "argNum": 1
+                  }
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Ds"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -1,0 +1,120 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "x ynl\n %x nl\n&<>": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "&<>_k"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%%"
+          }
+        }
+      }
+    },
+    "atab\t %llu 1x y1": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "new",
+            "value": "tab\t"
+          }
+        },
+        "Base": {
+          "variations": {
+            "device": {
+              "iphone": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "😀1"
+                }
+              },
+              "appletv": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "a"
+                }
+              },
+              "mac": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "&<>_k"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "back\\slashtab\tq\"uote"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "_k %.1f q\"uote": {},
+    "q\"uote": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "stale",
+            "value": "nl\n_ka %lld x y&<>"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "back\\slash%%"
+          }
+        }
+      }
+    },
+    "%%x y😀": {
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "fr": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "nl\n&<> %s x yback\\slash %i &<>&<>Z"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "x y&<>tab\t %i %% %s nl\n"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "q\"uotea %s nl\na %i Z"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "&<>"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%%Hello"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

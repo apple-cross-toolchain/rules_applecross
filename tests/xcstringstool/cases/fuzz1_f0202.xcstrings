@@ -1,0 +1,119 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Ünl\n %x 😀tab\t": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ax yq\"uote %lld a"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "x ya %lld Hellonl\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tab\tnl\n": {},
+    "Ü1": {
+      "comment": "Hello😀Z",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "&<>"
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "device": {
+              "mac": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "q\"uote"
+                }
+              },
+              "iphone": {
+                "variations": {
+                  "plural": {
+                    "other": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "a_ktab\t %s Ü %x nl\n"
+                      }
+                    },
+                    "zero": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "Ünl\n %s _knl\n %x 1Ü1"
+                      }
+                    },
+                    "many": {
+                      "stringUnit": {
+                        "state": "translated",
+                        "value": "%%Z %s Hello %x Z%%x y"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "variations": {
+            "device": {
+              "appletv": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "&<>Z"
+                }
+              },
+              "applevision": {
+                "variations": {
+                  "plural": {
+                    "many": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "q\"uote %llu nl\n"
+                      }
+                    },
+                    "one": {
+                      "stringUnit": {
+                        "state": "stale",
+                        "value": "x yx ynl\n %llu x y%%"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "😀 %llu Hello"
+                      }
+                    }
+                  }
+                }
+              },
+              "mac": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "q\"uote1nl\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

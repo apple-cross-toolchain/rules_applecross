@@ -1,0 +1,29 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Hello" : {
+      "comment" : "greeting",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Hallo" } },
+        "fr" : { "stringUnit" : { "state" : "needs_review", "value" : "Bonjour" } }
+      }
+    },
+    "Bye" : {},
+    "%lld apples" : {
+      "localizations" : {
+        "en" : { "variations" : { "plural" : {
+          "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld apple" } },
+          "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld apples" } } } } },
+        "de" : { "variations" : { "plural" : {
+          "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld Apfel" } },
+          "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld Äpfel" } } } } }
+      }
+    },
+    "quote \" and \\ and \n newline" : {
+      "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Zitat \" ü \t tab" } } }
+    },
+    "untranslatable" : { "shouldTranslate" : false },
+    "stale" : { "extractionState" : "stale", "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "alt" } } } }
+  },
+  "version" : "1.0"
+}

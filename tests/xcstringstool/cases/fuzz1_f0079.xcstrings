@@ -1,0 +1,114 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Helloq\"uote&<> %ld Helloback\\slashZ": {
+      "localizations": {
+        "Base": {
+          "variations": {
+            "plural": {
+              "zero": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "nl\nback\\slash %1$@ tab\tq\"uote %2$lld q\"uotex y"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Z %2$lld back\\slashÜ_k %1$@ %%"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "nl\nÜ %1$@ tab\ta %2$lld Üa"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "😀": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "nl\n&<>"
+          }
+        },
+        "pt-BR": {
+          "variations": {
+            "plural": {
+              "zero": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "_k %@ Ü %lld 1_kHello"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ÜHello %@ q\"uoteZnl\n %lld q\"uote"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "back\\slash😀 %@ ZZx y %lld Hello_k"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "x y&<>": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "tab\t %1$i Hello"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "_k_k %.1f nl\n"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "tab\tHelloÜ %.1f &<>&<>back\\slash"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "x y_k %.1f %%"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "%%"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

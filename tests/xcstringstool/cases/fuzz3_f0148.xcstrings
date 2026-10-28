@@ -1,0 +1,145 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "😀 %lld a1%%": {
+      "comment": "1back\\slash"
+    },
+    "_k&<>": {
+      "comment": "q\"uote1",
+      "localizations": {
+        "en": {
+          "variations": {
+            "device": {
+              "appletv": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "q\"uote&<>x y"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "&<>Hello"
+                }
+              }
+            }
+          }
+        },
+        "Base": {
+          "variations": {
+            "plural": {
+              "zero": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "&<>1_k %s tab\tx y %i back\\slashZtab\t"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "&<> %s nl\n %i 😀"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "_k %s 1%% %i Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "back\\slashtab\t %ld q\"uoteÜ_k": {
+      "comment": "Hello",
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ü😀back\\slash"
+          }
+        },
+        "en-GB": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "😀a %#@x@ %#@files@"
+          },
+          "substitutions": {
+            "x": {
+              "formatSpecifier": "ld",
+              "variations": {
+                "plural": {
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "a1nl\n %arg x yZ"
+                    }
+                  },
+                  "one": {
+                    "stringUnit": {
+                      "state": "new",
+                      "value": "q\"uote %arg %%"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            },
+            "files": {
+              "formatSpecifier": "d",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "back\\slash %arg back\\slashtab\t%%"
+                    }
+                  },
+                  "few": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "😀&<>nl\n %arg &<>_k"
+                    }
+                  }
+                }
+              },
+              "argNum": 2
+            }
+          }
+        },
+        "Base": {
+          "variations": {
+            "device": {
+              "iphone": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "Ü"
+                }
+              },
+              "applewatch": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Z😀"
+                }
+              },
+              "applevision": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "Hello"
+                }
+              },
+              "mac": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "1q\"uoteÜ"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

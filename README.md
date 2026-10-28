@@ -32,15 +32,15 @@ Off a Mac, these have no Linux version yet, and building a target that needs
 one fails:
 
 - Metal shaders (`metal`, `metallib`);
-- String Catalogs (`.xcstrings`);
 - App Intents metadata (`appintentsmetadataprocessor`);
 - Core Data models (`momc`, `mapc`) and Core ML models (`coremlc`);
 - Reality Composer content (`realitytool`), DocC, and `.xib` files;
 - tvOS app icons and Icon Composer icons
   ([docs/clean-room](docs/clean-room/README.md)).
 
-`--config=relaxed` lets the first two through as near matches: an empty
-Metal library, and String Catalogs' simple strings without their variations.
+`--config=relaxed` lets Metal through as an empty Metal library. String
+Catalogs compile as Xcode compiles them; the few it can't yet reproduce, it
+refuses unless relaxed ([docs/clean-room/xcstringstool.md](docs/clean-room/xcstringstool.md)).
 
 ## Setup
 

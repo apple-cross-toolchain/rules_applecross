@@ -1,0 +1,185 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "nl\n": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "_kÜ %#@x@"
+          },
+          "substitutions": {
+            "x": {
+              "formatSpecifier": "f",
+              "variations": {
+                "plural": {
+                  "few": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "😀1%% %arg x y"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "&<>%%nl\n %arg 😀back\\slashHello"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            }
+          }
+        },
+        "Base": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Z %#@count@ %#@x@"
+          },
+          "substitutions": {
+            "count": {
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "11😀 %arg aÜq\"uote"
+                    }
+                  },
+                  "few": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "&<> %arg a1_k"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            },
+            "x": {
+              "formatSpecifier": "d",
+              "variations": {
+                "plural": {
+                  "other": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "nl\n1 %arg 😀Ü"
+                    }
+                  },
+                  "few": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "&<>Helloq\"uote %arg nl\ntab\tnl\n"
+                    }
+                  }
+                }
+              },
+              "argNum": 2
+            }
+          }
+        }
+      }
+    },
+    "aÜ": {
+      "localizations": {
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "Z %.1f Hello"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%%nl\n %.1f q\"uoteaback\\slash"
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "device": {
+              "applewatch": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "tab\ta"
+                }
+              }
+            }
+          }
+        },
+        "en-GB": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "nl\nZ"
+          }
+        }
+      }
+    },
+    "nl\nnl\nHello": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "HelloÜ"
+          }
+        },
+        "en": {
+          "variations": {
+            "device": {
+              "applewatch": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "😀&<>"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "Hello11"
+                }
+              },
+              "applevision": {
+                "variations": {
+                  "plural": {
+                    "two": {
+                      "stringUnit": {
+                        "state": "stale",
+                        "value": "Ü1back\\slash %i nl\n&<>😀 %@ ÜZq\"uote"
+                      }
+                    },
+                    "many": {
+                      "stringUnit": {
+                        "state": "new",
+                        "value": "ZZ1 %@ _k&<>x y %i x y"
+                      }
+                    },
+                    "zero": {
+                      "stringUnit": {
+                        "state": "needs_review",
+                        "value": "_k😀 %i 1 %@ x y"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "new",
+                        "value": "Z %@ %%_kÜ %i Hello"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nl\n %ld back\\slashHello1": {}
+  },
+  "version": "1.0"
+}

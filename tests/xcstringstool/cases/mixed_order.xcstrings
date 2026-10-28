@@ -1,0 +1,106 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "b": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "vb",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "a": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "va",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "B": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "vB",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "é": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "vé",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "10": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "v10",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "9": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "v9",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "_": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "v_",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "Z": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "vZ",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "a b": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "va b",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "ab": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "vab",
+            "state": "translated"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

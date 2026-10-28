@@ -1,0 +1,16 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "amp & lt < gt > apos ' ctl \u0001 emoji 😀 cr \r": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "value": "& < > ' \u0001 😀 \r ]]>",
+            "state": "translated"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

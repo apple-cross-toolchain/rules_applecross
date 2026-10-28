@@ -1,0 +1,34 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "k": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "value": "pt",
+            "state": "translated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "value": "zh",
+            "state": "translated"
+          }
+        },
+        "en-GB": {
+          "stringUnit": {
+            "value": "gb",
+            "state": "translated"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "value": "de",
+            "state": "translated"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
