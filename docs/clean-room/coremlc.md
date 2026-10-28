@@ -1,8 +1,8 @@
 # coremlc
 
 Reproduced: `coremlc compile` and `coremlc generate` of ML Programs
-(`.mlpackage`) and of Create ML's text classifiers and word taggers
-(`.mlmodel`), as rules_apple runs them. Compiling writes `<Name>.mlmodelc/`
+(`.mlpackage`) and of Create ML's text classifiers, word taggers and linear
+tabular models (`.mlmodel`), as rules_apple runs them. Compiling writes `<Name>.mlmodelc/`
 and the partial Info.plist. Generating writes the Swift class
 (`--public-access --language Swift`) or the Objective-C pair. The
 implementation is `toolchain/stubs/coremlc.py`, pure Python, with its
@@ -15,8 +15,8 @@ Provenance: black-box, as [README.md](README.md) describes. Sources:
 - Apple's published Core ML model specification (the protobuf schema
   coremltools ships), for reading models.
 - coremltools, to build the test models and to list MIL operation names.
-- Apple's public CreateML framework, from a small Swift program, to train text
-  classifiers and word taggers as Create ML exports them.
+- Apple's public CreateML framework, from small Swift programs, to train text
+  classifiers, word taggers and tabular models as Create ML exports them.
 - CoreFoundation's published string hash and hash tables, for key order.
 
 Generating writes Xcode's fixed template text, taken from its outputs, around
@@ -115,6 +115,37 @@ Twelve models compared, trained with five label sets and the possible
 metadata. Every compiled and generated file matched, up to Xcode's map order
 for the one with two metadata entries.
 
+## Tabular models
+
+Create ML's linear and logistic regression models (`MLLinearRegressor`,
+`MLLogisticRegressionClassifier`, and the `MLRegressor` and `MLClassifier`
+that pick them) are pipelines (specification 1) of one-hot encoders, a
+feature vectorizer and a linear model. Compiling one writes a directory per
+part, `model0/`, `model1/` and so on:
+- each part's `coremldata.bin` has the text classifiers' header, with the
+  part's own field number (300 linear regressor, 400 linear classifier, 600
+  one-hot encoder, 602 feature vectorizer) and specification version, then
+  the part's bytes;
+- the top `coremldata.bin` has u32 200 (classifier) or 201 (regressor), u32 1
+  and 12 zero bytes, u32 1 and u32 0, the length-prefixed tag
+  `generic.model0v1.0.0spec.model1v1.0.0spec…`, the specification version
+  and 28 zero bytes, then the length-prefixed model description, the part
+  count, and u64 200 or 201 again.
+
+Their analytics add `PipelineModelDetails` (the part count). `metadata.json`
+names each part under `modelType`, and a classifier's labels come from its
+linear model (`stringClassLabels` or `int64ClassLabels`). Number features
+are `Double`.
+
+Generated code for specification 1 follows the specification 3 template,
+with availability from iOS 11, and iOS 12 availability on the configuration
+initializers and on batch predictions.
+
+Fifteen models compared, trained with five feature and label sets and three
+kinds of metadata, and four more from earlier probes. Every compiled and
+generated file matched, up to Xcode's map order for the two with two
+metadata entries; `tests/coremlc` keeps those two for generating only.
+
 ## Generated code
 
 The Swift class and the Objective-C header and implementation follow
@@ -137,11 +168,12 @@ seen kept as they are.
 Refused, strict or relaxed:
 - **Older neural networks** (`neuralNetwork`, `.mlmodel`), with a message to
   convert the model to an ML Program.
-- **The other `.mlmodel` types** Create ML still produces: the pipelines of
-  feature vectorizers, linear models and tree ensembles behind its tabular
-  models, and its image classifiers. These are the next step. Text
-  classifiers and word taggers of specifications other than 3 are refused
-  too.
+- **The other `.mlmodel` types** Create ML still produces: its tree
+  ensembles (boosted trees, random forests and decision trees, and the
+  `MLClassifier` or `MLRegressor` that picks one), and its image classifiers.
+  These are the next step. Text classifiers and word taggers of
+  specifications other than 3, and pipelines of other parts or
+  specifications, are refused too.
 - **Unestablished ML Program features:**
   - states, multiple functions, updatable models;
   - flexible shapes and default values;
