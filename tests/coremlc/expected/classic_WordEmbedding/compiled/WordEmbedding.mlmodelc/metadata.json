@@ -1,0 +1,52 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "shortDescription" : "This model is an embedding (version 1) with dimension 3 and vocabulary size 3",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Double",
+        "formattedType" : "MultiArray (Double)",
+        "shortDescription" : "vector",
+        "shape" : "[]",
+        "name" : "vector",
+        "type" : "MultiArray"
+      }
+    ],
+    "version" : "1",
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 4,
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_wordEmbedding"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "text",
+        "shortDescription" : "word"
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "WordEmbedding",
+    "method" : "predict"
+  }
+]

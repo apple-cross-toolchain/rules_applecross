@@ -3,9 +3,10 @@
 runs it (`compile MODEL OUTDIR --output-partial-info-plist PLIST`); see
 docs/clean-room/coremlc.md.
 
-ML Programs (.mlpackage) compile to the files Xcode 27.0's coremlc writes,
-read from the model's specification (Apple's published Core ML protobuf
-schema). Neural networks, an older format, are refused; so is what hasn't
+ML Programs (.mlpackage) and the other model types (.mlmodel) compile to
+the files Xcode 27.0's coremlc writes, read from the model's specification
+(Apple's published Core ML protobuf schema). Neural networks, an older
+format, are refused; so is what hasn't
 been established against Xcode, strict (the default). Relaxed
 (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, --config=relaxed), refused
 models fail all the same: there is no near match to write.
@@ -40,6 +41,77 @@ def _varint(data, i):
         shift += 7
         if b < 0x80:
             return value, i
+
+
+def _minimal_varint(data, i):
+    """(value, next index), or None for a varint longer than it needs to be."""
+    start, value, shift = i, 0, 0
+    while True:
+        b = data[i]
+        i += 1
+        value |= (b & 0x7F) << shift
+        shift += 7
+        if b < 0x80:
+            return None if i - start > 1 and b == 0 else (value, i)
+
+
+def _wire_message(data):
+    """[(number, wire, payload or None)] if `data` parses as a whole message
+    with minimal varints, otherwise None."""
+    out, i = [], 0
+    try:
+        while i < len(data):
+            key = _minimal_varint(data, i)
+            if key is None or key[0] >> 3 == 0:
+                return None
+            (number, wire), i = divmod(key[0], 8), key[1]
+            if wire in (0, 2):
+                value = _minimal_varint(data, i)
+                if value is None:
+                    return None
+                value, i = value
+                out.append((number, wire, data[i:i + value] if wire == 2 else None))
+                i += value if wire == 2 else 0
+            elif wire in (1, 5):
+                i += 8 if wire == 1 else 4
+                out.append((number, wire, None))
+            else:
+                return None
+        return out if i == len(data) else None
+    except IndexError:
+        return None
+
+
+def _in_order(fields):
+    """Fields in number order, a scalar field at most once (repeated scalars
+    packed), as protobuf's serializers write them."""
+    last = 0
+    for number, wire, _ in fields:
+        if number < last or (number == last and wire != 2):
+            return False
+        last = number
+    return True
+
+
+def check_encoding(model_bytes):
+    """Xcode re-encodes the specification it copies; this tool copies it as
+    given. So the levels known to be messages must already be encoded as
+    protobuf writes them: the Model, its description, the description's
+    features and metadata, and the model type's own message."""
+    model = _wire_message(model_bytes)
+    ok = model is not None and _in_order(model)
+    for number, _, payload in model or []:
+        if payload is None:
+            continue
+        fields = _wire_message(payload)
+        ok = ok and fields is not None and _in_order(fields)
+        if number == 2:
+            for n, _, p in fields or []:
+                if n in (1, 10, 13, 50, 100) and p is not None:
+                    inner = _wire_message(p)
+                    ok = ok and inner is not None and _in_order(inner)
+    if not ok:
+        unestablished("a model not encoded as protobuf's serializers encode it (Xcode re-encodes it)")
 
 
 class Message:
@@ -774,7 +846,7 @@ def function_attributes(inputs, states, spec_version):
 # Keys in the order coremlc inserts them (CoreFoundation's enumeration
 # order depends on it where keys collide), fitted to Xcode 27.0's output.
 TOP_KEYS = ["author", "inputSchema", "modelParameters", "shortDescription", "version", "method", "modelType",
-            "license", "metadataOutputVersion", "outputSchema", "defaultFunctionName", "stateSchema", "isUpdatable",
+            "license", "metadataOutputVersion", "customModels", "trainingInputSchema", "updateParameters", "outputSchema", "defaultFunctionName", "stateSchema", "isUpdatable",
             "classLabels", "specificationVersion", "availability", "generatedClassName", "userDefinedMetadata",
             "storagePrecision", "functions", "mlProgramOperationTypeHistogram", "computePrecision"]
 SCHEMA_KEYS = ["sizeFlexibility", "enumeratedSizes", "isColor", "colorspace", "hasSizeFlexibility", "shape", "keyType", "type",
@@ -790,6 +862,7 @@ FUNCTION_KEYS = ["name", "inputSchema", "outputSchema", "stateSchema", "storageP
 # Deployment availability by specification version.
 AVAILABILITY = {
     1: {"macOS": "10.13", "tvOS": "11.0", "visionOS": "1.0", "watchOS": "4.0", "iOS": "11.0", "macCatalyst": "11.0"},
+    2: {"macOS": "10.13.2", "tvOS": "11.2", "visionOS": "1.0", "watchOS": "4.2", "iOS": "11.2", "macCatalyst": "11.2"},
     3: {"macOS": "10.14", "tvOS": "12.0", "visionOS": "1.0", "watchOS": "5.0", "iOS": "12.0", "macCatalyst": "12.0"},
     4: {"macOS": "10.15", "tvOS": "13.0", "visionOS": "1.0", "watchOS": "6.0", "iOS": "13.0", "macCatalyst": "13.0"},
     5: {"macOS": "11.0", "tvOS": "14.0", "visionOS": "1.0", "watchOS": "7.0", "iOS": "14.0", "macCatalyst": "14.0"},
@@ -797,6 +870,7 @@ AVAILABILITY = {
     7: {"macOS": "13.0", "tvOS": "16.0", "visionOS": "1.0", "watchOS": "9.0", "iOS": "16.0", "macCatalyst": "16.0"},
     8: {"macOS": "14.0", "tvOS": "17.0", "visionOS": "1.0", "watchOS": "10.0", "iOS": "17.0", "macCatalyst": "17.0"},
     9: {"macOS": "15.0", "tvOS": "18.0", "visionOS": "2.0", "watchOS": "11.0", "iOS": "18.0", "macCatalyst": "18.0"},
+    10: {"macOS": "16.0", "tvOS": "19.0", "visionOS": "3.0", "watchOS": "12.0", "iOS": "19.0", "macCatalyst": "19.0"},
 }
 AVAILABILITY_KEYS = ["iOS", "macCatalyst", "macOS", "tvOS", "visionOS", "watchOS"]
 
@@ -817,8 +891,6 @@ def _dims(dims):
 def feature(f):
     t = f.msg(3) or unestablished("a feature without a type")
     optional = "1" if t.int(1000) else "0"
-    if t.int(1000) and not t.has(5):
-        unestablished("an optional feature other than a multi-array")
     pairs = [("isOptional", optional), ("name", f.str(1)), ("shortDescription", f.str(2))]
     if t.has(5):
         a = t.msg(5)
@@ -880,14 +952,19 @@ def feature(f):
     elif t.has(7):
         q = t.msg(7)
         value = "Int64" if q.has(1) else "String" if q.has(3) else unestablished("a sequence of another type")
-        size = q.msg(101) or unestablished("a sequence without a size range")
-        low, high = size.int(1), size.int(2)
-        if high >= 1 << 63:
-            unestablished("an unbounded sequence")
+        # Without a size range, 0 to 0; an upper bound of -1 is unbounded.
+        size = q.msg(101) or Message(b"")
+        low, high = size.int(1), _signed(size.int(2))
+        if low >= 1 << 63 or high < -1 or 0 <= high < low:
+            unestablished("a sequence's size range out of order")
+        bounds = str(low) if low == high else "%d..." % low if high == -1 else "%d...%d" % (low, high)
         pairs += [("type", "Sequence"), ("valueType", value), ("sizeRange", "[%d, %d]" % (low, high)),
-                  ("formattedType", "Sequence (%s %d...%d)" % (value, low, high))]
+                  ("formattedType", "Sequence (%s %s)" % (value, bounds))]
     else:
         unestablished("a feature type other than a multi-array, image, state, Int64, String or dictionary")
+    if t.int(1000) and not t.has(5):
+        # An optional feature's type ends in "?".
+        pairs = [(k, v + "?" if k == "formattedType" else v) for k, v in pairs]
     return ordered(pairs, SCHEMA_KEYS)
 
 
@@ -1088,7 +1165,7 @@ def class_labels(program):
 def metadata_json(model, name):
     spec_version = model.int(1)
     description = model.msg(2) or Message(b"")
-    if description.has(50):
+    if description.has(50) and not model.has(404):
         unestablished("a model with training inputs")
     if not model.has(502) and (description.has(13) or description.has(20)):
         unestablished("states or functions outside an ML Program")
@@ -1102,25 +1179,25 @@ def metadata_json(model, name):
         _, inputs, outputs, states = next(f for f in fns if f[0] == default)
         model_type = "MLModelType_mlProgram"
     elif pipeline_parts(model) is not None:
-        kind, parts = pipeline_parts(model)
-        model_type = CFDict([("name", "MLModelType_" + ("imageClassifier" if image_classifier(kind, parts) else PIPELINE_TYPES[kind])),
-                             ("structure", [CFDict([("name", "MLModelType_" + PART_TYPES[pk])]) for pk, _ in parts])])
-        labels = None
-        for pk, part in parts:
-            if pk in (400, 402):
-                labels = model_class_labels(Message(part).msg(pk))
+        model_type, labels = pipeline_structure(model)
     elif tree_kind(model) is not None:
         kind = tree_kind(model)
         model_type = "MLModelType_" + TREE_TYPES[kind]
         labels = model_class_labels(model.msg(kind)) if kind == 402 else None
+    elif model.has(404):
+        model_type = "MLModelType_kNearestNeighborsClassifier"
+        labels = knn_labels(model)
+    elif model.has(501):
+        model_type, labels = "MLModelType_itemSimilarityRecommender", None
     else:
         kind = SPEC_ARCHIVED.get(next((n for n, _, _ in model.fields if n in SPEC_ARCHIVED), None))
         if kind is None:
             unestablished("this model type's metadata")
         model_type = kind
-        labels = [v.decode() for v in model.msg(SPEC_TYPE_FIELD[kind]).msg(200).all(1)] if model.msg(SPEC_TYPE_FIELD[kind]).has(200) else unestablished("a text model without labels")
-    if model.int(10):
-        unestablished("an updatable model")
+        labels = spec_labels(model, SPEC_TYPE_FIELD[kind])
+    updatable = bool(model.int(10))
+    if updatable and not (model.has(404) and spec_version >= 4):
+        unestablished("an updatable model other than a k-nearest neighbors classifier")
     vision = vision_model(model)
     pairs = [("metadataOutputVersion", "3.0")]
     for key, number in (("shortDescription", 1), ("author", 3), ("license", 4), ("version", 2)):
@@ -1128,13 +1205,13 @@ def metadata_json(model, name):
             pairs.append((key, meta.str(number)))
     pairs += [
         ("outputSchema", [feature(f) for f in outputs]),
-        ("modelParameters", []),
+        ("modelParameters", model_parameters(model)),
         ("specificationVersion", spec_version),
     ]
     if program is not None:
         pairs += [("mlProgramOperationTypeHistogram", CFDict(histogram)), ("computePrecision", precision)]
     pairs += [
-        ("isUpdatable", "0"),
+        ("isUpdatable", "1" if updatable else "0"),
         ("stateSchema", [feature(f) for f in states]),
         ("availability", CFDict([(k, "unavailable" if k == "watchOS" and vision else (AVAILABILITY.get(spec_version) or unestablished("availability for specification %d" % spec_version))[k]) for k in AVAILABILITY_KEYS])),
         ("modelType", model_type if isinstance(model_type, CFDict) else CFDict([("name", model_type)])),
@@ -1146,6 +1223,11 @@ def metadata_json(model, name):
     # varies from run to run when it has more than one entry; this keeps the
     # model's own order.
     pairs.append(("userDefinedMetadata", CFDict(meta.map_str(100))))
+    if updatable:
+        # Its training inputs, and no update parameters.
+        pairs += [("updateParameters", []), ("trainingInputSchema", [feature(f) for f in description.msgs(50)])]
+    if model.has(555):
+        pairs.append(("customModels", [CFDict([("className", model.msg(555).str(10)), ("description", model.msg(555).str(40))])]))
     if program is None:
         if labels is not None:
             pairs.append(("classLabels", labels))
@@ -1164,6 +1246,47 @@ def metadata_json(model, name):
                 entries.append(ordered(fpairs, FUNCTION_KEYS))
             pairs += [("functions", entries), ("defaultFunctionName", default)]
     return "[\n  " + ns_json(ordered(pairs, TOP_KEYS), 1) + "\n]"
+
+
+def model_parameters(model, scope=""):
+    """metadata.json's model parameters: a k-nearest neighbors classifier's
+    number of neighbors, a linked model's file name and search path; a
+    pipeline's parts', each scoped by its name (model<N> unless named),
+    joined with a "." to the names of the pipelines it's in."""
+    if model.has(404):
+        out = [int64_parameter(model.msg(404).msg(3), "numberOfNeighbors", "Number of neighbors to use for prediction")[0]]
+    elif model.has(556):
+        out = linked_parameters(model.msg(556))
+    elif pipeline_parts(model) is not None:
+        kind, parts = pipeline_parts(model)
+        names = [n.decode("utf-8") for n in (model.msg(kind) if kind == 202 else model.msg(kind).msg(1)).all(2)]
+        out = []
+        for i, (_, part) in enumerate(parts):
+            out += model_parameters(Message(part), (scope + "." if scope else "") + (names[i] if names else "model%d" % i))
+        return out
+    else:
+        return []
+    for p in out:
+        p.pairs = [(k, scope if k == "scope" else v) for k, v in p.pairs]
+    return out
+
+
+def linked_parameters(linked):
+    if [n for n, _, _ in linked.fields if n != 1]:
+        unestablished("a linked model of another kind")
+    f = linked.msg(1) or unestablished("a linked model without its file")
+    if [n for n, _, _ in f.fields if n not in (1, 2)]:
+        unestablished("a linked model file field it doesn't know")
+    out = []
+    for number, name, description in ((1, "linkedModelFileName", "File name of linked model"),
+                                      (2, "linkedModelSearchPath", "Search path used to resolve model file name")):
+        # One not given is empty.
+        p = f.msg(number) or Message(b"")
+        if [n for n, _, _ in p.fields if n != 1]:
+            unestablished("a string parameter of another form")
+        out.append(ordered([("name", name), ("shortDescription", description), ("dataType", "String"),
+                            ("defaultValue", p.str(1)), ("scope", "")], MODEL_PARAMETER_KEYS))
+    return out
 
 
 def default_function(model):
@@ -1272,7 +1395,10 @@ MODEL_TYPES = {
     304: "Bayesian probit regressor", 400: "GLM classifier", 401: "support vector classifier",
     402: "tree ensemble classifier", 403: "neural network classifier", 404: "k-nearest neighbors classifier",
     500: "neural network", 501: "item similarity recommender", 502: "ML Program", 555: "custom model",
-    556: "linked model", 560: "class confidence thresholding", 2000: "text classifier", 2001: "word tagger",
+    556: "linked model", 560: "class confidence thresholding", 600: "one-hot encoder", 601: "imputer",
+    602: "feature vectorizer", 603: "dictionary vectorizer", 604: "scaler", 606: "categorical mapping", 607: "normalizer",
+    609: "array feature extractor", 610: "non-maximum suppression", 900: "identity", 3000: "serialized model",
+    2000: "text classifier", 2001: "word tagger",
     2002: "vision feature print", 2003: "sound analysis preprocessing", 2004: "gazetteer", 2005: "word embedding",
     2006: "audio feature print",
 }
@@ -1280,8 +1406,46 @@ MODEL_TYPES = {
 
 # Models coremlc compiles to their own specification behind a header: their
 # Model field and the name metadata.json gives their type.
-SPEC_ARCHIVED = {2000: "MLModelType_textClassifier", 2001: "MLModelType_wordTagger"}
+SPEC_ARCHIVED = {2000: "MLModelType_textClassifier", 2001: "MLModelType_wordTagger",
+                 301: "MLModelType_supportVectorRegressor", 401: "MLModelType_supportVectorClassifier",
+                 300: "MLModelType_glmRegressor", 400: "MLModelType_glmClassifier", 304: "MLModelType_bayesianProbitRegressor",
+                 555: "MLModelType_customModel", 556: "MLModelType_linkedModel", 560: "MLModelType_classConfidenceThresholding",
+                 600: "MLModelType_oneHotEncoder", 601: "MLModelType_imputer", 602: "MLModelType_featureVectorizer",
+                 603: "MLModelType_dictVectorizer", 604: "MLModelType_scaler", 606: "MLModelType_categoricalMapping",
+                 607: "MLModelType_normalizer", 609: "MLModelType_arrayFeatureExtractor", 610: "MLModelType_nonMaximumSuppression",
+                 900: "MLModelType_identity", 2003: "MLModelType_soundAnalysisPreprocessing", 2004: "MLModelType_gazetteer",
+                 2005: "MLModelType_wordEmbedding", 2006: "MLModelType_audioFeaturePrint", 2002: "MLModelType_visionFeaturePrint"}
 SPEC_TYPE_FIELD = {v: k for k, v in SPEC_ARCHIVED.items()}
+# Their specification versions established, where they are limited.
+SPEC_VERSIONS = {2000: (3,), 2001: (3,)}
+
+
+def spec_labels(model, kind):
+    """The class labels metadata.json gives a model compiled to its own
+    specification, or None."""
+    m = model.msg(kind)
+    if kind in (2000, 2001, 2004):
+        return [v.decode() for v in m.msg(200).all(1)] if m.has(200) else unestablished("a text model without labels")
+    if kind == 402:
+        return model_class_labels(m)
+    if kind in (400, 401, 610):
+        # Each label once, in the order first given.
+        labels = model_class_labels(m)
+        return None if labels is None else [x for k, x in enumerate(labels) if x not in labels[:k]]
+    return None
+
+
+def spec_bytes(model_bytes):
+    """A specification as coremlc copies it for a model on its own: a
+    description without metadata gets an empty one (a pipeline's parts are
+    copied as they are)."""
+    out = b""
+    for number, wire, value, raw in _wire_fields(model_bytes):
+        if number == 2 and not Message(value).has(100):
+            value += b"\xa2\x06\x00"
+            raw = b"\x12" + _enc_varint(len(value)) + value
+        out += raw
+    return out
 
 
 def compile_spec_model(model_bytes, name, outdir):
@@ -1290,14 +1454,14 @@ def compile_spec_model(model_bytes, name, outdir):
     model = Message(model_bytes)
     kind = next(n for n, _, _ in model.fields if n in SPEC_ARCHIVED)
     spec_version = model.int(1)
-    if spec_version != 3:
+    if spec_version not in SPEC_VERSIONS.get(kind, AVAILABILITY):
         unestablished("specification version %d of a %s" % (spec_version, MODEL_TYPES[kind]))
     header = _u32(kind) + _u32(1) + b"\0" * 20 + _u64(4) + b"spec" + _u32(spec_version) + b"\0" * 28
     def s(text):
         raw = text.encode()
         return _u64(len(raw)) + raw
     files = {
-        "coremldata.bin": header + model_bytes,
+        "coremldata.bin": header + spec_bytes(model_bytes),
         "metadata.json": metadata_json(model, name).encode("utf-8"),
         "analytics/coremldata.bin": s("SpecificationDetails") + _u64(2) + s("modelHash") + s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + s("modelName") + s(name),
     }
@@ -1308,13 +1472,13 @@ def compile_spec_model(model_bytes, name, outdir):
             f.write(data)
 
 
-PIPELINE_TYPES = {200: "pipelineClassifier", 201: "pipelineRegressor"}
-# Pipeline parts compiled to a header and their own specification, by Model
-# field, and the names metadata.json gives them.
-PART_TYPES = {300: "glmRegressor", 400: "glmClassifier", 600: "oneHotEncoder", 602: "featureVectorizer", 2002: "visionFeaturePrint",
-              302: "treeEnsembleRegressor", 402: "treeEnsembleClassifier"}
+PIPELINE_TYPES = {200: "pipelineClassifier", 201: "pipelineRegressor", 202: "pipeline"}
 # Tree ensembles, compiled to their own packed form.
 TREE_TYPES = {302: "treeEnsembleRegressor", 402: "treeEnsembleClassifier"}
+# Pipeline parts, by Model field, and the names metadata.json gives them:
+# those compiled to a header and their own specification, and trees.
+PART_TYPES = dict([(k, v[len("MLModelType_"):]) for k, v in SPEC_ARCHIVED.items()] + list(TREE_TYPES.items())
+                  + [(404, "kNearestNeighborsClassifier"), (501, "itemSimilarityRecommender")])
 
 
 def tree_kind(model):
@@ -1342,20 +1506,57 @@ def pipeline_parts(model):
     if kind is None:
         return None
     parts = []
-    for part in model.msg(kind).msg(1).all(1):
+    # A pipeline classifier or regressor holds a pipeline.
+    pipeline = model.msg(kind) if kind == 202 else model.msg(kind).msg(1) or Message(b"")
+    for part in pipeline.all(1):
         fields = [n for n, _, _ in Message(part).fields if n not in (1, 2, 10)]
-        if len(fields) != 1 or fields[0] not in PART_TYPES:
+        if len(fields) != 1 or fields[0] not in PART_TYPES and fields[0] not in PIPELINE_TYPES:
             unestablished("a pipeline with a %s" % (MODEL_TYPES.get(fields[0], "type %d" % fields[0]) if fields else "typeless model"))
         parts.append((fields[0], part))
-    if any(pk == 2002 for pk, _ in parts) and not image_classifier(kind, parts):
-        unestablished("a pipeline with a vision feature print that isn't Create ML's image classifier")
+    if not parts:
+        unestablished("a pipeline without models")
     return kind, parts
 
 
+def pipeline_structure(model):
+    """(metadata.json's model type, the class labels) of a pipeline: each
+    part named, a pipeline with its own parts. The labels are those of the
+    classifier giving the pipeline's predicted feature, or else of its only
+    classifier, nested ones included; with several, none."""
+    model_type, labelled = _pipeline_structure(model)
+    predicted = (model.msg(2) or Message(b"")).str(11)
+    matching = [labels for name, labels in labelled if predicted and name == predicted]
+    if matching:
+        return model_type, matching[-1]
+    return model_type, labelled[0][1] if len(labelled) == 1 else None
+
+
+def _pipeline_structure(model):
+    """(model type, [(predicted feature, labels)] of its classifiers)."""
+    kind, parts = pipeline_parts(model)
+    structure, labelled = [], []
+    for pk, part in parts:
+        part = Message(part)
+        if pk in PIPELINE_TYPES:
+            name, inner = _pipeline_structure(part)
+            labelled += inner
+        else:
+            name = CFDict([("name", "MLModelType_" + PART_TYPES[pk])])
+            labels = knn_labels(part) if pk == 404 else spec_labels(part, pk)
+            if labels is not None:
+                labelled.append(((part.msg(2) or Message(b"")).str(11), labels))
+        structure.append(name)
+    name = "MLModelType_" + ("imageClassifier" if image_classifier(kind, parts) else PIPELINE_TYPES[kind])
+    return CFDict([("name", name), ("structure", structure)]), labelled
+
+
 def vision_model(model):
-    """Whether the model uses Vision's feature prints, which watchOS lacks."""
+    """Whether the model uses Vision's feature prints, which watchOS lacks:
+    is one, or a pipeline with one."""
+    if model.has(2002):
+        return True
     parts = pipeline_parts(model)
-    return parts is not None and image_classifier(*parts)
+    return parts is not None and any(vision_model(Message(part)) for _, part in parts[1])
 
 
 def image_classifier(kind, parts):
@@ -1754,10 +1955,11 @@ def _encode_dat(nodes, npd, base, tf):
 
 # ------------------------------------------------------- coremldata.bin --
 
-def _canon_description(desc):
+def _canon_description(desc, part=False):
     """Re-serialize ModelDescription as Xcode does (MD1, MD2, MD3): fields in
     field-number order, empty proto3 strings dropped, metadata (100) always
-    present. Nested messages are copied; they must already be canonical."""
+    present but in a pipeline's part. Nested messages are copied; they must
+    already be canonical."""
     fl = []
     for f, wt, v, raw in _wire_fields(desc or b''):
         if f in (11, 12) and wt == 2 and len(v) == 0:
@@ -1769,14 +1971,14 @@ def _canon_description(desc):
                     raise Unestablished('non-canonical FeatureDescription field order')
                 last = g
         fl.append((f, raw))
-    if not any(f == 100 for f, _ in fl):
+    if not part and not any(f == 100 for f, _ in fl):
         fl.append((100, b'\xa2\x06\x00'))
     fl.sort(key=lambda x: x[0])            # stable
     return b''.join(r for _, r in fl)
 
 
-def _encode_coremldata(m, npd):
-    desc = _canon_description(m['desc'])
+def _encode_coremldata(m, npd, part=False):
+    desc = _canon_description(m['desc'], part)
     out = struct.pack('<II', m['kind'], 1) + b'\0' * 20
     out += struct.pack('<Q', 7) + b'generic'
     out += struct.pack('<I', m['sv']) + b'\0' * 28
@@ -1797,44 +1999,69 @@ def _encode_coremldata(m, npd):
     return out
 
 
-def encode_tree_part(part_model_bytes: bytes) -> dict:
+def encode_tree_part(part_model_bytes: bytes, part=False) -> dict:
     m = _parse_model(part_model_bytes)
     nodes, npd, base = _parse_params(m['params'] or b'')
     return {
-        'coremldata.bin': _encode_coremldata(m, npd),
+        'coremldata.bin': _encode_coremldata(m, npd, part),
         '_B0000.DAT': _encode_dat(nodes, npd, base, m['tf']),
     }
+
+
+def pipeline_archive(model_bytes, nested=False):
+    """(files, tag) of a pipeline: its archive, each part compiled to
+    model<N>/ (a pipeline as a pipeline, with analytics of its own), and the
+    names given to them; the tag names each part's archive. A pipeline in a
+    pipeline keeps its description as it is."""
+    model = Message(model_bytes)
+    kind, parts = pipeline_parts(model)
+    spec_version = model.int(1)
+    if spec_version not in AVAILABILITY:
+        unestablished("a pipeline of specification %d" % spec_version)
+    files, tags = {}, []
+    for i, (pk, part) in enumerate(parts):
+        if pk in PIPELINE_TYPES:
+            inner, inner_tag = pipeline_archive(part, True)
+            for rel, data in inner.items():
+                files["model%d/%s" % (i, rel)] = data
+            tags.append("model%dv1.0.1%s" % (i, inner_tag))
+        elif pk in TREE_TYPES:
+            for rel, data in encode_tree_part(part, True).items():
+                files["model%d/%s" % (i, rel)] = data
+            tags.append("model%dv1.0.0generic" % i)
+        elif pk in OWN_ARCHIVES:
+            for rel, data in OWN_ARCHIVES[pk](Message(part), True).items():
+                files["model%d/%s" % (i, rel)] = data
+            tags.append("model%dv1.0.0%s" % (i, "notreesyet" if pk == 404 else "generic"))
+        else:
+            part_version = Message(part).int(1)
+            files["model%d/coremldata.bin" % i] = _u32(pk) + _u32(1) + b"\0" * 20 + _u64(4) + b"spec" + _u32(part_version) + b"\0" * 28 + part
+            tags.append("model%dv1.0.0spec" % i)
+    tag = ("generic." + ".".join(tags)).encode()
+    description = model.bytes(2) if nested else canonical_description(model)
+    files["coremldata.bin"] = (_u32(kind) + _u32(1) + b"\0" * 12 + _u32(1) + _u32(0) + _u64(len(tag)) + tag + _u32(spec_version) + b"\0" * 28
+                               + _u64(len(description)) + description + _u64(len(parts)) + _u64(kind))
+    files["analytics/coremldata.bin"] = _s("PipelineModelDetails") + _u64(1) + _s("modelDimension") + _s(str(len(parts)))
+    names = [n.decode("utf-8") for n in (model.msg(kind) if kind == 202 else model.msg(kind).msg(1) or Message(b"")).all(2)]
+    if names:
+        files["modelNames/coremldata.bin"] = _u64(len(names)) + b"".join(_s(n) for n in names)
+    return files, tag.decode()
+
+
+def _s(text):
+    """A length-prefixed string."""
+    raw = text.encode()
+    return _u64(len(raw)) + raw
 
 
 def compile_pipeline(model_bytes, name, outdir):
     """A pipeline of models compiled each to model<N>/, behind an archive
     naming them."""
     model = Message(model_bytes)
-    kind, parts = pipeline_parts(model)
-    spec_version = model.int(1)
-    if spec_version not in ((1, 3, 8) if image_classifier(kind, parts) else (1,)):
-        unestablished("a pipeline of specification %d" % spec_version)
-    tag = ("generic." + ".".join("model%dv1.0.0%s" % (i, "generic" if pk in TREE_TYPES else "spec") for i, (pk, _) in enumerate(parts))).encode()
-    description = canonical_description(model)
-    files = {
-        "coremldata.bin": (_u32(kind) + _u32(1) + b"\0" * 12 + _u32(1) + _u32(0) + _u64(len(tag)) + tag + _u32(spec_version) + b"\0" * 28
-                           + _u64(len(description)) + description + _u64(len(parts)) + _u64(kind)),
-        "metadata.json": metadata_json(model, name).encode("utf-8"),
-    }
-
-    def s(text):
-        raw = text.encode()
-        return _u64(len(raw)) + raw
-    files["analytics/coremldata.bin"] = (s("PipelineModelDetails") + _u64(1) + s("modelDimension") + s(str(len(parts)))
-                                         + s("SpecificationDetails") + _u64(2) + s("modelHash")
-                                         + s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + s("modelName") + s(name))
-    for i, (pk, part) in enumerate(parts):
-        if pk in TREE_TYPES:
-            for rel, data in encode_tree_part(part).items():
-                files["model%d/%s" % (i, rel)] = data
-            continue
-        part_version = Message(part).int(1)
-        files["model%d/coremldata.bin" % i] = _u32(pk) + _u32(1) + b"\0" * 20 + _u64(4) + b"spec" + _u32(part_version) + b"\0" * 28 + part
+    files, _ = pipeline_archive(model_bytes)
+    files["metadata.json"] = metadata_json(model, name).encode("utf-8")
+    files["analytics/coremldata.bin"] += (_s("SpecificationDetails") + _u64(2) + _s("modelHash")
+                                          + _s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + _s("modelName") + _s(name))
     bundle = os.path.join(outdir, name + ".mlmodelc")
     for rel, data in files.items():
         os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
@@ -1863,6 +2090,736 @@ def compile_tree(model_bytes, name, outdir):
             f.write(data)
 
 
+# --- Item similarity recommenders ---------------------------------------------------
+#
+# An item similarity recommender (Model field 501) compiles to the `generic`
+# archive and a `_B0000.DAT` holding its similarities as a sparse matrix:
+# rows by item, columns by similar item, in the packed arrays tree
+# ensembles use.
+
+
+def item_similarities(model):
+    """(item count, {row: {column: score}}, {item: score adjustment}, integer
+    ids, string ids, the feature names) of an item similarity recommender,
+    checked as Xcode checks it."""
+    r = model.msg(501)
+    if any(n not in (1, 2, 3, 10, 11, 12, 13, 20, 21) for n, _, _ in r.fields):
+        unestablished("an item similarity recommender field it doesn't know")
+    rows, adjustments, count = {}, {}, 0
+    for item in r.msgs(1):
+        if any(n not in (1, 2, 3) for n, _, _ in item.fields):
+            unestablished("an item similarity field it doesn't know")
+        i = item.int(1)
+        if i in rows:
+            unestablished("an item listed twice")
+        rows[i] = {}
+        count = max(count, i + 1)
+        for c in item.msgs(2):
+            if any(n not in (1, 2) for n, _, _ in c.fields):
+                unestablished("a connected item field it doesn't know")
+            j = c.int(1)
+            score = struct.unpack("<d", c.bytes(2, b"\0" * 8))[0]
+            if j in rows[i]:
+                unestablished("an item's similar item listed twice")
+            if score != score or score in (float("inf"), float("-inf")):
+                unestablished("a similarity score that isn't finite")
+            rows[i][j] = score
+            count = max(count, j + 1)
+        if item.has(3):
+            adjustments[i] = struct.unpack("<d", item.bytes(3))[0]
+    if not rows:
+        # Xcode writes uninitialized bytes for a recommender without items.
+        unestablished("an item similarity recommender without items")
+    if r.has(2) and r.has(3):
+        unestablished("both integer and string item ids")
+    strings = [v.decode("utf-8") for v in r.msg(2).all(1)] if r.has(2) else []
+    ints = [_signed(v) for v in _ints(r.msg(3).all(1))] if r.has(3) else []
+    if len(set(strings)) != len(strings) or len(set(ints)) != len(ints):
+        unestablished("repeated item ids")
+    # Ids must cover every item: integer ids each one, string ids all but
+    # the last (as Xcode checks them).
+    if ints and len(ints) < count or strings and len(strings) < count - 1:
+        unestablished("fewer item ids than items")
+    names = [r.str(n) for n in (10, 11, 12, 13, 20, 21)]
+    return count, rows, adjustments, ints, strings, names
+
+
+def item_similarity_archive(model, part=False):
+    """coremldata.bin and _B0000.DAT of an item similarity recommender (a
+    pipeline's part keeps its description as it is)."""
+    count, rows, adjustments, ints, strings, names = item_similarities(model)
+    # Row offsets, as Xcode writes them: an item not listed before a listed
+    # one repeats the offset reached, one short of a row each.
+    offsets, columns, values = [0], [], []
+    for i in sorted(rows):
+        while len(offsets) < i:
+            offsets.append(len(values))
+        previous = None
+        # Scores of zero are left out; each row's columns are sorted and
+        # written as the gap from the one before (the first as it is).
+        for j in sorted(rows[i]):
+            if rows[i][j] == 0:
+                continue
+            columns.append(j if previous is None else j - previous - 1)
+            values.append(rows[i][j])
+            previous = j
+        offsets.append(len(values))
+    dat = struct.pack("<II", 0, count) + _u64(0)
+    dat += _packed_array(offsets, _bl1(max(offsets)))
+    dat += _packed_array(columns, _bl1(max(columns)) if columns else 1)
+    dat += _u64(len(values)) + b"".join(struct.pack("<d", v) for v in values)
+    if adjustments:
+        dat += _u64(count) + b"".join(struct.pack("<d", adjustments.get(i, 0.0)) for i in range(count))
+    else:
+        dat += _u64(0)
+    description = _canon_description(model.bytes(2), part)
+    head = (_u32(501) + _u32(1) + b"\0" * 20 + _s("generic") + _u32(model.int(1)) + b"\0" * 28 + _u64(len(description)) + description
+            + _u64(0) + _s("_B0000.DAT") + _u64(len(ints) or len(strings) or count)
+            + _u64(len(ints)) + b"".join(struct.pack("<q", x) for x in ints)
+            + _u64(len(strings)) + b"".join(_s(x) for x in strings) + b"".join(_s(n) for n in names))
+    return {"coremldata.bin": head, "_B0000.DAT": dat}
+
+
+# --- k-nearest neighbors ----------------------------------------------------------
+#
+# A k-nearest neighbors classifier (Model field 404) compiles to its own
+# archive (tag `notreesyet`) holding the samples and labels, and its number
+# of neighbors as a model parameter under modelParameters/.
+
+# A model parameter's keys in the order coremlc inserts them.
+MODEL_PARAMETER_KEYS = ["name", "shortDescription", "dataType", "defaultValue", "allowedRange", "allowedSet", "scope"]
+
+
+def _floats(values):
+    """A repeated float field's values, packed or not, as float32 bytes."""
+    out = b""
+    for r in values:
+        out += r
+    if len(out) % 4:
+        unestablished("a malformed float vector")
+    return out
+
+
+def int64_parameter(p, name, description):
+    """(metadata.json's description, the parameter's bytes) of an
+    Int64Parameter: its default must be positive and allowed, as Xcode
+    requires."""
+    if p is None:
+        unestablished("an Int64 parameter without a default")
+    default = _signed(p.int(1))
+    pairs = [("name", name), ("shortDescription", description), ("dataType", "Int64"), ("defaultValue", str(default)), ("scope", "")]
+    if default <= 0:
+        unestablished("a parameter whose default isn't positive")
+    if p.has(10) and p.has(11) or [n for n, _, _ in p.fields if n not in (1, 10, 11)]:
+        unestablished("an Int64 parameter of another form")
+    if p.has(10):
+        r = p.msg(10)
+        low, high = _signed(r.int(1)), _signed(r.int(2))
+        if not low <= default <= high:
+            unestablished("a parameter's default out of its range")
+        pairs.append(("allowedRange", "[%d, %d]" % (low, high)))
+    if p.has(11):
+        values = [_signed(v) for v in _ints(p.msg(11).all(1))]
+        if default not in values:
+            unestablished("a parameter's default outside its set")
+        pairs.append(("allowedSet", "[%s]" % ", ".join(map(str, values))))
+    return ordered(pairs, MODEL_PARAMETER_KEYS), p.data
+
+
+def knn_parts(model):
+    """The facts of a k-nearest neighbors classifier, checked as Xcode checks
+    them: (dimensions, samples' float32 bytes, sample count, labels as
+    given, default label, weighting, index, leaf size, neighbors parameter)."""
+    k = model.msg(404)
+    known = {1, 3, 100, 101, 110, 111, 200, 210}
+    if any(n not in known for n, _, _ in k.fields):
+        unestablished("a k-nearest neighbors field it doesn't know")
+    index = k.msg(1) or unestablished("a k-nearest neighbors classifier without an index")
+    if any(n not in (1, 2, 100, 110, 200) for n, _, _ in index.fields):
+        unestablished("a nearest neighbors index field it doesn't know")
+    dims = index.int(1)
+    samples = [_floats(v.all(1)) for v in index.msgs(2)]
+    if any(len(v) != 4 * dims for v in samples):
+        unestablished("a sample of another length than the dimensions")
+    if index.has(100) == index.has(110):
+        unestablished("a nearest neighbors index of no or several types")
+    if not index.has(200):
+        unestablished("a nearest neighbors index without its distance")
+    leaf = None
+    if index.has(110):
+        leaf = index.msg(110).int(1)
+        if leaf <= 0 or leaf >= 1 << 31:
+            unestablished("a k-d tree's leaf size that isn't positive")
+    if k.has(200) == k.has(210):
+        unestablished("a k-nearest neighbors classifier with no or several weightings")
+    if k.has(100) and k.has(101) or k.has(110) and k.has(111):
+        unestablished("several kinds of labels")
+    labels = model_class_labels(k)
+    default = k.str(110) if k.has(110) else _signed(k.int(111)) if k.has(111) else None
+    if not labels:
+        if default is None:
+            unestablished("a k-nearest neighbors classifier without labels or a default")
+        if samples:
+            unestablished("samples without labels")
+    elif len(labels) != len(samples):
+        unestablished("a k-nearest neighbors classifier with as many labels as samples")
+    if labels is not None and default is not None and k.has(110) != k.has(100):
+        unestablished("a default label of another type than the labels")
+    return dims, b"".join(samples), labels, k.has(101) or labels is None and k.has(111), default, 1 if k.has(210) else 0, leaf, k.msg(3)
+
+
+def knn_archive(model, part=False):
+    """coremldata.bin and modelParameters/ of a k-nearest neighbors
+    classifier (a pipeline's part keeps its description as it is)."""
+    dims, samples, labels, ints, default, weighting, leaf, neighbors = knn_parts(model)
+    sv = model.int(1)
+    description = _canon_description(model.bytes(2), part)
+    out = (_u32(404) + _u32(1) + b"\0" * 20 + _s("notreesyet") + _u32(sv) + b"\0" * 28 + _u64(len(description)) + description
+           + _u32(dims) + _u64(len(samples) // 4) + samples)
+    # Labels not given at all are written as none; given empty, as empty.
+    if labels is None:
+        out += _u64(0)
+    elif ints:
+        out += _u64(101) + _u64(len(labels)) + b"".join(struct.pack("<q", x) for x in labels)
+    else:
+        out += _u64(100) + _u64(len(labels)) + b"".join(_s(x) for x in labels)
+    if default is None:
+        out += _u64(0)
+    elif isinstance(default, str):
+        out += _u64(110) + _s(default)
+    else:
+        out += _u64(111) + struct.pack("<q", default)
+    out += _u32(weighting) + _u32(0 if leaf is None else 1) + (b"" if leaf is None else _u32(leaf))
+    _, parameter = int64_parameter(neighbors, "numberOfNeighbors", "Number of neighbors to use for prediction")
+    return {"coremldata.bin": out, "modelParameters/coremldata.bin": _u64(0),
+            "modelParameters/numberOfNeighbors/coremldata.bin": parameter}
+
+
+def knn_labels(model):
+    """metadata.json's labels of a k-nearest neighbors classifier: each label
+    once, in the order first given."""
+    labels = knn_parts(model)[2]
+    if labels is None:
+        return None
+    out = []
+    for x in labels:
+        if x not in out:
+            out.append(x)
+    return out
+
+
+# --- Checks of .mlmodel files -----------------------------------------------------
+#
+# Xcode checks a model as it reads it, for compiling and generating alike,
+# and refuses one that fails. Each type's checks below are those seen to
+# refuse a model, and a model of a form not seen accepted is refused too.
+
+def feature_kind(f):
+    """A feature's type: "double", "int64", "string", "array", "image",
+    "dict", "seq" or "state"."""
+    t = f.msg(3)
+    kinds = {1: "int64", 2: "double", 3: "string", 4: "image", 5: "array", 6: "dict", 7: "seq", 8: "state"}
+    present = [kinds[n] for n, _, _ in (t.fields if t else []) if n in kinds]
+    if t is None or len(present) != 1 or any(n not in kinds and n != 1000 for n, _, _ in t.fields):
+        unestablished("a feature without a single known type")
+    return present[0]
+
+
+def key_kind(f):
+    """A dictionary's key type or a sequence's element type."""
+    t = f.msg(3)
+    inner = t.msg(6) if t.has(6) else t.msg(7)
+    return "int64" if inner.has(1) else "string" if inner.has(2 if t.has(6) else 3) else unestablished("a dictionary or sequence of another type")
+
+
+def array_type(f):
+    return ARRAY_TYPES.get(f.msg(3).msg(5).int(2)) or unestablished("array data type %d" % f.msg(3).msg(5).int(2))
+
+
+def check_description(model, optional_inputs=False):
+    """The checks of every model's features."""
+    d = model.msg(2) or Message(b"")
+    sv = model.int(1)
+    inputs, outputs = d.msgs(1), d.msgs(10)
+    if not inputs or not outputs:
+        unestablished("a model without inputs or outputs")
+    if any(n not in (1, 10, 11, 12, 100) + ((50,) if model.has(404) else ()) for n, _, _ in d.fields):
+        unestablished("a model description field it doesn't know")
+    # Training inputs, as coremltools makes them: features the model has.
+    if any(t not in [f.data for f in inputs + outputs] for t in d.all(50)):
+        unestablished("a training input that isn't one of the model's features")
+    for f in inputs + outputs:
+        if not f.str(1):
+            unestablished("a feature without a name")
+        kind = feature_kind(f)
+        if kind == "state":
+            unestablished("a state outside an ML Program")
+        if kind == "array":
+            a = f.msg(3).msg(5)
+            if array_type(f) == "Float16" and sv < 7:
+                unestablished("a Float16 array before specification 7")
+            if f in inputs and not _ints(a.all(1)):
+                unestablished("an input array without a shape")
+            if a.has(41) or a.has(51) or a.has(61):
+                unestablished("a default value outside an ML Program")
+            shape, ranges, shapes = flexibility(f)
+            if ranges and any(not lo <= x <= hi for x, (lo, hi) in zip(shape, ranges)):
+                unestablished("a default shape out of its range")
+            if shapes is not None and shape not in shapes:
+                unestablished("a default shape not among its enumerated shapes")
+        if kind == "image":
+            im = f.msg(3).msg(4)
+            if im.int(3) == 40 and sv < 7:
+                unestablished("a Grayscale16Half image before specification 7")
+            shape, ranges, shapes = flexibility(f)
+            if ranges and any(not lo <= x <= hi for x, (lo, hi) in zip(shape, ranges)):
+                unestablished("a default size out of its range")
+            if shapes is not None and shape not in shapes:
+                unestablished("a default size not among its enumerated sizes")
+        if kind == "seq" and sv < 3:
+            unestablished("a sequence before specification 3")
+        if kind in ("dict", "seq"):
+            key_kind(f)
+    if any(f.msg(3).int(1000) for f in outputs):
+        unestablished("an optional output")
+    if not optional_inputs and any(f.msg(3).int(1000) for f in inputs):
+        unestablished("an optional input to a model that can't have them")
+    return inputs, outputs
+
+
+def _named(features, name):
+    out = [f for f in features if f.str(1) == name]
+    if not name or not out:
+        unestablished("a feature named %r not in the description" % name)
+    return out[0]
+
+
+def _one(inputs, outputs):
+    if len(inputs) != 1 or len(outputs) != 1:
+        unestablished("more than one input or output to a model that takes one")
+    return inputs[0], outputs[0]
+
+
+def _kinds(features, allowed, what):
+    for f in features:
+        if feature_kind(f) not in allowed:
+            unestablished("%s of type %s" % (what, feature_kind(f)))
+
+
+def _fields(m, known, what):
+    if any(n not in known for n, _, _ in m.fields):
+        unestablished("a %s field it doesn't know" % what)
+
+
+def _doubles(m, number):
+    """A repeated double field's values, packed or not."""
+    out = []
+    for n, wire, v in m.fields:
+        if n == number:
+            out += [struct.unpack("<d", v[i:i + 8])[0] for i in range(0, len(v), 8)] if wire == 2 else [struct.unpack("<d", v)[0]]
+    return out
+
+
+def _predicted(model, outputs, classifier):
+    d = model.msg(2)
+    _named(outputs, d.str(11))
+    if d.has(12) and d.str(12):
+        _named(outputs, d.str(12))
+        if not classifier:
+            unestablished("probabilities from a model that isn't a classifier")
+
+
+def _labels(model, m, outputs):
+    """A classifier's labels, required, and its predicted feature of their
+    type."""
+    labels = model_class_labels(m)
+    if not labels:
+        unestablished("a classifier without labels")
+    if m.has(100) and m.has(101):
+        unestablished("both string and integer labels")
+    predicted = _named(outputs, model.msg(2).str(11))
+    if feature_kind(predicted) != ("string" if m.has(100) else "int64"):
+        unestablished("a predicted label of another type than the labels")
+    return labels
+
+
+def check_glm_regressor(model, m, inputs, outputs):
+    _fields(m, (1, 2, 3), "GLM regressor")
+    _predicted(model, outputs, False)
+    _kinds(inputs, ("double", "int64", "array"), "a GLM regressor input")
+    _kinds(outputs, ("double",), "a GLM regressor output")
+    if not m.msgs(1) or len(m.msgs(1)) != len(_doubles(m, 2)) or m.int(3) > 2:
+        unestablished("a GLM regressor's weights, offsets or transform")
+
+
+def check_glm_classifier(model, m, inputs, outputs):
+    _fields(m, (1, 2, 3, 4, 100, 101), "GLM classifier")
+    _predicted(model, outputs, True)
+    _kinds(inputs, ("double", "int64", "array"), "a GLM classifier input")
+    labels = _labels(model, m, outputs)
+    weights = len(m.msgs(1))
+    if weights != len(_doubles(m, 2)) or m.int(3) > 1 or m.int(4) > 1:
+        unestablished("a GLM classifier's weights, offsets, transform or encoding")
+    if m.int(4) == 0 and weights != len(labels) - 1:
+        unestablished("reference-class weights other than one fewer than the classes")
+    if m.int(4) == 1 and weights != (1 if len(labels) == 2 else len(labels)):
+        unestablished("one-vs-rest weights other than one per class (one for two classes)")
+    if m.int(3) == 1 and len(labels) != 2:
+        unestablished("a probit GLM classifier of more than two classes")
+
+
+def _support_vectors(m, number_dense, number_sparse):
+    """The support vectors' count, dense or sparse; one kind required."""
+    if m.has(number_dense) == m.has(number_sparse):
+        unestablished("support vectors neither or both dense and sparse")
+    if m.has(number_dense):
+        return len(m.msg(number_dense).msgs(1))
+    for v in m.msg(number_sparse).msgs(1):
+        for node in v.msgs(1):
+            _fields(node, (1, 2), "sparse node")
+    return len(m.msg(number_sparse).msgs(1))
+
+
+def _kernel(k):
+    if k is None or len([n for n, _, _ in k.fields]) != 1 or k.fields[0][0] not in (1, 2, 3, 4):
+        unestablished("a support vector machine without a single known kernel")
+    _fields(k.msg(k.fields[0][0]), (1, 2, 3), "kernel")
+
+
+def check_svr(model, m, inputs, outputs):
+    _fields(m, (1, 2, 3, 4, 5), "support vector regressor")
+    _predicted(model, outputs, False)
+    _kinds(inputs, ("double", "int64", "array"), "a support vector regressor input")
+    _kinds(outputs, ("double", "array"), "a support vector regressor output")
+    _kernel(m.msg(1))
+    count = _support_vectors(m, 3, 2)
+    if len(_doubles(m.msg(4) or Message(b""), 1)) != count:
+        unestablished("as many coefficients as support vectors")
+
+
+def check_svc(model, m, inputs, outputs):
+    _fields(m, (1, 2, 3, 4, 5, 6, 7, 8, 100, 101), "support vector classifier")
+    _predicted(model, outputs, True)
+    _kinds(inputs, ("double", "int64", "array"), "a support vector classifier input")
+    labels = _labels(model, m, outputs)
+    _kernel(m.msg(1))
+    count = _support_vectors(m, 4, 3)
+    per_class = _ints(m.all(2))
+    if len(per_class) != len(labels) or sum(per_class) != count:
+        unestablished("support vectors per class that don't add up")
+    coefficients = [_doubles(c, 1) for c in m.msgs(5)]
+    if len(coefficients) != len(labels) - 1 or any(len(c) != count for c in coefficients):
+        unestablished("coefficients other than one fewer than the classes, each one per support vector")
+    if len(_doubles(m, 7)) != len(_doubles(m, 8)):
+        unestablished("probA and probB of different sizes")
+
+
+def check_probit(model, m, inputs, outputs):
+    _fields(m, (1, 2, 3, 10, 11, 12, 13, 20, 21, 22, 23), "Bayesian probit regressor")
+    for f in inputs:
+        if feature_kind(f) != "array" or array_type(f) != "Int32":
+            unestablished("a Bayesian probit regressor input other than an Int32 array")
+    _kinds(outputs, ("double",), "a Bayesian probit regressor output")
+
+
+def check_nms(model, m, inputs, outputs):
+    _fields(m, (1, 100, 101, 110, 111, 200, 201, 202, 203, 210, 211), "non-maximum suppression")
+    for number in (200, 201):
+        f = _named(inputs, m.str(number))
+        if feature_kind(f) != "array" or array_type(f) != "Double":
+            unestablished("non-maximum suppression of other than Double arrays")
+    for number in (202, 203):
+        if m.str(number) and feature_kind(_named(inputs, m.str(number))) != "double":
+            unestablished("a threshold input other than a double")
+    names = [m.str(210), m.str(211)]
+    if sorted(f.str(1) for f in outputs) != sorted(names):
+        unestablished("non-maximum suppression outputs other than those it names")
+    for f in outputs:
+        if feature_kind(f) != "array" or array_type(f) != "Double" or len(_ints(f.msg(3).msg(5).all(1))) != 2:
+            unestablished("a non-maximum suppression output other than a Double matrix")
+    for number in (110, 111):
+        value = struct.unpack("<d", m.bytes(number, b"\0" * 8))[0]
+        if not 0 <= value <= 1:
+            unestablished("a threshold outside 0 to 1")
+    labels = model_class_labels(m)
+    if labels is not None and len(labels) != _ints(_named(outputs, m.str(210)).msg(3).msg(5).all(1))[1]:
+        unestablished("as many labels as the confidence output's classes")
+    if m.has(1):
+        _fields(m.msg(1), (1,), "pick top")
+
+
+def check_cct(model, m, inputs, outputs):
+    _fields(m, (100,), "class confidence thresholding")
+    curves = m.msgs(100)
+    if not curves:
+        unestablished("class confidence thresholding without curves")
+    for c in curves:
+        _fields(c, (1, 2, 3, 4), "precision-recall curve")
+        lengths = {len(_floats((c.msg(n) or Message(b"")).all(1))) // 4 for n in (1, 2, 3, 4)}
+        if len(lengths) != 1 or 0 in lengths:
+            unestablished("precision-recall curves of empty or mismatched components")
+
+
+def check_custom(model, m, inputs, outputs):
+    _fields(m, (10, 30, 40), "custom model")
+    if not m.str(10):
+        unestablished("a custom model without a class name")
+
+
+def check_linked(model, m, inputs, outputs):
+    linked_parameters(m)
+    if not m.msg(1).msg(1).str(1):
+        unestablished("a linked model without a file name")
+
+
+def check_one_hot(model, m, inputs, outputs):
+    _fields(m, (1, 2, 10, 11), "one-hot encoder")
+    i, o = _one(inputs, outputs)
+    _kinds([i], ("string", "int64"), "a one-hot encoder input")
+    _kinds([o], ("dict",) if m.int(10) else ("array",), "a one-hot encoder output")
+    if m.has(1) == m.has(2) or m.int(11) > 1:
+        unestablished("a one-hot encoder without its categories")
+
+
+def check_imputer(model, m, inputs, outputs):
+    _fields(m, (1, 2, 3, 4, 11, 12, 13), "imputer")
+    i, o = _one(inputs, outputs)
+    kind = feature_kind(i)
+    imputed = [n for n in (1, 2, 3, 4) if m.has(n)]
+    replace = [n for n in (11, 12, 13) if m.has(n)]
+    # The imputed value of each input type, and the replaced value.
+    expected = {"double": (1, 11), "int64": (2, 12), "string": (3, 13), "array": (4, 11)}.get(kind)
+    if expected is None or imputed != [expected[0]] or replace not in ([], [expected[1]]) or feature_kind(o) != kind:
+        unestablished("an imputer of these types")
+    if kind == "array":
+        shape = _ints(i.msg(3).msg(5).all(1))
+        if len(shape) != 1 or len(_doubles(m.msg(4), 1)) != shape[0]:
+            unestablished("an imputed array of another shape than its input")
+
+
+def check_feature_vectorizer(model, m, inputs, outputs):
+    _fields(m, (1,), "feature vectorizer")
+    for c in m.msgs(1):
+        _fields(c, (1, 2), "feature vectorizer column")
+    _kinds(inputs, ("double", "int64", "array", "dict"), "a feature vectorizer input")
+    if len(outputs) != 1:
+        unestablished("a feature vectorizer of several outputs")
+    _kinds(outputs, ("array",), "a feature vectorizer output")
+
+
+def check_dict_vectorizer(model, m, inputs, outputs):
+    _fields(m, (1, 2), "dictionary vectorizer")
+    i, o = _one(inputs, outputs)
+    # Xcode accepts only a dictionary output.
+    _kinds([i], ("dict",), "a dictionary vectorizer input")
+    _kinds([o], ("dict",), "a dictionary vectorizer output")
+    if m.has(1) == m.has(2):
+        unestablished("a dictionary vectorizer without its index")
+
+
+def check_scaler(model, m, inputs, outputs):
+    _fields(m, (1, 2), "scaler")
+    i, o = _one(inputs, outputs)
+    kind, out = feature_kind(i), feature_kind(o)
+    shift, scale = len(_doubles(m, 1)), len(_doubles(m, 2))
+    if kind == "array":
+        shape = _ints(i.msg(3).msg(5).all(1))
+        if out != "array" or len(shape) != 1 or _ints(o.msg(3).msg(5).all(1)) != shape or shift not in (0, 1, shape[0]) or scale not in (0, 1, shape[0]):
+            unestablished("a scaler of these arrays")
+    elif (kind, out) not in (("double", "double"), ("int64", "int64"), ("int64", "double")) or shift > 1 or scale > 1:
+        unestablished("a scaler of these types")
+
+
+def check_categorical_mapping(model, m, inputs, outputs):
+    _fields(m, (1, 2, 101, 102), "categorical mapping")
+    i, o = _one(inputs, outputs)
+    if m.has(1) == m.has(2):
+        unestablished("a categorical mapping without its map")
+    source, target = ("string", "int64") if m.has(1) else ("int64", "string")
+    if m.has(101 if m.has(1) else 102):
+        unestablished("a default of another type than the mapping's")
+    if (feature_kind(i), feature_kind(o)) != (source, target) and not (
+            feature_kind(i) == feature_kind(o) == "seq" and key_kind(i) == source and key_kind(o) == target):
+        unestablished("a categorical mapping of these types")
+
+
+def check_normalizer(model, m, inputs, outputs):
+    _fields(m, (1,), "normalizer")
+    i, o = _one(inputs, outputs)
+    _kinds([i, o], ("array",), "a normalizer feature")
+    if m.int(1) > 2:
+        unestablished("a normalizer of another norm")
+
+
+def check_array_feature_extractor(model, m, inputs, outputs):
+    _fields(m, (1,), "array feature extractor")
+    i, o = _one(inputs, outputs)
+    _kinds([i], ("array",), "an array feature extractor input")
+    indices = _ints(m.all(1))
+    if feature_kind(o) in ("double", "int64") and len(indices) != 1 or feature_kind(o) == "array" and not indices:
+        unestablished("an array feature extractor of these indices")
+    _kinds([o], ("double", "int64", "array"), "an array feature extractor output")
+
+
+def check_text_model(model, m, inputs, outputs, output_kinds):
+    i = _one(inputs, outputs)[0] if model.has(2004) or model.has(2005) else inputs[0]
+    _kinds([i], ("string",), "a text model's input")
+    if not m.bytes(100):
+        unestablished("a text model without its data")
+    if model.has(2004) or model.has(2005):
+        _fields(m, (1, 10, 100, 200), "text model")
+        if m.int(1) < 2:
+            unestablished("a text model of revision 1")
+        _kinds(outputs, output_kinds, "a text model's output")
+    if model.has(2004) and not spec_labels(model, 2004):
+        unestablished("a gazetteer without labels")
+
+
+def check_item_similarity(model, m, inputs, outputs):
+    item_similarities(model)
+    _kinds([_named(inputs, m.str(10))], ("dict",), "a recommender's items")
+    _kinds([_named(outputs, m.str(20))], ("seq",), "a recommender's recommendations")
+    for number, kinds in ((11, ("int64",)), (12, ("seq",)), (13, ("seq",))):
+        if m.str(number):
+            _kinds([_named(inputs, m.str(number))], kinds, "a recommender input")
+    if m.str(21):
+        _kinds([_named(outputs, m.str(21))], ("dict",), "a recommender's scores")
+
+
+def check_knn(model, m, inputs, outputs):
+    _predicted(model, outputs, True)
+    _kinds(inputs, ("array",), "a k-nearest neighbors input")
+    _, _, labels, ints, default, _, _, _ = knn_parts(model)
+    if feature_kind(_named(outputs, model.msg(2).str(11))) != ("int64" if ints else "string"):
+        unestablished("a predicted label of another type than the labels")
+
+
+def check_vision_feature_print(model, m, inputs, outputs):
+    _fields(m, (20, 21), "vision feature print")
+    _kinds(inputs, ("image",), "a vision feature print input")
+    _kinds(outputs, ("array",), "a vision feature print output")
+    if len(inputs) != 1 or m.has(20) == m.has(21):
+        unestablished("a vision feature print of no or several kinds or inputs")
+    if m.has(20):
+        _fields(m.msg(20), (1,), "scene print")
+        if m.msg(20).int(1) not in (1, 2) or len(outputs) != 1:
+            unestablished("a scene print of another version or output count")
+    else:
+        _fields(m.msg(21), (1, 100), "object print")
+        names = [n.decode("utf-8") for n in m.msg(21).all(100)]
+        if m.msg(21).int(1) != 1 or len(names) != 2 or sorted(names) != sorted(f.str(1) for f in outputs):
+            unestablished("an object print of another version or outputs")
+
+
+def check_audio(model, m, inputs, outputs):
+    """An audio feature print (sound, version 1) or sound analysis
+    preprocessing (VGGish)."""
+    _fields(m, (20,), "audio model")
+    i, o = _one(inputs, outputs)
+    _kinds([i, o], ("array",), "an audio model's feature")
+    if not m.has(20) or model.has(2006) and m.msg(20).int(1) != 1 or [n for n, _, _ in m.msg(20).fields if n != 1]:
+        unestablished("an audio model of another kind or version")
+
+
+def _type_bytes(f):
+    """A feature's type as compared along a pipeline: whether it's optional
+    aside."""
+    return b"".join(raw for n, _, _, raw in _wire_fields(f.bytes(3)) if n != 1000)
+
+
+def check_pipeline(model):
+    """Each part's inputs come from the pipeline's or an earlier part's
+    outputs, of the same type, and so do the pipeline's outputs; names, if
+    given, name each part."""
+    kind, parts = pipeline_parts(model)
+    inputs, outputs = check_description(model)
+    pipeline = model.msg(kind) if kind == 202 else model.msg(kind).msg(1)
+    if pipeline.has(2) and len(pipeline.all(2)) != len(parts):
+        unestablished("pipeline names not one per model")
+    available = {f.str(1): _type_bytes(f) for f in inputs}
+    for _, part in parts:
+        d = Message(part).msg(2) or Message(b"")
+        for f in d.msgs(1):
+            if available.get(f.str(1)) != _type_bytes(f):
+                unestablished("a pipeline model's input not given before it, or of another type")
+        for f in d.msgs(10):
+            available[f.str(1)] = _type_bytes(f)
+    for f in outputs:
+        if available.get(f.str(1)) != _type_bytes(f):
+            unestablished("a pipeline output no model gives, or of another type")
+
+
+# The checks of each type, and whether its inputs may be optional.
+CHECKS = {
+    300: (check_glm_regressor, False), 400: (check_glm_classifier, False), 301: (check_svr, False), 401: (check_svc, False),
+    304: (check_probit, False), 610: (check_nms, False), 560: (check_cct, False), 555: (check_custom, False),
+    556: (check_linked, False), 600: (check_one_hot, False), 601: (check_imputer, True), 602: (check_feature_vectorizer, False),
+    603: (check_dict_vectorizer, False), 604: (check_scaler, False), 606: (check_categorical_mapping, False),
+    607: (check_normalizer, False), 609: (check_array_feature_extractor, False), 900: (lambda *a: None, True),
+    2004: (lambda model, m, i, o: check_text_model(model, m, i, o, ("string",)), False),
+    2005: (lambda model, m, i, o: check_text_model(model, m, i, o, ("array",)), False),
+    2000: (lambda model, m, i, o: check_text_model(model, m, i, o, None), False),
+    2001: (lambda model, m, i, o: check_text_model(model, m, i, o, None), False),
+    501: (check_item_similarity, True), 404: (check_knn, False), 2002: (check_vision_feature_print, False),
+    2003: (check_audio, False), 2006: (check_audio, False),
+}
+
+
+def validate(model):
+    """The checks Xcode makes of a .mlmodel as it reads it, before compiling
+    or generating: a pipeline's and each of its parts'."""
+    kinds = [n for n, _, _ in model.fields if n not in (1, 2, 10)]
+    if len(kinds) != 1:
+        unestablished("a model of no or several types")
+    kind = kinds[0]
+    if model.int(10) and kind != 404:
+        unestablished("an updatable model other than a k-nearest neighbors classifier")
+    if kind in PIPELINE_TYPES:
+        check_pipeline(model)
+        for _, part in pipeline_parts(model)[1]:
+            validate(Message(part))
+        return
+    if kind in CHECKS:
+        check, optional = CHECKS[kind]
+        inputs, outputs = check_description(model, optional)
+        check(model, model.msg(kind), inputs, outputs)
+    model_parameters(model)
+
+
+# Models compiled to archives of their own, by Model field.
+OWN_ARCHIVES = {404: knn_archive, 501: item_similarity_archive}
+
+
+def compile_own_archive(model_bytes, name, outdir):
+    """A k-nearest neighbors classifier or item similarity recommender."""
+    model = Message(model_bytes)
+    kind = next(n for n, _, _ in model.fields if n in OWN_ARCHIVES)
+    if model.int(1) not in AVAILABILITY:
+        unestablished("a %s of specification %d" % (MODEL_TYPES[kind], model.int(1)))
+    files = OWN_ARCHIVES[kind](model)
+    if model.int(10):
+        # An updatable model's update parameters: none.
+        files["updateParameters/coremldata.bin"] = _u64(0)
+    files["metadata.json"] = metadata_json(model, name).encode("utf-8")
+    files["analytics/coremldata.bin"] = (_s("SpecificationDetails") + _u64(2) + _s("modelHash")
+                                         + _s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + _s("modelName") + _s(name))
+    write_bundle(outdir, name, files)
+
+
+def write_bundle(outdir, name, files):
+    bundle = os.path.join(outdir, name + ".mlmodelc")
+    for rel, data in files.items():
+        os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
+        with open(os.path.join(bundle, rel), "wb") as f:
+            f.write(data)
+
+
+def compiled_type(model):
+    """Whether a .mlmodel's type is compiled here."""
+    return (any(model.has(n) for n in SPEC_ARCHIVED) or tree_kind(model) is not None or pipeline_parts(model) is not None
+            or any(model.has(n) for n in OWN_ARCHIVES))
+
+
 def refuse_model_file(model):
     """A .mlmodel file's refusal: ML Programs come as .mlpackage, and the
     other model types aren't reproduced yet."""
@@ -1885,6 +2842,7 @@ def compile_package(package, outdir):
         unestablished("a neural network (an older Core ML format; convert the model to an ML Program)")
     if not model.has(502):
         unestablished("a model that isn't an ML Program")
+    check_encoding(model_bytes)
     name = os.path.splitext(os.path.basename(package.rstrip("/")))[0]
     files = {
         "model.mil": model_mil(model).encode("utf-8"),
@@ -1907,11 +2865,15 @@ def compile_package(package, outdir):
 
 AVAILABILITY_LINE = {
     1: "macOS 10.13, iOS 11.0, tvOS 11.0, watchOS 4.0, visionOS 1.0",
+    2: "macOS 10.13.2, iOS 11.2, tvOS 11.2, watchOS 4.2, visionOS 1.0",
     3: "macOS 10.14, iOS 12.0, tvOS 12.0, watchOS 5.0, visionOS 1.0",
+    4: "macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, visionOS 1.0",
+    5: "macOS 11.0, iOS 14.0, tvOS 14.0, watchOS 7.0, visionOS 1.0",
     6: "macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1.0",
     7: "macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, visionOS 1.0",
     8: "macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0",
     9: "macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0",
+    10: "macOS 16.0, iOS 19.0, tvOS 19.0, watchOS 12.0, visionOS 3.0",
 }
 
 # Feature names the generated code (Swift and Objective-C alike) gives a
@@ -1936,8 +2898,8 @@ class Feature:
         self.description = f.str(2)
         t = f.msg(3)
         self.optional = bool(t.int(1000))
-        if self.optional and not t.has(5):
-            unestablished("an optional feature other than a multi-array's generated code")
+        if self.optional and t.has(4):
+            unestablished("an optional image's generated code")
         self.swift_name = self.name + "_" if self.name in SWIFT_RESERVED else self.name
         if not self.swift_name.replace("_", "a").isalnum() or not self.swift_name.isascii() or self.swift_name[0].isdigit():
             unestablished("generated code for a feature named %r" % self.name)
@@ -1998,7 +2960,10 @@ class Feature:
         self.doc = "%s as %s" % (label, self.phrase)
         self.param_doc = ("%s as %s" % (self.description, self.phrase)) if self.description else self.phrase
 
-    def value(self, expr):
+    def value(self, expr, input=False):
+        if self.kind == "dictionary" and input:
+            # An input's dictionary is converted so.
+            return "try! MLFeatureValue(dictionary: %s as [NSObject : NSNumber])" % expr
         if self.kind == "sequence":
             return "MLFeatureValue(sequence: %s)" % ("MLSequence(strings: %s)" if self.sequence == "string" else "MLSequence(int64s: %s as [NSNumber])") % expr
         return {"array": "MLFeatureValue(multiArray: %s)", "image": "MLFeatureValue(pixelBuffer: %s)",
@@ -2036,6 +3001,13 @@ def interface(model):
     return out
 
 
+def update_inputs(model):
+    """An updatable model's training inputs, for its update input class."""
+    if not model.int(10):
+        return []
+    return [Feature(f) for f in (model.msg(2) or Message(b"")).msgs(50)]
+
+
 def state_name(f):
     """(name, the name the generated code gives it) of a state."""
     t = f.msg(3)
@@ -2057,6 +3029,7 @@ def swift_source(model, name):
     if vision_model(model):
         available = re.sub(r", watchOS [0-9.]+", "", available) + "\n@available(watchOS, unavailable)"
     inputs, outputs, states = interface(model)
+    training = update_inputs(model)
     # Initializers and predictions take optional inputs last.
     params = [f for f in inputs if not f.optional] + [f for f in inputs if f.optional]
     # MLShapedArray came with iOS 15; MLShapedArray<Float16> isn't on Intel
@@ -2085,40 +3058,50 @@ def swift_source(model, name):
     L = []
     w = L.append
     w("//\n// %s.swift\n//\n// This file was automatically generated and should not be edited.\n//\n\nimport CoreML\n\n" % name)
-    # Input.
-    w("/// Model Prediction Input Type\n%s\npublic class %sInput : MLFeatureProvider {\n" % (available, name))
-    for f in inputs:
-        w("    /// %s\n    public var %s: %s%s\n" % (f.doc, f.swift_name, f.swift_type, "? = nil" if f.optional else ""))
-    w("    public var featureNames: Set<String> { [%s] }\n" % ", ".join('"%s"' % f.name for f in inputs))
-    w("    public func featureValue(for featureName: String) -> MLFeatureValue? {")
-    for f in inputs:
-        value = ("%s == nil ? nil : %s" % (f.swift_name, f.value(f.swift_name + "!"))) if f.optional else f.value(f.swift_name)
-        w("        if featureName == \"%s\" {\n            return %s\n        }" % (f.name, value))
-    w("        return nil\n    }\n")
-    w("    public init(%s) {" % ", ".join(param(f) for f in params))
-    for f in params:
-        w("        self.%s = %s" % (f.swift_name, f.swift_name))
-    w("    }\n")
-    arrays = [f for f in inputs if f.kind == "array"]
-    if arrays:
-        w(shaped(inputs) + "    public convenience init(%s) {" % ", ".join(param(f, True) for f in params))
-        w("        self.init(%s)" % ", ".join(arg(f, True) for f in params))
+    def input_class(title, cls, inputs):
+        """The input class (or the update input class) and its initializers."""
+        # Initializers take optional inputs last.
+        params = [f for f in inputs if not f.optional] + [f for f in inputs if f.optional]
+        w("/// %s\n%s\npublic class %s%s : MLFeatureProvider {\n" % (title, available, name, cls))
+        for f in inputs:
+            w("    /// %s\n    public var %s: %s%s\n" % (f.doc, f.swift_name, f.swift_type, "? = nil" if f.optional else ""))
+        w("    public var featureNames: Set<String> { [%s] }\n" % ", ".join('"%s"' % f.name for f in inputs))
+        w("    public func featureValue(for featureName: String) -> MLFeatureValue? {")
+        for f in inputs:
+            value = ("%s == nil ? nil : %s" % (f.swift_name, f.value(f.swift_name + "!", True))) if f.optional else f.value(f.swift_name, True)
+            if f.optional and f.kind == "dictionary":
+                # Its try! comes first.
+                value = "try! " + value.replace("try! ", "")
+            w("        if featureName == \"%s\" {\n            return %s\n        }" % (f.name, value))
+        w("        return nil\n    }\n")
+        w("    public init(%s) {" % ", ".join(param(f) for f in params))
+        for f in params:
+            w("        self.%s = %s" % (f.swift_name, f.swift_name))
         w("    }\n")
-    images = [f for f in inputs if f.kind == "image"]
-    if images:
-        # Images from CGImage and URL came with iOS 13.
-        ios13 = "    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, visionOS 1.0, *)\n" if spec_version < 4 else ""
-        # From each source, with arrays as MLMultiArray and then as MLShapedArray.
-        for source in IMAGE_SOURCES:
-            for shape in (False, True) if arrays else (False,):
-                w(ios13 + (shaped(inputs) if shape else "") + "    public convenience init(%s) throws {\n        self.init(%s)\n    }\n" % (
-                    ", ".join(param(f, shape, source=source) for f in params), ", ".join(arg(f, shape, source) for f in params)))
-        for source in IMAGE_SOURCES:
-            for f in images:
-                cap = f.swift_name[:1].upper() + f.swift_name[1:]
-                w(ios13 + "    public func set%s(with %s: %s) throws  {\n        self.%s = try %s\n    }\n" % (
-                    cap, f.swift_name, source[2], f.swift_name, mk % (source[0], f.swift_name, f.width, f.height, f.cg_format)))
-    w("}\n\n")
+        arrays = [f for f in inputs if f.kind == "array"]
+        if arrays:
+            w(shaped(inputs) + "    public convenience init(%s) {" % ", ".join(param(f, True) for f in params))
+            w("        self.init(%s)" % ", ".join(arg(f, True) for f in params))
+            w("    }\n")
+        images = [f for f in inputs if f.kind == "image"]
+        if images:
+            # Images from CGImage and URL came with iOS 13.
+            ios13 = "    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, visionOS 1.0, *)\n" if spec_version < 4 else ""
+            # From each source, with arrays as MLMultiArray and then as MLShapedArray.
+            for source in IMAGE_SOURCES:
+                for shape in (False, True) if arrays else (False,):
+                    w(ios13 + (shaped(inputs) if shape else "") + "    public convenience init(%s) throws {\n        self.init(%s)\n    }\n" % (
+                        ", ".join(param(f, shape, source=source) for f in params), ", ".join(arg(f, shape, source) for f in params)))
+            for source in IMAGE_SOURCES:
+                for f in images:
+                    cap = f.swift_name[:1].upper() + f.swift_name[1:]
+                    w(ios13 + "    public func set%s(with %s: %s) throws  {\n        self.%s = try %s\n    }\n" % (
+                        cap, f.swift_name, source[2], f.swift_name, mk % (source[0], f.swift_name, f.width, f.height, f.cg_format)))
+        w("}\n\n")
+
+    # Input.
+    input_class("Model Prediction Input Type", "Input", inputs)
+    arrays = [f for f in inputs if f.kind == "array"]
     # Output.
     w("/// Model Prediction Output Type\n%s\npublic class %sOutput : MLFeatureProvider {\n" % (available, name))
     w("    /// Source provided by CoreML\n    private let provider : MLFeatureProvider\n")
@@ -2132,11 +3115,21 @@ def swift_source(model, name):
     w("        self.provider = try! MLDictionaryFeatureProvider(dictionary: [%s])" % ", ".join('"%s" : %s' % (f.name, f.value(f.swift_name)) for f in outputs))
     w("    }\n")
     w("    public init(features: MLFeatureProvider) {\n        self.provider = features\n    }\n}\n\n")
+    if training:
+        input_class("Model Update Input Type", "TrainingInput", training)
     if states:
         L[-1] = L[-1].rstrip("\n") + "\n\n" + (SWIFT_STATE.replace("{available}", available).replace("{N}", name).replace(
             "{cases}", "\n".join('        case %s = "%s"' % (swift, n) for n, swift in states)))
     template = MODEL_CLASS_SPEC3 if spec_version < 6 else MODEL_CLASS
     model_class = template.replace("{available}", available).replace("{N}", name).rstrip("\n") + "\n"
+    if spec_version == 5:
+        # Specification 5 drops the deprecated initializer, defaults the
+        # configuration and needs nothing more for loading with a handler.
+        for old, new, count in SWIFT_SPEC5:
+            old = old.replace("{N}", name)
+            if model_class.count(old) != count:
+                unestablished("the model class of a specification 5 model")
+            model_class = model_class.replace(old, new)
     if states:
         # Predictions use and update a state.
         for old, new, count in SWIFT_STATE_PREDICTIONS:
@@ -2185,6 +3178,17 @@ def swift_source(model, name):
     return "\n".join(L)
 
 
+# (text, its replacement, occurrences) turning MODEL_CLASS_SPEC3 into
+# specification 5's model class.
+SWIFT_SPEC5 = [
+    ('    /**\n        Construct {N} instance by automatically loading the model from the app\'s bundle.\n    */\n'
+     '    @available(*, deprecated, message: "Use init(configuration:) instead and handle errors appropriately.")\n'
+     '    public convenience init() {\n        try! self.init(contentsOf: type(of:self).urlOfModelInThisBundle)\n    }\n\n', '', 1),
+    ('    public convenience init(configuration: MLModelConfiguration) throws {',
+     '    public convenience init(configuration: MLModelConfiguration = MLModelConfiguration()) throws {', 1),
+    ('    @available(macOS 11.0, iOS 14.0, tvOS 14.0, watchOS 7.0, visionOS 1.0, *)\n', '', 2),
+]
+
 SWIFT_STATE = '/// Model Prediction State Type\n{available}\npublic final class {N}State {\n    public enum Name: String, CaseIterable {\n{cases}\n    }\n\n    let handle: MLState\n\n    init(handle: MLState) {\n        self.handle = handle\n    }\n\n    public func withMultiArray<R>(for stateName: Name, _ body: (MLMultiArray) throws -> R) rethrows -> R {\n        try handle.withMultiArray(for: stateName.rawValue, body)\n    }\n}\n'
 
 # (text, its replacement, occurrences) turning MODEL_CLASS's predictions into
@@ -2214,11 +3218,15 @@ BATCH = '    /**\n        Make a batch prediction using the structured interface
 
 API_AVAILABLE = {
     1: "macos(10.13), ios(11.0), watchos(4.0), tvos(11.0)",
+    2: "macos(10.13.2), ios(11.2), watchos(4.2), tvos(11.2)",
     3: "macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)",
+    4: "macos(10.15), ios(13.0), watchos(6.0), tvos(13.0)",
+    5: "macos(11.0), ios(14.0), watchos(7.0), tvos(14.0)",
     6: "macos(12.0), ios(15.0), watchos(8.0), tvos(15.0)",
     7: "macos(13.0), ios(16.0), watchos(9.0), tvos(16.0)",
     8: "macos(14.0), ios(17.0), watchos(10.0), tvos(17.0)",
     9: "macos(15.0), ios(18.0), watchos(11.0), tvos(18.0)",
+    10: "macos(16.0), ios(19.0), watchos(12.0), tvos(19.0)",
 }
 
 
@@ -2246,9 +3254,18 @@ def _objc(f):
         t = "NSDictionary<%s, NSNumber *> *" % key
         out = "(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithDictionary:self.%s error:nil", "(" + t + ")[%%s featureValueForName:@\"%s\"].dictionaryValue"
     if f.optional:
-        # An optional multi-array is nullable.
-        out = (out[0].replace(") ", ", nullable) ", 1), "nullable " + out[1],
-               "self.%s == nil ? nil : [MLFeatureValue featureValueWithMultiArray:(MLMultiArray *)self.%s]", out[3])
+        # An optional feature is nullable, a number boxed.
+        value = {"array": "featureValueWithMultiArray:(MLMultiArray *)self.%s", "string": "featureValueWithString:(NSString *)self.%s",
+                 "int64": "featureValueWithInt64:self.%s.longLongValue", "double": "featureValueWithDouble:self.%s.doubleValue",
+                 "dictionary": "featureValueWithDictionary:(NSDictionary *)self.%s error:nil"}.get(f.kind)
+        if f.kind == "sequence":
+            value = "featureValueWithSequence:[MLSequence %s:(%s)self.%%s]" % (
+                "sequenceWithStringArray" if f.sequence == "string" else "sequenceWithInt64Array", out[1])
+        if value is None:
+            unestablished("an optional %s's generated code" % f.kind)
+        if f.kind in ("int64", "double"):
+            out = ("(readwrite, nonatomic, strong) NSNumber * ", "NSNumber *") + out[2:]
+        out = (out[0].replace(") ", ", nullable) ", 1), "nullable " + out[1], "self.%s == nil ? nil : [MLFeatureValue " + value + "]", out[3])
     return out
 
 
@@ -2281,19 +3298,26 @@ def objc_sources(model, name):
     if vision_model(model):
         available = re.sub(r", watchos\([0-9.]+\)", "", available).replace(") __attribute__", ") API_UNAVAILABLE(watchos)  __attribute__", 1)
     inputs, outputs, states = interface(model)
+    # An updatable model's update input class follows the output's.
+    training = update_inputs(model)
+    if any(f.kind == "image" or f.optional for f in training):
+        unestablished("an image or optional training input's generated code")
+    classes = (("Input", inputs), ("Output", outputs)) + ((("TrainingInput", training),) if training else ())
     for f in inputs + outputs:
         if not (f.name[:1].isalpha() or f.name[:1] == "_"):
             unestablished("generated code for a feature named %r" % f.name)
     images = [f for f in inputs if f.kind == "image"]
     # Initializers without the optional inputs come first.
     required = [f for f in inputs if not f.optional]
-    reduced = required if len(required) < len(inputs) else None
+    # (Not when every input is optional.)
+    reduced = required if required and len(required) < len(inputs) else None
     ios13 = " API_AVAILABLE(macos(10.15), ios(13.0), watchos(6.0), tvos(13.0)) __attribute__((visibility(\"hidden\")))" if spec_version < 4 else ""
     error = " error:(NSError * _Nullable __autoreleasing * _Nullable)error"
     H = []
     H.append("//\n// %s.h\n//\n// This file was automatically generated and should not be edited.\n//\n\n#import <Foundation/Foundation.h>\n#import <CoreML/CoreML.h>\n#include <stdint.h>\n#include <os/log.h>\n\nNS_ASSUME_NONNULL_BEGIN\n" % name)
-    for kind, features in (("Input", inputs), ("Output", outputs)):
-        H.append("/// Model Prediction %s Type\n%s\n@interface %s%s : NSObject<MLFeatureProvider>\n" % (kind, available, name, kind))
+    for kind, features in classes:
+        title = "Model Update Input Type" if kind == "TrainingInput" else "Model Prediction %s Type" % kind
+        H.append("/// %s\n%s\n@interface %s%s : NSObject<MLFeatureProvider>\n" % (title, available, name, kind))
         H.append("\n\n".join("/// %s\n@property %s%s;" % (f.doc, _objc(f)[0], f.swift_name) for f in features))
         H[-1] += "\n- (instancetype)init NS_UNAVAILABLE;\n"
         if kind == "Input" and reduced is not None:
@@ -2321,7 +3345,7 @@ def objc_sources(model, name):
             if header_model.count(old) != count:
                 unestablished("the predictions of a model with states")
             header_model = header_model.replace(old, new)
-    if spec_version < 6:
+    if spec_version < 5:
         # Loading with a completion handler needs iOS 14 and its contemporaries.
         for anchor in ("completionHandler:(void (^)(%s * _Nullable model, NSError * _Nullable error))handler;" % name,):
             if header_model.count(anchor) != 2:
@@ -2359,7 +3383,7 @@ def objc_sources(model, name):
 
     M = []
     M.append("//\n// %s.m\n//\n// This file was automatically generated and should not be edited.\n//\n\n#if !__has_feature(objc_arc)\n#error This file must be compiled with automatic reference counting enabled (-fobjc-arc)\n#endif\n\n#import \"%s.h\"\n" % (name, name))
-    for kind, features in (("Input", inputs), ("Output", outputs)):
+    for kind, features in classes:
         M.append("@implementation %s%s\n" % (name, kind))
         designated = "- (instancetype)%s {\n    self = [super init];\n    if (self) {\n" % _selector("initWith", features, _objc_param)
         for f in features:
@@ -2509,8 +3533,10 @@ def generate(argv):
         else:
             with open(source, "rb") as f:
                 model = Message(f.read())
-            if not any(model.has(n) for n in SPEC_ARCHIVED) and tree_kind(model) is None and pipeline_parts(model) is None:
+            if not compiled_type(model):
                 refuse_model_file(model)
+            # Xcode checks the model as it reads it, for either.
+            validate(model)
         name = generated_class_name(os.path.splitext(os.path.basename(source.rstrip("/")))[0])
         if language == "Swift":
             files = {name + ".swift": swift_source(model, name)}
@@ -2550,12 +3576,20 @@ def main(argv):
             with open(source, "rb") as f:
                 model_bytes = f.read()
             model = Message(model_bytes)
+            if not compiled_type(model):
+                refuse_model_file(model)
+            validate(model)
+            if tree_kind(model) is None:
+                # A tree ensemble's description is re-encoded here as Xcode does.
+                check_encoding(model_bytes)
             if any(model.has(n) for n in SPEC_ARCHIVED):
                 compile_spec_model(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
             elif tree_kind(model) is not None:
                 compile_tree(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
             elif pipeline_parts(model) is not None:
                 compile_pipeline(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
+            elif any(model.has(n) for n in OWN_ARCHIVES):
+                compile_own_archive(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
             else:
                 refuse_model_file(model)
     except Unestablished as e:

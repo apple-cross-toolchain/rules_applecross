@@ -1,0 +1,1 @@
+coremlc: error: compiler error: Error reading protobuf spec. validator error: Pipeline: the input 'zz' of model 'CoreML.Specification.ModelDescription' does not present in pipeline input or previous model.

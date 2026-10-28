@@ -53,5 +53,25 @@ class AssetsCarTest(unittest.TestCase):
         self.assertFalse(equivalent("App.app/Assets.car", self.first, bytes(changed)))
 
 
+class CoremldataTest(unittest.TestCase):
+    """coremlc writes the maps of a specification it copies (a categorical
+    mapping's, a custom model's parameters) and a model's user-defined
+    metadata (here in a k-nearest neighbors archive) in a random order."""
+
+    def test_two_xcode_runs_are_equivalent(self):
+        for name in ("CatMany", "Custom", "Knn"):
+            first, second = read(name + ".1.coremldata.bin"), read(name + ".2.coremldata.bin")
+            self.assertNotEqual(first, second, name)
+            self.assertTrue(equivalent("M.mlmodelc/coremldata.bin", first, second), name)
+
+    def test_any_changed_byte_is_not(self):
+        for name in ("CatMany", "Custom", "Knn"):
+            first, second = read(name + ".1.coremldata.bin"), read(name + ".2.coremldata.bin")
+            for at in range(len(second)):
+                changed = bytearray(second)
+                changed[at] ^= 1
+                self.assertFalse(equivalent("M.mlmodelc/coremldata.bin", first, bytes(changed)), (name, at))
+
+
 if __name__ == "__main__":
     unittest.main()

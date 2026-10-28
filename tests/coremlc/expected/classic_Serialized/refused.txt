@@ -1,0 +1,1 @@
+coremlc: error: compiler error: No known class for compiling model type MLModelType_serializedModel

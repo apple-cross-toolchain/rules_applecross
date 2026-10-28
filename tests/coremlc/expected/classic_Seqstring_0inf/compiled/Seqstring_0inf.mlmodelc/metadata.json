@@ -1,0 +1,56 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "y",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "customModels" : [
+      {
+        "className" : "C",
+        "description" : ""
+      }
+    ],
+    "modelType" : {
+      "name" : "MLModelType_customModel"
+    },
+    "inputSchema" : [
+      {
+        "valueType" : "String",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (String 0...)",
+        "sizeRange" : "[0, -1]",
+        "shortDescription" : "",
+        "type" : "Sequence",
+        "name" : "s"
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "Seqstring_0inf",
+    "method" : "predict"
+  }
+]

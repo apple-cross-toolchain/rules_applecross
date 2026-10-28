@@ -1,0 +1,56 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "y",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_identity"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "a",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "1",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)?",
+        "type" : "Dictionary",
+        "name" : "o",
+        "shortDescription" : ""
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "Id_dicts_4",
+    "method" : "predict"
+  }
+]

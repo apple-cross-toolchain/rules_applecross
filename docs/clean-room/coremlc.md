@@ -2,10 +2,16 @@
 
 Reproduced: `coremlc compile` and `coremlc generate` of ML Programs
 (`.mlpackage`, with states, several functions, flexible shapes, optional
-inputs, images among their inputs and outputs, and compressed weights), of
-tree ensembles, and of
-Create ML's text classifiers, word taggers, tabular models and image
-classifiers (`.mlmodel`), as rules_apple runs them. Compiling writes
+inputs, images among their inputs and outputs, and compressed weights), and
+of every other model type of the published specification but neural
+networks (`.mlmodel`): tree ensembles, support vector machines, linear
+models, Bayesian probit regressors, k-nearest neighbors classifiers
+(updatable ones too), item similarity recommenders, the feature transforms,
+non-maximum suppression, class confidence thresholding, custom and linked
+models, Vision and audio feature prints and sound analysis preprocessing,
+pipelines of any of these, and Create ML's text classifiers, word taggers,
+gazetteers, word embeddings, recommenders, and tabular, image and sound
+classifiers; as rules_apple runs them. Compiling writes
 `<Name>.mlmodelc/` and the partial Info.plist. Generating writes the Swift class
 (`--public-access --language Swift`) or the Objective-C pair. The
 implementation is `toolchain/stubs/coremlc.py`, pure Python, with its
@@ -16,14 +22,20 @@ Provenance: black-box, as [README.md](README.md) describes. Sources:
   component 3600.16.1) for models made for the purpose;
 - its usage messages.
 - Apple's published Core ML model specification (the protobuf schema
-  coremltools ships), for reading models.
+  coremltools ships), for reading models, and its comments, for what to
+  probe.
 - coremltools (its MIL builder and converter, its multi-function and weight
   compression utilities), to build the test models and to list MIL operation
   names; its published MIL operation definitions (the compression operations'
   inputs) and its packing of integers narrower than a byte, to read models.
 - Apple's public CreateML framework, from small Swift programs, to train text
-  classifiers, word taggers, tabular models and image classifiers as Create
-  ML exports them (the images drawn for the purpose).
+  classifiers, word taggers, tabular models, image classifiers, gazetteers,
+  word embeddings, recommenders, sound classifiers (on generated tones and
+  noise), activity classifiers, object detectors and style transfers as
+  Create ML exports them (the images drawn for the purpose).
+- coremltools's k-nearest neighbors builder, for updatable models; the other
+  `.mlmodel` probes were written with the specification's protobuf
+  messages.
 - CoreFoundation's published string hash and hash tables, for key order.
 
 Generating writes Xcode's fixed template text, taken from its outputs, around
@@ -57,8 +69,9 @@ none.
 
 An app built entirely on Linux (`//examples/ios/HelloWorldSwift`, with
 `examples/resources/Doubler.mlpackage`) carries a compiled model and a generated class byte-identical to Xcode's.
-`tests/coremlc` keeps 271 models with Xcode's output: 255 compiled, 3 that
-Xcode refuses, and 205 with generated classes.
+`tests/coremlc` keeps 338 models with Xcode's output: 318 compiled, 7 that
+Xcode refuses, and 268 with generated classes (the 67 `classic_*` cases
+are the other `.mlmodel` types).
 
 ## Xcode's own output varies
 
@@ -74,6 +87,13 @@ with `tools/xcode_equivalence.py`, which sorts that map on both sides and
 then compares the bytes, so a model's metadata is checked like the rest.
 Every probe for the features below was compiled twice by Xcode; no other
 output varied, compressed weights included.
+
+A model compiled to its own specification (below) is the specification as
+Xcode re-encodes it, so its other maps vary from run to run too: a custom
+model's parameters and a categorical mapping's map. `xcode_equivalence.py`
+sorts those as well (and an imputer's dictionary, which is refused).
+Xcode also writes uninitialized bytes into `_B0000.DAT` for an item
+similarity recommender without items; that is refused.
 
 ## Compiled files
 
@@ -428,8 +448,226 @@ Before specification 6, the `MLShapedArray` conveniences are marked iOS 15.
 
 Nine models compared: two and three classes, labels with spaces and
 non-ASCII letters, both revisions, specification 1 as well, with and without
-metadata. Every compiled and generated file matched. Other pipelines with a
-feature print are refused.
+metadata. Every compiled and generated file matched. Other models with a
+feature print are under Other model types, below.
+
+## Other model types
+
+Every other model type of the published specification but neural networks
+compiles too, on its own or as a pipeline's part, and generates its
+classes. 935 models were written for them with the specification's
+protobuf messages, each to vary one thing, and compiled twice and generated
+by Xcode and by this tool:
+- of the 687 Xcode compiles, 674 compile the same (up to the maps above) and
+  13 are refused here (below);
+- the 248 Xcode refuses are refused too;
+- every generated Swift and Objective-C file of those matches, but for the
+  13 and 11 more that are refused (optional images, names that need
+  escaping, and a serialized model, whose classes Xcode generates though it
+  doesn't compile it).
+
+### Models compiled to their specification
+
+Most types compile as text classifiers do: `coremldata.bin` is a header
+(u32 the model's field number, u32 1, 20 zero bytes, the tag `spec`, the
+specification version, 28 zero bytes) and the whole specification, a
+description without metadata given an empty one. Their analytics hold only
+`SpecificationDetails`, and `metadata.json` names the type
+(`MLModelType_supportVectorRegressor` and so on). So compile:
+- `supportVectorRegressor`, `supportVectorClassifier` (every kernel, dense
+  and sparse support vectors), `glmRegressor`, `glmClassifier`,
+  `bayesianProbitRegressor`;
+- `identity`, `normalizer`, `scaler`, `imputer`, `arrayFeatureExtractor`,
+  `categoricalMapping`, `dictVectorizer`, `oneHotEncoder`,
+  `featureVectorizer`;
+- `nonMaximumSuppression`, `classConfidenceThresholding`, `customModel`,
+  `linkedModel`;
+- `visionFeaturePrint` (scenes, revisions 1 and 2, and objects),
+  `audioFeaturePrint`, `soundAnalysisPreprocessing`, `gazetteer` and
+  `wordEmbedding`.
+
+`metadata.json` adds:
+- a classifier's labels (`classLabels`), each once, in the order first
+  given; a gazetteer's from its own label field;
+- for a custom model, `customModels` (its class name and description);
+- for a linked model, `modelParameters`: `linkedModelFileName` and
+  `linkedModelSearchPath`, each with its default (empty when not given),
+  `scope` and `dataType` `String`;
+- for any model using a Vision feature print, standalone or in a pipeline,
+  `watchOS` `unavailable` in its availability (and in the generated
+  classes, as for image classifiers).
+
+Xcode refuses `serializedModel` ("No known class for compiling"); so does
+this tool, which doesn't generate its classes either.
+
+### Checks
+
+Xcode checks a model as it reads it, for compiling and generating alike,
+and refuses one that fails. 404 models were written to break one rule each;
+155 of them Xcode refuses. This tool makes the same checks, and refuses any
+form of model it hasn't seen accepted:
+- every model: at least one input and one output, each named and typed; an
+  input array with a shape; Float16 arrays and Grayscale16Half images from
+  specification 7, sequences from specification 3; no optional outputs,
+  and optional inputs only to an identity, an imputer and an item
+  similarity recommender; a default shape within its ranges;
+- regressors and classifiers: a predicted feature that is an output, of the
+  labels' type; classifiers' labels;
+- GLMs: as many offsets as weights; with reference-class encoding one
+  weight vector fewer than classes; one-vs-rest, one per class, or one for
+  two classes; transforms and encodings the specification defines;
+- support vector machines: a kernel, support vectors, as many coefficients
+  as support vectors; for a classifier, support vectors per class adding up,
+  one coefficient vector fewer than classes, as many `probA` as `probB`;
+- normalizers, scalers, imputers, array feature extractors, categorical
+  mappings, one-hot encoders and dictionary vectorizers: one input and one
+  output of the types Xcode accepts (a dictionary vectorizer's output is a
+  dictionary: Xcode refuses an array), their parameters given and of the
+  types of their features;
+- non-maximum suppression: its named features present, Double arrays, the
+  outputs exactly those it names, thresholds between 0 and 1, as many
+  labels as the confidence output's classes;
+- class confidence thresholding: curves, each of non-empty components of
+  one length; custom models a class name; linked models a file name;
+- feature prints: one image (or audio array) in, a known kind and version;
+  object prints two named outputs; gazetteers and word embeddings revision
+  2 or later, their data and a string input.
+
+### Specification versions
+
+Every type compiles at the specifications Xcode accepts it at, 1 to 10
+(the last iOS 19 and its contemporaries). Generated classes follow:
+- specification 2: availability macOS 10.13.2, iOS 11.2, watchOS 4.2, tvOS
+  11.2;
+- specifications 2 to 4: the specification 3 template;
+- specification 5: that template without the deprecated `init()`, with a
+  default configuration, and with loading by completion handler unmarked;
+- specification 10: availability macOS 16, iOS 19, tvOS 19, watchOS 12,
+  visionOS 3.
+
+30 models (three types at each of specifications 1 to 10) compared.
+
+### Features
+
+- A sequence without a size range is `Sequence (String 0)`, `[0, 0]`; an
+  upper bound of -1 is unbounded (`0...`, `[0, -1]`); equal bounds are
+  written once.
+- Any input may be optional where the type allows it: its formatted type
+  ends in `?`; Swift makes it optional; Objective-C makes it `nullable`, an
+  integer or double an `NSNumber`. Without required inputs, Objective-C has
+  no initializer leaving optional ones out.
+- An input dictionary's value in Swift is `try! MLFeatureValue(dictionary:
+  x as [NSObject : NSNumber])` (`try!` first when optional).
+
+168 models (every feature type, optional or not, sequences, flexible shapes
+at specifications 1 to 4, names and descriptions) compared.
+
+### k-nearest neighbors
+
+`kNearestNeighborsClassifier` compiles to its own archive, tagged
+`notreesyet`: after the usual header and the description (canonical, as
+the trees' is), u32 the dimensions; u64 the count and the samples as
+float32; the labels (u64 0 when not given, else u64 100 or 101, the count
+and the labels as given, repeats kept); the default label (u64 0, or u64 110
+and a string, or u64 111 and an int64); u32 the weighting (0 uniform, 1
+inverse distance), u32 the index (0 linear, 1 k-d tree, then u32 its leaf
+size); labels given empty are u64 100 (or 101) and a count of 0.
+`modelParameters/coremldata.bin` is u64 0 and
+`modelParameters/numberOfNeighbors/coremldata.bin` the `Int64Parameter`'s
+own bytes; `metadata.json` describes it under `modelParameters` (default,
+`allowedRange` or `allowedSet`, `scope`). The labels in `metadata.json` are
+each given once.
+
+Xcode refuses: no index, distance or weighting; a leaf size that isn't
+positive; a sample of another length than the dimensions; labels not one
+per sample; no labels and no default; a default of another type; a number
+of neighbors not positive, out of its range or set. So does this tool. 60
+models compared, 18 of them refused by both.
+
+Updatable ones, as coremltools's builder makes them (specification 4 or
+later; training inputs the model's own features): `metadata.json` says
+`isUpdatable` `1`, with `updateParameters` (none) and `trainingInputSchema`;
+`updateParameters/coremldata.bin` is u64 0; the generated classes gain a
+`<Name>TrainingInput` class ("Model Update Input Type"), shaped as the
+input class, after the output class. Xcode refuses other updatable types
+("not supported for on-device update"). 9 compared.
+
+### Item similarity recommenders
+
+`itemSimilarityRecommender` compiles to the `generic` archive and a
+`_B0000.DAT`: after the description, u64 0, `_B0000.DAT`, u64 the item
+count (the ids' if given, else the largest item plus one), the integer ids
+and the string ids (each counted), and the six feature names. The data
+file holds the similarities as a sparse matrix, in the trees' packed
+arrays:
+- u32 0, u32 the largest item plus one, u64 0;
+- the row offsets: one per row up to the last listed one, an unlisted item
+  before a listed one repeating the offset reached, one short of a row each;
+- each row's columns, sorted, the first as it is and the rest as the gap
+  from the one before less one; zero scores are left out;
+- u64 the count and the scores as float64;
+- the score adjustments: u64 0 when none are given, else u64 the item count
+  and one per item (0 when not given).
+
+Xcode refuses ids of both kinds, repeated string ids, and fewer ids than
+items: integer ids must cover every item, string ids all but the last.
+Items listed twice or with a similar item twice (Xcode sums their scores)
+are refused here, and so is a recommender without items. 122 models
+compared, 30 of them refused by both.
+
+### Pipelines
+
+Pipelines (`pipeline`, `pipelineClassifier`, `pipelineRegressor`) of any of
+these parts compile as Create ML's tabular models do, at any specification
+Xcode accepts. Also:
+- a pipeline part compiles to its own pipeline archive in `model<N>/` (its
+  tag in the parent's `model<N>v1.0.1generic.…`), with analytics of only
+  `PipelineModelDetails` and no `metadata.json`; `metadata.json` nests its
+  structure;
+- k-nearest neighbors parts are tagged `notreesyet`, item similarity ones
+  `generic`;
+- a part (a pipeline too) keeps its description as given, without an empty
+  metadata added;
+- names given to the parts go in `modelNames/coremldata.bin` (u64 the
+  count and the names), and scope their model parameters (`model<N>` when
+  unnamed, joined with `.` within nested pipelines);
+- the labels are those of the classifier giving the pipeline's predicted
+  feature, else of its only classifier (nested ones count); with several,
+  none.
+
+Xcode refuses a pipeline without models, names not one per model, a part's
+input that no earlier part or pipeline input gives, of another type, and a
+pipeline output nothing gives; so does this tool. 78 models compared, 9 of
+them refused by both.
+
+### Create ML's other models
+
+Trained as Create ML exports them: gazetteers (`MLGazetteer`) and word
+embeddings (`MLWordEmbedding`) compile to their specification; recommenders
+(`MLRecommender`, string and integer items, with ratings or not) are item
+similarity recommenders; sound classifiers (`MLSoundClassifier`) are
+pipeline classifiers of an audio feature print and a GLM classifier. Eight
+compared. `MLActivityClassifier` and `MLStyleTransfer` export neural
+networks, and `MLObjectDetector` a pipeline of a neural network and
+non-maximum suppression; those are refused, as other neural networks.
+`MLHandPoseClassifier` wasn't tried.
+
+### Holdout
+
+900 random models of all these types, pipelines nested or not, with
+features, labels, specifications, metadata and occasional broken rules
+drawn at random, were made after the rules were written, 300 at a time:
+- the first 300 caught three rules: how many item ids Xcode requires, the
+  one-vs-rest weights of two classes, and pipeline parts' descriptions
+  kept as given; fixed before the next were made;
+- the second caught one (a nested pipeline's description) and that the
+  equivalence check didn't cover a k-nearest neighbors archive's metadata
+  map;
+- the third caught none.
+
+Of the 900, 806 compile with Xcode: 802 compile and generate the same here,
+4 (pipelines with an optional input, which Xcode accepts) are refused. The
+94 that Xcode refuses are refused too.
 
 ## Generated code
 
@@ -455,9 +693,21 @@ standard `predictionFromFeatures:`.
 Refused, strict or relaxed:
 - **Older neural networks** (`neuralNetwork`, `.mlmodel`), with a message to
   convert the model to an ML Program.
-- **Other `.mlmodel` types**, and text classifiers and word taggers of
-  specifications other than 3, and pipelines of other parts or
-  specifications.
+- **Unestablished `.mlmodel` forms:**
+  - text classifiers and word taggers of specifications other than 3;
+  - updatable models other than k-nearest neighbors classifiers on their
+    own (an updatable pipeline's classes differ), and training inputs that
+    aren't the model's own features;
+  - optional inputs to a pipeline (Xcode accepts some), and optional
+    images' generated classes;
+  - an item similarity recommender without items (Xcode writes
+    uninitialized bytes), or with an item, or an item's similar item,
+    listed twice;
+  - forms of a type not seen accepted: a GLM regressor's transform 3, a
+    probit regressor's array output, a k-nearest neighbors classifier's
+    double input, a recommender's sequence of items;
+  - imputers of dictionaries and integer arrays, and other forms not seen
+    accepted.
 - **Unestablished ML Program features:**
   - updatable models, and classifiers with several functions;
   - list and tuple values (coremltools writes them only for classifiers'
@@ -474,8 +724,20 @@ Refused, strict or relaxed:
     and Int4, UInt2, UInt3, UInt4 and UInt6, and weights held as
     attributes of operations other than iOS 16's compression operations;
   - operations not in the table.
-- **Refused by Xcode too:** models mixing ranges and enumerated shapes,
-  defaults of another type than their array, models whose inputs are all
-  optional, images with enumerated sizes whose program input fixes their
-  height or width, `resample` modes Xcode doesn't know, and operations
-  Xcode doesn't know.
+- **`serializedModel`**, which Xcode doesn't compile.
+- **Refused by Xcode too:** the `.mlmodel` checks above, models mixing
+  ranges and enumerated shapes, defaults of another type than their array,
+  models whose inputs are all optional, images with enumerated sizes whose
+  program input fixes their height or width, `resample` modes Xcode doesn't
+  know, and operations Xcode doesn't know.
+
+A specification is copied as it's given, where Xcode re-encodes it, so a
+model not encoded as protobuf's own serializers write it would come out
+different. Such a model is refused: the levels known to be messages (the
+model, its description, the description's features and metadata, and the
+model type's own message) must have their fields in number order, each
+scalar field once and minimal varints. Two models reordered on purpose were
+refused, and none of 4,578 models from coremltools, Create ML and the probes
+was. (A tree ensemble is exempt: its description is re-encoded here as
+Xcode does.) Deeper levels aren't checked, since without the schema their
+bytes can't be told from strings and packed numbers.

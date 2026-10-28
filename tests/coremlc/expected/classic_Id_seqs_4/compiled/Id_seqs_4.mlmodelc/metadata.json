@@ -1,0 +1,57 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "y",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_identity"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "a",
+        "shortDescription" : ""
+      },
+      {
+        "valueType" : "String",
+        "isOptional" : "1",
+        "formattedType" : "Sequence (String 0)?",
+        "sizeRange" : "[0, 0]",
+        "shortDescription" : "",
+        "type" : "Sequence",
+        "name" : "o"
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "Id_seqs_4",
+    "method" : "predict"
+  }
+]

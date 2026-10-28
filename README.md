@@ -39,9 +39,13 @@ one fails:
 - Core Data models (`momc`, `mapc`);
 - Core ML's older neural networks. ML Programs (`.mlpackage`, states,
   several functions, flexible shapes, optional inputs and compressed weights
-  included), tree ensembles, and Create
-  ML's text classifiers, word taggers, image classifiers and tabular models
-  compile, and get their generated classes, as Xcode makes them
+  included) and the other `.mlmodel` types compile, and get their generated
+  classes, as Xcode makes them: tree ensembles, support vector machines,
+  linear models, k-nearest neighbors (updatable too), item similarity
+  recommenders, the feature transforms, non-maximum suppression, custom and
+  linked models, Vision and audio feature prints, and pipelines of any of
+  these; and Create ML's text classifiers, word taggers, gazetteers, word
+  embeddings, recommenders, and image, sound and tabular models
   ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
 - Reality Composer content (`realitytool`), DocC, and `.xib` files;
 - tvOS app icons and Icon Composer icons

@@ -1,0 +1,1 @@
+coremlc: error: compiler error: Error reading protobuf spec. validator error: Specification is missing regressor predictedFeatureName.

@@ -1,0 +1,62 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+      {
+        "defaultValue" : "1",
+        "allowedSet" : "[1, 2, 5]",
+        "scope" : "",
+        "name" : "numberOfNeighbors",
+        "dataType" : "Int64",
+        "shortDescription" : "Number of neighbors to use for prediction"
+      }
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_kNearestNeighborsClassifier"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 2)",
+        "shortDescription" : "",
+        "shape" : "[2]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "classLabels" : [
+      "a",
+      "b"
+    ],
+    "generatedClassName" : "Kset",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]
