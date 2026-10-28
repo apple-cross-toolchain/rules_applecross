@@ -15,6 +15,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -724,7 +725,7 @@ def metadata_json(model, name):
         model_type = "MLModelType_mlProgram"
     elif pipeline_parts(model) is not None:
         kind, parts = pipeline_parts(model)
-        model_type = CFDict([("name", "MLModelType_" + PIPELINE_TYPES[kind]),
+        model_type = CFDict([("name", "MLModelType_" + ("imageClassifier" if image_classifier(kind, parts) else PIPELINE_TYPES[kind])),
                              ("structure", [CFDict([("name", "MLModelType_" + PART_TYPES[pk])]) for pk, _ in parts])])
         labels = None
         for pk, part in parts:
@@ -745,6 +746,7 @@ def metadata_json(model, name):
         labels = [v.decode() for v in model.msg(SPEC_TYPE_FIELD[kind]).msg(200).all(1)] if model.msg(SPEC_TYPE_FIELD[kind]).has(200) else unestablished("a text model without labels")
     if model.int(10):
         unestablished("an updatable model")
+    vision = vision_model(model)
     pairs = [("metadataOutputVersion", "3.0")]
     for key, number in (("shortDescription", 1), ("author", 3), ("license", 4), ("version", 2)):
         if meta.has(number) and meta.str(number):
@@ -759,7 +761,7 @@ def metadata_json(model, name):
     pairs += [
         ("isUpdatable", "0"),
         ("stateSchema", []),
-        ("availability", CFDict([(k, (AVAILABILITY.get(spec_version) or unestablished("availability for specification %d" % spec_version))[k]) for k in AVAILABILITY_KEYS])),
+        ("availability", CFDict([(k, "unavailable" if k == "watchOS" and vision else (AVAILABILITY.get(spec_version) or unestablished("availability for specification %d" % spec_version))[k]) for k in AVAILABILITY_KEYS])),
         ("modelType", model_type if isinstance(model_type, CFDict) else CFDict([("name", model_type)])),
         ("inputSchema", [feature(f) for f in description.msgs(1)]),
         ("generatedClassName", generated_class_name(name)),
@@ -907,7 +909,7 @@ def compile_spec_model(model_bytes, name, outdir):
 PIPELINE_TYPES = {200: "pipelineClassifier", 201: "pipelineRegressor"}
 # Pipeline parts compiled to a header and their own specification, by Model
 # field, and the names metadata.json gives them.
-PART_TYPES = {300: "glmRegressor", 400: "glmClassifier", 600: "oneHotEncoder", 602: "featureVectorizer"}
+PART_TYPES = {300: "glmRegressor", 400: "glmClassifier", 600: "oneHotEncoder", 602: "featureVectorizer", 2002: "visionFeaturePrint"}
 
 
 def pipeline_parts(model):
@@ -921,7 +923,21 @@ def pipeline_parts(model):
         if len(fields) != 1 or fields[0] not in PART_TYPES:
             unestablished("a pipeline with a %s" % (MODEL_TYPES.get(fields[0], "type %d" % fields[0]) if fields else "typeless model"))
         parts.append((fields[0], part))
+    if any(pk == 2002 for pk, _ in parts) and not image_classifier(kind, parts):
+        unestablished("a pipeline with a vision feature print that isn't Create ML's image classifier")
     return kind, parts
+
+
+def vision_model(model):
+    """Whether the model uses Vision's feature prints, which watchOS lacks."""
+    parts = pipeline_parts(model)
+    return parts is not None and image_classifier(*parts)
+
+
+def image_classifier(kind, parts):
+    """Create ML's image classifier: a scene print, then a linear classifier."""
+    return (kind == 200 and [pk for pk, _ in parts] == [2002, 400]
+            and Message(parts[0][1]).msg(2002).has(20))
 
 
 def compile_pipeline(model_bytes, name, outdir):
@@ -930,7 +946,7 @@ def compile_pipeline(model_bytes, name, outdir):
     model = Message(model_bytes)
     kind, parts = pipeline_parts(model)
     spec_version = model.int(1)
-    if spec_version != 1:
+    if spec_version not in ((1, 3, 8) if image_classifier(kind, parts) else (1,)):
         unestablished("a pipeline of specification %d" % spec_version)
     tag = ("generic." + ".".join("model%dv1.0.0spec" % i for i in range(len(parts)))).encode()
     description = canonical_description(model)
@@ -1120,6 +1136,8 @@ def swift_source(model, name):
     if description.has(13) or description.has(20):
         unestablished("generated code for a model with states or functions")
     available = "@available(%s, *)" % (AVAILABILITY_LINE.get(spec_version) or unestablished("specification version %d" % spec_version))
+    if vision_model(model):
+        available = re.sub(r", watchOS [0-9.]+", "", available) + "\n@available(watchOS, unavailable)"
     inputs = [Feature(f) for f in description.msgs(1)]
     outputs = [Feature(f) for f in description.msgs(10)]
     L = []
@@ -1149,11 +1167,13 @@ def swift_source(model, name):
             unestablished("generated code for images among other inputs")
         f = images[0]
         mk = "MLFeatureValue(%s: %s, pixelsWide: %d, pixelsHigh: %d, pixelFormatType: %s, options: nil).imageBufferValue!"
-        w("    public convenience init(%sWith %s: CGImage) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
-        w("    public convenience init(%sAt %s: URL) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
+        # Images from CGImage and URL came with iOS 13.
+        ios13 = "    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, visionOS 1.0, *)\n" if spec_version < 4 else ""
+        w(ios13 + "    public convenience init(%sWith %s: CGImage) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
+        w(ios13 + "    public convenience init(%sAt %s: URL) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
         cap = f.swift_name[:1].upper() + f.swift_name[1:]
-        w("    public func set%s(with %s: CGImage) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
-        w("    public func set%s(with %s: URL) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
+        w(ios13 + "    public func set%s(with %s: CGImage) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
+        w(ios13 + "    public func set%s(with %s: URL) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
     w("}\n\n")
     # Output.
     w("/// Model Prediction Output Type\n%s\npublic class %sOutput : MLFeatureProvider {\n" % (available, name))
@@ -1265,6 +1285,8 @@ def objc_sources(model, name):
     if description.has(13) or description.has(20):
         unestablished("generated code for a model with states or functions")
     available = "API_AVAILABLE(%s) __attribute__((visibility(\"hidden\")))" % (API_AVAILABLE.get(spec_version) or unestablished("specification version %d" % spec_version))
+    if vision_model(model):
+        available = re.sub(r", watchos\([0-9.]+\)", "", available).replace(") __attribute__", ") API_UNAVAILABLE(watchos)  __attribute__", 1)
     inputs = [Feature(f) for f in description.msgs(1)]
     outputs = [Feature(f) for f in description.msgs(10)]
     for f in inputs + outputs:
@@ -1284,10 +1306,11 @@ def objc_sources(model, name):
         if kind == "Input" and images:
             f = images[0]
             cap = f.name[:1].upper() + f.name[1:]
-            H.append("- (nullable instancetype)initWith%sFromCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n" % (cap, f.swift_name))
-            H.append("- (nullable instancetype)initWith%sAtURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n" % (cap, f.swift_name))
-            H.append("-(BOOL)set%sWithCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error ;" % (cap, f.swift_name))
-            H.append("-(BOOL)set%sWithURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error ;" % (cap, f.swift_name))
+            ios13 = " API_AVAILABLE(macos(10.15), ios(13.0), watchos(6.0), tvos(13.0)) __attribute__((visibility(\"hidden\")))" if spec_version < 4 else ""
+            H.append("- (nullable instancetype)initWith%sFromCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error%s;\n" % (cap, f.swift_name, ios13))
+            H.append("- (nullable instancetype)initWith%sAtURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error%s;\n" % (cap, f.swift_name, ios13))
+            H.append("-(BOOL)set%sWithCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error %s;" % (cap, f.swift_name, ios13))
+            H.append("-(BOOL)set%sWithURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error %s;" % (cap, f.swift_name, ios13))
         H.append("@end\n")
     header_model = H_MODEL.replace("{available}", available).replace("{N}", name)
     if spec_version < 6:

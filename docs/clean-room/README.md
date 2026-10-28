@@ -59,7 +59,7 @@ other tools refuse such inputs either way.
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
-| [coremlc.md](coremlc.md) | `coremlc`: ML Programs and Create ML's text and linear tabular models compiled to `.mlmodelc`, and their Swift and Objective-C classes |
+| [coremlc.md](coremlc.md) | `coremlc`: ML Programs and Create ML's text, image and linear tabular models compiled to `.mlmodelc`, and their Swift and Objective-C classes |
 | [appintentsmetadataprocessor.md](appintentsmetadataprocessor.md) | `appintentsmetadataprocessor`: App Intents metadata from Swift constant values |
 | [xcstringstool.md](xcstringstool.md) | `xcstringstool`: String Catalogs to `.strings` and `.stringsdict` |
 | [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |

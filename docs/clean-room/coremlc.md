@@ -1,8 +1,8 @@
 # coremlc
 
 Reproduced: `coremlc compile` and `coremlc generate` of ML Programs
-(`.mlpackage`) and of Create ML's text classifiers, word taggers and linear
-tabular models (`.mlmodel`), as rules_apple runs them. Compiling writes `<Name>.mlmodelc/`
+(`.mlpackage`) and of Create ML's text classifiers, word taggers, linear
+tabular models and image classifiers (`.mlmodel`), as rules_apple runs them. Compiling writes `<Name>.mlmodelc/`
 and the partial Info.plist. Generating writes the Swift class
 (`--public-access --language Swift`) or the Objective-C pair. The
 implementation is `toolchain/stubs/coremlc.py`, pure Python, with its
@@ -16,7 +16,8 @@ Provenance: black-box, as [README.md](README.md) describes. Sources:
   coremltools ships), for reading models.
 - coremltools, to build the test models and to list MIL operation names.
 - Apple's public CreateML framework, from small Swift programs, to train text
-  classifiers, word taggers and tabular models as Create ML exports them.
+  classifiers, word taggers, tabular models and image classifiers as Create
+  ML exports them (the images drawn for the purpose).
 - CoreFoundation's published string hash and hash tables, for key order.
 
 Generating writes Xcode's fixed template text, taken from its outputs, around
@@ -146,6 +147,24 @@ kinds of metadata, and four more from earlier probes. Every compiled and
 generated file matched, up to Xcode's map order for the two with two
 metadata entries; `tests/coremlc` keeps those two for generating only.
 
+## Image classifiers
+
+Create ML's image classifiers are pipeline classifiers of a Vision scene
+print (field 2002) and a linear classifier, at specification 3 (scene print
+revision 1) or 8 (revision 2). They compile as the tabular pipelines do, the
+scene print a part like the others. Xcode treats them as their own kind:
+- `metadata.json` names the model type `MLModelType_imageClassifier`, and its
+  availability gives watchOS as `unavailable`;
+- the generated classes say `@available(watchOS, unavailable)` (Objective-C:
+  `API_UNAVAILABLE(watchos)`) in place of a watchOS version;
+- before specification 4, the image conveniences (from a `CGImage` or a URL)
+  are marked iOS 13.
+
+Nine models compared: two and three classes, labels with spaces and
+non-ASCII letters, both revisions, specification 1 as well, with and without
+metadata. Every compiled and generated file matched. Other pipelines with a
+feature print are refused.
+
 ## Generated code
 
 The Swift class and the Objective-C header and implementation follow
@@ -170,8 +189,7 @@ Refused, strict or relaxed:
   convert the model to an ML Program.
 - **The other `.mlmodel` types** Create ML still produces: its tree
   ensembles (boosted trees, random forests and decision trees, and the
-  `MLClassifier` or `MLRegressor` that picks one), and its image classifiers.
-  These are the next step. Text classifiers and word taggers of
+  `MLClassifier` or `MLRegressor` that picks one). These are the next step. Text classifiers and word taggers of
   specifications other than 3, and pipelines of other parts or
   specifications, are refused too.
 - **Unestablished ML Program features:**

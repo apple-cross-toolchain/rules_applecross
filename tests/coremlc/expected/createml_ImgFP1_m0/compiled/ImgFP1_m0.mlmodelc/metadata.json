@@ -1,0 +1,76 @@
+[
+  {
+    "shortDescription" : "Colors",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "target",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "targetProbability",
+        "shortDescription" : ""
+      }
+    ],
+    "version" : "1.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 3,
+    "license" : "MIT",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.14",
+      "tvOS" : "12.0",
+      "visionOS" : "1.0",
+      "watchOS" : "unavailable",
+      "iOS" : "12.0",
+      "macCatalyst" : "12.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_imageClassifier",
+      "structure" : [
+        {
+          "name" : "MLModelType_visionFeaturePrint"
+        },
+        {
+          "name" : "MLModelType_glmClassifier"
+        }
+      ]
+    },
+    "inputSchema" : [
+      {
+        "height" : "299",
+        "colorspace" : "BGR",
+        "isOptional" : "0",
+        "width" : "299",
+        "isColor" : "1",
+        "formattedType" : "Image (Color 299 × 299)",
+        "hasSizeFlexibility" : "0",
+        "type" : "Image",
+        "shortDescription" : "",
+        "name" : "image"
+      }
+    ],
+    "classLabels" : [
+      "blue",
+      "red"
+    ],
+    "generatedClassName" : "ImgFP1_m0",
+    "userDefinedMetadata" : {
+      "com.apple.createml.version" : "27.0.1"
+    },
+    "method" : "predict"
+  }
+]

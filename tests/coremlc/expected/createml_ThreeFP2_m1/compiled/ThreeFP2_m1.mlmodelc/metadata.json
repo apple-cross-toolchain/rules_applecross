@@ -1,0 +1,73 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "target",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "targetProbability",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 8,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "unavailable",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_imageClassifier",
+      "structure" : [
+        {
+          "name" : "MLModelType_visionFeaturePrint"
+        },
+        {
+          "name" : "MLModelType_glmClassifier"
+        }
+      ]
+    },
+    "inputSchema" : [
+      {
+        "height" : "360",
+        "colorspace" : "BGR",
+        "isOptional" : "0",
+        "width" : "360",
+        "isColor" : "1",
+        "formattedType" : "Image (Color 360 × 360)",
+        "hasSizeFlexibility" : "0",
+        "type" : "Image",
+        "shortDescription" : "",
+        "name" : "image"
+      }
+    ],
+    "classLabels" : [
+      "Z z",
+      "cät",
+      "green"
+    ],
+    "generatedClassName" : "ThreeFP2_m1",
+    "userDefinedMetadata" : {
+      "com.apple.createml.version" : "27.0.1"
+    },
+    "method" : "predict"
+  }
+]
