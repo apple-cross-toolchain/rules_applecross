@@ -9,6 +9,39 @@ Supports:
 - Linux x86_64 and arm64
 - macOS x86_64 and arm64
 
+## What it does, and what it doesn't
+
+`bazel build` of rules_apple's targets on Linux gives what it gives on a Mac
+with Xcode: apps, extensions, frameworks, and the bundles of unit and UI
+tests, signed ad hoc or with a signing identity (Apple Development, Apple
+Distribution or Developer ID; see [docs/consumers.md](docs/consumers.md)).
+Mac apps can also be notarized and stapled from Linux (`//tools:notarize`,
+`//tools:staple`).
+
+It builds; it doesn't run. Apps and test bundles built on Linux run on a
+Mac, a simulator or a device, as those built with Xcode do; `bazel test` of
+an Apple test target off a Mac builds the bundles but has nothing to run
+them on.
+
+Resources are compiled by clean-room tools whose output is byte-identical to
+Xcode's or fails the build ([Byte-identical output](#byte-identical-output)).
+Code is compiled by swift.org's Swift and linked by LLVM's linker, not
+Apple's forks of them: it runs as Xcode's does, but its bytes differ.
+
+Off a Mac, these have no Linux version yet, and building a target that needs
+one fails:
+
+- Metal shaders (`metal`, `metallib`);
+- String Catalogs (`.xcstrings`);
+- App Intents metadata (`appintentsmetadataprocessor`);
+- Core Data models (`momc`, `mapc`) and Core ML models (`coremlc`);
+- Reality Composer content (`realitytool`), DocC, and `.xib` files;
+- tvOS app icons and Icon Composer icons
+  ([docs/clean-room](docs/clean-room/README.md)).
+
+`--config=relaxed` lets the first two through as near matches: an empty
+Metal library, and String Catalogs' simple strings without their variations.
+
 ## Setup
 
 1. Add the dependency to your `MODULE.bazel`:
@@ -188,9 +221,10 @@ not import the libraries compiled on Linux. Configure it with
 `@rules_applecross//toolchain:apple_bundling_on_linux` registers the same type
 for the Linux platform, which is what an all-remote build uses. It is
 incomplete: the ported `ibtool` compiles only the storyboards
-`docs/clean-room/ibtool.md` describes, and `codesign` signs ad hoc only.
-Register it only if you are building everything remotely and can live with
-that.
+`docs/clean-room/ibtool.md` describes, and a signing identity's key must be
+on the machine that signs, which a remote executor is not (docs/consumers.md,
+"Signing with an identity on Linux"). Register it only if you are building
+everything remotely and can live with that.
 
 ## Byte-identical output
 
