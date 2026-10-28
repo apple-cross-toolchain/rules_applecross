@@ -1018,6 +1018,157 @@ MODEL_CLASS = '/// Class for model loading and prediction\n{available}\npublic c
 BATCH = '    /**\n        Make a batch prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - inputs: the inputs to the prediction as [{N}Input]\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as [{N}Output]\n    */\n    public func predictions(inputs: [{N}Input], options: MLPredictionOptions = MLPredictionOptions()) throws -> [{N}Output] {\n        let batchIn = MLArrayBatchProvider(array: inputs)\n        let batchOut = try model.predictions(from: batchIn, options: options)\n        var results : [{N}Output] = []\n        results.reserveCapacity(inputs.count)\n        for i in 0..<batchOut.count {\n            let outProvider = batchOut.features(at: i)\n            let result =  {N}Output(features: outProvider)\n            results.append(result)\n        }\n        return results\n    }\n}\n'
 
 
+# --- coremlc generate (Objective-C) -----------------------------------------------
+
+API_AVAILABLE = {
+    6: "macos(12.0), ios(15.0), watchos(8.0), tvos(15.0)",
+    7: "macos(13.0), ios(16.0), watchos(9.0), tvos(16.0)",
+    8: "macos(14.0), ios(17.0), watchos(10.0), tvos(17.0)",
+    9: "macos(15.0), ios(18.0), watchos(11.0), tvos(18.0)",
+}
+
+
+def _objc(f):
+    """(property attributes and type, parameter type, value expression, read expression) of a feature."""
+    if f.kind == "array":
+        return "(readwrite, nonatomic, strong) MLMultiArray * ", "MLMultiArray *", "featureValueWithMultiArray:self.%s", "(MLMultiArray *)[%%s featureValueForName:@\"%s\"].multiArrayValue"
+    if f.kind == "image":
+        return "(readwrite, nonatomic) CVPixelBufferRef ", "CVPixelBufferRef", "featureValueWithPixelBuffer:self.%s", "(CVPixelBufferRef)[%%s featureValueForName:@\"%s\"].imageBufferValue"
+    if f.kind == "string":
+        return "(readwrite, nonatomic, strong) NSString * ", "NSString *", "featureValueWithString:self.%s", "(NSString *)[%%s featureValueForName:@\"%s\"].stringValue"
+    if f.kind == "int64":
+        return "(readwrite, nonatomic) int64_t ", "int64_t", "featureValueWithInt64:self.%s", "[%%s featureValueForName:@\"%s\"].int64Value"
+    key = "NSNumber *" if "Int64" in f.swift_type else "NSString *"
+    t = "NSDictionary<%s, NSNumber *> *" % key
+    return "(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithDictionary:self.%s error:nil", "(" + t + ")[%%s featureValueForName:@\"%s\"].dictionaryValue"
+
+
+def _selector(prefix, features, value):
+    """`prefixFirst:(value) second:(value) ...`: the first part capitalizes
+    the feature's own name, later parts use the name the code gives it."""
+    parts = []
+    for k, f in enumerate(features):
+        label = prefix + f.name[:1].upper() + f.name[1:] if k == 0 else f.swift_name
+        parts.append("%s:%s" % (label, value(f)))
+    return " ".join(parts)
+
+
+def objc_sources(model, name):
+    spec_version = model.int(1)
+    description = model.msg(2) or Message(b"")
+    if description.has(13) or description.has(20):
+        unestablished("generated code for a model with states or functions")
+    available = "API_AVAILABLE(%s) __attribute__((visibility(\"hidden\")))" % (API_AVAILABLE.get(spec_version) or unestablished("specification version %d" % spec_version))
+    inputs = [Feature(f) for f in description.msgs(1)]
+    outputs = [Feature(f) for f in description.msgs(10)]
+    for f in inputs + outputs:
+        if not f.name[:1].isalpha():
+            unestablished("generated code for a feature named %r" % f.name)
+    images = [f for f in inputs if f.kind == "image"]
+    if images and len(inputs) != 1:
+        unestablished("generated code for images among other inputs")
+    if any(f.kind == "image" for f in outputs):
+        unestablished("generated code for image outputs")
+    H = []
+    H.append("//\n// %s.h\n//\n// This file was automatically generated and should not be edited.\n//\n\n#import <Foundation/Foundation.h>\n#import <CoreML/CoreML.h>\n#include <stdint.h>\n#include <os/log.h>\n\nNS_ASSUME_NONNULL_BEGIN\n" % name)
+    for kind, features in (("Input", inputs), ("Output", outputs)):
+        H.append("/// Model Prediction %s Type\n%s\n@interface %s%s : NSObject<MLFeatureProvider>\n" % (kind, available, name, kind))
+        H.append("\n\n".join("/// %s\n@property %s%s;" % (f.doc, _objc(f)[0], f.swift_name) for f in features))
+        H[-1] += "\n- (instancetype)init NS_UNAVAILABLE;\n- (instancetype)%s NS_DESIGNATED_INITIALIZER;\n" % _selector("initWith", features, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name))
+        if kind == "Input" and images:
+            f = images[0]
+            cap = f.name[:1].upper() + f.name[1:]
+            H.append("- (nullable instancetype)initWith%sFromCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n" % (cap, f.swift_name))
+            H.append("- (nullable instancetype)initWith%sAtURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n" % (cap, f.swift_name))
+            H.append("-(BOOL)set%sWithCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error ;" % (cap, f.swift_name))
+            H.append("-(BOOL)set%sWithURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error ;" % (cap, f.swift_name))
+        H.append("@end\n")
+    header_model = H_MODEL.replace("{available}", available).replace("{N}", name)
+    if spec_version < 8:
+        for anchor in ("completionHandler:(void (^)(%sOutput * _Nullable output, NSError * _Nullable error))completionHandler;" % name,):
+            if header_model.count(anchor) != 2:
+                unestablished("the asynchronous predictions of an older model")
+            header_model = header_model.replace(anchor, anchor[:-1] + " API_AVAILABLE(%s) __attribute__((visibility(\"hidden\")));" % API_AVAILABLE[8])
+    H.append(header_model.rstrip("\n"))
+    params = "\n".join("    @param %s %s" % (f.swift_name, f.param_doc) for f in inputs)
+    H.append("\n/**\n    Make a prediction using the convenience interface\n%s\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the prediction as %sOutput\n*/\n- (nullable %sOutput *)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n" % (
+        params, name, name, _selector("predictionFrom", inputs, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name))))
+    H.append(H_BATCH.replace("{N}", name))
+    header = "\n".join(H)
+
+    def make_output(src):
+        return "[[%sOutput alloc] %s]" % (name, _selector("initWith", outputs, lambda f: _objc(f)[3] % src % f.name if False else (_objc(f)[3] % f.name) % src))
+
+    M = []
+    M.append("//\n// %s.m\n//\n// This file was automatically generated and should not be edited.\n//\n\n#if !__has_feature(objc_arc)\n#error This file must be compiled with automatic reference counting enabled (-fobjc-arc)\n#endif\n\n#import \"%s.h\"\n" % (name, name))
+    for kind, features in (("Input", inputs), ("Output", outputs)):
+        M.append("@implementation %s%s\n" % (name, kind))
+        M.append("- (instancetype)%s {\n    self = [super init];\n    if (self) {" % _selector("initWith", features, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name)))
+        for f in features:
+            M.append("        _%s = %s;" % (f.swift_name, f.swift_name))
+            if f.kind == "image":
+                M.append("        CVPixelBufferRetain(_%s);" % f.swift_name)
+        M.append("    }\n    return self;\n}\n")
+        if kind == "Input" and images:
+            M.append(_image_methods(images[0]))
+        M.append("- (NSSet<NSString *> *)featureNames {\n    return [NSSet setWithArray:@[%s]];\n}\n" % ", ".join('@"%s"' % f.name for f in features))
+        M.append("- (nullable MLFeatureValue *)featureValueForName:(NSString *)featureName {")
+        for f in features:
+            M.append("    if ([featureName isEqualToString:@\"%s\"]) {\n        return [MLFeatureValue %s];\n    }" % (f.name, _objc(f)[2] % f.swift_name))
+        M.append("    return nil;\n}\n\n@end\n")
+    M.append(M_MODEL.replace("{N}", name).rstrip("\n") + "\n")
+    M.append(("- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
+              "    return [self predictionFromFeatures:input options:[[MLPredictionOptions alloc] init] error:error];\n}\n").replace("{N}", name))
+    M.append(("- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
+              "    id<MLFeatureProvider> outFeatures = [self.model predictionFromFeatures:input options:options error:error];\n"
+              "    if (!outFeatures) { return nil; }\n    return %s;\n}\n").replace("{N}", name) % make_output("outFeatures"))
+    for opts in ("", " options:(MLPredictionOptions *)options"):
+        call = " options:options" if opts else ""
+        M.append(("- (void)predictionFromFeatures:({N}Input *)input%s completionHandler:(void (^)({N}Output * _Nullable output, NSError * _Nullable error))completionHandler {\n"
+                  "    [self.model predictionFromFeatures:input%s completionHandler:^(id<MLFeatureProvider> prediction, NSError *predictionError) {\n"
+                  "        if (prediction != nil) {\n            {N}Output *output = %s;\n            completionHandler(output, predictionError);\n"
+                  "        } else {\n            completionHandler(nil, predictionError);\n        }\n    }];\n}\n").replace("{N}", name) % (opts, call, make_output("prediction")))
+    M.append("- (nullable %sOutput *)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    %sInput *input_ = [[%sInput alloc] %s];\n    return [self predictionFromFeatures:input_ error:error];\n}\n" % (
+        name, _selector("predictionFrom", inputs, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name)), name, name, _selector("initWith", inputs, lambda f: f.swift_name)))
+    M.append(("- (nullable NSArray<{N}Output *> *)predictionsFromInputs:(NSArray<{N}Input*> *)inputArray options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
+              "    id<MLBatchProvider> inBatch = [[MLArrayBatchProvider alloc] initWithFeatureProviderArray:inputArray];\n"
+              "    id<MLBatchProvider> outBatch = [self.model predictionsFromBatch:inBatch options:options error:error];\n"
+              "    if (!outBatch) { return nil; }\n"
+              "    NSMutableArray<{N}Output*> *results = [NSMutableArray arrayWithCapacity:(NSUInteger)outBatch.count];\n"
+              "    for (NSInteger i = 0; i < outBatch.count; i++) {\n"
+              "        id<MLFeatureProvider> resultProvider = [outBatch featuresAtIndex:i];\n"
+              "        {N}Output * result = %s;\n"
+              "        [results addObject:result];\n    }\n    return results;\n}\n\n@end\n").replace("{N}", name) % make_output("resultProvider"))
+    return header, "\n".join(M)
+
+
+def _image_methods(f):
+    cap = f.name[:1].upper() + f.name[1:]
+    n = f.swift_name
+    make = "[MLFeatureValue featureValueWith%s:%s pixelsWide:%d pixelsHigh:%d pixelFormatType:%s options:nil error:&localError]"
+    out = []
+    for source, label, arg in (("CGImage", "FromCGImage:(CGImageRef)%s" % n, n), ("ImageAtURL", "AtURL:(NSURL *)%sURL" % n, n + "URL")):
+        out.append(("- (nullable instancetype)initWith%s%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
+                    "    if (self) {\n        NSError *localError;\n        BOOL result = YES;\n        id retVal = nil;\n        @autoreleasepool {\n            do {\n"
+                    "                MLFeatureValue * __%s = %s;\n                if (__%s == nil) {\n                    result = NO;\n                    break;\n                }\n"
+                    "                retVal = [self initWith%s:(CVPixelBufferRef)__%s.imageBufferValue];\n            }\n            while(0);\n        }\n"
+                    "        if (error != NULL) {\n            *error = localError;\n        }\n        return result ? retVal : nil;\n    }\n    return self;\n}\n") % (
+                    cap, label, n, make % (source, arg, f.width, f.height, f.cg_format), n, cap, n))
+    for source, label, arg in (("CGImage", "CGImage:(CGImageRef)%s" % n, n), ("ImageAtURL", "URL:(NSURL *)%sURL" % n, n + "URL")):
+        out.append(("-(BOOL)set%sWith%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    NSError *localError;\n    BOOL result = NO;\n    @autoreleasepool {\n"
+                    "        MLFeatureValue * __%s = %s;\n        if (__%s != nil) {\n            CVPixelBufferRelease(self.%s);\n"
+                    "            self.%s =  (CVPixelBufferRef)__%s.imageBufferValue;\n            CVPixelBufferRetain(self.%s);\n            result = YES;\n        }\n    }\n"
+                    "    if (error != NULL) {\n        *error = localError;\n    }\n    return result;\n}\n") % (
+                    cap, label, n, make % (source, arg, f.width, f.height, f.cg_format), n, n, n, n, n))
+    return "- (void)dealloc {\n    CVPixelBufferRelease(_%s);\n}\n\n" % n + "\n".join(out)
+
+H_MODEL = '/// Class for model loading and prediction\n{available}\n@interface {N} : NSObject\n@property (readonly, nonatomic, nullable) MLModel * model;\n\n/**\n    URL of the underlying .mlmodelc directory.\n*/\n+ (nullable NSURL *)URLOfModelInThisBundle;\n\n/**\n    Initialize {N} instance from an existing MLModel object.\n\n    Usually the application does not use this initializer unless it makes a subclass of {N}.\n    Such application may want to use `-[MLModel initWithContentsOfURL:configuration:error:]` and `+URLOfModelInThisBundle` to create a MLModel object to pass-in.\n*/\n- (instancetype)initWithMLModel:(MLModel *)model NS_DESIGNATED_INITIALIZER;\n\n/**\n    Initialize {N} instance with the model in this bundle.\n*/\n- (nullable instancetype)init;\n\n/**\n    Initialize {N} instance with the model in this bundle.\n\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithConfiguration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Construct {N} instance asynchronously with configuration.\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadWithConfiguration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler;\n\n/**\n    Construct {N} instance asynchronously with URL of .mlmodelc directory and optional configuration.\n\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param modelURL The model URL.\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler;\n\n/**\n    Make a prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the prediction as {N}Output\n*/\n- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Make a prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param options prediction options\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the prediction as {N}Output\n*/\n- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Make an asynchronous prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param completionHandler a block that will be called upon completion of the prediction. error will be nil if no error occurred.\n*/\n- (void)predictionFromFeatures:({N}Input *)input completionHandler:(void (^)({N}Output * _Nullable output, NSError * _Nullable error))completionHandler;\n\n/**\n    Make an asynchronous prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param options prediction options\n    @param completionHandler a block that will be called upon completion of the prediction. error will be nil if no error occurred.\n*/\n- (void)predictionFromFeatures:({N}Input *)input options:(MLPredictionOptions *)options completionHandler:(void (^)({N}Output * _Nullable output, NSError * _Nullable error))completionHandler;\n\n'
+
+H_BATCH = '/**\n    Batch prediction\n    @param inputArray array of {N}Input instances to obtain predictions from\n    @param options prediction options\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the predictions as NSArray<{N}Output *>\n*/\n- (nullable NSArray<{N}Output *> *)predictionsFromInputs:(NSArray<{N}Input*> *)inputArray options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n@end\n\nNS_ASSUME_NONNULL_END\n'
+
+M_MODEL = '@implementation {N}\n\n\n/**\n    URL of the underlying .mlmodelc directory.\n*/\n+ (nullable NSURL *)URLOfModelInThisBundle {\n    NSString *assetPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"{N}" ofType:@"mlmodelc"];\n    if (nil == assetPath) { os_log_error(OS_LOG_DEFAULT, "Could not load {N}.mlmodelc in the bundle resource"); return nil; }\n    return [NSURL fileURLWithPath:assetPath];\n}\n\n\n/**\n    Initialize {N} instance from an existing MLModel object.\n\n    Usually the application does not use this initializer unless it makes a subclass of {N}.\n    Such application may want to use `-[MLModel initWithContentsOfURL:configuration:error:]` and `+URLOfModelInThisBundle` to create a MLModel object to pass-in.\n*/\n- (instancetype)initWithMLModel:(MLModel *)model {\n    if (model == nil) {\n        return nil;\n    }\n    self = [super init];\n    if (self != nil) {\n        _model = model;\n    }\n    return self;\n}\n\n\n/**\n    Initialize {N} instance with the model in this bundle.\n*/\n- (nullable instancetype)init {\n    return [self initWithContentsOfURL:(NSURL * _Nonnull)self.class.URLOfModelInThisBundle error:nil];\n}\n\n\n/**\n    Initialize {N} instance with the model in this bundle.\n\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithConfiguration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    return [self initWithContentsOfURL:(NSURL * _Nonnull)self.class.URLOfModelInThisBundle configuration:configuration error:error];\n}\n\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    MLModel *model = [MLModel modelWithContentsOfURL:modelURL error:error];\n    if (model == nil) { return nil; }\n    return [self initWithMLModel:model];\n}\n\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    MLModel *model = [MLModel modelWithContentsOfURL:modelURL configuration:configuration error:error];\n    if (model == nil) { return nil; }\n    return [self initWithMLModel:model];\n}\n\n\n/**\n    Construct {N} instance asynchronously with configuration.\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadWithConfiguration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler {\n    [self loadContentsOfURL:(NSURL * _Nonnull)[self URLOfModelInThisBundle]\n              configuration:configuration\n          completionHandler:handler];\n}\n\n\n/**\n    Construct {N} instance asynchronously with URL of .mlmodelc directory and optional configuration.\n\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param modelURL The model URL.\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler {\n    [MLModel loadContentsOfURL:modelURL\n                 configuration:configuration\n             completionHandler:^(MLModel *model, NSError *error) {\n        if (model != nil) {\n            {N} *typedModel = [[{N} alloc] initWithMLModel:model];\n            handler(typedModel, nil);\n        } else {\n            handler(nil, error);\n        }\n    }];\n}\n\n'
+
+
 def read_package(package):
     with open(os.path.join(package, "Manifest.json")) as f:
         manifest = json.load(f)
@@ -1043,21 +1194,26 @@ def generate(argv):
             print("error: coremlc: unsupported argument %s" % arg, file=sys.stderr)
             return 1
     try:
-        if language != "Swift" or not public:
-            unestablished("generated %s%s code" % ("" if public else "internal ", language))
+        if (language == "Swift") != public or language not in ("Swift", "Objective-C"):
+            unestablished("generated %s%s code" % ("public " if public else "", language))
         if not os.path.isdir(source):
             unestablished("a .mlmodel file (only .mlpackage ML Programs are)")
         model = read_package(source)
         if not model.has(502):
             unestablished("a model that isn't an ML Program")
         name = generated_class_name(os.path.splitext(os.path.basename(source.rstrip("/")))[0])
-        text = swift_source(model, name)
+        if language == "Swift":
+            files = {name + ".swift": swift_source(model, name)}
+        else:
+            header, implementation = objc_sources(model, name)
+            files = {name + ".h": header, name + ".m": implementation}
     except Unestablished as e:
         print("error: coremlc: %s is not generated as Xcode generates it" % e, file=sys.stderr)
         return 1
     os.makedirs(outdir, exist_ok=True)
-    with open(os.path.join(outdir, name + ".swift"), "w") as f:
-        f.write(text)
+    for filename, text in files.items():
+        with open(os.path.join(outdir, filename), "w") as f:
+            f.write(text)
     return 0
 
 
