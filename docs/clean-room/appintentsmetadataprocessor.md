@@ -10,16 +10,16 @@ content is what has to match, not the layout.
 `toolchain/stubs/appintentsmetadataprocessor.py` is the implementation, in
 pure Python.
 
-Method: Swift sources, each built to isolate one behaviour, plus 140
+Method: Swift sources, each built to isolate one behaviour, plus 300
 generated at random. Xcode 27.0's `swiftc` compiled them, Xcode's
 `appintentsmetadataprocessor` processed the constant values (with
 `SWIFT_DETERMINISTIC_HASHING=1`, as rules_apple runs it), and this one
-processed the same constant values. All 213 outputs matched, Xcode's errors
+processed the same constant values. All 378 outputs matched, Xcode's errors
 included. Swift 6.4 on Linux emits the same constant values as Xcode's
 compiler for these sources. An app built entirely on Linux
 (`//examples/ios/HelloWorldSwift`) carries metadata identical to what Xcode's
 processor writes from the same input. `tests/appintentsmetadataprocessor`
-keeps 74 of the cases with Xcode's output.
+keeps 87 of the cases with Xcode's output.
 
 ## What it covers
 
@@ -34,6 +34,10 @@ keeps 74 of the cases with Xcode's output.
   - a `String`'s `inputOptions`.
 - **Parameter summaries:** `Summary` with interpolated parameters and other parameters, and `When(..., .equalTo, Bool)` with `otherwise`.
 - **`AppEnum`:** type and case display representations (title, subtitle, SF Symbol image), and a type's numeric format.
+- **`AppEntity`:** its default query, `@Property`s of the primitive types and their optionals, and parameters and results of entity type.
+  - Such a parameter's `dynamicOptionsSupport` is 1 when the entity's query is an `EntityQuery` and 2 when it is an `EntityStringQuery`.
+- **Queries:** `EntityQuery` (capabilities 66) and `EntityStringQuery` (70), each as its entity's default query.
+- **Type names:** `TypeDisplayRepresentation(name:)` with a literal name and no numeric format also gives the type a numeric format, the escaped name; a bare literal or a `LocalizedStringResource` name gives none.
 - **`AppShortcutsProvider`:**
   - shortcuts with phrases interpolating `.applicationName`, short titles and symbol names;
   - `shortcutTileColor`;
@@ -63,7 +67,7 @@ keeps 74 of the cases with Xcode's output.
 
 Refused strict; relaxed, the type is left out with a warning:
 
-- `AppEntity`, `EntityQuery`, `TransientEntity` and the other App Intents protocols;
+- `TransientAppEntity`, queries other than `EntityQuery` and `EntityStringQuery` (`EnumerableEntityQuery`, `EntityPropertyQuery`, ...), entity properties of entity or enum type, and the other App Intents protocols;
 - parameters of other types, dynamic options, other summary or `When` forms;
 - availability other than an introduced version, and platforms other than iOS and macOS;
 - values the compiler couldn't extract (computed at run time).
