@@ -8,6 +8,8 @@ exports_files([
     "repo_tools/extract_xip.py",
     "repo_tools/link_local_xcode.py",
     "stubs/appintentsmetadataprocessor.py",
+    "stubs/coremlc.py",
+    "stubs/coremlc_ops.json",
     "stubs/xcstringstool.py",
 ])
 

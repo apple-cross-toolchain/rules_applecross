@@ -1,0 +1,13 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [1, 1, 4, 4]> x) {
+            int32 upsample_nearest_neighbor_0_scale_factor_height_0 = const()[name = string("upsample_nearest_neighbor_0_scale_factor_height_0"), val = int32(2)];
+            int32 upsample_nearest_neighbor_0_scale_factor_width_0 = const()[name = string("upsample_nearest_neighbor_0_scale_factor_width_0"), val = int32(2)];
+            tensor<fp32, [1, 1, 8, 8]> upsample_nearest_neighbor_0 = upsample_nearest_neighbor(scale_factor_height = upsample_nearest_neighbor_0_scale_factor_height_0, scale_factor_width = upsample_nearest_neighbor_0_scale_factor_width_0, x = x)[name = string("upsample_nearest_neighbor_0")];
+            tensor<fp32, [1, 1, 8, 8]> o_upsample_nearest_neighbor_0 = identity(x = upsample_nearest_neighbor_0)[name = string("o_upsample_nearest_neighbor_0")];
+            int32 stack_0_axis_0 = const()[name = string("stack_0_axis_0"), val = int32(0)];
+            tensor<fp32, [2, 1, 1, 4, 4]> stack_0 = stack(axis = stack_0_axis_0, values = (x, x))[name = string("stack_0")];
+            tensor<fp32, [2, 1, 1, 4, 4]> o_stack_1 = identity(x = stack_0)[name = string("o_stack_1")];
+        } -> (o_upsample_nearest_neighbor_0, o_stack_1);
+}

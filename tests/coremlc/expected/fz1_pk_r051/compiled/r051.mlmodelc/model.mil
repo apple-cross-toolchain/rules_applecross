@@ -1,0 +1,13 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, []> sub_0_y_0 = const()[name = tensor<string, []>("sub_0_y_0"), val = tensor<fp32, []>(0x1p+0)];
+            tensor<fp32, [1, 1, 4, 4]> sub_0 = sub(x = x, y = sub_0_y_0)[name = tensor<string, []>("sub_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_sub_0 = identity(x = sub_0)[name = tensor<string, []>("o_sub_0")];
+            tensor<fp32, [1, 1, 4, 4]> tanh_0 = tanh(x = x)[name = tensor<string, []>("tanh_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_tanh_1 = identity(x = tanh_0)[name = tensor<string, []>("o_tanh_1")];
+            tensor<fp32, [1, 1, 4, 4]> tan_0 = tan(x = x)[name = tensor<string, []>("tan_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_tan_2 = identity(x = tan_0)[name = tensor<string, []>("o_tan_2")];
+        } -> (o_sub_0, o_tanh_1, o_tan_2);
+}

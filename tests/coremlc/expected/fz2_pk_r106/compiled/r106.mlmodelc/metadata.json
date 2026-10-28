@@ -1,0 +1,116 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "o_logical_and_0",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4]",
+        "name" : "o_reduce_l2_norm_1",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "o_cumsum_2",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "o_layer_norm_3",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4]",
+        "name" : "o_reduce_sum_4",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 16)",
+        "shortDescription" : "",
+        "shape" : "[1, 16]",
+        "name" : "o_flatten2d_5",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 6,
+    "mlProgramOperationTypeHistogram" : {
+      "Cumsum" : 1,
+      "Less" : 1,
+      "Cast" : 1,
+      "Identity" : 6,
+      "Flatten2d" : 1,
+      "LayerNorm" : 1,
+      "Greater" : 1,
+      "ReduceL2Norm" : 1,
+      "LogicalAnd" : 1,
+      "ReduceSum" : 1
+    },
+    "computePrecision" : "Mixed (Float32, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "12.0",
+      "tvOS" : "15.0",
+      "visionOS" : "1.0",
+      "watchOS" : "8.0",
+      "iOS" : "15.0",
+      "macCatalyst" : "15.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "generatedClassName" : "r106",
+    "method" : "predict"
+  }
+]

@@ -1,0 +1,11 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 4]> x) {
+            tensor<string, []> x_to_fp16_dtype_0 = const()[name = tensor<string, []>("x_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, [1, 4]> x_to_fp16 = cast(dtype = x_to_fp16_dtype_0, x = x)[name = tensor<string, []>("cast_1")];
+            tensor<fp16, [1, 4]> y_cast_fp16 = relu(x = x_to_fp16)[name = tensor<string, []>("y_cast_fp16")];
+            tensor<string, []> y_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("y_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [1, 4]> y = cast(dtype = y_cast_fp16_to_fp32_dtype_0, x = y_cast_fp16)[name = tensor<string, []>("cast_0")];
+        } -> (y);
+}

@@ -1,0 +1,16 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<string, []> x_to_fp16_dtype_0 = const()[name = tensor<string, []>("x_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, []> not_equal_0_y_0_to_fp16 = const()[name = tensor<string, []>("not_equal_0_y_0_to_fp16"), val = tensor<fp16, []>(0x0p+0)];
+            tensor<fp16, [1, 1, 4, 4]> x_to_fp16 = cast(dtype = x_to_fp16_dtype_0, x = x)[name = tensor<string, []>("cast_6")];
+            tensor<bool, [1, 1, 4, 4]> not_equal_0_cast_fp16 = not_equal(x = x_to_fp16, y = not_equal_0_y_0_to_fp16)[name = tensor<string, []>("not_equal_0_cast_fp16")];
+            tensor<string, []> o_not_equal_0_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_not_equal_0_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, []> greater_equal_0_y_0_to_fp16 = const()[name = tensor<string, []>("greater_equal_0_y_0_to_fp16"), val = tensor<fp16, []>(0x0p+0)];
+            tensor<bool, [1, 1, 4, 4]> greater_equal_0_cast_fp16 = greater_equal(x = x_to_fp16, y = greater_equal_0_y_0_to_fp16)[name = tensor<string, []>("greater_equal_0_cast_fp16")];
+            tensor<string, []> o_greater_equal_1_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_greater_equal_1_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [1, 1, 4, 4]> o_greater_equal_1 = cast(dtype = o_greater_equal_1_cast_fp16_to_fp32_dtype_0, x = greater_equal_0_cast_fp16)[name = tensor<string, []>("greater_equal_0_cast_fp16_to_fp32")];
+            tensor<fp32, [1, 1, 4, 4]> o_not_equal_0 = cast(dtype = o_not_equal_0_cast_fp16_to_fp32_dtype_0, x = not_equal_0_cast_fp16)[name = tensor<string, []>("not_equal_0_cast_fp16_to_fp32")];
+        } -> (o_not_equal_0, o_greater_equal_1);
+}

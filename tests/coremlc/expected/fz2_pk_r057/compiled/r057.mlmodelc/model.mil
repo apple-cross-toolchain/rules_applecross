@@ -1,0 +1,12 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, [2]> reshape_0_shape_0 = const()[name = tensor<string, []>("reshape_0_shape_0"), val = tensor<int32, [2]>([2, 8])];
+            tensor<fp32, [2, 8]> reshape_0 = reshape(shape = reshape_0_shape_0, x = x)[name = tensor<string, []>("reshape_0")];
+            tensor<fp32, [3, 8]> linear_0_weight_0 = const()[name = tensor<string, []>("linear_0_weight_0"), val = tensor<fp32, [3, 8]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];
+            tensor<fp32, [3]> linear_0_bias_0 = const()[name = tensor<string, []>("linear_0_bias_0"), val = tensor<fp32, [3]>([0x0p+0, 0x0p+0, 0x0p+0])];
+            tensor<fp32, [2, 3]> linear_0 = linear(bias = linear_0_bias_0, weight = linear_0_weight_0, x = reshape_0)[name = tensor<string, []>("linear_0")];
+            tensor<fp32, [2, 3]> o_linear_0 = identity(x = linear_0)[name = tensor<string, []>("o_linear_0")];
+        } -> (o_linear_0);
+}

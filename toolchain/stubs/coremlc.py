@@ -818,6 +818,29 @@ PARTIAL_INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+# Model types by their field in the Model message, for messages.
+MODEL_TYPES = {
+    200: "pipeline classifier", 201: "pipeline regressor", 202: "pipeline", 300: "GLM regressor",
+    301: "support vector regressor", 302: "tree ensemble regressor", 303: "neural network regressor",
+    304: "Bayesian probit regressor", 400: "GLM classifier", 401: "support vector classifier",
+    402: "tree ensemble classifier", 403: "neural network classifier", 404: "k-nearest neighbors classifier",
+    500: "neural network", 501: "item similarity recommender", 502: "ML Program", 555: "custom model",
+    556: "linked model", 560: "class confidence thresholding", 2000: "text classifier", 2001: "word tagger",
+    2002: "vision feature print", 2003: "sound analysis preprocessing", 2004: "gazetteer", 2005: "word embedding",
+    2006: "audio feature print",
+}
+
+
+def refuse_model_file(model):
+    """A .mlmodel file's refusal: ML Programs come as .mlpackage, and the
+    other model types aren't reproduced yet."""
+    kinds = [MODEL_TYPES.get(n, "type %d" % n) for n, _, _ in model.fields if n not in (1, 2, 10)]
+    kind = kinds[0] if kinds else "an unknown"
+    if model.has(500) or model.has(403) or model.has(303):
+        unestablished("a neural network (an older Core ML format; convert the model to an ML Program)")
+    unestablished("a %s model (.mlmodel)" % kind)
+
+
 def compile_package(package, outdir):
     with open(os.path.join(package, "Manifest.json")) as f:
         manifest = json.load(f)
@@ -1206,7 +1229,8 @@ def generate(argv):
         if (language == "Swift") != public or language not in ("Swift", "Objective-C"):
             unestablished("generated %s%s code" % ("public " if public else "", language))
         if not os.path.isdir(source):
-            unestablished("a .mlmodel file (only .mlpackage ML Programs are)")
+            with open(source, "rb") as f:
+                refuse_model_file(Message(f.read()))
         model = read_package(source)
         if not model.has(502):
             unestablished("a model that isn't an ML Program")
@@ -1244,7 +1268,8 @@ def main(argv):
             return 1
     try:
         if not os.path.isdir(source):
-            unestablished("a .mlmodel file (only .mlpackage ML Programs are)")
+            with open(source, "rb") as f:
+                refuse_model_file(Message(f.read()))
         compile_package(source, outdir)
     except Unestablished as e:
         print("error: coremlc: %s is not compiled as Xcode compiles it" % e, file=sys.stderr)

@@ -1,0 +1,10 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<int32, [2]> i) {
+            tensor<int32, []> mul_0_y_0 = const()[name = tensor<string, []>("mul_0_y_0"), val = tensor<int32, []>(2)];
+            tensor<int32, [2]> mul_0 = mul(x = i, y = mul_0_y_0)[name = tensor<string, []>("mul_0")];
+            tensor<string, []> f_dtype_0 = const()[name = tensor<string, []>("f_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [2]> f = cast(dtype = f_dtype_0, x = mul_0)[name = tensor<string, []>("cast_0")];
+        } -> (f);
+}

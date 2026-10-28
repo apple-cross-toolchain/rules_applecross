@@ -1,0 +1,37 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, []> leaky_relu_0_alpha_0 = const()[name = tensor<string, []>("leaky_relu_0_alpha_0"), val = tensor<fp32, []>(0x1.99999ap-4)];
+            tensor<fp32, [1, 1, 4, 4]> leaky_relu_0 = leaky_relu(alpha = leaky_relu_0_alpha_0, x = x)[name = tensor<string, []>("leaky_relu_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_leaky_relu_0 = identity(x = leaky_relu_0)[name = tensor<string, []>("o_leaky_relu_0")];
+            tensor<int32, []> split_0_num_splits_0 = const()[name = tensor<string, []>("split_0_num_splits_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> split_0_axis_0 = const()[name = tensor<string, []>("split_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<fp32, [1, 1, 4, 2]> split_0_0, tensor<fp32, [1, 1, 4, 2]> split_0_1 = split(axis = split_0_axis_0, num_splits = split_0_num_splits_0, x = x)[name = tensor<string, []>("split_0")];
+            tensor<fp32, [1, 1, 4, 2]> o_split_1 = identity(x = split_0_0)[name = tensor<string, []>("o_split_1")];
+            tensor<int32, [2]> max_pool_0_kernel_sizes_0 = const()[name = tensor<string, []>("max_pool_0_kernel_sizes_0"), val = tensor<int32, [2]>([2, 2])];
+            tensor<int32, [2]> max_pool_0_strides_0 = const()[name = tensor<string, []>("max_pool_0_strides_0"), val = tensor<int32, [2]>([2, 2])];
+            tensor<string, []> max_pool_0_pad_type_0 = const()[name = tensor<string, []>("max_pool_0_pad_type_0"), val = tensor<string, []>("valid")];
+            tensor<int32, [4]> max_pool_0_pad_0 = const()[name = tensor<string, []>("max_pool_0_pad_0"), val = tensor<int32, [4]>([0, 0, 0, 0])];
+            tensor<bool, []> max_pool_0_ceil_mode_0 = const()[name = tensor<string, []>("max_pool_0_ceil_mode_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 2, 2]> max_pool_0 = max_pool(ceil_mode = max_pool_0_ceil_mode_0, kernel_sizes = max_pool_0_kernel_sizes_0, pad = max_pool_0_pad_0, pad_type = max_pool_0_pad_type_0, strides = max_pool_0_strides_0, x = x)[name = tensor<string, []>("max_pool_0")];
+            tensor<fp32, [1, 1, 2, 2]> o_max_pool_2 = identity(x = max_pool_0)[name = tensor<string, []>("o_max_pool_2")];
+            tensor<fp32, [1, 1, 4, 4]> erf_0 = erf(x = x)[name = tensor<string, []>("erf_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_erf_3 = identity(x = erf_0)[name = tensor<string, []>("o_erf_3")];
+            tensor<fp32, []> upsample_bilinear_0_scale_factor_height_0 = const()[name = tensor<string, []>("upsample_bilinear_0_scale_factor_height_0"), val = tensor<fp32, []>(0x1p+1)];
+            tensor<fp32, []> upsample_bilinear_0_scale_factor_width_0 = const()[name = tensor<string, []>("upsample_bilinear_0_scale_factor_width_0"), val = tensor<fp32, []>(0x1p+1)];
+            tensor<bool, []> upsample_bilinear_0_align_corners_0 = const()[name = tensor<string, []>("upsample_bilinear_0_align_corners_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1, 8, 8]> upsample_bilinear_0 = upsample_bilinear(align_corners = upsample_bilinear_0_align_corners_0, scale_factor_height = upsample_bilinear_0_scale_factor_height_0, scale_factor_width = upsample_bilinear_0_scale_factor_width_0, x = x)[name = tensor<string, []>("upsample_bilinear_0")];
+            tensor<fp32, [1, 1, 8, 8]> o_upsample_bilinear_4 = identity(x = upsample_bilinear_0)[name = tensor<string, []>("o_upsample_bilinear_4")];
+            tensor<int32, [2]> one_hot_0_indices_0 = const()[name = tensor<string, []>("one_hot_0_indices_0"), val = tensor<int32, [2]>([0, 1])];
+            tensor<int32, []> one_hot_0_one_hot_vector_size_0 = const()[name = tensor<string, []>("one_hot_0_one_hot_vector_size_0"), val = tensor<int32, []>(4)];
+            tensor<int32, []> one_hot_0_axis_0 = const()[name = tensor<string, []>("one_hot_0_axis_0"), val = tensor<int32, []>(-1)];
+            tensor<int32, []> one_hot_0_on_value_0 = const()[name = tensor<string, []>("one_hot_0_on_value_0"), val = tensor<int32, []>(1)];
+            tensor<int32, []> one_hot_0_off_value_0 = const()[name = tensor<string, []>("one_hot_0_off_value_0"), val = tensor<int32, []>(0)];
+            tensor<int32, [2, 4]> one_hot_0 = one_hot(axis = one_hot_0_axis_0, indices = one_hot_0_indices_0, off_value = one_hot_0_off_value_0, on_value = one_hot_0_on_value_0, one_hot_vector_size = one_hot_0_one_hot_vector_size_0)[name = tensor<string, []>("one_hot_0")];
+            tensor<int32, [2, 4]> o_one_hot_5 = identity(x = one_hot_0)[name = tensor<string, []>("o_one_hot_5")];
+            tensor<fp32, [1]> prelu_0_alpha_0 = const()[name = tensor<string, []>("prelu_0_alpha_0"), val = tensor<fp32, [1]>([0x1p+0])];
+            tensor<fp32, [1, 1, 4, 4]> prelu_0 = prelu(alpha = prelu_0_alpha_0, x = x)[name = tensor<string, []>("prelu_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_prelu_6 = identity(x = prelu_0)[name = tensor<string, []>("o_prelu_6")];
+        } -> (o_leaky_relu_0, o_split_1, o_max_pool_2, o_erf_3, o_upsample_bilinear_4, o_one_hot_5, o_prelu_6);
+}

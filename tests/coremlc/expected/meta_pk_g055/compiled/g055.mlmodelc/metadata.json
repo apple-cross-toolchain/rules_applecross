@@ -1,0 +1,70 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "classLabel",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "Int64",
+        "formattedType" : "Dictionary (Int64 → Double)",
+        "type" : "Dictionary",
+        "name" : "classLabel_probs",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "author 55",
+    "specificationVersion" : 8,
+    "license" : "MIT",
+    "mlProgramOperationTypeHistogram" : {
+      "Ios16.softmax" : 1,
+      "Ios17.cast" : 2
+    },
+    "computePrecision" : "Mixed (Float16, Float32, Float64, Int32, Int64)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "10.0",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 3]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "classLabels" : [
+      0,
+      1,
+      2
+    ],
+    "generatedClassName" : "g055",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]

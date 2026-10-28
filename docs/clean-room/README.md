@@ -27,6 +27,8 @@ implementation.
     - the Security project's `libsecurity_codesigning`;
     - the Swift standard library's hashing (`Hasher`, SipHash-1-3), `Dictionary` layout and string escaping;
     - Apple's Core ML model specification and coremltools (which build test models).
+- Apple's public CreateML framework, called from small programs, to make test
+  models of the types Create ML exports.
 
 All observations were made on an Apple silicon Mac with that Xcode. Where a
 tool runs on Linux, its Linux build was compared against the Mac's output,
@@ -57,6 +59,7 @@ other tools refuse such inputs either way.
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
+| [coremlc.md](coremlc.md) | `coremlc`: ML Programs compiled to `.mlmodelc`, and their Swift and Objective-C classes |
 | [appintentsmetadataprocessor.md](appintentsmetadataprocessor.md) | `appintentsmetadataprocessor`: App Intents metadata from Swift constant values |
 | [xcstringstool.md](xcstringstool.md) | `xcstringstool`: String Catalogs to `.strings` and `.stringsdict` |
 | [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |

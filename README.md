@@ -36,7 +36,11 @@ one fails:
   default; set it to `False`). App Intents' intents, parameters, enums,
   entities, queries and App Shortcuts compile as Xcode compiles them
   ([docs/clean-room/appintentsmetadataprocessor.md](docs/clean-room/appintentsmetadataprocessor.md));
-- Core Data models (`momc`, `mapc`) and Core ML models (`coremlc`);
+- Core Data models (`momc`, `mapc`);
+- Core ML models other than ML Programs: Create ML's text classifiers, word
+  taggers, image classifiers and tabular models, and older neural networks.
+  ML Programs (`.mlpackage`) compile, and get their generated classes, as
+  Xcode makes them ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
 - Reality Composer content (`realitytool`), DocC, and `.xib` files;
 - tvOS app icons and Icon Composer icons
   ([docs/clean-room](docs/clean-room/README.md)).

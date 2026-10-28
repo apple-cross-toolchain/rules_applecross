@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application", "ios_ui_test", "ios_unit_test")
-load("@build_bazel_rules_apple//apple:resources.bzl", "swift_intent_library")
+load("@build_bazel_rules_apple//apple:resources.bzl", "swift_apple_core_ml_library", "swift_intent_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
 licenses(["notice"])
@@ -22,6 +22,13 @@ swift_library(
     srcs = ["Sources/AppIntents.swift"],
     linkopts = ["-Wl,-framework,AppIntents"],
     module_name = "HelloWorldAppIntents",
+    tags = ["manual"],
+)
+
+# An ML Program: compiled into the app, with a Swift class generated for it.
+swift_apple_core_ml_library(
+    name = "Doubler",
+    mlmodel = "//examples/resources:Doubler.mlpackage",
     tags = ["manual"],
 )
 
@@ -76,6 +83,7 @@ ios_application(
     minimum_os_version = "16.0",
     deps = [
         ":AppIntents",
+        ":Doubler",
         ":Sources",
     ],
 )
