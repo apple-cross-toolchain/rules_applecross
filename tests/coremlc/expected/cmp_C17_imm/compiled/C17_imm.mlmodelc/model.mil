@@ -1,0 +1,8 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [3, 3]> x) {
+            tensor<fp32, [3, 3]> constexpr_cast_0 = constexpr_cast()[name = tensor<string, []>("constexpr_cast_0"), output_dtype = tensor<string, []>("fp32"), source_val = tensor<fp16, [3, 3]>([[-0x1.05cp+0, 0x1.228p-2, -0x1.628p-1], [0x1.664p-2, 0x1.1acp+0, -0x1.454p-4], [0x1.05p-2, -0x1.6d4p+0, -0x1.33p-2]])];
+            tensor<fp32, [3, 3]> add_0 = add(x = x, y = constexpr_cast_0)[name = tensor<string, []>("add_0")];
+        } -> (add_0);
+}

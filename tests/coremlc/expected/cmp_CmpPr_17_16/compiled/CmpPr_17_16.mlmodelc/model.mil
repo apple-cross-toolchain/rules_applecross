@@ -1,0 +1,17 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 32]> x) {
+            tensor<string, []> x_to_fp16_dtype_0 = const()[name = tensor<string, []>("x_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, [16, 32]> linear_0_weight_0_to_fp16_sparsified = constexpr_sparse_to_dense()[mask = tensor<uint8, [64]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(640))), name = tensor<string, []>("linear_0_weight_0_to_fp16_sparsified"), nonzero_data = tensor<fp16, [245]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64))), shape = tensor<uint32, [2]>([16, 32])];
+            tensor<fp16, [16]> linear_0_bias_0_to_fp16 = const()[name = tensor<string, []>("linear_0_bias_0_to_fp16"), val = tensor<fp16, [16]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(768)))];
+            tensor<fp16, [1, 32]> x_to_fp16 = cast(dtype = x_to_fp16_dtype_0, x = x)[name = tensor<string, []>("cast_1")];
+            tensor<fp16, [1, 16]> linear_0_cast_fp16 = linear(bias = linear_0_bias_0_to_fp16, weight = linear_0_weight_0_to_fp16_sparsified, x = x_to_fp16)[name = tensor<string, []>("linear_0_cast_fp16")];
+            tensor<fp16, [1, 16]> relu_0_cast_fp16 = relu(x = linear_0_cast_fp16)[name = tensor<string, []>("relu_0_cast_fp16")];
+            tensor<fp16, [8, 16]> linear_1_weight_0_to_fp16_sparsified = constexpr_sparse_to_dense()[mask = tensor<uint8, [16]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(1152))), name = tensor<string, []>("linear_1_weight_0_to_fp16_sparsified"), nonzero_data = tensor<fp16, [65]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(896))), shape = tensor<uint32, [2]>([8, 16])];
+            tensor<fp16, [8]> linear_1_bias_0_to_fp16 = const()[name = tensor<string, []>("linear_1_bias_0_to_fp16"), val = tensor<fp16, [8]>([0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0])];
+            tensor<fp16, [1, 8]> linear_1_cast_fp16 = linear(bias = linear_1_bias_0_to_fp16, weight = linear_1_weight_0_to_fp16_sparsified, x = relu_0_cast_fp16)[name = tensor<string, []>("linear_1_cast_fp16")];
+            tensor<string, []> linear_1_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("linear_1_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [1, 8]> linear_1 = cast(dtype = linear_1_cast_fp16_to_fp32_dtype_0, x = linear_1_cast_fp16)[name = tensor<string, []>("cast_0")];
+        } -> (linear_1);
+}

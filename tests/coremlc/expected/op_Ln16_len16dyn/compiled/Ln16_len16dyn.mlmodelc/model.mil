@@ -1,0 +1,14 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [2, 3]> x, tensor<int32, [1]> y) {
+            tensor<fp32, [2, 3]> relu_0 = relu(x = x)[name = tensor<string, []>("relu_0")];
+            tensor<int32, []> squeeze_0 = squeeze(x = y)[name = tensor<string, []>("squeeze_0")];
+            tensor<int32, []> make_list_0_elem_shape0_0 = const()[name = tensor<string, []>("make_list_0_elem_shape0_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> make_list_0_elem_shape1_0 = const()[name = tensor<string, []>("make_list_0_elem_shape1_0"), val = tensor<int32, []>(3)];
+            tensor<string, []> make_list_0_dtype_0 = const()[name = tensor<string, []>("make_list_0_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<bool, []> make_list_0_dynamic_length_0 = const()[name = tensor<string, []>("make_list_0_dynamic_length_0"), val = tensor<bool, []>(true)];
+            list<tensor<fp16, [2, 3]>, ?> make_list_0 = make_list(dtype = make_list_0_dtype_0, dynamic_length = make_list_0_dynamic_length_0, elem_shape = (make_list_0_elem_shape0_0, make_list_0_elem_shape1_0), init_length = squeeze_0)[name = tensor<string, []>("make_list_0")];
+            tensor<int32, []> list_length_0 = list_length(ls = make_list_0)[name = tensor<string, []>("list_length_0")];
+        } -> (relu_0, list_length_0);
+}

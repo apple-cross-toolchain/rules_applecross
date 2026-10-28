@@ -1,0 +1,1 @@
+error: Failed to parse the model specification. Error: Unable to parse ML Program: in operation resample_0: Unexpected value for parameter coordinates_mode[0] "scaled" not in ("normalized_minus_one_to_one", "normalized_zero_to_one", "unnormalized").

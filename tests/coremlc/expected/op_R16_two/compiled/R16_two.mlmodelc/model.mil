@@ -1,0 +1,20 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 2, 4, 4]> x) {
+            tensor<fp32, [1, 3, 3, 2]> resample_0_coordinates_0 = const()[name = tensor<string, []>("resample_0_coordinates_0"), val = tensor<fp32, [1, 3, 3, 2]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];
+            tensor<string, []> resample_0_sampling_mode_0 = const()[name = tensor<string, []>("resample_0_sampling_mode_0"), val = tensor<string, []>("bilinear")];
+            tensor<string, []> resample_0_padding_mode_0 = const()[name = tensor<string, []>("resample_0_padding_mode_0"), val = tensor<string, []>("constant")];
+            tensor<fp32, []> resample_0_padding_value_0 = const()[name = tensor<string, []>("resample_0_padding_value_0"), val = tensor<fp32, []>(0x1p-1)];
+            tensor<string, []> resample_0_coordinates_mode_0 = const()[name = tensor<string, []>("resample_0_coordinates_mode_0"), val = tensor<string, []>("normalized_minus_one_to_one")];
+            tensor<bool, []> resample_0_align_corners_0 = const()[name = tensor<string, []>("resample_0_align_corners_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 2, 3, 3]> resample_0 = resample(align_corners = resample_0_align_corners_0, coordinates = resample_0_coordinates_0, coordinates_format = tensor<string, []>("xy"), coordinates_mode = resample_0_coordinates_mode_0, coordinates_type = tensor<string, []>("absolute"), padding_mode = resample_0_padding_mode_0, padding_value = resample_0_padding_value_0, sampling_mode = resample_0_sampling_mode_0, x = x)[name = tensor<string, []>("resample_0")];
+            tensor<fp32, [1, 3, 3, 2]> resample_1_coordinates_0 = const()[name = tensor<string, []>("resample_1_coordinates_0"), val = tensor<fp32, [1, 3, 3, 2]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(256)))];
+            tensor<string, []> resample_1_sampling_mode_0 = const()[name = tensor<string, []>("resample_1_sampling_mode_0"), val = tensor<string, []>("nearest")];
+            tensor<string, []> resample_1_padding_mode_0 = const()[name = tensor<string, []>("resample_1_padding_mode_0"), val = tensor<string, []>("constant")];
+            tensor<fp32, []> resample_1_padding_value_0 = const()[name = tensor<string, []>("resample_1_padding_value_0"), val = tensor<fp32, []>(0x1p-1)];
+            tensor<string, []> resample_1_coordinates_mode_0 = const()[name = tensor<string, []>("resample_1_coordinates_mode_0"), val = tensor<string, []>("normalized_minus_one_to_one")];
+            tensor<bool, []> resample_1_align_corners_0 = const()[name = tensor<string, []>("resample_1_align_corners_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 2, 3, 3]> resample_1 = resample(align_corners = resample_1_align_corners_0, coordinates = resample_1_coordinates_0, coordinates_format = tensor<string, []>("xy"), coordinates_mode = resample_1_coordinates_mode_0, coordinates_type = tensor<string, []>("absolute"), padding_mode = resample_1_padding_mode_0, padding_value = resample_1_padding_value_0, sampling_mode = resample_1_sampling_mode_0, x = x)[name = tensor<string, []>("resample_1")];
+        } -> (resample_0, resample_1);
+}

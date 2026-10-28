@@ -1,0 +1,8 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [3, 3]> x) {
+            tensor<fp32, [3, 3]> constexpr_lut_to_dense_0 = constexpr_lut_to_dense(indices = tensor<uint2, [3, 3]>([[0, 0, 3], [3, 2, 2], [3, 0, 0]]), lut = tensor<fp32, [1, 1, 4, 1]>([[[[0x1.6c557cp+3], [-0x1.054c1ep+2], [0x1.1abe26p+4], [-0x1.0bb1b4p+4]]]]))[name = string("constexpr_lut_to_dense_0")];
+            tensor<fp32, [3, 3]> add_0 = add(x = x, y = constexpr_lut_to_dense_0)[name = string("add_0")];
+        } -> (add_0);
+}

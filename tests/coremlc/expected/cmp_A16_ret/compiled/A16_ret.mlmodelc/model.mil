@@ -1,0 +1,8 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [4, 4]> x) {
+            tensor<fp32, [4, 4]> relu_0 = relu(x = x)[name = tensor<string, []>("relu_0")];
+            tensor<fp32, [4, 4]> constexpr_affine_dequantize_0 = constexpr_affine_dequantize()[axis = tensor<int32, []>(0), name = tensor<string, []>("constexpr_affine_dequantize_0"), quantized_data = tensor<int8, [4, 4]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64))), scale = tensor<fp32, []>(0x1.99999ap-4), zero_point = tensor<int8, []>(3)];
+        } -> (relu_0, constexpr_affine_dequantize_0);
+}

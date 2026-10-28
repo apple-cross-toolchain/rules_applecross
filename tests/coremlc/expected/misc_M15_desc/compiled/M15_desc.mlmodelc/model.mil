@@ -1,0 +1,7 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [2]> x) {
+            tensor<fp32, [2]> relu_6 = relu(x = x)[name = tensor<string, []>("relu_6")];
+        } -> (relu_6);
+}

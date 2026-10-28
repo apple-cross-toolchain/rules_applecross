@@ -1,0 +1,11 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [6, 6]> x) {
+            tensor<uint1, [6, 6]> constexpr_lut_to_sparse_0_0, tensor<fp16, [21]> constexpr_lut_to_sparse_0_1 = constexpr_lut_to_sparse(indices_mask = tensor<uint1, [6, 6]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(64))), indices_nonzero_data = tensor<uint4, [21]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(192))), lut = tensor<fp16, [1, 1, 16, 1]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(320))))[name = string("constexpr_lut_to_sparse_0")];
+            tensor<fp16, [6, 6]> constexpr_sparse_to_dense_0 = constexpr_sparse_to_dense(mask = constexpr_lut_to_sparse_0_0, nonzero_data = constexpr_lut_to_sparse_0_1)[name = string("constexpr_sparse_to_dense_0")];
+            string cast_0_dtype_0 = const()[name = string("cast_0_dtype_0"), val = string("fp32")];
+            tensor<fp32, [6, 6]> cast_0 = cast(dtype = cast_0_dtype_0, x = constexpr_sparse_to_dense_0)[name = string("cast_1")];
+            tensor<fp32, [6, 6]> add_0 = add(x = x, y = cast_0)[name = string("add_0")];
+        } -> (add_0);
+}

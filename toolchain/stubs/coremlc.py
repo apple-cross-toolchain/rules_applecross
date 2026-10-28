@@ -118,15 +118,32 @@ DATA_TYPES = {
 # Byte-packed integer constants, written in decimal.
 PACKED_INTEGERS = {"int8": "b", "uint8": "B", "int16": "h", "uint16": "H", "uint32": "I"}
 
+# Integers narrower than a byte, packed from each byte's least significant
+# bit up (coremltools's packing): their width and whether they're signed.
+SUB_BYTE_INTEGERS = {"int4": (4, True), "uint1": (1, False), "uint2": (2, False), "uint3": (3, False),
+                     "uint4": (4, False), "uint6": (6, False)}
+
+
+def unpack_bits(raw, width, signed, count):
+    bits = int.from_bytes(raw, "little")
+    if len(raw) != (width * count + 7) // 8:
+        unestablished("packed values of another length than their shape's")
+    out = []
+    for k in range(count):
+        v = (bits >> (k * width)) & ((1 << width) - 1)
+        out.append(v - (1 << width) if signed and v >> (width - 1) else v)
+    return out
+
 OPSETS = {"CoreML5": "ios15", "CoreML6": "ios16", "CoreML7": "ios17", "CoreML8": "ios18"}
 
 
 def hex_float(value):
     """`value` as C's printf("%a") writes it: the fewest hex digits."""
+    # Xcode writes every NaN, whatever its sign or payload, as nan.
     if value != value:
-        unestablished("a NaN constant")
+        return "nan"
     if value in (float("inf"), float("-inf")):
-        unestablished("an infinite constant")
+        return "inf" if value > 0 else "-inf"
     if value == 0:
         return "-0x0p+0" if str(value).startswith("-") else "0x0p+0"
     text = value.hex()  # e.g. 0x1.9000000000000p+6
@@ -147,6 +164,14 @@ def _declared(block, out):
             _declared(b, out)
 
 
+# The modes resample was seen compiled with (Xcode refuses others).
+RESAMPLE_MODES = {
+    "coordinates_mode": ("normalized_minus_one_to_one", "normalized_zero_to_one", "unnormalized"),
+    "padding_mode": ("constant", "border", "reflection", "symmetric"),
+    "sampling_mode": ("bilinear", "nearest"),
+}
+
+
 class Printer:
     def __init__(self, scalar_style):
         self.duplicates = set()
@@ -155,6 +180,9 @@ class Printer:
         # Program 1.3 and later write rank-0 tensors as their element type.
         self.scalar_style = scalar_style
         self.lines = []
+        # Each constant string's values by name, and the function's opset.
+        self.strings = {}
+        self.opset = None
 
     def dimension(self, d):
         if d.has(1):
@@ -177,7 +205,13 @@ class Printer:
             return "tensor<%s, [%s]>" % (dtype, ", ".join(dims))
         if t.has(5):
             return "state<%s>" % self.value_type(t.msg(5).msg(1))
-        unestablished("a value type other than a tensor or state")
+        if t.has(2):
+            # A list gives its elements' type and its length.
+            lst = t.msg(2)
+            if not lst.has(2):
+                unestablished("a list without a length")
+            return "list<%s, %s>" % (self.value_type(lst.msg(1)), self.dimension(lst.msg(2)))
+        unestablished("a value type other than a tensor, list or state")
 
     def tensor_values(self, t, value):
         """The values of a TensorValue, written as model.mil writes them."""
@@ -212,6 +246,11 @@ class Printer:
             elif dtype in PACKED_INTEGERS:
                 code = PACKED_INTEGERS[dtype]
                 items = [str(x) for x in struct.unpack("<%d%s" % (len(raw) // struct.calcsize(code), code), raw)]
+            elif dtype in SUB_BYTE_INTEGERS:
+                count = 1
+                for d in dims:
+                    count *= d
+                items = [str(x) for x in unpack_bits(raw, *SUB_BYTE_INTEGERS[dtype], count)]
             else:
                 unestablished("byte-packed %s values" % dtype)
         else:
@@ -299,20 +338,56 @@ class Printer:
                 outputs.append(name)
         return ", ".join(self.ref(n) for n in outputs)
 
+    def string_input(self, op, name):
+        argument = dict(op.map(2)).get(name)
+        bindings = argument.msgs(1) if argument else []
+        if len(bindings) == 1:
+            b = bindings[0]
+            if b.has(1):
+                values = self.strings.get(b.str(1))
+            elif b.msg(2).has(3) and b.msg(2).msg(3).has(1) and b.msg(2).msg(3).msg(1).has(4):
+                values = [v.decode("utf-8") for v in b.msg(2).msg(3).msg(1).msg(4).all(1)]
+            else:
+                values = None
+            if values and len(values) == 1:
+                return values[0]
+        unestablished("%s's %s other than a constant string" % (op.str(1), name))
+
+    def resample_inputs(self, op):
+        """From iOS 16 coremlc gives resample the coordinates' format and
+        type, which coremltools leaves out; it refuses modes it doesn't know."""
+        for name, known in RESAMPLE_MODES.items():
+            if self.string_input(op, name) not in known:
+                unestablished("resample's %s %r" % (name, self.string_input(op, name)))
+        given = {name for name, _ in op.map(2)}
+        if given & {"coordinates_format", "coordinates_type"}:
+            unestablished("resample with its coordinates' format or type")
+        if self.opset == "CoreML5":
+            return []
+        return [("coordinates_format", self.scalar_literal("string", '"xy"')),
+                ("coordinates_type", self.scalar_literal("string", '"absolute"'))]
+
     def operation(self, op, indent):
         pad = " " * indent
         outputs = op.msgs(3)
         if not outputs and (op.str(1) != "write_state" or op.has(4)):
             unestablished("an operation without outputs")
         inputs = []
-        for name, argument in sorted(op.map(2), key=lambda kv: kv[0]):
+        for name, argument in op.map(2):
             bindings = argument.msgs(1)
             if not bindings or not all(b.has(1) or b.has(2) for b in bindings):
                 unestablished("an operation input bound to nothing")
             # An input bound to a value is written as the value.
             names = [self.ref(b.str(1)) if b.has(1) else self.value(b.msg(2)) for b in bindings]
             # A variadic input lists its arguments in parentheses.
-            inputs.append("%s = %s" % (name, names[0] if len(names) == 1 else "(%s)" % ", ".join(names)))
+            inputs.append((name, names[0] if len(names) == 1 else "(%s)" % ", ".join(names)))
+        if op.str(1) == "const" and len(outputs) == 1:
+            val = dict(op.map(5)).get("val")
+            if val is not None and val.has(3) and val.msg(3).has(1) and val.msg(3).msg(1).has(4):
+                self.strings[outputs[0].str(1)] = [v.decode("utf-8") for v in val.msg(3).msg(1).msg(4).all(1)]
+        if op.str(1) == "resample":
+            inputs += self.resample_inputs(op)
+        inputs = ["%s = %s" % kv for kv in sorted(inputs, key=lambda kv: kv[0])]
         attributes = ["%s = %s" % (name, self.value(v)) for name, v in sorted(op.map(5), key=lambda kv: kv[0])]
         head = "%s%s = %s(%s)[%s]" % (pad, "%s", op.str(1), ", ".join(inputs), ", ".join(attributes))
 
@@ -373,6 +448,8 @@ def print_program(program, spec_version, extra_build_info, function_attributes):
         p.duplicates = {n for n in names if names.count(n) > 1}
         p.seen = {}
         opset = function.str(2)
+        p.opset = opset
+        p.strings = {}
         if function.has(4):
             unestablished("a function with attributes")
         inputs = ", ".join("%s %s" % (p.value_type(i.msg(2)), i.str(1)) for i in sorted(function.msgs(1), key=lambda i: i.str(1)))
@@ -393,9 +470,24 @@ def print_program(program, spec_version, extra_build_info, function_attributes):
 COREMLC_BUILD_INFO = [("coremlc-component-MIL", "3600.16.1"), ("coremlc-version", "3600.25.1")]
 
 
+def enumerated_image_inputs(model):
+    """Xcode refuses an image with enumerated sizes whose program input
+    fixes its height or width (a different shape from the image's)."""
+    program = dict(model.msg(502).map(2))
+    for name, inputs, _, _ in functions(model):
+        for f in inputs:
+            t = f.msg(3)
+            if not (t.has(4) and t.msg(4).has(21)):
+                continue
+            params = [i for i in program[name].msgs(1) if i.str(1) == f.str(1)] if name in program else []
+            dims = params[0].msg(2).msg(1).msgs(3) if params and params[0].msg(2).has(1) else None
+            if dims is None or len(dims) != 4 or any(d.has(1) for d in dims[2:]):
+                unestablished("an image with enumerated sizes whose program input fixes its height or width")
+
+
 def model_mil(model, extra_build_info=COREMLC_BUILD_INFO):
-    scalar_style = model.int(1) >= 9
-    attributes = {name: function_attributes(inputs, states, scalar_style) for name, inputs, _, states in functions(model)}
+    enumerated_image_inputs(model)
+    attributes = {name: function_attributes(inputs, states, model.int(1)) for name, inputs, _, states in functions(model)}
     return print_program(model.msg(502), model.int(1), extra_build_info, attributes)
 
 
@@ -498,6 +590,11 @@ def ns_json(value, indent=0):
     unestablished("a JSON %s" % type(value).__name__)
 
 
+# NSJSONSerialization's escapes for control characters; it writes the others
+# as \u00XX.
+JSON_ESCAPES = {"\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
 def _json_string(text):
     out = []
     for ch in text:
@@ -507,8 +604,10 @@ def _json_string(text):
             out.append("\\\\")
         elif ch == "/":
             out.append("\\/")
+        elif ch in JSON_ESCAPES:
+            out.append(JSON_ESCAPES[ch])
         elif ord(ch) < 0x20:
-            unestablished("a control character in metadata")
+            out.append("\\u%04x" % ord(ch))
         else:
             out.append(ch)
     return '"' + "".join(out) + '"'
@@ -614,9 +713,10 @@ def input_defaults(inputs):
     return defaults
 
 
-def function_attributes(inputs, states, scalar_style):
+def function_attributes(inputs, states, spec_version):
     """The attributes coremlc gives a function in model.mil: its optional
     inputs' default values and its inputs' flexible shapes."""
+    scalar_style = spec_version >= 9
     S = "string" if scalar_style else "tensor<string, []>"
     out = []
     defaults = input_defaults(inputs)
@@ -644,9 +744,12 @@ def function_attributes(inputs, states, scalar_style):
     counts = {len(flex[n][2]) for n in enumerated}
     if len(enumerated) > 1 and (not scalar_style or len(counts) != 1):
         unestablished("several inputs with enumerated shapes before specification 9 or of different counts")
-    if not scalar_style and any(f.msg(3).has(4) and f.msg(3).msg(4).int(3) == 40 and f.str(1) in enumerated for f in inputs):
-        # Xcode gives these three channels, and refuses some.
-        unestablished("a Grayscale16Half image with enumerated sizes before specification 9")
+    for f in inputs:
+        if spec_version == 7 and f.msg(3).has(4) and f.msg(3).msg(4).int(3) == 40 and f.str(1) in enumerated:
+            # At specification 7 Xcode gives a Grayscale16Half image's
+            # enumerated sizes three channels (its default keeps one).
+            n = f.str(1)
+            flex[n] = (flex[n][0], None, [[1, 3] + e[2:] for e in flex[n][2]])
     # Each enumerated shape is named for every input's and state's shape,
     # padded to rank 5 (name_1_1_1_2_3_name2_...), from specification 9 by
     # that name's SHA-256, eight hex digits.
@@ -817,6 +920,16 @@ def _walk_ops(block, out):
 PRECISION_NAMES = {"fp16": "Float16", "fp32": "Float32", "fp64": "Float64", "int32": "Int32", "int64": "Int64", "uint16": "UInt16",
                    "int8": "Int8", "uint8": "UInt8", "uint32": "UInt32"}
 
+# Weights narrower than a byte, in storagePrecision; of them only UInt1 (a
+# sparse mask an operation produces) was seen in computePrecision.
+SUB_BYTE_PRECISION_NAMES = {"uint1": "UInt1", "uint2": "UInt2", "uint3": "UInt3", "uint4": "UInt4", "uint6": "UInt6",
+                            "int4": "Int4"}
+
+# iOS 16's compression operations, which hold their weights as attributes:
+# what they add to storagePrecision is their own description (below), not
+# the types of those weights.
+ATTRIBUTE_WEIGHTS = ("constexpr_affine_dequantize", "constexpr_cast", "constexpr_lut_to_dense", "constexpr_sparse_to_dense")
+
 
 def program_facts(program, spec_version, only=None):
     """(histogram pairs in first-use order, compute precision, class labels)
@@ -834,10 +947,6 @@ def program_facts(program, spec_version, only=None):
     labels = None
     for op in ops:
         kind = op.str(1)
-        if kind in ("constexpr_lut_to_dense", "constexpr_sparse_to_dense", "constexpr_lut_to_sparse", "constexpr_sparse_blockwise_shift_scale"):
-            # Their storage precision is described in their own terms
-            # ("Palettized (2 bits)", "Sparse").
-            unestablished("palettized or sparse weights")
         declared += [o.msg(2) for o in op.msgs(3)]
         if kind == "const":
             continue
@@ -855,21 +964,54 @@ def program_facts(program, spec_version, only=None):
                 if b.has(1):
                     read.add(b.str(1))
     stored = set()
+    named = {o.str(1): o.msg(2) for op in ops for o in op.msgs(3)}
+
+    def dtype_of(t):
+        if t is None or not t.has(1):
+            unestablished("compressed weights of a type other than a tensor")
+        dtype = DATA_TYPES.get(t.msg(1).int(1))
+        return PRECISION_NAMES.get(dtype) or SUB_BYTE_PRECISION_NAMES.get(dtype) or unestablished("weights stored as %s" % dtype)
 
     def store(v):
-        dtype = DATA_TYPES.get(v.msg(2).msg(1).int(1))
-        stored.add(PRECISION_NAMES.get(dtype) or unestablished("weights stored as %s" % dtype))
+        stored.add(dtype_of(v.msg(2)))
+
+    def operand(op, name):
+        """The type of `op`'s input or attribute `name`."""
+        attributes = dict(op.map(5))
+        if name in attributes:
+            return attributes[name].msg(2)
+        argument = dict(op.map(2)).get(name)
+        bindings = argument.msgs(1) if argument else []
+        if len(bindings) != 1:
+            unestablished("%s without one %s" % (op.str(1), name))
+        b = bindings[0]
+        return b.msg(2).msg(2) if b.has(2) else named.get(b.str(1)) or unestablished("%s's %s from a function input" % (op.str(1), name))
     for op in ops:
-        if op.str(1) != "const":
-            # Other operations' own weights count: attributes and inputs
-            # bound to a value.
-            for _, v in op.map(5):
-                if v.has(5):
-                    store(v)
+        kind = op.str(1)
+        if kind != "const":
+            # Other operations' weights count when bound to an input from
+            # the weights file.
             for _, argument in op.map(2):
                 for b in argument.msgs(1):
                     if b.has(2) and b.msg(2).has(5):
                         store(b.msg(2))
+            if any(v.has(5) for _, v in op.map(5)) and kind not in ATTRIBUTE_WEIGHTS:
+                unestablished("weights held as an attribute of %s" % kind)
+            # Compression operations add their own description, from
+            # their weights' types and shapes however they're held.
+            if kind == "constexpr_lut_to_dense":
+                # The bits that would index every entry of every table.
+                t = operand(op, "lut")
+                entries = 1
+                for d in t.msg(1).msgs(3):
+                    entries *= d.msg(1).int(1) if d.has(1) else unestablished("a lookup table of unknown shape")
+                stored.add("Palettized (%d bits)" % (entries - 1).bit_length())
+            elif kind == "constexpr_sparse_to_dense":
+                stored.add("Sparse")
+            elif kind == "constexpr_affine_dequantize":
+                stored.add(dtype_of(operand(op, "quantized_data")))
+            elif kind == "constexpr_blockwise_shift_scale":
+                stored.add(dtype_of(operand(op, "data")))
             continue
         out = op.msgs(3)[0]
         for _, v in op.map(5):
@@ -883,12 +1025,14 @@ def program_facts(program, spec_version, only=None):
         if t.has(1):
             dtype = DATA_TYPES.get(t.msg(1).int(1))
             if dtype not in ("bool", "string"):
-                types.add(PRECISION_NAMES.get(dtype) or unestablished("compute precision with %s" % dtype))
+                types.add(PRECISION_NAMES.get(dtype) or (dtype == "uint1" and SUB_BYTE_PRECISION_NAMES[dtype]) or unestablished("compute precision with %s" % dtype))
         elif t.has(4):
             collect(t.msg(4).msg(1))
             collect(t.msg(4).msg(2))
+        elif t.has(2):
+            collect(t.msg(2).msg(1))
         else:
-            unestablished("compute precision with a list, tuple or state type")
+            unestablished("compute precision with a tuple or state type")
     for t in declared:
         collect(t)
     names = sorted(types)

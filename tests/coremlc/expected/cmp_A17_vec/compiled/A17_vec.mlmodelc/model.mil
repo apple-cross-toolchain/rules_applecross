@@ -1,0 +1,8 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [12, 4]> x) {
+            tensor<fp32, [12, 4]> constexpr_affine_dequantize_0 = constexpr_affine_dequantize()[axis = tensor<int32, []>(0), name = tensor<string, []>("constexpr_affine_dequantize_0"), quantized_data = tensor<uint8, [12, 4]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64))), scale = tensor<fp32, [12]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(320))), zero_point = tensor<uint8, [12]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(192)))];
+            tensor<fp32, [12, 4]> add_0 = add(x = x, y = constexpr_affine_dequantize_0)[name = tensor<string, []>("add_0")];
+        } -> (add_0);
+}

@@ -1,0 +1,24 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 4, 6, 6]> x) {
+            tensor<fp32, [8, 4, 3, 3]> conv_0_weight_0 = const()[name = tensor<string, []>("conv_0_weight_0"), val = tensor<fp32, [8, 4, 3, 3]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];
+            tensor<fp32, [8]> conv_0_bias_0 = const()[name = tensor<string, []>("conv_0_bias_0"), val = tensor<fp32, [8]>([-0x1.1dd0fap+0, 0x1.4b7a38p-4, -0x1.7e1d2p-3, -0x1.d18192p-5, 0x1.f82712p-2, -0x1.5c81d8p-1, -0x1.5a2516p-4, -0x1.307fa2p-2])];
+            tensor<int32, [2]> conv_0_strides_0 = const()[name = tensor<string, []>("conv_0_strides_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<string, []> conv_0_pad_type_0 = const()[name = tensor<string, []>("conv_0_pad_type_0"), val = tensor<string, []>("valid")];
+            tensor<int32, [4]> conv_0_pad_0 = const()[name = tensor<string, []>("conv_0_pad_0"), val = tensor<int32, [4]>([0, 0, 0, 0])];
+            tensor<int32, [2]> conv_0_dilations_0 = const()[name = tensor<string, []>("conv_0_dilations_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<int32, []> conv_0_groups_0 = const()[name = tensor<string, []>("conv_0_groups_0"), val = tensor<int32, []>(1)];
+            tensor<fp32, [1, 8, 4, 4]> conv_0 = conv(bias = conv_0_bias_0, dilations = conv_0_dilations_0, groups = conv_0_groups_0, pad = conv_0_pad_0, pad_type = conv_0_pad_type_0, strides = conv_0_strides_0, weight = conv_0_weight_0, x = x)[name = tensor<string, []>("conv_0")];
+            tensor<fp32, [1, 8, 4, 4]> relu_0 = relu(x = conv_0)[name = tensor<string, []>("relu_0")];
+            tensor<int32, [2]> reshape_0_shape_0 = const()[name = tensor<string, []>("reshape_0_shape_0"), val = tensor<int32, [2]>([1, 128])];
+            tensor<fp32, [1, 128]> reshape_0 = reshape(shape = reshape_0_shape_0, x = relu_0)[name = tensor<string, []>("reshape_0")];
+            tensor<fp32, [16, 128]> linear_0_weight_0_sparsified = constexpr_sparse_to_dense()[mask = tensor<uint8, [256]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(5440))), name = tensor<string, []>("linear_0_weight_0_sparsified"), nonzero_data = tensor<fp32, [1024]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(1280))), shape = tensor<uint32, [2]>([16, 128])];
+            tensor<fp32, [16]> linear_0_bias_0 = const()[name = tensor<string, []>("linear_0_bias_0"), val = tensor<fp32, [16]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(5760)))];
+            tensor<fp32, [1, 16]> linear_0 = linear(bias = linear_0_bias_0, weight = linear_0_weight_0_sparsified, x = reshape_0)[name = tensor<string, []>("linear_0")];
+            tensor<fp32, [1, 16]> relu_1 = relu(x = linear_0)[name = tensor<string, []>("relu_1")];
+            tensor<fp32, [8, 16]> linear_1_weight_0_sparsified = constexpr_sparse_to_dense()[mask = tensor<uint8, [16]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(6208))), name = tensor<string, []>("linear_1_weight_0_sparsified"), nonzero_data = tensor<fp32, [64]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(5888))), shape = tensor<uint32, [2]>([8, 16])];
+            tensor<fp32, [8]> linear_1_bias_0 = const()[name = tensor<string, []>("linear_1_bias_0"), val = tensor<fp32, [8]>([0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0])];
+            tensor<fp32, [1, 8]> linear_1 = linear(bias = linear_1_bias_0, weight = linear_1_weight_0_sparsified, x = relu_1)[name = tensor<string, []>("linear_1")];
+        } -> (linear_1);
+}

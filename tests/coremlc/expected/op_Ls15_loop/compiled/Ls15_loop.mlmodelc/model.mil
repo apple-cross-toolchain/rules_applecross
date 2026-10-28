@@ -1,0 +1,28 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [2, 3]> x) {
+            tensor<int32, []> make_list_0_init_length_0 = const()[name = tensor<string, []>("make_list_0_init_length_0"), val = tensor<int32, []>(1)];
+            tensor<int32, []> make_list_0_elem_shape0_0 = const()[name = tensor<string, []>("make_list_0_elem_shape0_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> make_list_0_elem_shape1_0 = const()[name = tensor<string, []>("make_list_0_elem_shape1_0"), val = tensor<int32, []>(3)];
+            tensor<string, []> make_list_0_dtype_0 = const()[name = tensor<string, []>("make_list_0_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<bool, []> make_list_0_dynamic_length_0 = const()[name = tensor<string, []>("make_list_0_dynamic_length_0"), val = tensor<bool, []>(true)];
+            list<tensor<fp32, [2, 3]>, 1> make_list_0 = make_list(dtype = make_list_0_dtype_0, dynamic_length = make_list_0_dynamic_length_0, elem_shape = (make_list_0_elem_shape0_0, make_list_0_elem_shape1_0), init_length = make_list_0_init_length_0)[name = tensor<string, []>("make_list_0")];
+            tensor<int32, []> while_loop_0_loop_vars0_0 = const()[name = tensor<string, []>("while_loop_0_loop_vars0_0"), val = tensor<int32, []>(0)];
+            tensor<int32, []> while_loop_0_0, list<tensor<fp32, [2, 3]>, 1> while_loop_0_1 = while_loop(loop_vars = (while_loop_0_loop_vars0_0, make_list_0))[name = tensor<string, []>("while_loop_0")]
+                (tensor<int32, []> while_loop_0_loop_vars0_0_x0_1_1_1_0, list<tensor<fp32, [2, 3]>, 1> make_list_0_x0_1_1_1_0) {
+                    tensor<int32, []> less_1_y_0 = const()[name = tensor<string, []>("less_1_y_0"), val = tensor<int32, []>(3)];
+                    tensor<bool, []> less_1 = less(x = while_loop_0_loop_vars0_0_x0_1_1_1_0, y = less_1_y_0)[name = tensor<string, []>("less_1")];
+                } -> (less_1)
+                (tensor<int32, []> while_loop_0_loop_vars0_0_x0_1_1_1_1, list<tensor<fp32, [2, 3]>, 1> make_list_0_x0_1_1_1_1) {
+                    tensor<int32, []> add_1_y_0 = const()[name = tensor<string, []>("add_1_y_0"), val = tensor<int32, []>(1)];
+                    tensor<int32, []> add_1 = add(x = while_loop_0_loop_vars0_0_x0_1_1_1_1, y = add_1_y_0)[name = tensor<string, []>("add_1")];
+                    tensor<string, []> cast_1_dtype_0 = const()[name = tensor<string, []>("cast_1_dtype_0"), val = tensor<string, []>("fp32")];
+                    tensor<fp32, []> cast_1 = cast(dtype = cast_1_dtype_0, x = while_loop_0_loop_vars0_0_x0_1_1_1_1)[name = tensor<string, []>("cast_2")];
+                    tensor<fp32, [2, 3]> mul_1 = mul(x = x, y = cast_1)[name = tensor<string, []>("mul_1")];
+                    list<tensor<fp32, [2, 3]>, 1> list_write_1 = list_write(index = while_loop_0_loop_vars0_0_x0_1_1_1_1, ls = make_list_0_x0_1_1_1_1, value = mul_1)[name = tensor<string, []>("list_write_1")];
+                } -> (add_1, list_write_1);
+            tensor<int32, [2]> list_gather_0_indices_0 = const()[name = tensor<string, []>("list_gather_0_indices_0"), val = tensor<int32, [2]>([0, 2])];
+            tensor<fp32, [2, 2, 3]> list_gather_0 = list_gather(indices = list_gather_0_indices_0, ls = while_loop_0_1)[name = tensor<string, []>("list_gather_0")];
+        } -> (list_gather_0);
+}

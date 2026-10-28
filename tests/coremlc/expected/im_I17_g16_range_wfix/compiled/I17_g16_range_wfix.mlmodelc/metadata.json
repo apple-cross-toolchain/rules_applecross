@@ -1,0 +1,63 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1 × 1)",
+        "shortDescription" : "",
+        "shape" : "[1, 1]",
+        "name" : "reduce_mean_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 8,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios16.reduceMean" : 1
+    },
+    "computePrecision" : "Mixed (Float16, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "10.0",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.conversion_date" : "2026-10-28",
+      "com.github.apple.coremltools.source" : "milinternal"
+    },
+    "inputSchema" : [
+      {
+        "formattedType" : "Image (Grayscale16Half 6 × 4)",
+        "hasSizeFlexibility" : "1",
+        "shortDescription" : "",
+        "sizeRange" : "[[6, 6], [2, 16]]",
+        "width" : "6",
+        "type" : "Image",
+        "isColor" : "0",
+        "height" : "4",
+        "sizeFlexibility" : "6 × 2...16",
+        "colorspace" : "Grayscale16Half",
+        "name" : "img",
+        "isOptional" : "0"
+      }
+    ],
+    "generatedClassName" : "I17_g16_range_wfix",
+    "method" : "predict"
+  }
+]

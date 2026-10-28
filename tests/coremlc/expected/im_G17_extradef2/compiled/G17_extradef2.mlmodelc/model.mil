@@ -1,0 +1,10 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp16, [1, 1, ?, ?]> img, tensor<fp16, [2]> t) [FlexibleShapeInformation = tuple<tuple<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>, tuple<tensor<string, []>, dict<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>>>((("DefaultShapes", {{"img", [1, 1, 8, 8]}}), ("EnumeratedShapes", {{"img_1_1_1_4_6_t_1_1_1_1_2_", {{"img", [1, 1, 4, 6]}, {"t", [2]}}}, {"img_1_1_1_8_8_t_1_1_1_1_2_", {{"img", [1, 1, 8, 8]}, {"t", [2]}}}})))] {
+            tensor<int32, [2]> reduce_mean_0_axes_0 = const()[name = tensor<string, []>("reduce_mean_0_axes_0"), val = tensor<int32, [2]>([2, 3])];
+            tensor<bool, []> reduce_mean_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_mean_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<fp16, [1, 1]> reduce_mean_0 = reduce_mean(axes = reduce_mean_0_axes_0, keep_dims = reduce_mean_0_keep_dims_0, x = img)[name = tensor<string, []>("reduce_mean_0")];
+            tensor<fp16, [2]> relu_0 = relu(x = t)[name = tensor<string, []>("relu_0")];
+        } -> (reduce_mean_0, relu_0);
+}

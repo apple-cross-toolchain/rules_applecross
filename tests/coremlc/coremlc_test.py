@@ -66,6 +66,19 @@ class CoremlcTest(unittest.TestCase):
                     self.assertEqual(tree(tmp), tree(os.path.join(expected, language)))
         self.assertGreater(count, 30)
 
+    def test_refuses_what_xcode_refuses(self):
+        # expected/X/refused.txt holds Xcode's error for a model it refuses.
+        count = 0
+        for case, package, expected in self.cases():
+            if not os.path.isfile(os.path.join(expected, "refused.txt")):
+                continue
+            count += 1
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                result = run("compile", package, tmp)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(os.listdir(tmp), [])
+        self.assertGreater(count, 0)
+
     def test_refuses_neural_networks(self):
         with tempfile.TemporaryDirectory() as tmp:
             # A neural network: the Model message's field 500.

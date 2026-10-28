@@ -1,0 +1,19 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [2, 3]> x) {
+            tensor<int32, []> make_list_0_init_length_0 = const()[name = tensor<string, []>("make_list_0_init_length_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> make_list_0_elem_shape0_0 = const()[name = tensor<string, []>("make_list_0_elem_shape0_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> make_list_0_elem_shape1_0 = const()[name = tensor<string, []>("make_list_0_elem_shape1_0"), val = tensor<int32, []>(3)];
+            tensor<string, []> make_list_0_dtype_0 = const()[name = tensor<string, []>("make_list_0_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<bool, []> make_list_0_dynamic_length_0 = const()[name = tensor<string, []>("make_list_0_dynamic_length_0"), val = tensor<bool, []>(false)];
+            list<tensor<fp32, [2, 3]>, 2> make_list_0 = make_list(dtype = make_list_0_dtype_0, dynamic_length = make_list_0_dynamic_length_0, elem_shape = (make_list_0_elem_shape0_0, make_list_0_elem_shape1_0), init_length = make_list_0_init_length_0)[name = tensor<string, []>("make_list_0")];
+            tensor<int32, []> list_write_0_index_0 = const()[name = tensor<string, []>("list_write_0_index_0"), val = tensor<int32, []>(0)];
+            list<tensor<fp32, [2, 3]>, 2> list_write_0 = list_write(index = list_write_0_index_0, ls = make_list_0, value = x)[name = tensor<string, []>("list_write_0")];
+            tensor<fp32, [2, 3]> relu_0 = relu(x = x)[name = tensor<string, []>("relu_0")];
+            tensor<int32, []> list_write_1_index_0 = const()[name = tensor<string, []>("list_write_1_index_0"), val = tensor<int32, []>(1)];
+            list<tensor<fp32, [2, 3]>, 2> list_write_1 = list_write(index = list_write_1_index_0, ls = list_write_0, value = relu_0)[name = tensor<string, []>("list_write_1")];
+            tensor<int32, [2]> list_gather_0_indices_0 = const()[name = tensor<string, []>("list_gather_0_indices_0"), val = tensor<int32, [2]>([0, 1])];
+            tensor<fp32, [2, 2, 3]> list_gather_0 = list_gather(indices = list_gather_0_indices_0, ls = list_write_1)[name = tensor<string, []>("list_gather_0")];
+        } -> (list_gather_0);
+}

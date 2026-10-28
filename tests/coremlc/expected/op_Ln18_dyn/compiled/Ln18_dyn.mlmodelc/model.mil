@@ -1,0 +1,16 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [2, 3]> x, tensor<int32, [1]> y) {
+            int32 squeeze_0 = squeeze(x = y)[name = string("squeeze_0")];
+            int32 make_list_0_elem_shape0_0 = const()[name = string("make_list_0_elem_shape0_0"), val = int32(2)];
+            int32 make_list_0_elem_shape1_0 = const()[name = string("make_list_0_elem_shape1_0"), val = int32(3)];
+            string make_list_0_dtype_0 = const()[name = string("make_list_0_dtype_0"), val = string("fp32")];
+            bool make_list_0_dynamic_length_0 = const()[name = string("make_list_0_dynamic_length_0"), val = bool(true)];
+            list<tensor<fp32, [2, 3]>, ?> make_list_0 = make_list(dtype = make_list_0_dtype_0, dynamic_length = make_list_0_dynamic_length_0, elem_shape = (make_list_0_elem_shape0_0, make_list_0_elem_shape1_0), init_length = squeeze_0)[name = string("make_list_0")];
+            int32 list_write_0_index_0 = const()[name = string("list_write_0_index_0"), val = int32(0)];
+            list<tensor<fp32, [2, 3]>, ?> list_write_0 = list_write(index = list_write_0_index_0, ls = make_list_0, value = x)[name = string("list_write_0")];
+            int32 list_read_0_index_0 = const()[name = string("list_read_0_index_0"), val = int32(0)];
+            tensor<fp32, [2, 3]> list_read_0 = list_read(index = list_read_0_index_0, ls = list_write_0)[name = string("list_read_0")];
+        } -> (list_read_0);
+}

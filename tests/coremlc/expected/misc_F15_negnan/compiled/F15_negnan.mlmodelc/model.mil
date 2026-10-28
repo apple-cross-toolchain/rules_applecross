@@ -1,0 +1,8 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [4]> x) {
+            tensor<fp32, []> add_0_y_0 = const()[name = tensor<string, []>("add_0_y_0"), val = tensor<fp32, []>(nan)];
+            tensor<fp32, [4]> add_0 = add(x = x, y = add_0_y_0)[name = tensor<string, []>("add_0")];
+        } -> (add_0);
+}

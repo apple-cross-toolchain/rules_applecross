@@ -1,0 +1,8 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [3, 3]> x) {
+            tensor<fp32, [3, 3]> constexpr_affine_dequantize_0 = constexpr_affine_dequantize()[axis = int32(0), name = string("constexpr_affine_dequantize_0"), quantized_data = tensor<uint8, [3, 3]>([[9, 4, 126], [26, 117, 203], [46, 254, 50]]), scale = fp32(0x1.99999ap-4), zero_point = uint8(3)];
+            tensor<fp32, [3, 3]> add_0 = add(x = x, y = constexpr_affine_dequantize_0)[name = string("add_0")];
+        } -> (add_0);
+}
