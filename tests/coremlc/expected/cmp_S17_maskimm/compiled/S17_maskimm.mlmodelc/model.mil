@@ -1,0 +1,8 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [4, 4]> x) {
+            tensor<fp32, [4, 4]> constexpr_sparse_to_dense_0 = constexpr_sparse_to_dense()[mask = tensor<uint8, [2]>([243, 27]), name = tensor<string, []>("constexpr_sparse_to_dense_0"), nonzero_data = tensor<fp32, [10]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64))), shape = tensor<uint32, [2]>([4, 4])];
+            tensor<fp32, [4, 4]> add_0 = add(x = x, y = constexpr_sparse_to_dense_0)[name = tensor<string, []>("add_0")];
+        } -> (add_0);
+}

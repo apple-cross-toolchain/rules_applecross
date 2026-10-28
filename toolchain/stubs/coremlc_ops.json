@@ -159,9 +159,6 @@
  "constexpr_cast": {
   "base": null,
   "camel": "constexprCast",
-  "targets": [
-   18
-  ],
   "versions": [
    16,
    18
@@ -172,6 +169,20 @@
   "camel": "constexprLutToDense",
   "versions": [
    16,
+   18
+  ]
+ },
+ "constexpr_lut_to_sparse": {
+  "base": null,
+  "camel": "constexprLutToSparse",
+  "versions": [
+   18
+  ]
+ },
+ "constexpr_sparse_blockwise_shift_scale": {
+  "base": null,
+  "camel": "constexprSparseBlockwiseShiftScale",
+  "versions": [
    18
   ]
  },
@@ -503,6 +514,31 @@
    18
   ]
  },
+ "list_gather": {
+  "base": "ListGather",
+  "camel": null,
+  "versions": []
+ },
+ "list_length": {
+  "base": "ListLength",
+  "camel": null,
+  "versions": []
+ },
+ "list_read": {
+  "base": "ListRead",
+  "camel": null,
+  "versions": []
+ },
+ "list_scatter": {
+  "base": "ListScatter",
+  "camel": null,
+  "versions": []
+ },
+ "list_write": {
+  "base": "ListWrite",
+  "camel": null,
+  "versions": []
+ },
  "local_response_norm": {
   "base": "LocalResponseNorm",
   "camel": "localResponseNorm",
@@ -565,6 +601,11 @@
    17,
    18
   ]
+ },
+ "make_list": {
+  "base": "MakeList",
+  "camel": null,
+  "versions": []
  },
  "matmul": {
   "base": "Matmul",
@@ -850,9 +891,6 @@
  "resample": {
   "base": "Resample",
   "camel": "resample",
-  "targets": [
-   15
-  ],
   "versions": [
    16,
    17,

@@ -1,0 +1,9 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [6, 6]> x) {
+            tensor<uint1, [6, 6]> constexpr_sparse_blockwise_shift_scale_0_0, tensor<fp32, [22]> constexpr_sparse_blockwise_shift_scale_0_1 = constexpr_sparse_blockwise_shift_scale(data_mask = tensor<uint1, [6, 6]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(64))), nonzero_data = tensor<uint4, [22]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(192))), offset = tensor<uint4, [1, 1]>([[1]]), scale = tensor<fp32, [1, 1]>([[0x1p-1]]))[name = string("constexpr_sparse_blockwise_shift_scale_0")];
+            tensor<fp32, [6, 6]> constexpr_sparse_to_dense_0 = constexpr_sparse_to_dense(mask = constexpr_sparse_blockwise_shift_scale_0_0, nonzero_data = constexpr_sparse_blockwise_shift_scale_0_1)[name = string("constexpr_sparse_to_dense_0")];
+            tensor<fp32, [6, 6]> add_0 = add(x = x, y = constexpr_sparse_to_dense_0)[name = string("add_0")];
+        } -> (add_0);
+}

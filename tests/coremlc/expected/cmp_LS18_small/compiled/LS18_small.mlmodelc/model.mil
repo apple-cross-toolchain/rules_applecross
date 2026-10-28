@@ -1,0 +1,9 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [3, 3]> x) {
+            tensor<uint1, [3, 3]> constexpr_lut_to_sparse_0_0, tensor<fp32, [6]> constexpr_lut_to_sparse_0_1 = constexpr_lut_to_sparse(indices_mask = tensor<uint1, [3, 3]>([[1, 0, 1], [1, 1, 1], [0, 1, 0]]), indices_nonzero_data = tensor<uint1, [6]>([1, 1, 1, 0, 0, 0]), lut = tensor<fp32, [1, 1, 2, 1]>([[[[-0x1.58630ap+3], [0x1.292f1ap+3]]]]))[name = string("constexpr_lut_to_sparse_0")];
+            tensor<fp32, [3, 3]> constexpr_sparse_to_dense_0 = constexpr_sparse_to_dense(mask = constexpr_lut_to_sparse_0_0, nonzero_data = constexpr_lut_to_sparse_0_1)[name = string("constexpr_sparse_to_dense_0")];
+            tensor<fp32, [3, 3]> add_0 = add(x = x, y = constexpr_sparse_to_dense_0)[name = string("add_0")];
+        } -> (add_0);
+}

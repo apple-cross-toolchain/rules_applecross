@@ -1,0 +1,13 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [1, 2, 4, 4]> x) {
+            tensor<fp32, [1, 3, 3, 2]> resample_0_coordinates_0 = const()[name = string("resample_0_coordinates_0"), val = tensor<fp32, [1, 3, 3, 2]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(64)))];
+            string resample_0_sampling_mode_0 = const()[name = string("resample_0_sampling_mode_0"), val = string("bilinear")];
+            string resample_0_padding_mode_0 = const()[name = string("resample_0_padding_mode_0"), val = string("symmetric")];
+            fp32 resample_0_padding_value_0 = const()[name = string("resample_0_padding_value_0"), val = fp32(0x1p-1)];
+            string resample_0_coordinates_mode_0 = const()[name = string("resample_0_coordinates_mode_0"), val = string("normalized_minus_one_to_one")];
+            bool resample_0_align_corners_0 = const()[name = string("resample_0_align_corners_0"), val = bool(true)];
+            tensor<fp32, [1, 2, 3, 3]> resample_0 = resample(align_corners = resample_0_align_corners_0, coordinates = resample_0_coordinates_0, coordinates_format = string("xy"), coordinates_mode = resample_0_coordinates_mode_0, coordinates_type = string("absolute"), padding_mode = resample_0_padding_mode_0, padding_value = resample_0_padding_value_0, sampling_mode = resample_0_sampling_mode_0, x = x)[name = string("resample_0")];
+        } -> (resample_0);
+}

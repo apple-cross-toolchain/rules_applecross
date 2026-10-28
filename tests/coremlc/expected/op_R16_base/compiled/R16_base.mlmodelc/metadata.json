@@ -1,0 +1,60 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "storagePrecision" : "Float32",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 2 × 3 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 2, 3, 3]",
+        "name" : "resample_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 7,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios16.resample" : 1
+    },
+    "computePrecision" : "Float32",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "13.0",
+      "tvOS" : "16.0",
+      "visionOS" : "1.0",
+      "watchOS" : "9.0",
+      "iOS" : "16.0",
+      "macCatalyst" : "16.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.conversion_date" : "2026-10-28",
+      "com.github.apple.coremltools.source" : "milinternal"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 2 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 2, 4, 4]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "generatedClassName" : "R16_base",
+    "method" : "predict"
+  }
+]

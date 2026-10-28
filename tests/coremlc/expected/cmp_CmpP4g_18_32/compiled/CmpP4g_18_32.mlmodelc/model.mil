@@ -1,0 +1,13 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}})]
+{
+    func main<ios18>(tensor<fp32, [1, 32]> x) {
+            tensor<fp32, [16, 32]> linear_0_weight_0_palettized = constexpr_lut_to_dense(indices = tensor<uint4, [16, 32]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(64))), lut = tensor<fp32, [4, 1, 16, 1]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(384))))[name = string("linear_0_weight_0_palettized")];
+            tensor<fp32, [16]> linear_0_bias_0 = const()[name = string("linear_0_bias_0"), val = tensor<fp32, [16]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(704)))];
+            tensor<fp32, [1, 16]> linear_0 = linear(bias = linear_0_bias_0, weight = linear_0_weight_0_palettized, x = x)[name = string("linear_0")];
+            tensor<fp32, [1, 16]> relu_0 = relu(x = linear_0)[name = string("relu_0")];
+            tensor<fp32, [8, 16]> linear_1_weight_0_palettized = constexpr_lut_to_dense(indices = tensor<uint4, [8, 16]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(832))), lut = tensor<fp32, [2, 1, 16, 1]>(BLOBFILE(path = string("@model_path/weights/weight.bin"), offset = uint64(960))))[name = string("linear_1_weight_0_palettized")];
+            tensor<fp32, [8]> linear_1_bias_0 = const()[name = string("linear_1_bias_0"), val = tensor<fp32, [8]>([0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x0p+0])];
+            tensor<fp32, [1, 8]> linear_1 = linear(bias = linear_1_bias_0, weight = linear_1_weight_0_palettized, x = relu_0)[name = string("linear_1")];
+        } -> (linear_1);
+}

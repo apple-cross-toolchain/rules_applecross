@@ -1,0 +1,1 @@
+error: compiler error: Encountered an error while compiling a model: validator error: Model image input 'img' has a different shape than its corresponding parameter to main.
