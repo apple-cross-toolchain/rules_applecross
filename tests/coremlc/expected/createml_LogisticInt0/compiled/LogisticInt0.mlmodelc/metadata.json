@@ -1,0 +1,78 @@
+[
+  {
+    "shortDescription" : "Tabular",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "yi",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "Int64",
+        "formattedType" : "Dictionary (Int64 → Double)",
+        "type" : "Dictionary",
+        "name" : "yiProbability",
+        "shortDescription" : ""
+      }
+    ],
+    "version" : "1.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 1,
+    "license" : "MIT",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.13",
+      "tvOS" : "11.0",
+      "visionOS" : "1.0",
+      "watchOS" : "4.0",
+      "iOS" : "11.0",
+      "macCatalyst" : "11.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_pipelineClassifier",
+      "structure" : [
+        {
+          "name" : "MLModelType_featureVectorizer"
+        },
+        {
+          "name" : "MLModelType_glmClassifier"
+        }
+      ]
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "a",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "c",
+        "shortDescription" : ""
+      }
+    ],
+    "classLabels" : [
+      0,
+      1
+    ],
+    "generatedClassName" : "LogisticInt0",
+    "userDefinedMetadata" : {
+      "com.apple.createml.version" : "27.0.1"
+    },
+    "method" : "predict"
+  }
+]
