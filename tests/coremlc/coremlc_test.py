@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from python.runfiles import runfiles
+from xcode_equivalence import differences
 
 RUNFILES = runfiles.Create()
 TOOL = RUNFILES.Rlocation("rules_applecross/toolchain/stubs/coremlc.py")
@@ -48,7 +49,8 @@ class CoremlcTest(unittest.TestCase):
                 result = run("compile", package, tmp, "--output-partial-info-plist", os.path.join(tmp, "partial.plist"))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 os.remove(os.path.join(tmp, "partial.plist"))
-                self.assertEqual(tree(tmp), tree(os.path.join(expected, "compiled")))
+                # Xcode writes some models' metadata in a random order.
+                self.assertEqual(differences(os.path.join(expected, "compiled"), tmp), [])
         self.assertGreater(count, 50)
 
     def test_generate_matches_xcode(self):

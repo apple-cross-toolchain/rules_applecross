@@ -1,0 +1,31 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, [1, 1, 4, 4]> sigmoid_0 = sigmoid(x = x)[name = tensor<string, []>("sigmoid_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_sigmoid_0 = identity(x = sigmoid_0)[name = tensor<string, []>("o_sigmoid_0")];
+            tensor<fp32, []> instance_norm_0_epsilon_0 = const()[name = tensor<string, []>("instance_norm_0_epsilon_0"), val = tensor<fp32, []>(0x1.4f8b58p-17)];
+            tensor<fp32, [1, 1, 4, 4]> instance_norm_0 = instance_norm(epsilon = instance_norm_0_epsilon_0, x = x)[name = tensor<string, []>("instance_norm_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_instance_norm_1 = identity(x = instance_norm_0)[name = tensor<string, []>("o_instance_norm_1")];
+            tensor<fp32, [1, 1, 4, 4]> floor_0 = floor(x = x)[name = tensor<string, []>("floor_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_floor_2 = identity(x = floor_0)[name = tensor<string, []>("o_floor_2")];
+            tensor<int32, [4]> tile_0_reps_0 = const()[name = tensor<string, []>("tile_0_reps_0"), val = tensor<int32, [4]>([1, 4, 1, 1])];
+            tensor<fp32, [1, 4, 4, 4]> tile_0 = tile(reps = tile_0_reps_0, x = x)[name = tensor<string, []>("tile_0")];
+            tensor<int32, []> pixel_shuffle_0_upscale_factor_0 = const()[name = tensor<string, []>("pixel_shuffle_0_upscale_factor_0"), val = tensor<int32, []>(2)];
+            tensor<fp32, [1, 1, 8, 8]> pixel_shuffle_0 = pixel_shuffle(upscale_factor = pixel_shuffle_0_upscale_factor_0, x = tile_0)[name = tensor<string, []>("pixel_shuffle_0")];
+            tensor<fp32, [1, 1, 8, 8]> o_pixel_shuffle_3 = identity(x = pixel_shuffle_0)[name = tensor<string, []>("o_pixel_shuffle_3")];
+            tensor<int32, []> softmax_0_axis_0 = const()[name = tensor<string, []>("softmax_0_axis_0"), val = tensor<int32, []>(-1)];
+            tensor<fp32, [1, 1, 4, 4]> softmax_0 = softmax(axis = softmax_0_axis_0, x = x)[name = tensor<string, []>("softmax_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_softmax_4 = identity(x = softmax_0)[name = tensor<string, []>("o_softmax_4")];
+            tensor<int32, [1]> reduce_log_sum_exp_0_axes_0 = const()[name = tensor<string, []>("reduce_log_sum_exp_0_axes_0"), val = tensor<int32, [1]>([3])];
+            tensor<bool, []> reduce_log_sum_exp_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_log_sum_exp_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 4]> reduce_log_sum_exp_0 = reduce_log_sum_exp(axes = reduce_log_sum_exp_0_axes_0, keep_dims = reduce_log_sum_exp_0_keep_dims_0, x = x)[name = tensor<string, []>("reduce_log_sum_exp_0")];
+            tensor<fp32, [1, 1, 4]> o_reduce_log_sum_exp_5 = identity(x = reduce_log_sum_exp_0)[name = tensor<string, []>("o_reduce_log_sum_exp_5")];
+            tensor<int32, [2]> reshape_0_shape_0 = const()[name = tensor<string, []>("reshape_0_shape_0"), val = tensor<int32, [2]>([2, 8])];
+            tensor<fp32, [2, 8]> reshape_0 = reshape(shape = reshape_0_shape_0, x = x)[name = tensor<string, []>("reshape_0")];
+            tensor<fp32, [3, 8]> linear_0_weight_0 = const()[name = tensor<string, []>("linear_0_weight_0"), val = tensor<fp32, [3, 8]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];
+            tensor<fp32, [3]> linear_0_bias_0 = const()[name = tensor<string, []>("linear_0_bias_0"), val = tensor<fp32, [3]>([0x0p+0, 0x0p+0, 0x0p+0])];
+            tensor<fp32, [2, 3]> linear_0 = linear(bias = linear_0_bias_0, weight = linear_0_weight_0, x = reshape_0)[name = tensor<string, []>("linear_0")];
+            tensor<fp32, [2, 3]> o_linear_6 = identity(x = linear_0)[name = tensor<string, []>("o_linear_6")];
+        } -> (o_sigmoid_0, o_instance_norm_1, o_floor_2, o_pixel_shuffle_3, o_softmax_4, o_reduce_log_sum_exp_5, o_linear_6);
+}

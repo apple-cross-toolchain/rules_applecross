@@ -1,0 +1,39 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, [1]> batch_norm_0_mean_0 = const()[name = tensor<string, []>("batch_norm_0_mean_0"), val = tensor<fp32, [1]>([0x0p+0])];
+            tensor<fp32, [1]> batch_norm_0_variance_0 = const()[name = tensor<string, []>("batch_norm_0_variance_0"), val = tensor<fp32, [1]>([0x1p+0])];
+            tensor<fp32, []> batch_norm_0_epsilon_0 = const()[name = tensor<string, []>("batch_norm_0_epsilon_0"), val = tensor<fp32, []>(0x1.4f8b58p-17)];
+            tensor<fp32, [1, 1, 4, 4]> batch_norm_0 = batch_norm(epsilon = batch_norm_0_epsilon_0, mean = batch_norm_0_mean_0, variance = batch_norm_0_variance_0, x = x)[name = tensor<string, []>("batch_norm_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_batch_norm_0 = identity(x = batch_norm_0)[name = tensor<string, []>("o_batch_norm_0")];
+            tensor<int32, [2]> one_hot_0_indices_0 = const()[name = tensor<string, []>("one_hot_0_indices_0"), val = tensor<int32, [2]>([0, 1])];
+            tensor<int32, []> one_hot_0_one_hot_vector_size_0 = const()[name = tensor<string, []>("one_hot_0_one_hot_vector_size_0"), val = tensor<int32, []>(4)];
+            tensor<int32, []> one_hot_0_axis_0 = const()[name = tensor<string, []>("one_hot_0_axis_0"), val = tensor<int32, []>(-1)];
+            tensor<int32, []> one_hot_0_on_value_0 = const()[name = tensor<string, []>("one_hot_0_on_value_0"), val = tensor<int32, []>(1)];
+            tensor<int32, []> one_hot_0_off_value_0 = const()[name = tensor<string, []>("one_hot_0_off_value_0"), val = tensor<int32, []>(0)];
+            tensor<int32, [2, 4]> one_hot_0 = one_hot(axis = one_hot_0_axis_0, indices = one_hot_0_indices_0, off_value = one_hot_0_off_value_0, on_value = one_hot_0_on_value_0, one_hot_vector_size = one_hot_0_one_hot_vector_size_0)[name = tensor<string, []>("one_hot_0")];
+            tensor<int32, [2, 4]> o_one_hot_1 = identity(x = one_hot_0)[name = tensor<string, []>("o_one_hot_1")];
+            tensor<int32, []> reduce_argmax_0_axis_0 = const()[name = tensor<string, []>("reduce_argmax_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<bool, []> reduce_argmax_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_argmax_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<string, []> reduce_argmax_0_output_dtype_0 = const()[name = tensor<string, []>("reduce_argmax_0_output_dtype_0"), val = tensor<string, []>("int32")];
+            tensor<int32, [1, 1, 4]> reduce_argmax_0 = reduce_argmax(axis = reduce_argmax_0_axis_0, keep_dims = reduce_argmax_0_keep_dims_0, output_dtype = reduce_argmax_0_output_dtype_0, x = x)[name = tensor<string, []>("reduce_argmax_0")];
+            tensor<int32, [1, 1, 4]> o_argmax_2 = identity(x = reduce_argmax_0)[name = tensor<string, []>("o_argmax_2")];
+            tensor<int32, [1]> expand_dims_0_axes_0 = const()[name = tensor<string, []>("expand_dims_0_axes_0"), val = tensor<int32, [1]>([0])];
+            tensor<fp32, [1, 1, 1, 4, 4]> expand_dims_0 = expand_dims(axes = expand_dims_0_axes_0, x = x)[name = tensor<string, []>("expand_dims_0")];
+            tensor<fp32, [1, 1, 1, 4, 4]> o_expand_dims_3 = identity(x = expand_dims_0)[name = tensor<string, []>("o_expand_dims_3")];
+            tensor<fp32, []> floor_div_0_y_0 = const()[name = tensor<string, []>("floor_div_0_y_0"), val = tensor<fp32, []>(0x1p+1)];
+            tensor<fp32, [1, 1, 4, 4]> floor_div_0 = floor_div(x = x, y = floor_div_0_y_0)[name = tensor<string, []>("floor_div_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_floor_div_4 = identity(x = floor_div_0)[name = tensor<string, []>("o_floor_div_4")];
+            tensor<fp32, [1, 1, 4, 4]> tanh_0 = tanh(x = x)[name = tensor<string, []>("tanh_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_tanh_5 = identity(x = tanh_0)[name = tensor<string, []>("o_tanh_5")];
+            tensor<fp32, [1, 1, 4, 4]> abs_0 = abs(x = x)[name = tensor<string, []>("abs_0")];
+            tensor<fp32, [1, 1, 4, 4]> sqrt_0 = sqrt(x = abs_0)[name = tensor<string, []>("sqrt_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_sqrt_6 = identity(x = sqrt_0)[name = tensor<string, []>("o_sqrt_6")];
+            tensor<int32, [4]> tile_0_reps_0 = const()[name = tensor<string, []>("tile_0_reps_0"), val = tensor<int32, [4]>([1, 4, 1, 1])];
+            tensor<fp32, [1, 4, 4, 4]> tile_0 = tile(reps = tile_0_reps_0, x = x)[name = tensor<string, []>("tile_0")];
+            tensor<int32, []> depth_to_space_0_block_size_0 = const()[name = tensor<string, []>("depth_to_space_0_block_size_0"), val = tensor<int32, []>(2)];
+            tensor<fp32, [1, 1, 8, 8]> depth_to_space_0 = depth_to_space(block_size = depth_to_space_0_block_size_0, x = tile_0)[name = tensor<string, []>("depth_to_space_0")];
+            tensor<fp32, [1, 1, 8, 8]> o_depth_to_space_7 = identity(x = depth_to_space_0)[name = tensor<string, []>("o_depth_to_space_7")];
+        } -> (o_batch_norm_0, o_one_hot_1, o_argmax_2, o_expand_dims_3, o_floor_div_4, o_tanh_5, o_sqrt_6, o_depth_to_space_7);
+}
