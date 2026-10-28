@@ -1,0 +1,40 @@
+Core ML off a Mac.
+
+Give the Core ML library rule's source generation (coremlc generate) the
+toolchain's files (apple_mac_toolchain_info.sdk_tool_files) as inputs, as
+rules_apple_codesign_inputs_sdk_tools.patch does for compiling models, so
+that xcrun and coremlc are in the sandbox.
+
+diff --git a/apple/internal/resource_actions/mlmodel.bzl b/apple/internal/resource_actions/mlmodel.bzl
+--- a/apple/internal/resource_actions/mlmodel.bzl
++++ b/apple/internal/resource_actions/mlmodel.bzl
+@@ -77,7 +77,8 @@
+         objc_output_hdr,
+         language,
+         platform_prerequisites,
+-        xctoolrunner):
++        xctoolrunner,
++        sdk_tool_files = []):
+     """Creates an action that generates sources for an mlmodel file.
+ 
+     Args:
+@@ -118,7 +119,7 @@
+         arguments = [arguments],
+         exec_group = mac_exec_group,
+         executable = xctoolrunner,
+-        inputs = [input_file],
++        inputs = [input_file] + sdk_tool_files,
+         mnemonic = "MlmodelGenerate",
+         outputs = outputs,
+         xcode_config = platform_prerequisites.xcode_version_config,
+diff --git a/apple/internal/resource_rules/apple_core_ml_library.bzl b/apple/internal/resource_rules/apple_core_ml_library.bzl
+--- a/apple/internal/resource_rules/apple_core_ml_library.bzl
++++ b/apple/internal/resource_rules/apple_core_ml_library.bzl
+@@ -111,6 +111,7 @@
+         objc_output_hdr = objc_output_hdr,
+         platform_prerequisites = platform_prerequisites,
+         xctoolrunner = apple_mac_toolchain_info.xctoolrunner,
++        sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+     )
+ 
+     if is_swift:

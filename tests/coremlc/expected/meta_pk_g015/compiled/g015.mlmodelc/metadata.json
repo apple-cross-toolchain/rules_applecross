@@ -1,0 +1,61 @@
+[
+  {
+    "shortDescription" : "desc 15",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 2)",
+        "shortDescription" : "feature f",
+        "shape" : "[2]",
+        "name" : "f",
+        "type" : "MultiArray"
+      }
+    ],
+    "version" : "1.15",
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "license" : "MIT",
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.mul" : 1,
+      "Ios18.cast" : 1
+    },
+    "computePrecision" : "Mixed (Float32, Int32)",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 2)",
+        "shortDescription" : "feature i",
+        "shape" : "[2]",
+        "name" : "i",
+        "type" : "MultiArray"
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "g015",
+    "method" : "predict"
+  }
+]

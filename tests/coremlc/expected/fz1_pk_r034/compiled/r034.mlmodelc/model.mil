@@ -1,0 +1,42 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<string, []> x_to_fp16_dtype_0 = const()[name = tensor<string, []>("x_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, []> less_0_y_0_to_fp16 = const()[name = tensor<string, []>("less_0_y_0_to_fp16"), val = tensor<fp16, []>(0x0p+0)];
+            tensor<fp16, [1, 1, 4, 4]> x_to_fp16 = cast(dtype = x_to_fp16_dtype_0, x = x)[name = tensor<string, []>("cast_10")];
+            tensor<bool, [1, 1, 4, 4]> less_0_cast_fp16 = less(x = x_to_fp16, y = less_0_y_0_to_fp16)[name = tensor<string, []>("less_0_cast_fp16")];
+            tensor<string, []> o_less_0_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_less_0_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, []> _inversed_real_div_0_y_0_to_fp16 = const()[name = tensor<string, []>("_inversed_real_div_0_y_0_to_fp16"), val = tensor<fp16, []>(0x1p-1)];
+            tensor<fp16, [1, 1, 4, 4]> _inversed_real_div_0_cast_fp16 = mul(x = x_to_fp16, y = _inversed_real_div_0_y_0_to_fp16)[name = tensor<string, []>("_inversed_real_div_0_cast_fp16")];
+            tensor<string, []> o_real_div_1_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_real_div_1_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [2]> crop_0_crop_height_0 = const()[name = tensor<string, []>("crop_0_crop_height_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<int32, [2]> crop_0_crop_width_0 = const()[name = tensor<string, []>("crop_0_crop_width_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<fp16, [1, 1, 2, 2]> crop_0_cast_fp16 = crop(crop_height = crop_0_crop_height_0, crop_width = crop_0_crop_width_0, x = x_to_fp16)[name = tensor<string, []>("crop_0_cast_fp16")];
+            tensor<string, []> o_crop_2_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_crop_2_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, [1, 1, 4, 4]> sigmoid_0_cast_fp16 = sigmoid(x = x_to_fp16)[name = tensor<string, []>("sigmoid_0_cast_fp16")];
+            tensor<string, []> o_sigmoid_3_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_sigmoid_3_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [2]> gather_0_indices_0 = const()[name = tensor<string, []>("gather_0_indices_0"), val = tensor<int32, [2]>([0, 1])];
+            tensor<int32, []> gather_0_axis_0 = const()[name = tensor<string, []>("gather_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<fp16, [1, 1, 4, 2]> gather_0_cast_fp16 = gather(axis = gather_0_axis_0, indices = gather_0_indices_0, x = x_to_fp16)[name = tensor<string, []>("gather_0_cast_fp16")];
+            tensor<string, []> o_gather_4_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_gather_4_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [1]> reduce_prod_0_axes_0 = const()[name = tensor<string, []>("reduce_prod_0_axes_0"), val = tensor<int32, [1]>([3])];
+            tensor<bool, []> reduce_prod_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_prod_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<fp16, [1, 1, 4]> reduce_prod_0_cast_fp16 = reduce_prod(axes = reduce_prod_0_axes_0, keep_dims = reduce_prod_0_keep_dims_0, x = x_to_fp16)[name = tensor<string, []>("reduce_prod_0_cast_fp16")];
+            tensor<string, []> o_reduce_prod_5_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_reduce_prod_5_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, []> mod_0_y_0_to_fp16 = const()[name = tensor<string, []>("mod_0_y_0_to_fp16"), val = tensor<fp16, []>(0x1p+1)];
+            tensor<fp16, [1, 1, 4, 4]> mod_0_cast_fp16 = mod(x = x_to_fp16, y = mod_0_y_0_to_fp16)[name = tensor<string, []>("mod_0_cast_fp16")];
+            tensor<string, []> o_mod_6_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_mod_6_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, []> stack_0_axis_0 = const()[name = tensor<string, []>("stack_0_axis_0"), val = tensor<int32, []>(0)];
+            tensor<fp16, [2, 1, 1, 4, 4]> stack_0_cast_fp16 = stack(axis = stack_0_axis_0, values = (x_to_fp16, x_to_fp16))[name = tensor<string, []>("stack_0_cast_fp16")];
+            tensor<string, []> o_stack_7_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_stack_7_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [2, 1, 1, 4, 4]> o_stack_7 = cast(dtype = o_stack_7_cast_fp16_to_fp32_dtype_0, x = stack_0_cast_fp16)[name = tensor<string, []>("cast_1")];
+            tensor<fp32, [1, 1, 4, 4]> o_mod_6 = cast(dtype = o_mod_6_cast_fp16_to_fp32_dtype_0, x = mod_0_cast_fp16)[name = tensor<string, []>("cast_2")];
+            tensor<fp32, [1, 1, 4]> o_reduce_prod_5 = cast(dtype = o_reduce_prod_5_cast_fp16_to_fp32_dtype_0, x = reduce_prod_0_cast_fp16)[name = tensor<string, []>("cast_3")];
+            tensor<fp32, [1, 1, 4, 2]> o_gather_4 = cast(dtype = o_gather_4_cast_fp16_to_fp32_dtype_0, x = gather_0_cast_fp16)[name = tensor<string, []>("cast_4")];
+            tensor<fp32, [1, 1, 4, 4]> o_sigmoid_3 = cast(dtype = o_sigmoid_3_cast_fp16_to_fp32_dtype_0, x = sigmoid_0_cast_fp16)[name = tensor<string, []>("cast_5")];
+            tensor<fp32, [1, 1, 2, 2]> o_crop_2 = cast(dtype = o_crop_2_cast_fp16_to_fp32_dtype_0, x = crop_0_cast_fp16)[name = tensor<string, []>("cast_6")];
+            tensor<fp32, [1, 1, 4, 4]> o_real_div_1 = cast(dtype = o_real_div_1_cast_fp16_to_fp32_dtype_0, x = _inversed_real_div_0_cast_fp16)[name = tensor<string, []>("cast_7")];
+            tensor<fp32, [1, 1, 4, 4]> o_less_0 = cast(dtype = o_less_0_cast_fp16_to_fp32_dtype_0, x = less_0_cast_fp16)[name = tensor<string, []>("less_0_cast_fp16_to_fp32")];
+        } -> (o_less_0, o_real_div_1, o_crop_2, o_sigmoid_3, o_gather_4, o_reduce_prod_5, o_mod_6, o_stack_7);
+}

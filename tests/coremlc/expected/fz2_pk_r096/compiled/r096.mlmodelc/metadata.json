@@ -1,0 +1,124 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 4)",
+        "shortDescription" : "",
+        "shape" : "[4]",
+        "name" : "o_range_1d_0",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 4 × 2 × 2)",
+        "shortDescription" : "",
+        "shape" : "[1, 4, 2, 2]",
+        "name" : "o_space_to_depth_1",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "o_not_equal_2",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 8 × 8)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 8, 8]",
+        "name" : "o_upsample_nearest_neighbor_3",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "o_logical_not_4",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "o_scatter_5",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "o_prelu_6",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 8,
+    "mlProgramOperationTypeHistogram" : {
+      "SpaceToDepth" : 1,
+      "Ios17.logicalNot" : 1,
+      "Ios17.leakyRelu" : 1,
+      "Ios17.cast" : 7,
+      "Ios17.greater" : 1,
+      "Ios17.scatter" : 1,
+      "Ios17.notEqual" : 1,
+      "UpsampleNearestNeighbor" : 1
+    },
+    "computePrecision" : "Mixed (Float16, Float32, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "10.0",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 1 × 4 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 1, 4, 4]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "generatedClassName" : "r096",
+    "method" : "predict"
+  }
+]

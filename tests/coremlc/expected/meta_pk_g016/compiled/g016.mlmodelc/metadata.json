@@ -1,0 +1,61 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3 × 8 × 8)",
+        "shortDescription" : "feature feat",
+        "shape" : "[1, 3, 8, 8]",
+        "name" : "feat",
+        "type" : "MultiArray"
+      }
+    ],
+    "version" : "1.16",
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 6,
+    "mlProgramOperationTypeHistogram" : {
+      "Relu" : 1,
+      "Cast" : 2
+    },
+    "computePrecision" : "Mixed (Float16, Float32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "12.0",
+      "tvOS" : "15.0",
+      "visionOS" : "1.0",
+      "watchOS" : "8.0",
+      "iOS" : "15.0",
+      "macCatalyst" : "15.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "height" : "8",
+        "colorspace" : "RGB",
+        "isOptional" : "0",
+        "width" : "8",
+        "isColor" : "1",
+        "formattedType" : "Image (Color 8 × 8)",
+        "hasSizeFlexibility" : "0",
+        "type" : "Image",
+        "shortDescription" : "feature img",
+        "name" : "img"
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "g016",
+    "method" : "predict"
+  }
+]

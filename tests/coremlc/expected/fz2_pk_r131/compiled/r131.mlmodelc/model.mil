@@ -1,0 +1,31 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, []> topk_0_k_0 = const()[name = tensor<string, []>("topk_0_k_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> topk_0_axis_0 = const()[name = tensor<string, []>("topk_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<bool, []> topk_0_ascending_0 = const()[name = tensor<string, []>("topk_0_ascending_0"), val = tensor<bool, []>(false)];
+            tensor<bool, []> topk_0_sort_0 = const()[name = tensor<string, []>("topk_0_sort_0"), val = tensor<bool, []>(true)];
+            tensor<bool, []> topk_0_return_indices_0 = const()[name = tensor<string, []>("topk_0_return_indices_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1, 4, 2]> topk_0_0, tensor<int32, [1, 1, 4, 2]> topk_0_1 = topk(ascending = topk_0_ascending_0, axis = topk_0_axis_0, k = topk_0_k_0, return_indices = topk_0_return_indices_0, sort = topk_0_sort_0, x = x)[name = tensor<string, []>("topk_0")];
+            tensor<fp32, [1, 1, 4, 2]> o_topk_0 = identity(x = topk_0_0)[name = tensor<string, []>("o_topk_0")];
+            tensor<int32, [4]> slice_by_index_0_begin_0 = const()[name = tensor<string, []>("slice_by_index_0_begin_0"), val = tensor<int32, [4]>([0, 0, 0, 0])];
+            tensor<int32, [4]> slice_by_index_0_end_0 = const()[name = tensor<string, []>("slice_by_index_0_end_0"), val = tensor<int32, [4]>([1, 1, 2, 2])];
+            tensor<fp32, [1, 1, 2, 2]> slice_by_index_0 = slice_by_index(begin = slice_by_index_0_begin_0, end = slice_by_index_0_end_0, x = x)[name = tensor<string, []>("slice_by_index_0")];
+            tensor<fp32, [1, 1, 2, 2]> o_slice_by_index_1 = identity(x = slice_by_index_0)[name = tensor<string, []>("o_slice_by_index_1")];
+            tensor<string, []> gelu_0_mode_0 = const()[name = tensor<string, []>("gelu_0_mode_0"), val = tensor<string, []>("EXACT")];
+            tensor<fp32, [1, 1, 4, 4]> gelu_0 = gelu(mode = gelu_0_mode_0, x = x)[name = tensor<string, []>("gelu_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_gelu_2 = identity(x = gelu_0)[name = tensor<string, []>("o_gelu_2")];
+            tensor<int32, [2]> gather_0_indices_0 = const()[name = tensor<string, []>("gather_0_indices_0"), val = tensor<int32, [2]>([0, 1])];
+            tensor<int32, []> gather_0_axis_0 = const()[name = tensor<string, []>("gather_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<int32, []> gather_0_batch_dims_0 = const()[name = tensor<string, []>("gather_0_batch_dims_0"), val = tensor<int32, []>(0)];
+            tensor<fp32, [1, 1, 4, 2]> gather_0 = gather(axis = gather_0_axis_0, batch_dims = gather_0_batch_dims_0, indices = gather_0_indices_0, x = x)[name = tensor<string, []>("gather_0")];
+            tensor<fp32, [1, 1, 4, 2]> o_gather_3 = identity(x = gather_0)[name = tensor<string, []>("o_gather_3")];
+            tensor<fp32, [1, 1, 4, 4]> abs_0 = abs(x = x)[name = tensor<string, []>("abs_0")];
+            tensor<fp32, [1, 1, 4, 4]> sqrt_0 = sqrt(x = abs_0)[name = tensor<string, []>("sqrt_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_sqrt_4 = identity(x = sqrt_0)[name = tensor<string, []>("o_sqrt_4")];
+            tensor<fp32, []> maximum_0_y_0 = const()[name = tensor<string, []>("maximum_0_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<fp32, [1, 1, 4, 4]> maximum_0 = maximum(x = x, y = maximum_0_y_0)[name = tensor<string, []>("maximum_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_maximum_5 = identity(x = maximum_0)[name = tensor<string, []>("o_maximum_5")];
+        } -> (o_topk_0, o_slice_by_index_1, o_gelu_2, o_gather_3, o_sqrt_4, o_maximum_5);
+}

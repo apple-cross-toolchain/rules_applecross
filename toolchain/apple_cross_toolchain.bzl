@@ -389,6 +389,9 @@ _RULE_INPUT_FILES = [
     "stubs/appintentsmetadataprocessor.py",
     "stubs/appintentsmetadataprocessor.sh",
     "stubs/appintentsnltrainingprocessor.sh",
+    "stubs/coremlc.py",
+    "stubs/coremlc.sh",
+    "stubs/coremlc_ops.json",
 ]
 
 _LLVM_PREBUILT = {
@@ -697,6 +700,15 @@ def _apple_cross_toolchain_impl(rctx):
     if result.return_code != 0:
         _install_executable(rctx, "stubs/appintentsmetadataprocessor.sh", _appintents_path)
         _install_executable(rctx, "stubs/appintentsmetadataprocessor.py", _appintents_path + ".py")
+    # Core ML models: compiled and their classes generated from the model's
+    # specification.
+    _coremlc_path = xcode_toolchain_bindir + "coremlc"
+    result = rctx.execute(["test", "-e", _coremlc_path])
+    if result.return_code != 0:
+        _install_executable(rctx, "stubs/coremlc.sh", _coremlc_path)
+        _install_executable(rctx, "stubs/coremlc.py", _coremlc_path + ".py")
+        _install_executable(rctx, "stubs/coremlc_ops.json", xcode_toolchain_bindir + "coremlc_ops.json")
+
     _nl_training_path = xcode_toolchain_bindir + "appintentsnltrainingprocessor"
     result = rctx.execute(["test", "-e", _nl_training_path])
     if result.return_code != 0:

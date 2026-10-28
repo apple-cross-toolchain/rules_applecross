@@ -1,0 +1,823 @@
+{
+ "abs": {
+  "base": "Abs",
+  "camel": "abs",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "add": {
+  "base": "Add",
+  "camel": "add",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "atan": {
+  "base": "Atan",
+  "camel": "atan",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "avg_pool": {
+  "base": "AvgPool",
+  "camel": "avgPool",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "band_part": {
+  "base": "BandPart",
+  "camel": null,
+  "versions": []
+ },
+ "batch_norm": {
+  "base": "BatchNorm",
+  "camel": "batchNorm",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "cast": {
+  "base": "Cast",
+  "camel": "cast",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "ceil": {
+  "base": "Ceil",
+  "camel": "ceil",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "clip": {
+  "base": "Clip",
+  "camel": "clip",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "concat": {
+  "base": "Concat",
+  "camel": "concat",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "cond": {
+  "base": "Cond",
+  "camel": null,
+  "versions": []
+ },
+ "conv": {
+  "base": "Conv",
+  "camel": "conv",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "conv_transpose": {
+  "base": "ConvTranspose",
+  "camel": "convTranspose",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "cos": {
+  "base": "Cos",
+  "camel": "cos",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "crop": {
+  "base": "Crop",
+  "camel": null,
+  "versions": []
+ },
+ "cumsum": {
+  "base": "Cumsum",
+  "camel": "cumsum",
+  "versions": [
+   16
+  ]
+ },
+ "depth_to_space": {
+  "base": "DepthToSpace",
+  "camel": null,
+  "versions": []
+ },
+ "equal": {
+  "base": "Equal",
+  "camel": "equal",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "erf": {
+  "base": "Erf",
+  "camel": "erf",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "exp": {
+  "base": "Exp",
+  "camel": "exp",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "exp2": {
+  "base": "Exp2",
+  "camel": "exp2",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "expand_dims": {
+  "base": "ExpandDims",
+  "camel": "expandDims",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "fill": {
+  "base": "Fill",
+  "camel": null,
+  "versions": []
+ },
+ "flatten2d": {
+  "base": "Flatten2d",
+  "camel": null,
+  "versions": []
+ },
+ "floor": {
+  "base": "Floor",
+  "camel": "floor",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "floor_div": {
+  "base": "FloorDiv",
+  "camel": "floorDiv",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "gather": {
+  "base": "Gather",
+  "camel": "gather",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "gather_nd": {
+  "base": "GatherNd",
+  "camel": "gatherNd",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "gelu": {
+  "base": "Gelu",
+  "camel": "gelu",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "greater": {
+  "base": "Greater",
+  "camel": "greater",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "greater_equal": {
+  "base": "GreaterEqual",
+  "camel": "greaterEqual",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "identity": {
+  "base": "Identity",
+  "camel": null,
+  "versions": []
+ },
+ "instance_norm": {
+  "base": "InstanceNorm",
+  "camel": "instanceNorm",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "inverse": {
+  "base": "Inverse",
+  "camel": "inverse",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "l2_norm": {
+  "base": "L2Norm",
+  "camel": "l2Norm",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "layer_norm": {
+  "base": "LayerNorm",
+  "camel": "layerNorm",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "leaky_relu": {
+  "base": "LeakyRelu",
+  "camel": "leakyRelu",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "less": {
+  "base": "Less",
+  "camel": "less",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "less_equal": {
+  "base": "LessEqual",
+  "camel": "lessEqual",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "linear": {
+  "base": "Linear",
+  "camel": "linear",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "local_response_norm": {
+  "base": "LocalResponseNorm",
+  "camel": "localResponseNorm",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "log": {
+  "base": "Log",
+  "camel": "log",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "logical_and": {
+  "base": "LogicalAnd",
+  "camel": "logicalAnd",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "logical_not": {
+  "base": "LogicalNot",
+  "camel": "logicalNot",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "logical_or": {
+  "base": "LogicalOr",
+  "camel": "logicalOr",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "matmul": {
+  "base": "Matmul",
+  "camel": "matmul",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "max_pool": {
+  "base": "MaxPool",
+  "camel": "maxPool",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "maximum": {
+  "base": "Maximum",
+  "camel": "maximum",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "minimum": {
+  "base": "Minimum",
+  "camel": "minimum",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "mod": {
+  "base": "Mod",
+  "camel": "mod",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "mul": {
+  "base": "Mul",
+  "camel": "mul",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "not_equal": {
+  "base": "NotEqual",
+  "camel": "notEqual",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "one_hot": {
+  "base": "OneHot",
+  "camel": null,
+  "versions": []
+ },
+ "pad": {
+  "base": "Pad",
+  "camel": null,
+  "versions": []
+ },
+ "pixel_shuffle": {
+  "base": "PixelShuffle",
+  "camel": null,
+  "versions": []
+ },
+ "pow": {
+  "base": "Pow",
+  "camel": "pow",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "prelu": {
+  "base": "Prelu",
+  "camel": "prelu",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "range_1d": {
+  "base": "Range1d",
+  "camel": null,
+  "versions": []
+ },
+ "real_div": {
+  "base": "RealDiv",
+  "camel": "realDiv",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "reduce_argmax": {
+  "base": "ReduceArgmax",
+  "camel": "reduceArgmax",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "reduce_argmin": {
+  "base": "ReduceArgmin",
+  "camel": "reduceArgmin",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "reduce_l2_norm": {
+  "base": "ReduceL2Norm",
+  "camel": "reduceL2Norm",
+  "versions": [
+   16
+  ]
+ },
+ "reduce_log_sum_exp": {
+  "base": "ReduceLogSumExp",
+  "camel": "reduceLogSumExp",
+  "versions": [
+   16
+  ]
+ },
+ "reduce_max": {
+  "base": "ReduceMax",
+  "camel": "reduceMax",
+  "versions": [
+   16
+  ]
+ },
+ "reduce_mean": {
+  "base": "ReduceMean",
+  "camel": "reduceMean",
+  "versions": [
+   16
+  ]
+ },
+ "reduce_min": {
+  "base": "ReduceMin",
+  "camel": "reduceMin",
+  "versions": [
+   16
+  ]
+ },
+ "reduce_prod": {
+  "base": "ReduceProd",
+  "camel": "reduceProd",
+  "versions": [
+   16
+  ]
+ },
+ "reduce_sum": {
+  "base": "ReduceSum",
+  "camel": "reduceSum",
+  "versions": [
+   16
+  ]
+ },
+ "relu": {
+  "base": "Relu",
+  "camel": "relu",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "relu6": {
+  "base": "Relu6",
+  "camel": "relu6",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "reshape": {
+  "base": "Reshape",
+  "camel": "reshape",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "resize_bilinear": {
+  "base": "ResizeBilinear",
+  "camel": "resizeBilinear",
+  "versions": [
+   16
+  ]
+ },
+ "reverse": {
+  "base": "Reverse",
+  "camel": "reverse",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "round": {
+  "base": "Round",
+  "camel": "round",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "rsqrt": {
+  "base": "Rsqrt",
+  "camel": "rsqrt",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "scatter": {
+  "base": "Scatter",
+  "camel": "scatter",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "select": {
+  "base": "Select",
+  "camel": null,
+  "versions": []
+ },
+ "shape": {
+  "base": "Shape",
+  "camel": null,
+  "versions": []
+ },
+ "sigmoid": {
+  "base": "Sigmoid",
+  "camel": "sigmoid",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "sign": {
+  "base": "Sign",
+  "camel": "sign",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "silu": {
+  "base": "Silu",
+  "camel": "silu",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "sin": {
+  "base": "Sin",
+  "camel": "sin",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "slice_by_index": {
+  "base": "SliceByIndex",
+  "camel": "sliceByIndex",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "slice_by_size": {
+  "base": "SliceBySize",
+  "camel": "sliceBySize",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "sliding_windows": {
+  "base": "SlidingWindows",
+  "camel": "slidingWindows",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "softmax": {
+  "base": "Softmax",
+  "camel": "softmax",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "softplus": {
+  "base": "Softplus",
+  "camel": "softplus",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "softsign": {
+  "base": "Softsign",
+  "camel": "softsign",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "space_to_depth": {
+  "base": "SpaceToDepth",
+  "camel": null,
+  "versions": []
+ },
+ "split": {
+  "base": "Split",
+  "camel": null,
+  "versions": []
+ },
+ "sqrt": {
+  "base": "Sqrt",
+  "camel": "sqrt",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "square": {
+  "base": "Square",
+  "camel": "square",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "squeeze": {
+  "base": "Squeeze",
+  "camel": "squeeze",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "stack": {
+  "base": "Stack",
+  "camel": null,
+  "versions": []
+ },
+ "sub": {
+  "base": "Sub",
+  "camel": "sub",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "tan": {
+  "base": "Tan",
+  "camel": "tan",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "tanh": {
+  "base": "Tanh",
+  "camel": "tanh",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "threshold": {
+  "base": "Threshold",
+  "camel": "threshold",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "tile": {
+  "base": "Tile",
+  "camel": null,
+  "versions": []
+ },
+ "topk": {
+  "base": "Topk",
+  "camel": "topk",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "transpose": {
+  "base": "Transpose",
+  "camel": "transpose",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "upsample_bilinear": {
+  "base": "UpsampleBilinear",
+  "camel": "upsampleBilinear",
+  "versions": [
+   16
+  ]
+ },
+ "upsample_nearest_neighbor": {
+  "base": "UpsampleNearestNeighbor",
+  "camel": null,
+  "versions": []
+ },
+ "while_loop": {
+  "base": "WhileLoop",
+  "camel": null,
+  "versions": []
+ }
+}

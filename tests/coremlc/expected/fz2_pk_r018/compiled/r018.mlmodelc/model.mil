@@ -1,0 +1,39 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, []> less_equal_0_y_0 = const()[name = tensor<string, []>("less_equal_0_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<bool, [1, 1, 4, 4]> less_equal_0 = less_equal(x = x, y = less_equal_0_y_0)[name = tensor<string, []>("less_equal_0")];
+            tensor<string, []> cast_0_dtype_0 = const()[name = tensor<string, []>("cast_0_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [1, 1, 4, 4]> cast_0 = cast(dtype = cast_0_dtype_0, x = less_equal_0)[name = tensor<string, []>("cast_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_less_equal_0 = identity(x = cast_0)[name = tensor<string, []>("o_less_equal_0")];
+            tensor<bool, []> matmul_0_transpose_x_0 = const()[name = tensor<string, []>("matmul_0_transpose_x_0"), val = tensor<bool, []>(false)];
+            tensor<bool, []> matmul_0_transpose_y_0 = const()[name = tensor<string, []>("matmul_0_transpose_y_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 4, 4]> matmul_0 = matmul(transpose_x = matmul_0_transpose_x_0, transpose_y = matmul_0_transpose_y_0, x = x, y = x)[name = tensor<string, []>("matmul_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_matmul_1 = identity(x = matmul_0)[name = tensor<string, []>("o_matmul_1")];
+            tensor<fp32, [2, 1, 1, 1]> conv_0_weight_0 = const()[name = tensor<string, []>("conv_0_weight_0"), val = tensor<fp32, [2, 1, 1, 1]>([[[[0x1p+0]]], [[[0x1p+0]]]])];
+            tensor<int32, [2]> conv_0_strides_0 = const()[name = tensor<string, []>("conv_0_strides_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<string, []> conv_0_pad_type_0 = const()[name = tensor<string, []>("conv_0_pad_type_0"), val = tensor<string, []>("valid")];
+            tensor<int32, [4]> conv_0_pad_0 = const()[name = tensor<string, []>("conv_0_pad_0"), val = tensor<int32, [4]>([0, 0, 0, 0])];
+            tensor<int32, [2]> conv_0_dilations_0 = const()[name = tensor<string, []>("conv_0_dilations_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<int32, []> conv_0_groups_0 = const()[name = tensor<string, []>("conv_0_groups_0"), val = tensor<int32, []>(1)];
+            tensor<fp32, [1, 2, 4, 4]> conv_0 = conv(dilations = conv_0_dilations_0, groups = conv_0_groups_0, pad = conv_0_pad_0, pad_type = conv_0_pad_type_0, strides = conv_0_strides_0, weight = conv_0_weight_0, x = x)[name = tensor<string, []>("conv_0")];
+            tensor<fp32, [1, 2, 4, 4]> o_conv_2 = identity(x = conv_0)[name = tensor<string, []>("o_conv_2")];
+            tensor<int32, []> topk_0_k_0 = const()[name = tensor<string, []>("topk_0_k_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> topk_0_axis_0 = const()[name = tensor<string, []>("topk_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<bool, []> topk_0_ascending_0 = const()[name = tensor<string, []>("topk_0_ascending_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 4, 2]> topk_0_0, tensor<int32, [1, 1, 4, 2]> topk_0_1 = topk(ascending = topk_0_ascending_0, axis = topk_0_axis_0, k = topk_0_k_0, x = x)[name = tensor<string, []>("topk_0")];
+            tensor<fp32, [1, 1, 4, 2]> o_topk_3 = identity(x = topk_0_0)[name = tensor<string, []>("o_topk_3")];
+            tensor<fp32, [1, 1, 4, 4]> cos_0 = cos(x = x)[name = tensor<string, []>("cos_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_cos_4 = identity(x = cos_0)[name = tensor<string, []>("o_cos_4")];
+            tensor<fp32, []> minimum_0_y_0 = const()[name = tensor<string, []>("minimum_0_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<fp32, [1, 1, 4, 4]> minimum_0 = minimum(x = x, y = minimum_0_y_0)[name = tensor<string, []>("minimum_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_minimum_5 = identity(x = minimum_0)[name = tensor<string, []>("o_minimum_5")];
+            tensor<fp32, [1, 1, 4, 4]> sign_0 = sign(x = x)[name = tensor<string, []>("sign_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_sign_6 = identity(x = sign_0)[name = tensor<string, []>("o_sign_6")];
+            tensor<int32, []> reduce_argmax_0_axis_0 = const()[name = tensor<string, []>("reduce_argmax_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<bool, []> reduce_argmax_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_argmax_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<int32, [1, 1, 4]> reduce_argmax_0 = reduce_argmax(axis = reduce_argmax_0_axis_0, keep_dims = reduce_argmax_0_keep_dims_0, x = x)[name = tensor<string, []>("reduce_argmax_0")];
+            tensor<int32, [1, 1, 4]> o_argmax_7 = identity(x = reduce_argmax_0)[name = tensor<string, []>("o_argmax_7")];
+        } -> (o_less_equal_0, o_matmul_1, o_conv_2, o_topk_3, o_cos_4, o_minimum_5, o_sign_6, o_argmax_7);
+}

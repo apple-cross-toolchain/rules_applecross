@@ -1,0 +1,36 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, [1]> expand_dims_0_axes_0 = const()[name = tensor<string, []>("expand_dims_0_axes_0"), val = tensor<int32, [1]>([0])];
+            tensor<fp32, [1, 1, 1, 4, 4]> expand_dims_0 = expand_dims(axes = expand_dims_0_axes_0, x = x)[name = tensor<string, []>("expand_dims_0")];
+            tensor<fp32, [1, 1, 1, 4, 4]> o_expand_dims_0 = identity(x = expand_dims_0)[name = tensor<string, []>("o_expand_dims_0")];
+            tensor<int32, [4]> fill_0_shape_0 = const()[name = tensor<string, []>("fill_0_shape_0"), val = tensor<int32, [4]>([1, 1, 4, 4])];
+            tensor<fp32, []> fill_0_value_0 = const()[name = tensor<string, []>("fill_0_value_0"), val = tensor<fp32, []>(0x1p+0)];
+            tensor<fp32, [1, 1, 4, 4]> fill_0 = fill(shape = fill_0_shape_0, value = fill_0_value_0)[name = tensor<string, []>("fill_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_fill_1 = identity(x = fill_0)[name = tensor<string, []>("o_fill_1")];
+            tensor<int32, [2]> max_pool_0_kernel_sizes_0 = const()[name = tensor<string, []>("max_pool_0_kernel_sizes_0"), val = tensor<int32, [2]>([2, 2])];
+            tensor<int32, [2]> max_pool_0_strides_0 = const()[name = tensor<string, []>("max_pool_0_strides_0"), val = tensor<int32, [2]>([2, 2])];
+            tensor<string, []> max_pool_0_pad_type_0 = const()[name = tensor<string, []>("max_pool_0_pad_type_0"), val = tensor<string, []>("valid")];
+            tensor<int32, [4]> max_pool_0_pad_0 = const()[name = tensor<string, []>("max_pool_0_pad_0"), val = tensor<int32, [4]>([0, 0, 0, 0])];
+            tensor<bool, []> max_pool_0_ceil_mode_0 = const()[name = tensor<string, []>("max_pool_0_ceil_mode_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 2, 2]> max_pool_0 = max_pool(ceil_mode = max_pool_0_ceil_mode_0, kernel_sizes = max_pool_0_kernel_sizes_0, pad = max_pool_0_pad_0, pad_type = max_pool_0_pad_type_0, strides = max_pool_0_strides_0, x = x)[name = tensor<string, []>("max_pool_0")];
+            tensor<fp32, [1, 1, 2, 2]> o_max_pool_2 = identity(x = max_pool_0)[name = tensor<string, []>("o_max_pool_2")];
+            tensor<fp32, [1, 1, 4, 4]> relu6_0 = relu6(x = x)[name = tensor<string, []>("relu6_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_relu6_3 = identity(x = relu6_0)[name = tensor<string, []>("o_relu6_3")];
+            tensor<fp32, []> instance_norm_0_epsilon_0 = const()[name = tensor<string, []>("instance_norm_0_epsilon_0"), val = tensor<fp32, []>(0x1.4f8b58p-17)];
+            tensor<fp32, [1, 1, 4, 4]> instance_norm_0 = instance_norm(epsilon = instance_norm_0_epsilon_0, x = x)[name = tensor<string, []>("instance_norm_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_instance_norm_4 = identity(x = instance_norm_0)[name = tensor<string, []>("o_instance_norm_4")];
+            tensor<fp32, []> mul_0_y_0 = const()[name = tensor<string, []>("mul_0_y_0"), val = tensor<fp32, []>(0x1p+1)];
+            tensor<fp32, [1, 1, 4, 4]> mul_0 = mul(x = x, y = mul_0_y_0)[name = tensor<string, []>("mul_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_mul_5 = identity(x = mul_0)[name = tensor<string, []>("o_mul_5")];
+            tensor<int32, []> cumsum_0_axis_0 = const()[name = tensor<string, []>("cumsum_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<bool, []> cumsum_0_exclusive_0 = const()[name = tensor<string, []>("cumsum_0_exclusive_0"), val = tensor<bool, []>(false)];
+            tensor<bool, []> cumsum_0_reverse_0 = const()[name = tensor<string, []>("cumsum_0_reverse_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 4, 4]> cumsum_0 = cumsum(axis = cumsum_0_axis_0, exclusive = cumsum_0_exclusive_0, reverse = cumsum_0_reverse_0, x = x)[name = tensor<string, []>("cumsum_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_cumsum_6 = identity(x = cumsum_0)[name = tensor<string, []>("o_cumsum_6")];
+            tensor<fp32, []> l2_norm_0_epsilon_0 = const()[name = tensor<string, []>("l2_norm_0_epsilon_0"), val = tensor<fp32, []>(0x1.0c6f7ap-20)];
+            tensor<fp32, [1, 1, 4, 4]> l2_norm_0 = l2_norm(epsilon = l2_norm_0_epsilon_0, x = x)[name = tensor<string, []>("l2_norm_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_l2_norm_7 = identity(x = l2_norm_0)[name = tensor<string, []>("o_l2_norm_7")];
+        } -> (o_expand_dims_0, o_fill_1, o_max_pool_2, o_relu6_3, o_instance_norm_4, o_mul_5, o_cumsum_6, o_l2_norm_7);
+}

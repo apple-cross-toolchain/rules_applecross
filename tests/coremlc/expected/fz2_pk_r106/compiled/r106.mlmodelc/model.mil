@@ -1,0 +1,34 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, []> greater_0_y_0 = const()[name = tensor<string, []>("greater_0_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<bool, [1, 1, 4, 4]> greater_0 = greater(x = x, y = greater_0_y_0)[name = tensor<string, []>("greater_0")];
+            tensor<fp32, []> less_0_y_0 = const()[name = tensor<string, []>("less_0_y_0"), val = tensor<fp32, []>(0x1p+0)];
+            tensor<bool, [1, 1, 4, 4]> less_0 = less(x = x, y = less_0_y_0)[name = tensor<string, []>("less_0")];
+            tensor<bool, [1, 1, 4, 4]> logical_and_0 = logical_and(x = greater_0, y = less_0)[name = tensor<string, []>("logical_and_0")];
+            tensor<string, []> cast_0_dtype_0 = const()[name = tensor<string, []>("cast_0_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [1, 1, 4, 4]> cast_0 = cast(dtype = cast_0_dtype_0, x = logical_and_0)[name = tensor<string, []>("cast_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_logical_and_0 = identity(x = cast_0)[name = tensor<string, []>("o_logical_and_0")];
+            tensor<int32, [1]> reduce_l2_norm_0_axes_0 = const()[name = tensor<string, []>("reduce_l2_norm_0_axes_0"), val = tensor<int32, [1]>([3])];
+            tensor<bool, []> reduce_l2_norm_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_l2_norm_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 4]> reduce_l2_norm_0 = reduce_l2_norm(axes = reduce_l2_norm_0_axes_0, keep_dims = reduce_l2_norm_0_keep_dims_0, x = x)[name = tensor<string, []>("reduce_l2_norm_0")];
+            tensor<fp32, [1, 1, 4]> o_reduce_l2_norm_1 = identity(x = reduce_l2_norm_0)[name = tensor<string, []>("o_reduce_l2_norm_1")];
+            tensor<int32, []> cumsum_0_axis_0 = const()[name = tensor<string, []>("cumsum_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<bool, []> cumsum_0_exclusive_0 = const()[name = tensor<string, []>("cumsum_0_exclusive_0"), val = tensor<bool, []>(false)];
+            tensor<bool, []> cumsum_0_reverse_0 = const()[name = tensor<string, []>("cumsum_0_reverse_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 4, 4]> cumsum_0 = cumsum(axis = cumsum_0_axis_0, exclusive = cumsum_0_exclusive_0, reverse = cumsum_0_reverse_0, x = x)[name = tensor<string, []>("cumsum_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_cumsum_2 = identity(x = cumsum_0)[name = tensor<string, []>("o_cumsum_2")];
+            tensor<int32, [1]> layer_norm_0_axes_0 = const()[name = tensor<string, []>("layer_norm_0_axes_0"), val = tensor<int32, [1]>([3])];
+            tensor<fp32, []> layer_norm_0_epsilon_0 = const()[name = tensor<string, []>("layer_norm_0_epsilon_0"), val = tensor<fp32, []>(0x1.4f8b58p-17)];
+            tensor<fp32, [1, 1, 4, 4]> layer_norm_0 = layer_norm(axes = layer_norm_0_axes_0, epsilon = layer_norm_0_epsilon_0, x = x)[name = tensor<string, []>("layer_norm_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_layer_norm_3 = identity(x = layer_norm_0)[name = tensor<string, []>("o_layer_norm_3")];
+            tensor<int32, [1]> reduce_sum_0_axes_0 = const()[name = tensor<string, []>("reduce_sum_0_axes_0"), val = tensor<int32, [1]>([3])];
+            tensor<bool, []> reduce_sum_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_sum_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1, 1, 4]> reduce_sum_0 = reduce_sum(axes = reduce_sum_0_axes_0, keep_dims = reduce_sum_0_keep_dims_0, x = x)[name = tensor<string, []>("reduce_sum_0")];
+            tensor<fp32, [1, 1, 4]> o_reduce_sum_4 = identity(x = reduce_sum_0)[name = tensor<string, []>("o_reduce_sum_4")];
+            tensor<int32, []> flatten2d_0_axis_0 = const()[name = tensor<string, []>("flatten2d_0_axis_0"), val = tensor<int32, []>(1)];
+            tensor<fp32, [1, 16]> flatten2d_0 = flatten2d(axis = flatten2d_0_axis_0, x = x)[name = tensor<string, []>("flatten2d_0")];
+            tensor<fp32, [1, 16]> o_flatten2d_5 = identity(x = flatten2d_0)[name = tensor<string, []>("o_flatten2d_5")];
+        } -> (o_logical_and_0, o_reduce_l2_norm_1, o_cumsum_2, o_layer_norm_3, o_reduce_sum_4, o_flatten2d_5);
+}

@@ -1,0 +1,17 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, [1, 1, 4, 4]> abs_0 = abs(x = x)[name = tensor<string, []>("abs_0")];
+            tensor<fp32, []> log_0_epsilon_0 = const()[name = tensor<string, []>("log_0_epsilon_0"), val = tensor<fp32, []>(0x1p-149)];
+            tensor<fp32, [1, 1, 4, 4]> log_0 = log(epsilon = log_0_epsilon_0, x = abs_0)[name = tensor<string, []>("log_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_log_0 = identity(x = log_0)[name = tensor<string, []>("o_log_0")];
+            tensor<fp32, []> minimum_0_y_0 = const()[name = tensor<string, []>("minimum_0_y_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<fp32, [1, 1, 4, 4]> minimum_0 = minimum(x = x, y = minimum_0_y_0)[name = tensor<string, []>("minimum_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_minimum_1 = identity(x = minimum_0)[name = tensor<string, []>("o_minimum_1")];
+            tensor<int32, [2]> gather_0_indices_0 = const()[name = tensor<string, []>("gather_0_indices_0"), val = tensor<int32, [2]>([0, 1])];
+            tensor<int32, []> gather_0_axis_0 = const()[name = tensor<string, []>("gather_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<fp32, [1, 1, 4, 2]> gather_0 = gather(axis = gather_0_axis_0, indices = gather_0_indices_0, x = x)[name = tensor<string, []>("gather_0")];
+            tensor<fp32, [1, 1, 4, 2]> o_gather_2 = identity(x = gather_0)[name = tensor<string, []>("o_gather_2")];
+        } -> (o_log_0, o_minimum_1, o_gather_2);
+}

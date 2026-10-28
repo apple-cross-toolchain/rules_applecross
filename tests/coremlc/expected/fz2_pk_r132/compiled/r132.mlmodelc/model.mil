@@ -1,0 +1,22 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, [1, 1, 4, 4]> abs_0 = abs(x = x)[name = tensor<string, []>("abs_0")];
+            tensor<fp32, []> rsqrt_0_epsilon_0 = const()[name = tensor<string, []>("rsqrt_0_epsilon_0"), val = tensor<fp32, []>(0x1.197998p-40)];
+            tensor<fp32, [1, 1, 4, 4]> rsqrt_0 = rsqrt(epsilon = rsqrt_0_epsilon_0, x = abs_0)[name = tensor<string, []>("rsqrt_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_rsqrt_0 = identity(x = rsqrt_0)[name = tensor<string, []>("o_rsqrt_0")];
+            tensor<fp32, [2, 1, 1, 1]> conv_0_weight_0 = const()[name = tensor<string, []>("conv_0_weight_0"), val = tensor<fp32, [2, 1, 1, 1]>([[[[0x1p+0]]], [[[0x1p+0]]]])];
+            tensor<int32, [2]> conv_0_strides_0 = const()[name = tensor<string, []>("conv_0_strides_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<string, []> conv_0_pad_type_0 = const()[name = tensor<string, []>("conv_0_pad_type_0"), val = tensor<string, []>("valid")];
+            tensor<int32, [4]> conv_0_pad_0 = const()[name = tensor<string, []>("conv_0_pad_0"), val = tensor<int32, [4]>([0, 0, 0, 0])];
+            tensor<int32, [2]> conv_0_dilations_0 = const()[name = tensor<string, []>("conv_0_dilations_0"), val = tensor<int32, [2]>([1, 1])];
+            tensor<int32, []> conv_0_groups_0 = const()[name = tensor<string, []>("conv_0_groups_0"), val = tensor<int32, []>(1)];
+            tensor<fp32, [1, 2, 4, 4]> conv_0 = conv(dilations = conv_0_dilations_0, groups = conv_0_groups_0, pad = conv_0_pad_0, pad_type = conv_0_pad_type_0, strides = conv_0_strides_0, weight = conv_0_weight_0, x = x)[name = tensor<string, []>("conv_0")];
+            tensor<fp32, [1, 2, 4, 4]> o_conv_1 = identity(x = conv_0)[name = tensor<string, []>("o_conv_1")];
+            tensor<int32, []> split_0_num_splits_0 = const()[name = tensor<string, []>("split_0_num_splits_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> split_0_axis_0 = const()[name = tensor<string, []>("split_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<fp32, [1, 1, 4, 2]> split_0_0, tensor<fp32, [1, 1, 4, 2]> split_0_1 = split(axis = split_0_axis_0, num_splits = split_0_num_splits_0, x = x)[name = tensor<string, []>("split_0")];
+            tensor<fp32, [1, 1, 4, 2]> o_split_2 = identity(x = split_0_0)[name = tensor<string, []>("o_split_2")];
+        } -> (o_rsqrt_0, o_conv_1, o_split_2);
+}

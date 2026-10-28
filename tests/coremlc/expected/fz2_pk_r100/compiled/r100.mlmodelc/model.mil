@@ -1,0 +1,21 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, []> sliding_windows_0_axis_0 = const()[name = tensor<string, []>("sliding_windows_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<int32, []> sliding_windows_0_size_0 = const()[name = tensor<string, []>("sliding_windows_0_size_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> sliding_windows_0_stride_0 = const()[name = tensor<string, []>("sliding_windows_0_stride_0"), val = tensor<int32, []>(1)];
+            tensor<string, []> x_to_fp16_dtype_0 = const()[name = tensor<string, []>("x_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, [1, 1, 4, 4]> x_to_fp16 = cast(dtype = x_to_fp16_dtype_0, x = x)[name = tensor<string, []>("cast_3")];
+            tensor<fp16, [1, 1, 4, 3, 2]> sliding_windows_0_cast_fp16 = sliding_windows(axis = sliding_windows_0_axis_0, size = sliding_windows_0_size_0, stride = sliding_windows_0_stride_0, x = x_to_fp16)[name = tensor<string, []>("sliding_windows_0_cast_fp16")];
+            tensor<string, []> o_sliding_windows_0_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_sliding_windows_0_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<int32, [2]> reshape_0_shape_0 = const()[name = tensor<string, []>("reshape_0_shape_0"), val = tensor<int32, [2]>([2, 8])];
+            tensor<fp16, [2, 8]> reshape_0_cast_fp16 = reshape(shape = reshape_0_shape_0, x = x_to_fp16)[name = tensor<string, []>("reshape_0_cast_fp16")];
+            tensor<string, []> o_reshape_1_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_reshape_1_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, [1, 1, 4, 4]> round_0_cast_fp16 = round(x = x_to_fp16)[name = tensor<string, []>("round_0_cast_fp16")];
+            tensor<string, []> o_round_2_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("o_round_2_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [1, 1, 4, 4]> o_round_2 = cast(dtype = o_round_2_cast_fp16_to_fp32_dtype_0, x = round_0_cast_fp16)[name = tensor<string, []>("cast_0")];
+            tensor<fp32, [2, 8]> o_reshape_1 = cast(dtype = o_reshape_1_cast_fp16_to_fp32_dtype_0, x = reshape_0_cast_fp16)[name = tensor<string, []>("cast_1")];
+            tensor<fp32, [1, 1, 4, 3, 2]> o_sliding_windows_0 = cast(dtype = o_sliding_windows_0_cast_fp16_to_fp32_dtype_0, x = sliding_windows_0_cast_fp16)[name = tensor<string, []>("cast_2")];
+        } -> (o_sliding_windows_0, o_reshape_1, o_round_2);
+}
