@@ -35,7 +35,7 @@ class CoremlcTest(unittest.TestCase):
 
     def cases(self):
         for case in sorted(os.listdir(os.path.join(HERE, "cases"))):
-            package = glob.glob(os.path.join(HERE, "cases", case, "*.mlpackage"))[0]
+            package = (glob.glob(os.path.join(HERE, "cases", case, "*.mlpackage")) + glob.glob(os.path.join(HERE, "cases", case, "*.mlmodel")))[0]
             yield case, package, os.path.join(HERE, "expected", case)
 
     def test_compile_matches_xcode(self):

@@ -1,7 +1,8 @@
 # coremlc
 
 Reproduced: `coremlc compile` and `coremlc generate` of ML Programs
-(`.mlpackage`), as rules_apple runs them. Compiling writes `<Name>.mlmodelc/`
+(`.mlpackage`) and of Create ML's text classifiers and word taggers
+(`.mlmodel`), as rules_apple runs them. Compiling writes `<Name>.mlmodelc/`
 and the partial Info.plist. Generating writes the Swift class
 (`--public-access --language Swift`) or the Objective-C pair. The
 implementation is `toolchain/stubs/coremlc.py`, pure Python, with its
@@ -14,6 +15,8 @@ Provenance: black-box, as [README.md](README.md) describes. Sources:
 - Apple's published Core ML model specification (the protobuf schema
   coremltools ships), for reading models.
 - coremltools, to build the test models and to list MIL operation names.
+- Apple's public CreateML framework, from a small Swift program, to train text
+  classifiers and word taggers as Create ML exports them.
 - CoreFoundation's published string hash and hash tables, for key order.
 
 Generating writes Xcode's fixed template text, taken from its outputs, around
@@ -84,6 +87,34 @@ to that order; for models with at most one entry it matches byte for byte.
     The table of 104 operations comes from compiling each one for each target.
 - **The partial Info.plist** sets `LSBundleContainsCoreMLmlmodelc`.
 
+## Text classifiers and word taggers
+
+Their `coremldata.bin` has its own header, followed by the model's whole
+specification:
+- u32 2000 (text classifier) or 2001 (word tagger), the model's field number;
+- u32 1 and 20 zero bytes;
+- the length-prefixed tag `spec`, then the specification version (3);
+- 28 zero bytes.
+
+Xcode re-encodes the specification, so a model whose user-defined metadata
+has more than one entry varies from run to run here too.
+
+Their analytics hold only `SpecificationDetails`. `metadata.json` has the
+class labels (`stringClassLabels`, or a word tagger's `stringTags`) and the
+model type, and no operation histogram or precision. Sequence features
+(`Sequence (String 0...10000)`) give `valueType` and `sizeRange`.
+
+Generated code for specification 3 follows Xcode's template of that era:
+- a deprecated `init()`, and no default configuration;
+- iOS 14 and 15 availability on loading;
+- iOS 17 availability on asynchronous prediction;
+- sequences as `[String]`, or `[Int64]` passed as `[NSNumber]`;
+- in Objective-C, sequences as `NSArray`.
+
+Twelve models compared, trained with five label sets and the possible
+metadata. Every compiled and generated file matched, up to Xcode's map order
+for the one with two metadata entries.
+
 ## Generated code
 
 The Swift class and the Objective-C header and implementation follow
@@ -106,10 +137,11 @@ seen kept as they are.
 Refused, strict or relaxed:
 - **Older neural networks** (`neuralNetwork`, `.mlmodel`), with a message to
   convert the model to an ML Program.
-- **The other `.mlmodel` types** Create ML still produces: text classifiers,
-  word taggers, and the pipelines of feature vectorizers, linear models and
-  tree ensembles behind tabular models and image classifiers. These are the
-  next step.
+- **The other `.mlmodel` types** Create ML still produces: the pipelines of
+  feature vectorizers, linear models and tree ensembles behind its tabular
+  models, and its image classifiers. These are the next step. Text
+  classifiers and word taggers of specifications other than 3 are refused
+  too.
 - **Unestablished ML Program features:**
   - states, multiple functions, updatable models;
   - flexible shapes and default values;

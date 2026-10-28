@@ -494,15 +494,17 @@ COLOR_SPACES = {10: ("Grayscale", "0"), 20: ("RGB", "1"), 30: ("BGR", "1")}
 
 # Keys in the order coremlc inserts them (CoreFoundation's enumeration
 # order depends on it where keys collide), fitted to Xcode 27.0's output.
-TOP_KEYS = ["license", "classLabels", "outputSchema", "computePrecision", "modelType", "generatedClassName",
-            "shortDescription", "author", "version", "metadataOutputVersion", "inputSchema", "stateSchema",
-            "isUpdatable", "specificationVersion", "modelParameters", "mlProgramOperationTypeHistogram",
-            "userDefinedMetadata", "method", "availability", "storagePrecision"]
-SCHEMA_KEYS = ["isColor", "colorspace", "hasSizeFlexibility", "shape", "keyType", "type", "dataType", "width",
-               "height", "name", "isOptional", "hasShapeFlexibility", "shortDescription", "formattedType"]
+TOP_KEYS = ["author", "license", "outputSchema", "version", "shortDescription", "generatedClassName", "modelType",
+            "availability", "metadataOutputVersion", "modelParameters", "specificationVersion", "inputSchema",
+            "stateSchema", "isUpdatable", "mlProgramOperationTypeHistogram", "classLabels", "userDefinedMetadata",
+            "computePrecision", "method", "storagePrecision"]
+SCHEMA_KEYS = ["isColor", "colorspace", "hasSizeFlexibility", "shape", "keyType", "type", "sizeRange", "dataType",
+            "width", "height", "name", "isOptional", "hasShapeFlexibility", "shortDescription", "formattedType",
+            "valueType"]
 
 # Deployment availability by specification version.
 AVAILABILITY = {
+    3: {"macOS": "10.14", "tvOS": "12.0", "visionOS": "1.0", "watchOS": "5.0", "iOS": "12.0", "macCatalyst": "12.0"},
     6: {"macOS": "12.0", "tvOS": "15.0", "visionOS": "1.0", "watchOS": "8.0", "iOS": "15.0", "macCatalyst": "15.0"},
     7: {"macOS": "13.0", "tvOS": "16.0", "visionOS": "1.0", "watchOS": "9.0", "iOS": "16.0", "macCatalyst": "16.0"},
     8: {"macOS": "14.0", "tvOS": "17.0", "visionOS": "1.0", "watchOS": "10.0", "iOS": "17.0", "macCatalyst": "17.0"},
@@ -561,6 +563,15 @@ def feature(f):
         d = t.msg(6)
         key = "Int64" if d.has(1) else "String"
         pairs += [("type", "Dictionary"), ("keyType", key), ("formattedType", "Dictionary (%s → Double)" % key)]
+    elif t.has(7):
+        q = t.msg(7)
+        value = "Int64" if q.has(1) else "String" if q.has(3) else unestablished("a sequence of another type")
+        size = q.msg(101) or unestablished("a sequence without a size range")
+        low, high = size.int(1), size.int(2)
+        if high >= 1 << 63:
+            unestablished("an unbounded sequence")
+        pairs += [("type", "Sequence"), ("valueType", value), ("sizeRange", "[%d, %d]" % (low, high)),
+                  ("formattedType", "Sequence (%s %d...%d)" % (value, low, high))]
     else:
         unestablished("a feature type other than a multi-array, image, Int64, String or dictionary")
     return ordered(pairs, SCHEMA_KEYS)
@@ -705,7 +716,15 @@ def metadata_json(model, name):
         unestablished("a model with states, functions or training inputs")
     meta = description.msg(100) or Message(b"")
     program = model.msg(502)
-    histogram, precision, classifier, storage = program_facts(program, spec_version)
+    if program is not None:
+        histogram, precision, classifier, storage = program_facts(program, spec_version)
+        model_type = "MLModelType_mlProgram"
+    else:
+        kind = SPEC_ARCHIVED.get(next((n for n, _, _ in model.fields if n in SPEC_ARCHIVED), None))
+        if kind is None:
+            unestablished("this model type's metadata")
+        model_type = kind
+        labels = [v.decode() for v in model.msg(SPEC_TYPE_FIELD[kind]).msg(200).all(1)] if model.msg(SPEC_TYPE_FIELD[kind]).has(200) else unestablished("a text model without labels")
     if model.int(10):
         unestablished("an updatable model")
     pairs = [("metadataOutputVersion", "3.0")]
@@ -716,12 +735,14 @@ def metadata_json(model, name):
         ("outputSchema", [feature(f) for f in description.msgs(10)]),
         ("modelParameters", []),
         ("specificationVersion", spec_version),
-        ("mlProgramOperationTypeHistogram", CFDict(histogram)),
-        ("computePrecision", precision),
+    ]
+    if program is not None:
+        pairs += [("mlProgramOperationTypeHistogram", CFDict(histogram)), ("computePrecision", precision)]
+    pairs += [
         ("isUpdatable", "0"),
         ("stateSchema", []),
         ("availability", CFDict([(k, (AVAILABILITY.get(spec_version) or unestablished("availability for specification %d" % spec_version))[k]) for k in AVAILABILITY_KEYS])),
-        ("modelType", CFDict([("name", "MLModelType_mlProgram")])),
+        ("modelType", CFDict([("name", model_type)])),
         ("inputSchema", [feature(f) for f in description.msgs(1)]),
         ("generatedClassName", generated_class_name(name)),
         ("method", "predict"),
@@ -730,10 +751,13 @@ def metadata_json(model, name):
     # varies from run to run when it has more than one entry; this keeps the
     # model's own order.
     pairs.append(("userDefinedMetadata", CFDict(meta.map_str(100))))
-    if classifier:
-        pairs.append(("classLabels", class_labels(program)))
-    if storage:
-        pairs.append(("storagePrecision", storage))
+    if program is None:
+        pairs.append(("classLabels", labels))
+    else:
+        if classifier:
+            pairs.append(("classLabels", class_labels(program)))
+        if storage:
+            pairs.append(("storagePrecision", storage))
     return "[\n  " + ns_json(ordered(pairs, TOP_KEYS), 1) + "\n]"
 
 
@@ -831,6 +855,36 @@ MODEL_TYPES = {
 }
 
 
+# Models coremlc compiles to their own specification behind a header: their
+# Model field and the name metadata.json gives their type.
+SPEC_ARCHIVED = {2000: "MLModelType_textClassifier", 2001: "MLModelType_wordTagger"}
+SPEC_TYPE_FIELD = {v: k for k, v in SPEC_ARCHIVED.items()}
+
+
+def compile_spec_model(model_bytes, name, outdir):
+    """A text classifier or word tagger: coremldata.bin is a header and the
+    model's own bytes."""
+    model = Message(model_bytes)
+    kind = next(n for n, _, _ in model.fields if n in SPEC_ARCHIVED)
+    spec_version = model.int(1)
+    if spec_version != 3:
+        unestablished("specification version %d of a %s" % (spec_version, MODEL_TYPES[kind]))
+    header = _u32(kind) + _u32(1) + b"\0" * 20 + _u64(4) + b"spec" + _u32(spec_version) + b"\0" * 28
+    def s(text):
+        raw = text.encode()
+        return _u64(len(raw)) + raw
+    files = {
+        "coremldata.bin": header + model_bytes,
+        "metadata.json": metadata_json(model, name).encode("utf-8"),
+        "analytics/coremldata.bin": s("SpecificationDetails") + _u64(2) + s("modelHash") + s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + s("modelName") + s(name),
+    }
+    bundle = os.path.join(outdir, name + ".mlmodelc")
+    for rel, data in files.items():
+        os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
+        with open(os.path.join(bundle, rel), "wb") as f:
+            f.write(data)
+
+
 def refuse_model_file(model):
     """A .mlmodel file's refusal: ML Programs come as .mlpackage, and the
     other model types aren't reproduced yet."""
@@ -874,6 +928,7 @@ def compile_package(package, outdir):
 # --- coremlc generate (Swift) ----------------------------------------------------
 
 AVAILABILITY_LINE = {
+    3: "macOS 10.14, iOS 12.0, tvOS 12.0, watchOS 5.0, visionOS 1.0",
     6: "macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1.0",
     7: "macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, visionOS 1.0",
     8: "macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0",
@@ -953,17 +1008,30 @@ class Feature:
             self.kind = "dictionary"
             self.swift_type = "[%s : Double]" % key
             self.phrase = "dictionary of %s to doubles" % ("64-bit integers" if key == "Int64" else "strings")
+        elif t.has(7):
+            q = t.msg(7)
+            if q.has(3):
+                self.kind, self.swift_type, self.phrase, self.sequence = "sequence", "[String]", "sequence of strings", "string"
+            elif q.has(1):
+                self.kind, self.swift_type, self.phrase, self.sequence = "sequence", "[Int64]", "sequence of 64-bit integers", "int64"
+            else:
+                unestablished("generated code for a sequence of another type")
         else:
             unestablished("generated code for this feature type")
         self.doc = "%s as %s" % (label, self.phrase)
         self.param_doc = ("%s as %s" % (self.description, self.phrase)) if self.description else self.phrase
 
     def value(self, expr):
+        if self.kind == "sequence":
+            return "MLFeatureValue(sequence: %s)" % ("MLSequence(strings: %s)" if self.sequence == "string" else "MLSequence(int64s: %s as [NSNumber])") % expr
         return {"array": "MLFeatureValue(multiArray: %s)", "image": "MLFeatureValue(pixelBuffer: %s)",
                 "string": "MLFeatureValue(string: %s)", "int64": "MLFeatureValue(int64: %s)",
                 "dictionary": "MLFeatureValue(dictionary: %s as [AnyHashable : NSNumber])"}[self.kind] % expr
 
     def read(self):
+        if self.kind == "sequence":
+            return ("provider.featureValue(for: \"%s\")!.sequenceValue!.stringValues" if self.sequence == "string"
+                    else "provider.featureValue(for: \"%s\")!.sequenceValue!.int64Values as! [Int64]") % self.name
         return {"array": "provider.featureValue(for: \"%s\")!.multiArrayValue!",
                 "image": "provider.featureValue(for: \"%s\")!.imageBufferValue!",
                 "string": "provider.featureValue(for: \"%s\")!.stringValue",
@@ -1025,8 +1093,9 @@ def swift_source(model, name):
     w("        self.provider = try! MLDictionaryFeatureProvider(dictionary: [%s])" % ", ".join('"%s" : %s' % (f.name, f.value(f.swift_name)) for f in outputs))
     w("    }\n")
     w("    public init(features: MLFeatureProvider) {\n        self.provider = features\n    }\n}\n\n")
-    model_class = MODEL_CLASS.replace("{available}", available).replace("{N}", name).rstrip("\n") + "\n"
-    if spec_version < 8:
+    template = MODEL_CLASS_SPEC3 if spec_version == 3 else MODEL_CLASS
+    model_class = template.replace("{available}", available).replace("{N}", name).rstrip("\n") + "\n"
+    if 6 <= spec_version < 8:
         # Asynchronous prediction needs iOS 17 and its contemporaries.
         anchor = "    public func prediction(input: %sInput, options: MLPredictionOptions = MLPredictionOptions()) async throws" % name
         if model_class.count(anchor) != 1:
@@ -1041,11 +1110,16 @@ def swift_source(model, name):
     w(doc + "    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in inputs), name) + call)
     if arrays:
         w(doc + "\n    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs), name) + call)
-    w(BATCH.replace("{N}", name))
+    w((BATCH_SPEC3 if spec_version == 3 else BATCH).replace("{N}", name))
     return "\n".join(L)
 
 
 MODEL_CLASS = '/// Class for model loading and prediction\n{available}\npublic class {N} {\n    public let model: MLModel\n\n    /// URL of model assuming it was installed in the same bundle as this class\n    class var urlOfModelInThisBundle : URL {\n        let bundle = Bundle(for: self)\n        return bundle.url(forResource: "{N}", withExtension:"mlmodelc")!\n    }\n\n    /**\n        Construct {N} instance with an existing MLModel object.\n\n        Usually the application does not use this initializer unless it makes a subclass of {N}.\n        Such application may want to use `MLModel(contentsOfURL:configuration:)` and `{N}.urlOfModelInThisBundle` to create a MLModel object to pass-in.\n\n        - parameters:\n          - model: MLModel object\n    */\n    init(model: MLModel) {\n        self.model = model\n    }\n\n    /**\n        Construct a model with configuration\n\n        - parameters:\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(configuration: MLModelConfiguration = MLModelConfiguration()) throws {\n        try self.init(contentsOf: type(of:self).urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance with explicit path to mlmodelc file\n        - parameters:\n           - modelURL: the file url of the model\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL) throws {\n        try self.init(model: MLModel(contentsOf: modelURL))\n    }\n\n    /**\n        Construct a model with URL of the .mlmodelc directory and configuration\n\n        - parameters:\n           - modelURL: the file url of the model\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL, configuration: MLModelConfiguration) throws {\n        try self.init(model: MLModel(contentsOf: modelURL, configuration: configuration))\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration, completionHandler: handler)\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n    */\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        try await load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        MLModel.load(contentsOf: modelURL, configuration: configuration) { result in\n            switch result {\n            case .failure(let error):\n                handler(.failure(error))\n            case .success(let model):\n                handler(.success({N}(model: model)))\n            }\n        }\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n    */\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        let model = try await MLModel.load(contentsOf: modelURL, configuration: configuration)\n        return {N}(model: model)\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input) throws -> {N}Output {\n        try prediction(input: input, options: MLPredictionOptions())\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input, options: MLPredictionOptions) throws -> {N}Output {\n        let outFeatures = try model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n    /**\n        Make an asynchronous prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input, options: MLPredictionOptions = MLPredictionOptions()) async throws -> {N}Output {\n        let outFeatures = try await model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n'
+
+# The model class of specification 3 models (iOS 12 and its contemporaries).
+MODEL_CLASS_SPEC3 = '/// Class for model loading and prediction\n{available}\npublic class {N} {\n    public let model: MLModel\n\n    /// URL of model assuming it was installed in the same bundle as this class\n    class var urlOfModelInThisBundle : URL {\n        let bundle = Bundle(for: self)\n        return bundle.url(forResource: "{N}", withExtension:"mlmodelc")!\n    }\n\n    /**\n        Construct {N} instance with an existing MLModel object.\n\n        Usually the application does not use this initializer unless it makes a subclass of {N}.\n        Such application may want to use `MLModel(contentsOfURL:configuration:)` and `{N}.urlOfModelInThisBundle` to create a MLModel object to pass-in.\n\n        - parameters:\n          - model: MLModel object\n    */\n    init(model: MLModel) {\n        self.model = model\n    }\n\n    /**\n        Construct {N} instance by automatically loading the model from the app\'s bundle.\n    */\n    @available(*, deprecated, message: "Use init(configuration:) instead and handle errors appropriately.")\n    public convenience init() {\n        try! self.init(contentsOf: type(of:self).urlOfModelInThisBundle)\n    }\n\n    /**\n        Construct a model with configuration\n\n        - parameters:\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(configuration: MLModelConfiguration) throws {\n        try self.init(contentsOf: type(of:self).urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance with explicit path to mlmodelc file\n        - parameters:\n           - modelURL: the file url of the model\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL) throws {\n        try self.init(model: MLModel(contentsOf: modelURL))\n    }\n\n    /**\n        Construct a model with URL of the .mlmodelc directory and configuration\n\n        - parameters:\n           - modelURL: the file url of the model\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL, configuration: MLModelConfiguration) throws {\n        try self.init(model: MLModel(contentsOf: modelURL, configuration: configuration))\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    @available(macOS 11.0, iOS 14.0, tvOS 14.0, watchOS 7.0, visionOS 1.0, *)\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration, completionHandler: handler)\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n    */\n    @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1.0, *)\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        try await load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    @available(macOS 11.0, iOS 14.0, tvOS 14.0, watchOS 7.0, visionOS 1.0, *)\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        MLModel.load(contentsOf: modelURL, configuration: configuration) { result in\n            switch result {\n            case .failure(let error):\n                handler(.failure(error))\n            case .success(let model):\n                handler(.success({N}(model: model)))\n            }\n        }\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n    */\n    @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1.0, *)\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        let model = try await MLModel.load(contentsOf: modelURL, configuration: configuration)\n        return {N}(model: model)\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input) throws -> {N}Output {\n        try prediction(input: input, options: MLPredictionOptions())\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input, options: MLPredictionOptions) throws -> {N}Output {\n        let outFeatures = try model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n    /**\n        Make an asynchronous prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0, *)\n    public func prediction(input: {N}Input, options: MLPredictionOptions = MLPredictionOptions()) async throws -> {N}Output {\n        let outFeatures = try await model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n'
+
+BATCH_SPEC3 = '    /**\n        Make a batch prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - inputs: the inputs to the prediction as [{N}Input]\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as [{N}Output]\n    */\n    public func predictions(inputs: [{N}Input], options: MLPredictionOptions = MLPredictionOptions()) throws -> [{N}Output] {\n        let batchIn = MLArrayBatchProvider(array: inputs)\n        let batchOut = try model.predictions(from: batchIn, options: options)\n        var results : [{N}Output] = []\n        results.reserveCapacity(inputs.count)\n        for i in 0..<batchOut.count {\n            let outProvider = batchOut.features(at: i)\n            let result =  {N}Output(features: outProvider)\n            results.append(result)\n        }\n        return results\n    }\n}\n'
 
 BATCH = '    /**\n        Make a batch prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - inputs: the inputs to the prediction as [{N}Input]\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as [{N}Output]\n    */\n    public func predictions(inputs: [{N}Input], options: MLPredictionOptions = MLPredictionOptions()) throws -> [{N}Output] {\n        let batchIn = MLArrayBatchProvider(array: inputs)\n        let batchOut = try model.predictions(from: batchIn, options: options)\n        var results : [{N}Output] = []\n        results.reserveCapacity(inputs.count)\n        for i in 0..<batchOut.count {\n            let outProvider = batchOut.features(at: i)\n            let result =  {N}Output(features: outProvider)\n            results.append(result)\n        }\n        return results\n    }\n}\n'
 
@@ -1053,6 +1127,7 @@ BATCH = '    /**\n        Make a batch prediction using the structured interface
 # --- coremlc generate (Objective-C) -----------------------------------------------
 
 API_AVAILABLE = {
+    3: "macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)",
     6: "macos(12.0), ios(15.0), watchos(8.0), tvos(15.0)",
     7: "macos(13.0), ios(16.0), watchos(9.0), tvos(16.0)",
     8: "macos(14.0), ios(17.0), watchos(10.0), tvos(17.0)",
@@ -1070,6 +1145,13 @@ def _objc(f):
         return "(readwrite, nonatomic, strong) NSString * ", "NSString *", "featureValueWithString:self.%s", "(NSString *)[%%s featureValueForName:@\"%s\"].stringValue"
     if f.kind == "int64":
         return "(readwrite, nonatomic) int64_t ", "int64_t", "featureValueWithInt64:self.%s", "[%%s featureValueForName:@\"%s\"].int64Value"
+    if f.kind == "sequence":
+        element = "NSString *" if f.sequence == "string" else "NSNumber *"
+        t = "NSArray<%s> *" % element
+        make = "sequenceWithStringArray" if f.sequence == "string" else "sequenceWithInt64Array"
+        values = "stringValues" if f.sequence == "string" else "int64Values"
+        return ("(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithSequence:[MLSequence %s:self.%%s]" % make,
+                "(" + t + ")[%%s featureValueForName:@\"%s\"].sequenceValue." + values)
     key = "NSNumber *" if "Int64" in f.swift_type else "NSString *"
     t = "NSDictionary<%s, NSNumber *> *" % key
     return "(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithDictionary:self.%s error:nil", "(" + t + ")[%%s featureValueForName:@\"%s\"].dictionaryValue"
@@ -1116,6 +1198,12 @@ def objc_sources(model, name):
             H.append("-(BOOL)set%sWithURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error ;" % (cap, f.swift_name))
         H.append("@end\n")
     header_model = H_MODEL.replace("{available}", available).replace("{N}", name)
+    if spec_version < 6:
+        # Loading with a completion handler needs iOS 14 and its contemporaries.
+        for anchor in ("completionHandler:(void (^)(%s * _Nullable model, NSError * _Nullable error))handler;" % name,):
+            if header_model.count(anchor) != 2:
+                unestablished("the asynchronous loading of an older model")
+            header_model = header_model.replace(anchor, anchor[:-1] + " API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0)) __attribute__((visibility(\"hidden\")));")
     if spec_version < 8:
         for anchor in ("completionHandler:(void (^)(%sOutput * _Nullable output, NSError * _Nullable error))completionHandler;" % name,):
             if header_model.count(anchor) != 2:
@@ -1228,12 +1316,15 @@ def generate(argv):
     try:
         if (language == "Swift") != public or language not in ("Swift", "Objective-C"):
             unestablished("generated %s%s code" % ("public " if public else "", language))
-        if not os.path.isdir(source):
+        if os.path.isdir(source):
+            model = read_package(source)
+            if not model.has(502):
+                unestablished("a model that isn't an ML Program")
+        else:
             with open(source, "rb") as f:
-                refuse_model_file(Message(f.read()))
-        model = read_package(source)
-        if not model.has(502):
-            unestablished("a model that isn't an ML Program")
+                model = Message(f.read())
+            if not any(model.has(n) for n in SPEC_ARCHIVED):
+                refuse_model_file(model)
         name = generated_class_name(os.path.splitext(os.path.basename(source.rstrip("/")))[0])
         if language == "Swift":
             files = {name + ".swift": swift_source(model, name)}
@@ -1267,10 +1358,16 @@ def main(argv):
             print("error: coremlc: unsupported option %s" % rest[0], file=sys.stderr)
             return 1
     try:
-        if not os.path.isdir(source):
+        if os.path.isdir(source):
+            compile_package(source, outdir)
+        else:
             with open(source, "rb") as f:
-                refuse_model_file(Message(f.read()))
-        compile_package(source, outdir)
+                model_bytes = f.read()
+            model = Message(model_bytes)
+            if any(model.has(n) for n in SPEC_ARCHIVED):
+                compile_spec_model(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
+            else:
+                refuse_model_file(model)
     except Unestablished as e:
         print("error: coremlc: %s is not compiled as Xcode compiles it" % e, file=sys.stderr)
         return 1

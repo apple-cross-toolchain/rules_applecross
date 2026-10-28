@@ -1,0 +1,56 @@
+[
+  {
+    "shortDescription" : "Desc 1",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : "Text label"
+      }
+    ],
+    "version" : "1.1",
+    "modelParameters" : [
+
+    ],
+    "author" : "A 1",
+    "specificationVersion" : 3,
+    "license" : "MIT",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.14",
+      "tvOS" : "12.0",
+      "visionOS" : "1.0",
+      "watchOS" : "5.0",
+      "iOS" : "12.0",
+      "macCatalyst" : "12.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_textClassifier"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "text",
+        "shortDescription" : "Input text"
+      }
+    ],
+    "classLabels" : [
+      "a",
+      "b",
+      "c"
+    ],
+    "generatedClassName" : "Text1",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]
