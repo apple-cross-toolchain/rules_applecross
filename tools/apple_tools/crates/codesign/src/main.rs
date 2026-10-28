@@ -31,7 +31,7 @@ struct Options {
 }
 
 fn usage() -> String {
-    "usage: codesign -s identity [--force] [--entitlements file] [--generate-entitlement-der] [-i identifier] path ...\n       codesign --verify path ...".into()
+    "usage: codesign -s identity [--force] [--entitlements file] [--generate-entitlement-der] [-i identifier]\n                [-o|--options runtime] [--timestamp[=URL|=none]] path ...\n       codesign --verify path ...".into()
 }
 
 fn parse(args: Vec<String>) -> Result<Options, String> {
