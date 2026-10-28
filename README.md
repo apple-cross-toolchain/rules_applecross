@@ -32,9 +32,9 @@ Off a Mac, these have no Linux version yet, and building a target that needs
 one fails:
 
 - Metal shaders (`metal`, `metallib`);
-- App Intents' entities and queries, and App Shortcuts Flexible Matching
-  (`app_intents_flexible_matching`, on by default; set it to `False`).
-  Intents, parameters, enums and App Shortcuts compile as Xcode compiles them
+- App Shortcuts Flexible Matching (`app_intents_flexible_matching`, on by
+  default; set it to `False`). App Intents' intents, parameters, enums,
+  entities, queries and App Shortcuts compile as Xcode compiles them
   ([docs/clean-room/appintentsmetadataprocessor.md](docs/clean-room/appintentsmetadataprocessor.md));
 - Core Data models (`momc`, `mapc`) and Core ML models (`coremlc`);
 - Reality Composer content (`realitytool`), DocC, and `.xib` files;

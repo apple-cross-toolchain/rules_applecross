@@ -219,6 +219,15 @@ class Module:
         entry = self.by_name.get(type_name)
         return bool(entry) and protocol in entry.get("conformances", [])
 
+    def dynamic_options(self, type_name):
+        """1 for an entity (or optional or array of one) whose query is an
+        EntityQuery, 2 for an EntityStringQuery, else 0."""
+        base = _generic(type_name, "Swift.Optional") or _generic(type_name, "Swift.Array") or type_name
+        if not self.conforms(base, "AppIntents.AppEntity"):
+            return 0
+        query = _aliases(self.by_name[base]).get("DefaultQuery")
+        return 2 if self.conforms(query, "AppIntents.EntityStringQuery") else 1
+
     def value_type(self, type_name):
         """(valueType, resolvableInputTypes, isOptional) of a parameter's type."""
         inner = _generic(type_name, "Swift.Optional")
@@ -237,6 +246,8 @@ class Module:
             return primitive(PRIMITIVES[type_name]), resolvable, False
         if self.conforms(type_name, "AppIntents.AppEnum"):
             return {"linkEnumeration": {"wrapper": {"identifier": type_name.rsplit(".", 1)[1]}}}, [], False
+        if self.conforms(type_name, "AppIntents.AppEntity"):
+            return entity_type(type_name), [], False
         unestablished("a parameter of type {}".format(type_name))
 
 
@@ -287,7 +298,7 @@ def parameter(module, prop):
     base = _generic(type_name, "Swift.Optional") or type_name
     out = {
         "capabilities": 0,
-        "dynamicOptionsSupport": 0,
+        "dynamicOptionsSupport": module.dynamic_options(type_name),
         "inputConnectionBehavior": 0,
         "isInput": False,
         "isOptional": optional,
@@ -481,8 +492,104 @@ def action(module, entry):
         if requirement["typeAliasName"] != "AppIntents.IntentResult.Value":
             unestablished("a result requirement on {}".format(requirement["typeAliasName"]))
         value = requirement["substitutedTypeName"]
-        out["outputType"] = primitive(_lookup(PRIMITIVES, value, "a result value of type"))
+        if module.conforms(value, "AppIntents.AppEntity"):
+            out["outputType"] = entity_type(value)
+        else:
+            out["outputType"] = primitive(_lookup(PRIMITIVES, value, "a result value of type"))
     return out
+
+
+def entity_type(type_name):
+    return {"entity": {"wrapper": {"typeName": type_name.rsplit(".", 1)[1]}}}
+
+
+def _aliases(entry):
+    return {a["typeAliasName"]: a["substitutedTypeName"] for a in entry.get("associatedTypeAliases", [])}
+
+
+def app_entity(module, entry):
+    props = _properties(entry)
+    if "AppIntents.TransientAppEntity" in entry.get("conformances", []):
+        unestablished("a TransientAppEntity")
+    query = _aliases(entry).get("DefaultQuery")
+    if not query or not module.conforms(query, "AppIntents.EntityQuery"):
+        unestablished("an AppEntity whose defaultQuery isn't an EntityQuery of the module")
+    out = {
+        "assistantDefinedSchemas": [],
+        "availabilityAnnotations": availability(entry),
+        "defaultQueryIdentifier": query,
+        "effectiveBundleIdentifiers": [],
+        "entitySyncMetadata": {"entitySyncType": 0},
+        "fullyQualifiedTypeName": entry["typeName"],
+        "mangledTypeName": entry["mangledTypeName"],
+        "mangledTypeNameByBundleIdentifier": {},
+        "properties": [],
+        "requiredCapabilities": [],
+        "systemProtocolMetadata": [],
+        "systemProtocolMetadataV2": [],
+        "transient": False,
+        "typeName": _identifier(entry["typeName"], module.name),
+        "typeSpecificMetadata": [],
+        "visibilityMetadata": {"assistantOnly": False, "isDiscoverable": True},
+    }
+    _display_type(out, props["typeDisplayRepresentation"])
+    for prop in entry.get("properties", []):
+        label = prop["label"]
+        if label.startswith("_") or label.startswith("$"):
+            continue
+        value = prop.get("value") or {}
+        if prop.get("valueKind") == "InitCall" and value.get("type", "").startswith("AppIntents.EntityProperty<"):
+            out["properties"].append(entity_property(module, prop))
+        elif prop.get("isStatic") == "true" and label not in ("typeDisplayRepresentation", "defaultQuery"):
+            unestablished("an AppEntity's static {}".format(label))
+    return out
+
+
+def entity_property(module, prop):
+    type_name = _generic(prop["value"]["type"], "AppIntents.EntityProperty")
+    arguments = _args(prop)
+    _only(arguments, {"title"}, "an entity property")
+    value_type, _, optional = module.value_type(type_name)
+    if "entity" in value_type or "linkEnumeration" in value_type:
+        unestablished("an entity property of type {}".format(type_name))
+    return {
+        "capabilities": 0,
+        "identifier": prop["label"],
+        "isOptional": optional,
+        "title": localized(arguments["title"][0]),
+        "valueType": value_type,
+    }
+
+
+def entity_query(module, entry):
+    conformances = set(entry.get("conformances", []))
+    kinds = [c for c in conformances if c in QUERY_CAPABILITIES]
+    others = {c for c in conformances if c.endswith("Query") and c not in QUERY_CAPABILITIES}
+    if others:
+        unestablished("a query conforming to {}".format(", ".join(sorted(others))))
+    if _properties(entry):
+        unestablished("a query with properties")
+    entity = _aliases(entry).get("Entity")
+    entity_entry = module.by_name.get(entity)
+    if entity_entry is None or _aliases(entity_entry).get("DefaultQuery") != entry["typeName"]:
+        unestablished("a query that isn't its entity's defaultQuery")
+    identifier = _identifier(entry["typeName"], module.name)
+    return {
+        "availabilityAnnotations": availability(entry),
+        "capabilities": max(QUERY_CAPABILITIES[k] for k in kinds),
+        "defaultQueryForEntity": True,
+        "effectiveBundleIdentifiers": [],
+        "entityType": _identifier(entity, module.name),
+        "fullyQualifiedIdentifier": entry["typeName"],
+        "identifier": identifier,
+        "mangledTypeName": entry["mangledTypeName"],
+        "mangledTypeNameByBundleIdentifier": {},
+        "parameters": [],
+        "queryType": identifier,
+        "resultValueType": entity_type(entity),
+        "sortingOptions": [],
+        "visibilityMetadata": {"assistantOnly": False, "isDiscoverable": True},
+    }
 
 
 def app_enum(module, entry):
@@ -502,17 +609,7 @@ def app_enum(module, entry):
         "systemProtocolMetadata": [],
         "visibilityMetadata": {"assistantOnly": False, "isDiscoverable": True},
     }
-    representation = props["typeDisplayRepresentation"]
-    if representation.get("valueKind") == "RawLiteral":
-        # A literal TypeDisplayRepresentation is written as escaped source.
-        out["displayTypeName"] = {"alternatives": [], "key": swift_escaped(_string(representation))}
-    else:
-        arguments = _args(representation)
-        _only(arguments, {"name", "numericFormat"}, "a TypeDisplayRepresentation")
-        out["displayTypeName"] = localized(arguments["name"][0])
-        for argument in arguments.get("numericFormat", []):
-            if not _absent(argument):
-                out["numericFormatTypeName"] = {"alternatives": [], "key": _numeric_format(argument)}
+    _display_type(out, props["typeDisplayRepresentation"])
     cases = props["caseDisplayRepresentations"]
     if cases.get("valueKind") != "Dictionary":
         unestablished("caseDisplayRepresentations other than a dictionary literal")
@@ -524,6 +621,25 @@ def app_enum(module, entry):
     if len(out["cases"]) != len(shown):
         unestablished("caseDisplayRepresentations naming cases that aren't the enum's")
     return out
+
+
+def _display_type(out, representation):
+    """displayTypeName (and numericFormatTypeName) from a
+    typeDisplayRepresentation."""
+    if representation.get("valueKind") == "RawLiteral":
+        # A literal TypeDisplayRepresentation is written as escaped source.
+        out["displayTypeName"] = {"alternatives": [], "key": swift_escaped(_string(representation))}
+        return
+    arguments = _args(representation)
+    _only(arguments, {"name", "numericFormat"}, "a TypeDisplayRepresentation")
+    name = arguments["name"][0]
+    out["displayTypeName"] = localized(name)
+    formats = [a for a in arguments.get("numericFormat", []) if not _absent(a)]
+    if formats:
+        out["numericFormatTypeName"] = {"alternatives": [], "key": _numeric_format(formats[0])}
+    elif name.get("valueKind") == "RawLiteral":
+        # A literal name without a numeric format is its own, escaped.
+        out["numericFormatTypeName"] = {"alternatives": [], "key": swift_escaped(_string(name))}
 
 
 def _numeric_format(value):
@@ -692,7 +808,14 @@ _IMPLIED = {
     "AppIntents.PersistentlyIdentifiable", "AppIntents._SupportsAppDependencies", "AppIntents._IntentValueRepresentable",
     "AppIntents.TypeDisplayRepresentable", "AppIntents.CaseDisplayRepresentable", "AppIntents.StaticEnumValueRepresentable",
     "AppIntents.InstanceDisplayRepresentable", "AppIntents.CustomLocalizedStringResourceConvertible", "AppIntents.AppValue",
-    "AppIntents.StaticDisplayRepresentable", "AppIntents._IntentValue",
+    "AppIntents.StaticDisplayRepresentable", "AppIntents._IntentValue", "AppIntents.DisplayRepresentable",
+    "AppIntents.DynamicOptionsProvider",
+}
+
+# Query protocols and the capabilities Xcode records for them.
+QUERY_CAPABILITIES = {
+    "AppIntents.EntityQuery": 66,
+    "AppIntents.EntityStringQuery": 70,
 }
 
 
@@ -707,6 +830,12 @@ def _add(out, module, entry, handled):
         out["actions"][a["identifier"]] = a
     if "AppIntents.AppEnum" in kinds:
         out["enums"].append(app_enum(module, entry))
+    if "AppIntents.AppEntity" in kinds:
+        e = app_entity(module, entry)
+        out["entities"][e["typeName"]] = e
+    if "AppIntents.EntityQuery" in kinds:
+        q = entity_query(module, entry)
+        out["queries"][q["identifier"]] = q
     if "AppIntents.AppShortcutsProvider" in kinds:
         if "autoShortcutProviderMangledName" in out:
             unestablished("more than one AppShortcutsProvider")
@@ -731,7 +860,8 @@ def metadata(module_name, entries, version):
         "shortcutTileColor": 14,
         "version": 1,
     }
-    handled = {"AppIntents.AppIntent", "AppIntents.AppEnum", "AppIntents.AppShortcutsProvider"}
+    handled = {"AppIntents.AppIntent", "AppIntents.AppEnum", "AppIntents.AppShortcutsProvider", "AppIntents.AppEntity",
+               "AppIntents.EntityQuery", "AppIntents.EntityStringQuery"}
     # Providers last, so that the intents their shortcuts name are known.
     entries = sorted(entries, key=lambda e: "AppIntents.AppShortcutsProvider" in e.get("conformances", []))
     for entry in entries:
