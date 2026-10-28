@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Minimal xcstringstool stub for cross-compilation on Linux."""
+"""A stand-in for xcstringstool off a Mac.
+
+Its output is not Xcode's: it writes each language's simple strings and
+drops plural and device variations, substitutions and the .stringsdict they
+need. Strict (the default), it refuses every String Catalog; relaxed
+(RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, --config=relaxed), it writes
+that near match.
+"""
 
 import json
 import os
@@ -52,6 +59,11 @@ def compile_xcstrings(args):
 
 def main() -> int:
     if len(sys.argv) < 2:
+        return 1
+    if os.environ.get("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE") != "relaxed":
+        print("error: xcstringstool: String Catalogs can't yet be compiled as Xcode compiles them off a Mac; "
+              "build with --config=relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to compile only their "
+              "simple strings, without plural or device variations", file=sys.stderr)
         return 1
     if sys.argv[1] == "compile":
         return compile_xcstrings(sys.argv[2:])

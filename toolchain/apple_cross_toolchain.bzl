@@ -376,7 +376,7 @@ _RULE_INPUT_FILES = [
     "repo_tools/link_local_xcode.py",
     "repo_tools/patch_swiftinterfaces.py",
     "repo_tools/read_xcode_versions.py",
-    "stubs/empty_output_tool.sh",
+    "stubs/metal_unavailable.sh",
     "stubs/intentbuilderc.py",
     "stubs/intentbuilderc.sh",
     "stubs/codesign_identity.sh",
@@ -672,7 +672,7 @@ def _apple_cross_toolchain_impl(rctx):
         _tool_path = xcode_toolchain_bindir + _tool_name
         result = rctx.execute(["test", "-e", _tool_path])
         if result.return_code != 0:
-            _install_executable(rctx, "stubs/empty_output_tool.sh", _tool_path)
+            _install_executable(rctx, "stubs/metal_unavailable.sh", _tool_path)
 
     # Create intentbuilderc stub for Linux.
     _intentbuilderc_path = xcode_toolchain_bindir + "intentbuilderc"
