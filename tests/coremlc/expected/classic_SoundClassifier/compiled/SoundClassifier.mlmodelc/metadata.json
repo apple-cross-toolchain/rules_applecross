@@ -1,0 +1,77 @@
+[
+  {
+    "shortDescription" : "A probe",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "target",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "targetProbability",
+        "shortDescription" : ""
+      }
+    ],
+    "version" : "1.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 6,
+    "license" : "MIT",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "12.0",
+      "tvOS" : "15.0",
+      "visionOS" : "1.0",
+      "watchOS" : "8.0",
+      "iOS" : "15.0",
+      "macCatalyst" : "15.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_pipelineClassifier",
+      "structure" : [
+        {
+          "name" : "MLModelType_audioFeaturePrint"
+        },
+        {
+          "name" : "MLModelType_glmClassifier"
+        }
+      ]
+    },
+    "inputSchema" : [
+      {
+        "dataType" : "Float32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "8000...240000",
+        "shapeRange" : "[[8000, 240000]]",
+        "formattedType" : "MultiArray (Float32 15600)",
+        "type" : "MultiArray",
+        "shape" : "[15600]",
+        "name" : "audioSamples",
+        "shortDescription" : ""
+      }
+    ],
+    "classLabels" : [
+      "noise",
+      "tone"
+    ],
+    "generatedClassName" : "SoundClassifier",
+    "userDefinedMetadata" : {
+      "sampleRate" : "16000",
+      "com.apple.createml.version" : "27.0.1"
+    },
+    "method" : "predict"
+  }
+]

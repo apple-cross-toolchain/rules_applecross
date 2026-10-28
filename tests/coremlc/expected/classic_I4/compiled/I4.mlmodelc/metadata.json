@@ -1,0 +1,58 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "valueType" : "Int64",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (Int64 0)",
+        "sizeRange" : "[0, 0]",
+        "shortDescription" : "",
+        "type" : "Sequence",
+        "name" : "recs"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_itemSimilarityRecommender"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "keyType" : "Int64",
+        "formattedType" : "Dictionary (Int64 → Double)",
+        "type" : "Dictionary",
+        "name" : "items",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "1",
+        "formattedType" : "Int64?",
+        "type" : "Int64",
+        "name" : "k",
+        "shortDescription" : ""
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "I4",
+    "method" : "predict"
+  }
+]

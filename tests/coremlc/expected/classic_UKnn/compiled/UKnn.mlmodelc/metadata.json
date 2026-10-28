@@ -1,0 +1,92 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "labelProbs",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+      {
+        "defaultValue" : "3",
+        "scope" : "",
+        "allowedRange" : "[1, 1000]",
+        "name" : "numberOfNeighbors",
+        "dataType" : "Int64",
+        "shortDescription" : "Number of neighbors to use for prediction"
+      }
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "updateParameters" : [
+
+    ],
+    "isUpdatable" : "1",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_kNearestNeighborsClassifier"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 2)",
+        "shortDescription" : "",
+        "shape" : "[2]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "classLabels" : [
+      "a",
+      "b"
+    ],
+    "generatedClassName" : "UKnn",
+    "userDefinedMetadata" : {
+
+    },
+    "trainingInputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 2)",
+        "shortDescription" : "",
+        "shape" : "[2]",
+        "name" : "x",
+        "type" : "MultiArray"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : ""
+      }
+    ],
+    "method" : "predict"
+  }
+]

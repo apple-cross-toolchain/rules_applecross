@@ -1,0 +1,66 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 288 × 35 × 35)",
+        "shortDescription" : "",
+        "shape" : "[288, 35, 35]",
+        "name" : "hi",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 768 × 17 × 17)",
+        "shortDescription" : "",
+        "shape" : "[768, 17, 17]",
+        "name" : "lo",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 5,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "11.0",
+      "tvOS" : "14.0",
+      "visionOS" : "1.0",
+      "watchOS" : "unavailable",
+      "iOS" : "14.0",
+      "macCatalyst" : "14.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_visionFeaturePrint"
+    },
+    "inputSchema" : [
+      {
+        "height" : "299",
+        "colorspace" : "RGB",
+        "isOptional" : "0",
+        "width" : "299",
+        "isColor" : "1",
+        "formattedType" : "Image (Color 299 × 299)",
+        "hasSizeFlexibility" : "0",
+        "type" : "Image",
+        "shortDescription" : "",
+        "name" : "image"
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "VObj1",
+    "method" : "predict"
+  }
+]

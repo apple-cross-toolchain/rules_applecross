@@ -1,0 +1,51 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "shortDescription" : "This model is a gazetteer which tags words according to set {CITY,NAME}",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : "label"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 4,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_gazetteer"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "text",
+        "shortDescription" : "word"
+      }
+    ],
+    "classLabels" : [
+      ""
+    ],
+    "generatedClassName" : "Gazetteer",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]

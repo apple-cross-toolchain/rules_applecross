@@ -1,0 +1,66 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "y",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 1,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.13",
+      "tvOS" : "11.0",
+      "visionOS" : "1.0",
+      "watchOS" : "4.0",
+      "iOS" : "11.0",
+      "macCatalyst" : "11.0"
+    },
+    "customModels" : [
+      {
+        "className" : "C",
+        "description" : ""
+      }
+    ],
+    "modelType" : {
+      "name" : "MLModelType_customModel"
+    },
+    "inputSchema" : [
+      {
+        "height" : "3",
+        "colorspace" : "RGB",
+        "isOptional" : "0",
+        "width" : "4",
+        "isColor" : "1",
+        "formattedType" : "Image (Color 4 × 3)",
+        "hasSizeFlexibility" : "0",
+        "type" : "Image",
+        "shortDescription" : "",
+        "name" : "img"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "s",
+        "shortDescription" : ""
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "Cimg1",
+    "method" : "predict"
+  }
+]

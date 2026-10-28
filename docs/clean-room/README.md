@@ -65,7 +65,9 @@ order before comparing them byte for byte. The tests and
 
 Known variations:
 - `coremlc` writes a model's user-defined metadata (a protobuf map) in a
-  randomly seeded order, in `coremldata.bin` and `metadata.json`
+  randomly seeded order, in `coremldata.bin` and `metadata.json`, and so the
+  other maps of a specification it copies into `coremldata.bin` (a custom
+  model's parameters, a categorical mapping's map)
   ([coremlc.md](coremlc.md#xcodes-own-output-varies)). Ours keeps the
   model's own order.
 - `actool` writes the blocks of `Assets.car`'s `APPEARANCEKEYS` tree in a
@@ -91,7 +93,7 @@ fails on.)
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
-| [coremlc.md](coremlc.md) | `coremlc`: ML Programs, tree ensembles and Create ML's text, image and tabular models compiled to `.mlmodelc`, and their Swift and Objective-C classes |
+| [coremlc.md](coremlc.md) | `coremlc`: ML Programs and the other Core ML model types but neural networks, Create ML's included, compiled to `.mlmodelc`, and their Swift and Objective-C classes |
 | [appintentsmetadataprocessor.md](appintentsmetadataprocessor.md) | `appintentsmetadataprocessor`: App Intents metadata from Swift constant values |
 | [xcstringstool.md](xcstringstool.md) | `xcstringstool`: String Catalogs to `.strings` and `.stringsdict` |
 | [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |

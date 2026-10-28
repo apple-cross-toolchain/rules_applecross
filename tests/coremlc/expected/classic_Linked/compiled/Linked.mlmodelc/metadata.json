@@ -1,0 +1,67 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Double",
+        "formattedType" : "MultiArray (Double 2)",
+        "shortDescription" : "",
+        "shape" : "[2]",
+        "name" : "y",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+      {
+        "defaultValue" : "Other.mlmodelc",
+        "scope" : "",
+        "name" : "linkedModelFileName",
+        "dataType" : "String",
+        "shortDescription" : "File name of linked model"
+      },
+      {
+        "defaultValue" : "$BUNDLE_MAIN",
+        "scope" : "",
+        "name" : "linkedModelSearchPath",
+        "dataType" : "String",
+        "shortDescription" : "Search path used to resolve model file name"
+      }
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_linkedModel"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Double",
+        "formattedType" : "MultiArray (Double 2)",
+        "shortDescription" : "",
+        "shape" : "[2]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "userDefinedMetadata" : {
+
+    },
+    "generatedClassName" : "Linked",
+    "method" : "predict"
+  }
+]

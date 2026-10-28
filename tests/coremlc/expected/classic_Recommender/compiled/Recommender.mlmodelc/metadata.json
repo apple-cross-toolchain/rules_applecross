@@ -1,0 +1,87 @@
+[
+  {
+    "shortDescription" : "A probe",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "valueType" : "String",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (String 0)",
+        "sizeRange" : "[0, 0]",
+        "shortDescription" : "The recommended items in order from most relevant to least relevant.",
+        "type" : "Sequence",
+        "name" : "recommendations"
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "scores",
+        "shortDescription" : "The scores for the recommended items, given as a dictionary of items and the corresponding scores."
+      }
+    ],
+    "version" : "1.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Example",
+    "specificationVersion" : 4,
+    "license" : "MIT",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_itemSimilarityRecommender"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "items",
+        "shortDescription" : "The list of items used to generate the recommendations."
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "k",
+        "shortDescription" : "The number of items to return on a recommendation."
+      },
+      {
+        "valueType" : "String",
+        "isOptional" : "1",
+        "formattedType" : "Sequence (String 0)?",
+        "sizeRange" : "[0, 0]",
+        "shortDescription" : "A sequence of items from which to generate recommendations.",
+        "type" : "Sequence",
+        "name" : "restrict"
+      },
+      {
+        "valueType" : "String",
+        "isOptional" : "1",
+        "formattedType" : "Sequence (String 0)?",
+        "sizeRange" : "[0, 0]",
+        "shortDescription" : "A sequence of items to exclude from recommendations.  Defaults to the input item list if not given.",
+        "type" : "Sequence",
+        "name" : "exclude"
+      }
+    ],
+    "userDefinedMetadata" : {
+      "com.apple.createml.version" : "27.0.1"
+    },
+    "generatedClassName" : "Recommender",
+    "method" : "predict"
+  }
+]

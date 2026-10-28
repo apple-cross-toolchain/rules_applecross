@@ -14,8 +14,10 @@ beyond those variations, and exits 1 if any do.
 Known variations (docs/clean-room/README.md#determinism):
 - coremlc writes a model's user-defined metadata, a protobuf map, in a
   randomly seeded order: in `coremldata.bin` (the model description, or the
-  whole specification of a text model or a pipeline part) and in
-  `metadata.json`'s `userDefinedMetadata`.
+  whole specification of a model compiled to its specification or a
+  pipeline part) and in `metadata.json`'s `userDefinedMetadata`. So it
+  writes the other maps of a specification it copies: a custom model's
+  parameters, a categorical mapping's map and an imputer's dictionary.
 - actool writes the blocks of `Assets.car`'s APPEARANCEKEYS tree (each
   appearance's name and id) in a random order when a catalog has more than
   one appearance.
@@ -95,13 +97,39 @@ def _sorted_description(description):
                     for number, raw, payload in _fields(description))
 
 
+def _sorted_entries(message, number):
+    """`message` with the entries of its map field `number` in byte order."""
+    fields = _fields(message)
+    entries = iter(sorted(raw for n, raw, _ in fields if n == number))
+    return b"".join(next(entries) if n == number else raw for n, raw, _ in fields)
+
+
+# Maps in a model's own parameters, by Model field: (the map's field, or
+# (the field holding it, the map's field)).
+_MODEL_MAPS = {555: [30], 601: [(6, 1), (7, 1)], 606: [(1, 1), (2, 1)]}
+
+
+def _sorted_parameters(number, payload):
+    for where in _MODEL_MAPS[number]:
+        if isinstance(where, int):
+            payload = _sorted_entries(payload, where)
+        else:
+            outer, inner = where
+            payload = b"".join(_key(outer, _sorted_entries(p, inner)) if n == outer and p is not None else r
+                               for n, r, p in _fields(payload))
+    return payload
+
+
 def _sorted_model(model):
-    """A Model with its own description's metadata, and its pipeline's parts'
-    (fields 200-202, PipelineClassifier/Regressor/Pipeline), sorted."""
+    """A Model with its own description's metadata, its own parameters'
+    maps, and its pipeline's parts' (fields 200-202,
+    PipelineClassifier/Regressor/Pipeline), sorted."""
     out = []
     for number, raw, payload in _fields(model):
         if number == 2 and payload is not None:
             out.append(_key(2, _sorted_description(payload)))
+        elif number in _MODEL_MAPS and payload is not None:
+            out.append(_key(number, _sorted_parameters(number, payload)))
         elif number in (200, 201) and payload is not None:
             out.append(_key(number, b"".join(
                 _key(1, _sorted_pipeline(p)) if n == 1 and p is not None else r for n, r, p in _fields(payload))))
@@ -119,17 +147,19 @@ def _sorted_pipeline(pipeline):
 # --- Core ML's compiled files ---------------------------------------------------
 
 def _coremldata(data):
-    """coremldata.bin with its metadata map sorted. Two archives hold it:
+    """coremldata.bin with its metadata map sorted. Two kinds of archive
+    hold it:
     - `spec`: a 72-byte header, then the whole specification;
-    - `generic...`: a header naming the parts, then the length-prefixed
-      model description (and, after it, what doesn't vary)."""
+    - `generic...` (`notreesyet` for k-nearest neighbors): a header naming
+      the parts, then the length-prefixed model description (and, after
+      it, what doesn't vary)."""
     if len(data) < 36:
         return data
     tag_length = struct.unpack_from("<Q", data, 28)[0]
     tag = data[36:36 + tag_length]
     if tag == b"spec":
         return data[:72] + _sorted_model(data[72:])
-    if tag.startswith(b"generic"):
+    if tag.startswith(b"generic") or tag == b"notreesyet":
         at = 36 + tag_length + 4 + 28
         if at + 8 > len(data):
             return data

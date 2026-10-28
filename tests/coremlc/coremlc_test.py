@@ -79,6 +79,26 @@ class CoremlcTest(unittest.TestCase):
                 self.assertEqual(os.listdir(tmp), [])
         self.assertGreater(count, 0)
 
+    def test_refuses_encodings_xcode_would_change(self):
+        # Xcode re-encodes the specification it copies; one whose fields are
+        # out of order would come out different, so it is refused.
+        source = glob.glob(os.path.join(HERE, "cases", "classic_Afe", "*.mlmodel"))[0]
+        with open(source, "rb") as f:
+            data = f.read()
+        self.assertEqual(data[0], 0x08)  # field 1, the specification version
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(run("compile", source, tmp).returncode, 0)
+        end = 2
+        while data[end - 1] & 0x80:
+            end += 1
+        with tempfile.TemporaryDirectory() as tmp:
+            model = os.path.join(tmp, "Reordered.mlmodel")
+            with open(model, "wb") as f:
+                f.write(data[end:] + data[:end])
+            result = run("compile", model, tmp)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("encoded", result.stderr)
+
     def test_refuses_neural_networks(self):
         with tempfile.TemporaryDirectory() as tmp:
             # A neural network: the Model message's field 500.

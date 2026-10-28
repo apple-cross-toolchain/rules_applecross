@@ -1,0 +1,229 @@
+//
+// Id_dicts_4.m
+//
+// This file was automatically generated and should not be edited.
+//
+
+#if !__has_feature(objc_arc)
+#error This file must be compiled with automatic reference counting enabled (-fobjc-arc)
+#endif
+
+#import "Id_dicts_4.h"
+
+@implementation Id_dicts_4Input
+
+- (instancetype)initWithA:(double)a {
+    return [self initWithA:a o:nil];
+}
+- (instancetype)initWithA:(double)a o:(nullable NSDictionary<NSString *, NSNumber *> *)o {
+    self = [super init];
+    if (self) {
+        _a = a;
+        _o = o;
+    }
+    return self;
+}
+
+- (NSSet<NSString *> *)featureNames {
+    return [NSSet setWithArray:@[@"a", @"o"]];
+}
+
+- (nullable MLFeatureValue *)featureValueForName:(NSString *)featureName {
+    if ([featureName isEqualToString:@"a"]) {
+        return [MLFeatureValue featureValueWithDouble:self.a];
+    }
+    if ([featureName isEqualToString:@"o"]) {
+        return self.o == nil ? nil : [MLFeatureValue featureValueWithDictionary:(NSDictionary *)self.o error:nil];
+    }
+    return nil;
+}
+
+@end
+
+@implementation Id_dicts_4Output
+
+- (instancetype)initWithY:(double)y {
+    self = [super init];
+    if (self) {
+        _y = y;
+    }
+    return self;
+}
+
+- (NSSet<NSString *> *)featureNames {
+    return [NSSet setWithArray:@[@"y"]];
+}
+
+- (nullable MLFeatureValue *)featureValueForName:(NSString *)featureName {
+    if ([featureName isEqualToString:@"y"]) {
+        return [MLFeatureValue featureValueWithDouble:self.y];
+    }
+    return nil;
+}
+
+@end
+
+@implementation Id_dicts_4
+
+
+/**
+    URL of the underlying .mlmodelc directory.
+*/
++ (nullable NSURL *)URLOfModelInThisBundle {
+    NSString *assetPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"Id_dicts_4" ofType:@"mlmodelc"];
+    if (nil == assetPath) { os_log_error(OS_LOG_DEFAULT, "Could not load Id_dicts_4.mlmodelc in the bundle resource"); return nil; }
+    return [NSURL fileURLWithPath:assetPath];
+}
+
+
+/**
+    Initialize Id_dicts_4 instance from an existing MLModel object.
+
+    Usually the application does not use this initializer unless it makes a subclass of Id_dicts_4.
+    Such application may want to use `-[MLModel initWithContentsOfURL:configuration:error:]` and `+URLOfModelInThisBundle` to create a MLModel object to pass-in.
+*/
+- (instancetype)initWithMLModel:(MLModel *)model {
+    if (model == nil) {
+        return nil;
+    }
+    self = [super init];
+    if (self != nil) {
+        _model = model;
+    }
+    return self;
+}
+
+
+/**
+    Initialize Id_dicts_4 instance with the model in this bundle.
+*/
+- (nullable instancetype)init {
+    return [self initWithContentsOfURL:(NSURL * _Nonnull)self.class.URLOfModelInThisBundle error:nil];
+}
+
+
+/**
+    Initialize Id_dicts_4 instance with the model in this bundle.
+
+    @param configuration The model configuration object
+    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.
+*/
+- (nullable instancetype)initWithConfiguration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error {
+    return [self initWithContentsOfURL:(NSURL * _Nonnull)self.class.URLOfModelInThisBundle configuration:configuration error:error];
+}
+
+
+/**
+    Initialize Id_dicts_4 instance from the model URL.
+
+    @param modelURL URL to the .mlmodelc directory for Id_dicts_4.
+    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.
+*/
+- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL error:(NSError * _Nullable __autoreleasing * _Nullable)error {
+    MLModel *model = [MLModel modelWithContentsOfURL:modelURL error:error];
+    if (model == nil) { return nil; }
+    return [self initWithMLModel:model];
+}
+
+
+/**
+    Initialize Id_dicts_4 instance from the model URL.
+
+    @param modelURL URL to the .mlmodelc directory for Id_dicts_4.
+    @param configuration The model configuration object
+    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.
+*/
+- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error {
+    MLModel *model = [MLModel modelWithContentsOfURL:modelURL configuration:configuration error:error];
+    if (model == nil) { return nil; }
+    return [self initWithMLModel:model];
+}
+
+
+/**
+    Construct Id_dicts_4 instance asynchronously with configuration.
+    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.
+
+    @param configuration The model configuration
+    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid Id_dicts_4 instance or NSError object.
+*/
++ (void)loadWithConfiguration:(MLModelConfiguration *)configuration completionHandler:(void (^)(Id_dicts_4 * _Nullable model, NSError * _Nullable error))handler {
+    [self loadContentsOfURL:(NSURL * _Nonnull)[self URLOfModelInThisBundle]
+              configuration:configuration
+          completionHandler:handler];
+}
+
+
+/**
+    Construct Id_dicts_4 instance asynchronously with URL of .mlmodelc directory and optional configuration.
+
+    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.
+
+    @param modelURL The model URL.
+    @param configuration The model configuration
+    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid Id_dicts_4 instance or NSError object.
+*/
++ (void)loadContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration completionHandler:(void (^)(Id_dicts_4 * _Nullable model, NSError * _Nullable error))handler {
+    [MLModel loadContentsOfURL:modelURL
+                 configuration:configuration
+             completionHandler:^(MLModel *model, NSError *error) {
+        if (model != nil) {
+            Id_dicts_4 *typedModel = [[Id_dicts_4 alloc] initWithMLModel:model];
+            handler(typedModel, nil);
+        } else {
+            handler(nil, error);
+        }
+    }];
+}
+
+- (nullable Id_dicts_4Output *)predictionFromFeatures:(Id_dicts_4Input *)input error:(NSError * _Nullable __autoreleasing * _Nullable)error {
+    return [self predictionFromFeatures:input options:[[MLPredictionOptions alloc] init] error:error];
+}
+
+- (nullable Id_dicts_4Output *)predictionFromFeatures:(Id_dicts_4Input *)input options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error {
+    id<MLFeatureProvider> outFeatures = [self.model predictionFromFeatures:input options:options error:error];
+    if (!outFeatures) { return nil; }
+    return [[Id_dicts_4Output alloc] initWithY:[outFeatures featureValueForName:@"y"].doubleValue];
+}
+
+- (void)predictionFromFeatures:(Id_dicts_4Input *)input completionHandler:(void (^)(Id_dicts_4Output * _Nullable output, NSError * _Nullable error))completionHandler {
+    [self.model predictionFromFeatures:input completionHandler:^(id<MLFeatureProvider> prediction, NSError *predictionError) {
+        if (prediction != nil) {
+            Id_dicts_4Output *output = [[Id_dicts_4Output alloc] initWithY:[prediction featureValueForName:@"y"].doubleValue];
+            completionHandler(output, predictionError);
+        } else {
+            completionHandler(nil, predictionError);
+        }
+    }];
+}
+
+- (void)predictionFromFeatures:(Id_dicts_4Input *)input options:(MLPredictionOptions *)options completionHandler:(void (^)(Id_dicts_4Output * _Nullable output, NSError * _Nullable error))completionHandler {
+    [self.model predictionFromFeatures:input options:options completionHandler:^(id<MLFeatureProvider> prediction, NSError *predictionError) {
+        if (prediction != nil) {
+            Id_dicts_4Output *output = [[Id_dicts_4Output alloc] initWithY:[prediction featureValueForName:@"y"].doubleValue];
+            completionHandler(output, predictionError);
+        } else {
+            completionHandler(nil, predictionError);
+        }
+    }];
+}
+
+- (nullable Id_dicts_4Output *)predictionFromA:(double)a o:(nullable NSDictionary<NSString *, NSNumber *> *)o error:(NSError * _Nullable __autoreleasing * _Nullable)error {
+    Id_dicts_4Input *input_ = [[Id_dicts_4Input alloc] initWithA:a o:o];
+    return [self predictionFromFeatures:input_ error:error];
+}
+
+- (nullable NSArray<Id_dicts_4Output *> *)predictionsFromInputs:(NSArray<Id_dicts_4Input*> *)inputArray options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error {
+    id<MLBatchProvider> inBatch = [[MLArrayBatchProvider alloc] initWithFeatureProviderArray:inputArray];
+    id<MLBatchProvider> outBatch = [self.model predictionsFromBatch:inBatch options:options error:error];
+    if (!outBatch) { return nil; }
+    NSMutableArray<Id_dicts_4Output*> *results = [NSMutableArray arrayWithCapacity:(NSUInteger)outBatch.count];
+    for (NSInteger i = 0; i < outBatch.count; i++) {
+        id<MLFeatureProvider> resultProvider = [outBatch featuresAtIndex:i];
+        Id_dicts_4Output * result = [[Id_dicts_4Output alloc] initWithY:[resultProvider featureValueForName:@"y"].doubleValue];
+        [results addObject:result];
+    }
+    return results;
+}
+
+@end
