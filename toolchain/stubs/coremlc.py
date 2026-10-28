@@ -857,8 +857,17 @@ AVAILABILITY_LINE = {
     9: "macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0",
 }
 
-# Feature names Swift code can't use as they are, given a trailing "_".
-SWIFT_RESERVED = {"out", "var"}
+# Feature names the generated code (Swift and Objective-C alike) gives a
+# trailing "_", observed from Xcode 27.0's coremlc. Names outside this set
+# were seen kept as they are.
+SWIFT_RESERVED = set("""
+out var in inout self class let import return if for while struct protocol id int float double char void BOOL YES NO
+nil default switch case operator typealias extension init deinit subscript static public private internal Type Protocol
+super where as is break continue fallthrough enum union const signed unsigned long short auto register extern volatile
+goto sizeof typedef oneway bycopy byref restrict inline Self do else convenience dynamic final lazy optional required
+override weak unowned mutating nonmutating prefix postfix infix get set didSet NULL Class SEL IMP nonatomic atomic
+error _Bool dynamicType
+""".split())
 
 ARRAY_SWIFT = {"Float32": ("Float", "floats"), "Float16": ("Float16", "16-bit floats"), "Double": ("Double", "doubles"),
                "Int32": ("Int32", "32-bit integers")}
@@ -1062,7 +1071,7 @@ def objc_sources(model, name):
     inputs = [Feature(f) for f in description.msgs(1)]
     outputs = [Feature(f) for f in description.msgs(10)]
     for f in inputs + outputs:
-        if not f.name[:1].isalpha():
+        if not (f.name[:1].isalpha() or f.name[:1] == "_"):
             unestablished("generated code for a feature named %r" % f.name)
     images = [f for f in inputs if f.kind == "image"]
     if images and len(inputs) != 1:
