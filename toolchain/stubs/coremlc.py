@@ -589,15 +589,16 @@ def _walk_ops(block, out):
             _walk_ops(b, out)
 
 
-PRECISION_NAMES = {"fp16": "Float16", "fp32": "Float32", "fp64": "Float64", "int32": "Int32", "int64": "Int64"}
+PRECISION_NAMES = {"fp16": "Float16", "fp32": "Float32", "fp64": "Float64", "int32": "Int32", "int64": "Int64", "uint16": "UInt16"}
 
 
 def program_facts(program, spec_version):
     """(histogram pairs in first-use order, compute precision, class labels)."""
     ops = []
     declared = []
+    # Compute precision counts what operations produce (constants
+    # included), not the function's inputs.
     for _, function in sorted(program.map(2), key=lambda kv: kv[0]):
-        declared += [i.msg(2) for i in function.msgs(1)]
         for _, b in function.map(3):
             _walk_ops(b, ops)
     counts = {}
@@ -612,10 +613,21 @@ def program_facts(program, spec_version):
             continue
         name = histogram_name(kind, spec_version)
         counts[name] = counts.get(name, 0) + 1
+    # Storage precision counts the weights file's constants that an
+    # operation reads; one only returned counts for nothing.
+    read = set()
+    for op in ops:
+        for _, argument in op.map(2):
+            for b in argument.msgs(1):
+                if b.has(1):
+                    read.add(b.str(1))
     stored = set()
     for op in ops:
+        if op.str(1) != "const":
+            continue
+        out = op.msgs(3)[0]
         for _, v in op.map(5):
-            if v.has(5):
+            if v.has(5) and out.str(1) in read:
                 dtype = DATA_TYPES.get(v.msg(2).msg(1).int(1))
                 stored.add(PRECISION_NAMES.get(dtype) or unestablished("weights stored as %s" % dtype))
     types = set()
@@ -637,7 +649,9 @@ def program_facts(program, spec_version):
     names = sorted(types)
     precision = names[0] if len(names) == 1 else "Mixed (%s)" % ", ".join(names)
     storage = sorted(stored)
-    storage = None if not storage else storage[0] if len(storage) == 1 else unestablished("weights stored as several types")
+    if len(storage) > 1:
+        unestablished("weights stored as %s" % ", ".join(storage))
+    storage = storage[0] if storage else None
     return list(counts.items()), precision, labels, storage
 
 
@@ -833,7 +847,223 @@ def compile_package(package, outdir):
         shutil.copytree(weights, os.path.join(bundle, "weights"))
 
 
+
+# --- coremlc generate (Swift) ----------------------------------------------------
+
+AVAILABILITY_LINE = {
+    6: "macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, visionOS 1.0",
+    7: "macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, visionOS 1.0",
+    8: "macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0",
+    9: "macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0",
+}
+
+# Feature names Swift code can't use as they are, given a trailing "_".
+SWIFT_RESERVED = {"out", "var"}
+
+ARRAY_SWIFT = {"Float32": ("Float", "floats"), "Float16": ("Float16", "16-bit floats"), "Double": ("Double", "doubles"),
+               "Int32": ("Int32", "32-bit integers")}
+
+
+class Feature:
+    def __init__(self, f):
+        self.name = f.str(1)
+        self.description = f.str(2)
+        t = f.msg(3)
+        if t.int(1000):
+            unestablished("an optional feature's generated code")
+        self.swift_name = self.name + "_" if self.name in SWIFT_RESERVED else self.name
+        if not self.swift_name.replace("_", "a").isalnum() or not self.swift_name.isascii() or self.swift_name[0].isdigit():
+            unestablished("generated code for a feature named %r" % self.name)
+        label = self.description or self.name
+        if t.has(5):
+            a = t.msg(5)
+            dtype = ARRAY_TYPES.get(a.int(2)) or unestablished("array data type %d" % a.int(2))
+            self.element, words = ARRAY_SWIFT[dtype]
+            shape = []
+            for r in a.all(1):
+                if isinstance(r, bytes):
+                    i = 0
+                    while i < len(r):
+                        v, i = _varint(r, i)
+                        shape.append(v)
+                else:
+                    shape.append(r)
+            if len(shape) == 1:
+                shaped = "%d element vector of %s" % (shape[0], words)
+            elif len(shape) == 2:
+                shaped = "%d by %d matrix of %s" % (shape[0], shape[1], words)
+            elif len(shape) >= 3:
+                shaped = "%s %d-dimensional array of %s" % (" × ".join(map(str, shape)), len(shape), words)
+            else:
+                shaped = "multidimensional array of %s" % words
+            self.kind = "array"
+            self.swift_type = "MLMultiArray"
+            self.phrase = shaped
+        elif t.has(4):
+            im = t.msg(4)
+            space = im.int(3)
+            if space not in (10, 20, 30):
+                unestablished("color space %d" % space)
+            self.width, self.height = im.int(1), im.int(2)
+            self.kind = "image"
+            self.swift_type = "CVPixelBuffer"
+            fmt = "kCVPixelFormatType_OneComponent8" if space == 10 else "kCVPixelFormatType_32BGRA"
+            self.phrase = "%s (%s) image buffer, %d pixels wide by %d pixels high" % (
+                "grayscale" if space == 10 else "color", fmt, self.width, self.height)
+            self.cg_format = {10: "kCVPixelFormatType_OneComponent8", 20: "kCVPixelFormatType_32ARGB", 30: "kCVPixelFormatType_32BGRA"}[space]
+        elif t.has(3):
+            self.kind, self.swift_type, self.phrase = "string", "String", "string value"
+        elif t.has(1):
+            self.kind, self.swift_type, self.phrase = "int64", "Int64", "integer value"
+        elif t.has(6):
+            d = t.msg(6)
+            key = "Int64" if d.has(1) else "String"
+            self.kind = "dictionary"
+            self.swift_type = "[%s : Double]" % key
+            self.phrase = "dictionary of %s to doubles" % ("64-bit integers" if key == "Int64" else "strings")
+        else:
+            unestablished("generated code for this feature type")
+        self.doc = "%s as %s" % (label, self.phrase)
+        self.param_doc = ("%s as %s" % (self.description, self.phrase)) if self.description else self.phrase
+
+    def value(self, expr):
+        return {"array": "MLFeatureValue(multiArray: %s)", "image": "MLFeatureValue(pixelBuffer: %s)",
+                "string": "MLFeatureValue(string: %s)", "int64": "MLFeatureValue(int64: %s)",
+                "dictionary": "MLFeatureValue(dictionary: %s as [AnyHashable : NSNumber])"}[self.kind] % expr
+
+    def read(self):
+        return {"array": "provider.featureValue(for: \"%s\")!.multiArrayValue!",
+                "image": "provider.featureValue(for: \"%s\")!.imageBufferValue!",
+                "string": "provider.featureValue(for: \"%s\")!.stringValue",
+                "int64": "provider.featureValue(for: \"%s\")!.int64Value",
+                "dictionary": "provider.featureValue(for: \"%s\")!.dictionaryValue as! " + self.swift_type}[self.kind] % self.name
+
+
+def swift_source(model, name):
+    spec_version = model.int(1)
+    description = model.msg(2) or Message(b"")
+    if description.has(13) or description.has(20):
+        unestablished("generated code for a model with states or functions")
+    available = "@available(%s, *)" % (AVAILABILITY_LINE.get(spec_version) or unestablished("specification version %d" % spec_version))
+    inputs = [Feature(f) for f in description.msgs(1)]
+    outputs = [Feature(f) for f in description.msgs(10)]
+    L = []
+    w = L.append
+    w("//\n// %s.swift\n//\n// This file was automatically generated and should not be edited.\n//\n\nimport CoreML\n\n" % name)
+    # Input.
+    w("/// Model Prediction Input Type\n%s\npublic class %sInput : MLFeatureProvider {\n" % (available, name))
+    for f in inputs:
+        w("    /// %s\n    public var %s: %s\n" % (f.doc, f.swift_name, f.swift_type))
+    w("    public var featureNames: Set<String> { [%s] }\n" % ", ".join('"%s"' % f.name for f in inputs))
+    w("    public func featureValue(for featureName: String) -> MLFeatureValue? {")
+    for f in inputs:
+        w("        if featureName == \"%s\" {\n            return %s\n        }" % (f.name, f.value(f.swift_name)))
+    w("        return nil\n    }\n")
+    w("    public init(%s) {" % ", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in inputs))
+    for f in inputs:
+        w("        self.%s = %s" % (f.swift_name, f.swift_name))
+    w("    }\n")
+    arrays = [f for f in inputs if f.kind == "array"]
+    if arrays:
+        w("    public convenience init(%s) {" % ", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs))
+        w("        self.init(%s)" % ", ".join("%s: %s" % (f.swift_name, "MLMultiArray(%s)" % f.swift_name if f.kind == "array" else f.swift_name) for f in inputs))
+        w("    }\n")
+    images = [f for f in inputs if f.kind == "image"]
+    if images:
+        if len(inputs) != 1:
+            unestablished("generated code for images among other inputs")
+        f = images[0]
+        mk = "MLFeatureValue(%s: %s, pixelsWide: %d, pixelsHigh: %d, pixelFormatType: %s, options: nil).imageBufferValue!"
+        w("    public convenience init(%sWith %s: CGImage) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
+        w("    public convenience init(%sAt %s: URL) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
+        cap = f.swift_name[:1].upper() + f.swift_name[1:]
+        w("    public func set%s(with %s: CGImage) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
+        w("    public func set%s(with %s: URL) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
+    w("}\n\n")
+    # Output.
+    w("/// Model Prediction Output Type\n%s\npublic class %sOutput : MLFeatureProvider {\n" % (available, name))
+    w("    /// Source provided by CoreML\n    private let provider : MLFeatureProvider\n")
+    for f in outputs:
+        w("    /// %s\n    public var %s: %s {\n        %s\n    }\n" % (f.doc, f.swift_name, f.swift_type, f.read()))
+        if f.kind == "array":
+            w("    /// %s\n    public var %sShapedArray: MLShapedArray<%s> {\n        MLShapedArray<%s>(%s)\n    }\n" % (f.doc, f.swift_name, f.element, f.element, f.swift_name))
+    w("    public var featureNames: Set<String> {\n        provider.featureNames\n    }\n")
+    w("    public func featureValue(for featureName: String) -> MLFeatureValue? {\n        provider.featureValue(for: featureName)\n    }\n")
+    w("    public init(%s) {" % ", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in outputs))
+    w("        self.provider = try! MLDictionaryFeatureProvider(dictionary: [%s])" % ", ".join('"%s" : %s' % (f.name, f.value(f.swift_name)) for f in outputs))
+    w("    }\n")
+    w("    public init(features: MLFeatureProvider) {\n        self.provider = features\n    }\n}\n\n")
+    model_class = MODEL_CLASS.replace("{available}", available).replace("{N}", name).rstrip("\n") + "\n"
+    if spec_version < 8:
+        # Asynchronous prediction needs iOS 17 and its contemporaries.
+        anchor = "    public func prediction(input: %sInput, options: MLPredictionOptions = MLPredictionOptions()) async throws" % name
+        if model_class.count(anchor) != 1:
+            unestablished("the asynchronous prediction of an older model")
+        model_class = model_class.replace(anchor, "    @available(%s, *)\n" % AVAILABILITY_LINE[8] + anchor)
+    w(model_class)
+    # Convenience predictions.
+    params = "\n".join("            - %s: %s" % (f.swift_name, f.param_doc) for f in inputs)
+    doc = ("    /**\n        Make a prediction using the convenience interface\n\n        It uses the default function if the model has multiple functions.\n\n"
+           "        - parameters:\n%s\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as %sOutput\n    */\n") % (params, name)
+    call = "        let input_ = %sInput(%s)\n        return try prediction(input: input_)\n    }\n" % (name, ", ".join("%s: %s" % (f.swift_name, f.swift_name) for f in inputs))
+    w(doc + "    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in inputs), name) + call)
+    if arrays:
+        w(doc + "\n    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs), name) + call)
+    w(BATCH.replace("{N}", name))
+    return "\n".join(L)
+
+
+MODEL_CLASS = '/// Class for model loading and prediction\n{available}\npublic class {N} {\n    public let model: MLModel\n\n    /// URL of model assuming it was installed in the same bundle as this class\n    class var urlOfModelInThisBundle : URL {\n        let bundle = Bundle(for: self)\n        return bundle.url(forResource: "{N}", withExtension:"mlmodelc")!\n    }\n\n    /**\n        Construct {N} instance with an existing MLModel object.\n\n        Usually the application does not use this initializer unless it makes a subclass of {N}.\n        Such application may want to use `MLModel(contentsOfURL:configuration:)` and `{N}.urlOfModelInThisBundle` to create a MLModel object to pass-in.\n\n        - parameters:\n          - model: MLModel object\n    */\n    init(model: MLModel) {\n        self.model = model\n    }\n\n    /**\n        Construct a model with configuration\n\n        - parameters:\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(configuration: MLModelConfiguration = MLModelConfiguration()) throws {\n        try self.init(contentsOf: type(of:self).urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance with explicit path to mlmodelc file\n        - parameters:\n           - modelURL: the file url of the model\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL) throws {\n        try self.init(model: MLModel(contentsOf: modelURL))\n    }\n\n    /**\n        Construct a model with URL of the .mlmodelc directory and configuration\n\n        - parameters:\n           - modelURL: the file url of the model\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL, configuration: MLModelConfiguration) throws {\n        try self.init(model: MLModel(contentsOf: modelURL, configuration: configuration))\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration, completionHandler: handler)\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n    */\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        try await load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        MLModel.load(contentsOf: modelURL, configuration: configuration) { result in\n            switch result {\n            case .failure(let error):\n                handler(.failure(error))\n            case .success(let model):\n                handler(.success({N}(model: model)))\n            }\n        }\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n    */\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        let model = try await MLModel.load(contentsOf: modelURL, configuration: configuration)\n        return {N}(model: model)\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input) throws -> {N}Output {\n        try prediction(input: input, options: MLPredictionOptions())\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input, options: MLPredictionOptions) throws -> {N}Output {\n        let outFeatures = try model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n    /**\n        Make an asynchronous prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input, options: MLPredictionOptions = MLPredictionOptions()) async throws -> {N}Output {\n        let outFeatures = try await model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n'
+
+BATCH = '    /**\n        Make a batch prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - inputs: the inputs to the prediction as [{N}Input]\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as [{N}Output]\n    */\n    public func predictions(inputs: [{N}Input], options: MLPredictionOptions = MLPredictionOptions()) throws -> [{N}Output] {\n        let batchIn = MLArrayBatchProvider(array: inputs)\n        let batchOut = try model.predictions(from: batchIn, options: options)\n        var results : [{N}Output] = []\n        results.reserveCapacity(inputs.count)\n        for i in 0..<batchOut.count {\n            let outProvider = batchOut.features(at: i)\n            let result =  {N}Output(features: outProvider)\n            results.append(result)\n        }\n        return results\n    }\n}\n'
+
+
+def read_package(package):
+    with open(os.path.join(package, "Manifest.json")) as f:
+        manifest = json.load(f)
+    root = manifest["itemInfoEntries"][manifest["rootModelIdentifier"]]
+    with open(os.path.join(package, "Data", root["path"]), "rb") as f:
+        return Message(f.read())
+
+
+def generate(argv):
+    source, outdir, language, public = None, None, "Objective-C", False
+    rest = list(argv)
+    while rest:
+        arg = rest.pop(0)
+        if arg == "--public-access":
+            public = True
+        elif arg == "--language" and rest:
+            language = rest.pop(0)
+        elif source is None:
+            source = arg
+        elif outdir is None:
+            outdir = arg
+        else:
+            print("error: coremlc: unsupported argument %s" % arg, file=sys.stderr)
+            return 1
+    try:
+        if language != "Swift" or not public:
+            unestablished("generated %s%s code" % ("" if public else "internal ", language))
+        if not os.path.isdir(source):
+            unestablished("a .mlmodel file (only .mlpackage ML Programs are)")
+        model = read_package(source)
+        if not model.has(502):
+            unestablished("a model that isn't an ML Program")
+        name = generated_class_name(os.path.splitext(os.path.basename(source.rstrip("/")))[0])
+        text = swift_source(model, name)
+    except Unestablished as e:
+        print("error: coremlc: %s is not generated as Xcode generates it" % e, file=sys.stderr)
+        return 1
+    os.makedirs(outdir, exist_ok=True)
+    with open(os.path.join(outdir, name + ".swift"), "w") as f:
+        f.write(text)
+    return 0
+
+
 def main(argv):
+    if argv and argv[0] == "generate":
+        return generate(argv[1:])
     if len(argv) < 3 or argv[0] != "compile":
         print("error: coremlc: only `compile <model> <output-directory> [--output-partial-info-plist <plist>]` is supported off a Mac", file=sys.stderr)
         return 1
