@@ -1,4 +1,5 @@
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
 
 # bazel run //tools:package_sdks -- <Xcode.xip> <output.tar.gz>: the SDK archive
 # whose SHA-256 toolchain/xcode_versions.bzl pins.
@@ -31,6 +32,22 @@ py_binary(
 py_binary(
     name = "notarize",
     srcs = ["notarize.py"],
+    deps = [":app_store_connect"],
+)
+
+# bazel run //tools:upload -- --key AuthKey.p8 --key-id ID --issuer ISSUER
+# App.ipa: a distribution-signed app to App Store Connect, for TestFlight,
+# through its build uploads API, from any host.
+py_binary(
+    name = "upload",
+    srcs = ["upload.py"],
+    deps = [":app_store_connect"],
+)
+
+py_library(
+    name = "app_store_connect",
+    srcs = ["app_store_connect.py"],
+    imports = ["."],
 )
 
 # The LLVM the repository rule stubs Mach-O binaries with, for this host.

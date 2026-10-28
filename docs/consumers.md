@@ -191,6 +191,21 @@ A notarized Mac app's ticket can be stapled off a Mac too:
 from Apple's public lookup by the app's code directory hash and writes it to
 `Contents/CodeResources`, as `xcrun stapler staple` does.
 
+Apple's services that take a build need no Mac either. Each authenticates
+with an App Store Connect API key, given as `--key AuthKey.p8 --key-id ID
+--issuer ISSUER` or by `APP_STORE_CONNECT_KEY_PATH`,
+`APP_STORE_CONNECT_KEY_ID` and `APP_STORE_CONNECT_ISSUER_ID`:
+
+- `bazel run @rules_applecross//tools:notarize -- path/to/App.app`
+  (or a `.zip`, `.dmg` or `.pkg`) notarizes a Developer ID-signed Mac app
+  as `xcrun notarytool submit --wait` does, through the notary web API;
+  staple it afterwards.
+- `bazel run @rules_applecross//tools:upload -- path/to/App.ipa` uploads an
+  iOS, tvOS or visionOS app signed for distribution (Apple Distribution and
+  an App Store profile) to App Store Connect, for TestFlight, as Transporter
+  does, through the build uploads API. The app must already exist in App
+  Store Connect, by the bundle identifier the `.ipa`'s app carries.
+
 ## The Linux host
 
 The toolchain fetches LLVM, swift.org's Swift and the ported tools itself.
