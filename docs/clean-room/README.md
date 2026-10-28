@@ -1,20 +1,46 @@
 # Clean-room Apple build tools
 
-`tools/apple_tools/crates` reimplements, for Linux, Apple tools that
-rules_apple runs while bundling. They ship with the ported tools
-(`tools/build-ported-tools.sh`).
+`tools/apple_tools/crates` (Rust, shipped with the ported tools, see
+`tools/build-ported-tools.sh`) and `toolchain/stubs/` (Python, installed by
+the toolchain) reimplement, for Linux, Apple tools that rules_apple runs
+while bundling.
 
-No Apple binary was disassembled, decompiled or patched, and no Apple code
-was copied. All observations were made on an Apple silicon Mac with an
-unmodified Xcode 27.0; the Linux builds compared against it ran in a VM on
-that Mac, reading that Xcode through a read-only mount. Sources:
+## How they were made
 
-- the tools' command lines and documentation;
-- the outputs of Xcode 27.0's tools for constructed inputs;
-- Apple's public APIs, called from small programs;
-- published sources: the reference LZFSE encoder, CoreFoundation's string
-  hash and hash tables, the former open-source `swift-stdlib-tool`, and the
-  Security project's `libsecurity_codesigning` (read, not copied).
+Every tool here was developed clean-room, as a black box. Each one was
+derived from what an unmodified Xcode 27.0 tool does with inputs written for
+the purpose, and from published material. None of it comes from Apple's
+implementation.
+
+- **Ruled out, for every tool:**
+  - disassembling, decompiling or patching any Apple binary;
+  - reading an Apple binary's code, symbols or strings to learn how it works;
+  - copying Apple code.
+- **Allowed sources:**
+  - the tools' command lines, `--help` and Apple's documentation;
+  - the outputs of Xcode 27.0's tools for constructed inputs, compared byte for byte;
+  - Apple's public APIs, called from small programs;
+  - published sources and specifications, read rather than copied:
+    - the reference LZFSE encoder;
+    - CoreFoundation's string hash and hash tables (CFString.c, CFBasicHash);
+    - the former open-source `swift-stdlib-tool`;
+    - the Security project's `libsecurity_codesigning`;
+    - the Swift standard library's hashing (`Hasher`, SipHash-1-3), `Dictionary` layout and string escaping;
+    - Apple's Core ML model specification and coremltools (which build test models).
+
+All observations were made on an Apple silicon Mac with that Xcode. Where a
+tool runs on Linux, its Linux build was compared against the Mac's output,
+in a VM on that Mac reading the Xcode through a read-only mount, or as the
+same pure-Python program.
+
+Each tool's page has a **Provenance** paragraph (or **Method** paragraph)
+giving:
+- the experiments behind it, and how many inputs were compared;
+- what it reproduces;
+- what it refuses because the behaviour isn't established.
+
+The tests keep a sample of those comparisons with Xcode's output, so a reader
+can see the evidence for what each tool writes.
 
 The tools are strict by default: their output is byte-identical to Xcode's,
 or the build fails on the input. Known gaps are on each page; the largest is

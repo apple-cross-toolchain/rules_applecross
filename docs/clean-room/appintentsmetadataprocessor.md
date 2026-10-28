@@ -10,6 +10,18 @@ content is what has to match, not the layout.
 `toolchain/stubs/appintentsmetadataprocessor.py` is the implementation, in
 pure Python.
 
+Provenance: black-box, as [README.md](README.md) describes. Sources:
+- the outputs of Xcode 27.0's `appintentsmetadataprocessor` for constant
+  values from sources written for the purpose;
+- its `--help`;
+- Apple's App Intents documentation;
+- the published Swift standard library, for how Swift hashes strings
+  (`Hasher`, SipHash-1-3), lays out a `Dictionary` and escapes a string
+  (`debugDescription`). Those were read, not copied, and confirmed against
+  the processor's outputs.
+
+No Apple binary was read.
+
 Method: Swift sources, each built to isolate one behaviour, plus 300
 generated at random. Xcode 27.0's `swiftc` compiled them, Xcode's
 `appintentsmetadataprocessor` processed the constant values (with
