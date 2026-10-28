@@ -1,4 +1,5 @@
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
 
 # bazel run //tools:package_sdks -- <Xcode.xip> <output.tar.gz>: the SDK archive
 # whose SHA-256 toolchain/xcode_versions.bzl pins.
@@ -31,6 +32,15 @@ py_binary(
 py_binary(
     name = "notarize",
     srcs = ["notarize.py"],
+)
+
+# Outputs compared with Xcode's, allowing only what Xcode itself varies
+# (docs/clean-room/README.md#determinism).
+py_library(
+    name = "xcode_equivalence",
+    srcs = ["xcode_equivalence.py"],
+    imports = ["."],
+    visibility = ["//tests:__subpackages__"],
 )
 
 # The LLVM the repository rule stubs Mach-O binaries with, for this host.

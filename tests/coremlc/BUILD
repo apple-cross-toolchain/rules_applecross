@@ -2,7 +2,8 @@ load("@rules_python//python:py_test.bzl", "py_test")
 
 # coremlc compile and generate off a Mac, against Xcode 27.0's output for the
 # same models: cases/X/<name>.mlpackage (or .mlmodel) compiles to expected/X/compiled/ and
-# generates expected/X/swift/ and expected/X/objc/, where those exist.
+# generates expected/X/swift/ and expected/X/objc/, where those exist. Compiled
+# models compare up to the metadata order Xcode varies from run to run.
 py_test(
     name = "coremlc_test",
     srcs = ["coremlc_test.py"],
@@ -13,5 +14,8 @@ py_test(
         "cases/**",
         "expected/**",
     ]),
-    deps = ["@rules_python//python/runfiles"],
+    deps = [
+        "//tools:xcode_equivalence",
+        "@rules_python//python/runfiles",
+    ],
 )

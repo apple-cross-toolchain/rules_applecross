@@ -1,0 +1,81 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "valueType" : "String",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (String 0...10000)",
+        "sizeRange" : "[0, 10000]",
+        "shortDescription" : "Token tags",
+        "type" : "Sequence",
+        "name" : "labels"
+      },
+      {
+        "valueType" : "Int64",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (Int64 0...10000)",
+        "sizeRange" : "[0, 10000]",
+        "shortDescription" : "Token lengths",
+        "type" : "Sequence",
+        "name" : "lengths"
+      },
+      {
+        "valueType" : "Int64",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (Int64 0...10000)",
+        "sizeRange" : "[0, 10000]",
+        "shortDescription" : "Token locations",
+        "type" : "Sequence",
+        "name" : "locations"
+      },
+      {
+        "valueType" : "String",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (String 0...10000)",
+        "sizeRange" : "[0, 10000]",
+        "shortDescription" : "Tokens",
+        "type" : "Sequence",
+        "name" : "tokens"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Only author",
+    "specificationVersion" : 3,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.14",
+      "tvOS" : "12.0",
+      "visionOS" : "1.0",
+      "watchOS" : "5.0",
+      "iOS" : "12.0",
+      "macCatalyst" : "12.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_wordTagger"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "text",
+        "shortDescription" : "Input text"
+      }
+    ],
+    "classLabels" : [
+      "one"
+    ],
+    "generatedClassName" : "Tagger3",
+    "userDefinedMetadata" : {
+      "k2" : "v2",
+      "k1" : "v1"
+    },
+    "method" : "predict"
+  }
+]

@@ -35,8 +35,8 @@ Every compiled file matched (allowing Xcode's random map order, below), and
 so did every generated Swift and Objective-C file. An app built entirely on
 Linux (`//examples/ios/HelloWorldSwift`, with `examples/resources/Doubler.mlpackage`)
 carries a compiled model and a generated class byte-identical to Xcode's.
-`tests/coremlc` keeps 68 compile cases and 19 generate cases with Xcode's
-output.
+`tests/coremlc` keeps 143 models with Xcode's output: 130 compiled, and 77
+with generated classes.
 
 ## Xcode's own output varies
 
@@ -45,8 +45,11 @@ seeded order. So a model with more than one entry compiles to different
 `coremldata.bin` and `metadata.json` bytes on every run. coremltools adds
 three entries to every model it converts.
 
-This tool keeps the model's own order. For such models it matches Xcode up
-to that order; for models with at most one entry it matches byte for byte.
+This tool keeps the model's own order, so its output is the same on every
+run. For such models it matches Xcode up to that order; for models with at
+most one entry it matches byte for byte. The tests compare compiled models
+with `tools/xcode_equivalence.py`, which sorts that map on both sides and
+then compares the bytes, so a model's metadata is checked like the rest.
 
 ## Compiled files
 
@@ -146,7 +149,7 @@ initializers and on batch predictions.
 Fifteen models compared, trained with five feature and label sets and three
 kinds of metadata, and four more from earlier probes. Every compiled and
 generated file matched, up to Xcode's map order for the two with two
-metadata entries; `tests/coremlc` keeps those two for generating only.
+metadata entries.
 
 ## Tree ensembles
 

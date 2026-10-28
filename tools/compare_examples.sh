@@ -6,6 +6,8 @@
 #   tools/compare_examples.sh compare .compare/mac .compare/linux
 set -euo pipefail
 
+here="$(cd "$(dirname "$0")" && pwd)"
+
 FLAGS=(
   --ios_multi_cpus=sim_arm64
   --macos_cpus=arm64
@@ -59,6 +61,10 @@ compare() {
     if diff -rq "$a/$f" "$b/$f" >/dev/null; then
       echo "identical: $f"; continue
     fi
+    # Xcode varies some outputs from run to run (docs/clean-room/README.md#determinism).
+    if python3 "$here/xcode_equivalence.py" "$a/$f" "$b/$f" >/dev/null; then
+      echo "equivalent (up to Xcode's own variation): $f"; continue
+    fi
     status=1
     case "$f" in
       *.ipa|*.zip|*.xcarchive.zip)
@@ -68,6 +74,8 @@ compare() {
         (cd "$work/b" && unzip -qo "$b/$f")
         if diff -rq "$work/a" "$work/b" >/dev/null; then
           echo "DIFFERENT (zip metadata only): $f"
+        elif python3 "$here/xcode_equivalence.py" "$work/a" "$work/b" >/dev/null; then
+          echo "DIFFERENT (zip metadata, and Xcode's own variation, only): $f"
         else
           echo "DIFFERENT: $f"
           diff -rq "$work/a" "$work/b" | sed "s|$work/[ab]/||g; s/^/    /" || true

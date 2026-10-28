@@ -1,0 +1,28 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, []> upsample_bilinear_0_scale_factor_height_0 = const()[name = tensor<string, []>("upsample_bilinear_0_scale_factor_height_0"), val = tensor<fp32, []>(0x1p+1)];
+            tensor<fp32, []> upsample_bilinear_0_scale_factor_width_0 = const()[name = tensor<string, []>("upsample_bilinear_0_scale_factor_width_0"), val = tensor<fp32, []>(0x1p+1)];
+            tensor<bool, []> upsample_bilinear_0_align_corners_0 = const()[name = tensor<string, []>("upsample_bilinear_0_align_corners_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1, 8, 8]> upsample_bilinear_0 = upsample_bilinear(align_corners = upsample_bilinear_0_align_corners_0, scale_factor_height = upsample_bilinear_0_scale_factor_height_0, scale_factor_width = upsample_bilinear_0_scale_factor_width_0, x = x)[name = tensor<string, []>("upsample_bilinear_0")];
+            tensor<fp32, [1, 1, 8, 8]> o_upsample_bilinear_0 = identity(x = upsample_bilinear_0)[name = tensor<string, []>("o_upsample_bilinear_0")];
+            tensor<string, []> gelu_0_mode_0 = const()[name = tensor<string, []>("gelu_0_mode_0"), val = tensor<string, []>("EXACT")];
+            tensor<fp32, [1, 1, 4, 4]> gelu_0 = gelu(mode = gelu_0_mode_0, x = x)[name = tensor<string, []>("gelu_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_gelu_1 = identity(x = gelu_0)[name = tensor<string, []>("o_gelu_1")];
+            tensor<fp32, [1, 1, 4, 4]> exp_0 = exp(x = x)[name = tensor<string, []>("exp_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_exp_2 = identity(x = exp_0)[name = tensor<string, []>("o_exp_2")];
+            tensor<fp32, [1, 1, 4, 4]> exp2_0 = exp2(x = x)[name = tensor<string, []>("exp2_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_exp2_3 = identity(x = exp2_0)[name = tensor<string, []>("o_exp2_3")];
+            tensor<fp32, [1, 1, 4, 4]> relu6_0 = relu6(x = x)[name = tensor<string, []>("relu6_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_relu6_4 = identity(x = relu6_0)[name = tensor<string, []>("o_relu6_4")];
+            tensor<int32, []> split_0_num_splits_0 = const()[name = tensor<string, []>("split_0_num_splits_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> split_0_axis_0 = const()[name = tensor<string, []>("split_0_axis_0"), val = tensor<int32, []>(3)];
+            tensor<fp32, [1, 1, 4, 2]> split_0_0, tensor<fp32, [1, 1, 4, 2]> split_0_1 = split(axis = split_0_axis_0, num_splits = split_0_num_splits_0, x = x)[name = tensor<string, []>("split_0")];
+            tensor<fp32, [1, 1, 4, 2]> o_split_5 = identity(x = split_0_0)[name = tensor<string, []>("o_split_5")];
+            tensor<int32, []> band_part_0_lower_0 = const()[name = tensor<string, []>("band_part_0_lower_0"), val = tensor<int32, []>(-1)];
+            tensor<int32, []> band_part_0_upper_0 = const()[name = tensor<string, []>("band_part_0_upper_0"), val = tensor<int32, []>(-1)];
+            tensor<fp32, [1, 1, 4, 4]> band_part_0 = band_part(lower = band_part_0_lower_0, upper = band_part_0_upper_0, x = x)[name = tensor<string, []>("band_part_0")];
+            tensor<fp32, [1, 1, 4, 4]> o_band_part_6 = identity(x = band_part_0)[name = tensor<string, []>("o_band_part_6")];
+        } -> (o_upsample_bilinear_0, o_gelu_1, o_exp_2, o_exp2_3, o_relu6_4, o_split_5, o_band_part_6);
+}

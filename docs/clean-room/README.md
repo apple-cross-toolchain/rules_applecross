@@ -54,6 +54,21 @@ support to xcbuild's actool (`tools/apple_tools/xcbuild`), and `ibtool`
 leaves what it can't compile uncompiled, as the stub it replaced did. The
 other tools refuse such inputs either way.
 
+## Determinism
+
+These tools write the same bytes every time for the same input. Not all of
+Xcode's do. Where an Xcode tool varies its output from run to run, ours keep
+one order, and comparisons with Xcode's output allow exactly that variation.
+`tools/xcode_equivalence.py` lists each one and puts both sides in a single
+order before comparing them byte for byte. The tests and
+`tools/compare_examples.sh` use it.
+
+Known variations:
+- `coremlc` writes a model's user-defined metadata (a protobuf map) in a
+  randomly seeded order, in `coremldata.bin` and `metadata.json`
+  ([coremlc.md](coremlc.md#xcodes-own-output-varies)). Ours keeps the
+  model's own order.
+
 | Page | Tool |
 | --- | --- |
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
