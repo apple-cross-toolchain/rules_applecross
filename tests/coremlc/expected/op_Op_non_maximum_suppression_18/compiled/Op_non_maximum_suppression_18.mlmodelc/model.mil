@@ -1,0 +1,15 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, [3]> reshape_0_shape_0 = const()[name = string("reshape_0_shape_0"), val = tensor<int32, [3]>([1, 4, 4])];
+            tensor<fp32, [1, 4, 4]> reshape_0 = reshape(shape = reshape_0_shape_0, x = x)[name = string("reshape_0")];
+            tensor<int32, [3]> reshape_1_shape_0 = const()[name = string("reshape_1_shape_0"), val = tensor<int32, [3]>([1, 4, 4])];
+            tensor<fp32, [1, 4, 4]> reshape_1 = reshape(shape = reshape_1_shape_0, x = x)[name = string("reshape_1")];
+            int32 non_maximum_suppression_0_max_boxes_0 = const()[name = string("non_maximum_suppression_0_max_boxes_0"), val = int32(2)];
+            fp32 non_maximum_suppression_0_iou_threshold_0 = const()[name = string("non_maximum_suppression_0_iou_threshold_0"), val = fp32(0x1p-1)];
+            bool non_maximum_suppression_0_per_class_suppression_0 = const()[name = string("non_maximum_suppression_0_per_class_suppression_0"), val = bool(false)];
+            tensor<fp32, [1, 4, 2]> non_maximum_suppression_0_0, tensor<fp32, [1, 4, 2]> non_maximum_suppression_0_1, tensor<int32, [1, 2]> non_maximum_suppression_0_2 = non_maximum_suppression(boxes = reshape_0, iou_threshold = non_maximum_suppression_0_iou_threshold_0, max_boxes = non_maximum_suppression_0_max_boxes_0, per_class_suppression = non_maximum_suppression_0_per_class_suppression_0, scores = reshape_1)[name = string("non_maximum_suppression_0")];
+            tensor<fp32, [1, 4, 2]> o = identity(x = non_maximum_suppression_0_0)[name = string("o")];
+        } -> (o);
+}

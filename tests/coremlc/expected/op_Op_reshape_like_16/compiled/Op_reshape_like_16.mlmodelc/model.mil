@@ -1,0 +1,11 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, []> reshape_like_0_begins0_0 = const()[name = tensor<string, []>("reshape_like_0_begins0_0"), val = tensor<int32, []>(0)];
+            tensor<int32, []> reshape_like_0_ends0_0 = const()[name = tensor<string, []>("reshape_like_0_ends0_0"), val = tensor<int32, []>(4)];
+            tensor<bool, []> reshape_like_0_end_masks0_0 = const()[name = tensor<string, []>("reshape_like_0_end_masks0_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1, 4, 4]> reshape_like_0 = reshape_like(begins = tensor<int32, []>(0), end_masks = tensor<bool, []>(true), ends = tensor<int32, []>(4), ref_tensors = x, x = x)[name = tensor<string, []>("reshape_like_0")];
+            tensor<fp32, [1, 1, 4, 4]> o = identity(x = reshape_like_0)[name = tensor<string, []>("o")];
+        } -> (o);
+}

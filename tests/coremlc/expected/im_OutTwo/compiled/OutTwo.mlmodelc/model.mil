@@ -1,0 +1,11 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 3, 4, 4]> x) {
+            tensor<fp32, [1, 3, 4, 4]> first = relu(x = x)[name = tensor<string, []>("first")];
+            tensor<int32, [1]> reduce_mean_0_axes_0 = const()[name = tensor<string, []>("reduce_mean_0_axes_0"), val = tensor<int32, [1]>([1])];
+            tensor<bool, []> reduce_mean_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_mean_0_keep_dims_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1, 4, 4]> reduce_mean_0 = reduce_mean(axes = reduce_mean_0_axes_0, keep_dims = reduce_mean_0_keep_dims_0, x = x)[name = tensor<string, []>("reduce_mean_0")];
+            tensor<fp32, [1, 1, 4, 4]> second = sigmoid(x = reduce_mean_0)[name = tensor<string, []>("second")];
+        } -> (first, second);
+}

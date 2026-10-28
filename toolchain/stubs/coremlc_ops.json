@@ -8,6 +8,15 @@
    18
   ]
  },
+ "acos": {
+  "base": "Acos",
+  "camel": "acos",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "add": {
   "base": "Add",
   "camel": "add",
@@ -17,9 +26,40 @@
    18
   ]
  },
+ "affine": {
+  "base": "Affine",
+  "camel": "affine",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "argsort": {
+  "base": "Argsort",
+  "camel": null,
+  "versions": []
+ },
+ "asin": {
+  "base": "Asin",
+  "camel": "asin",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "atan": {
   "base": "Atan",
   "camel": "atan",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "atanh": {
+  "base": "Atanh",
+  "camel": "atanh",
   "versions": [
    16,
    17,
@@ -48,6 +88,11 @@
    18
   ]
  },
+ "batch_to_space": {
+  "base": "BatchToSpace",
+  "camel": null,
+  "versions": []
+ },
  "cast": {
   "base": "Cast",
   "camel": "cast",
@@ -60,6 +105,15 @@
  "ceil": {
   "base": "Ceil",
   "camel": "ceil",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "clamped_relu": {
+  "base": "ClampedRelu",
+  "camel": "clampedRelu",
   "versions": [
    16,
    17,
@@ -88,6 +142,47 @@
   "camel": null,
   "versions": []
  },
+ "constexpr_affine_dequantize": {
+  "base": null,
+  "camel": "constexprAffineDequantize",
+  "versions": [
+   16
+  ]
+ },
+ "constexpr_blockwise_shift_scale": {
+  "base": null,
+  "camel": "constexprBlockwiseShiftScale",
+  "versions": [
+   18
+  ]
+ },
+ "constexpr_cast": {
+  "base": null,
+  "camel": "constexprCast",
+  "targets": [
+   18
+  ],
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "constexpr_lut_to_dense": {
+  "base": null,
+  "camel": "constexprLutToDense",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "constexpr_sparse_to_dense": {
+  "base": null,
+  "camel": "constexprSparseToDense",
+  "versions": [
+   16,
+   18
+  ]
+ },
  "conv": {
   "base": "Conv",
   "camel": "conv",
@@ -115,10 +210,28 @@
    18
   ]
  },
+ "cosh": {
+  "base": "Cosh",
+  "camel": "cosh",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "crop": {
   "base": "Crop",
   "camel": null,
   "versions": []
+ },
+ "crop_resize": {
+  "base": "CropResize",
+  "camel": "cropResize",
+  "versions": [
+   16,
+   17,
+   18
+  ]
  },
  "cumsum": {
   "base": "Cumsum",
@@ -131,6 +244,30 @@
   "base": "DepthToSpace",
   "camel": null,
   "versions": []
+ },
+ "dequantize": {
+  "base": null,
+  "camel": "dequantize",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "einsum": {
+  "base": "Einsum",
+  "camel": "einsum",
+  "versions": [
+   16
+  ]
+ },
+ "elu": {
+  "base": "Elu",
+  "camel": "elu",
+  "versions": [
+   16,
+   17,
+   18
+  ]
  },
  "equal": {
   "base": "Equal",
@@ -180,6 +317,13 @@
   "camel": null,
   "versions": []
  },
+ "fill_like": {
+  "base": null,
+  "camel": "fillLike",
+  "versions": [
+   16
+  ]
+ },
  "flatten2d": {
   "base": "Flatten2d",
   "camel": null,
@@ -206,6 +350,15 @@
  "gather": {
   "base": "Gather",
   "camel": "gather",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "gather_along_axis": {
+  "base": "GatherAlongAxis",
+  "camel": "gatherAlongAxis",
   "versions": [
    16,
    17,
@@ -247,6 +400,15 @@
    18
   ]
  },
+ "gru": {
+  "base": "Gru",
+  "camel": "gru",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "identity": {
   "base": "Identity",
   "camel": null,
@@ -276,6 +438,14 @@
   "versions": [
    16,
    17,
+   18
+  ]
+ },
+ "l2_pool": {
+  "base": "L2Pool",
+  "camel": "l2Pool",
+  "versions": [
+   16,
    18
   ]
  },
@@ -324,6 +494,15 @@
    18
   ]
  },
+ "linear_activation": {
+  "base": "LinearActivation",
+  "camel": "linearActivation",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "local_response_norm": {
   "base": "LocalResponseNorm",
   "camel": "localResponseNorm",
@@ -363,6 +542,24 @@
  "logical_or": {
   "base": "LogicalOr",
   "camel": "logicalOr",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "logical_xor": {
+  "base": "LogicalXor",
+  "camel": "logicalXor",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "lstm": {
+  "base": "Lstm",
+  "camel": "lstm",
   "versions": [
    16,
    17,
@@ -422,6 +619,20 @@
    18
   ]
  },
+ "non_maximum_suppression": {
+  "base": "NonMaximumSuppression",
+  "camel": "nonMaximumSuppression",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "non_zero": {
+  "base": "NonZero",
+  "camel": null,
+  "versions": []
+ },
  "not_equal": {
   "base": "NotEqual",
   "camel": "notEqual",
@@ -446,6 +657,13 @@
   "camel": null,
   "versions": []
  },
+ "pixel_unshuffle": {
+  "base": null,
+  "camel": "pixelUnshuffle",
+  "versions": [
+   16
+  ]
+ },
  "pow": {
   "base": "Pow",
   "camel": "pow",
@@ -464,10 +682,57 @@
    18
   ]
  },
+ "quantize": {
+  "base": null,
+  "camel": "quantize",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "random_bernoulli": {
+  "base": "RandomBernoulli",
+  "camel": "randomBernoulli",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "random_categorical": {
+  "base": "RandomCategorical",
+  "camel": "randomCategorical",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "random_normal": {
+  "base": "RandomNormal",
+  "camel": "randomNormal",
+  "versions": [
+   16,
+   18
+  ]
+ },
+ "random_uniform": {
+  "base": "RandomUniform",
+  "camel": "randomUniform",
+  "versions": [
+   16,
+   18
+  ]
+ },
  "range_1d": {
   "base": "Range1d",
   "camel": null,
   "versions": []
+ },
+ "read_state": {
+  "base": null,
+  "camel": "readState",
+  "versions": [
+   18
+  ]
  },
  "real_div": {
   "base": "RealDiv",
@@ -496,9 +761,23 @@
    18
   ]
  },
+ "reduce_l1_norm": {
+  "base": "ReduceL1Norm",
+  "camel": "reduceL1Norm",
+  "versions": [
+   16
+  ]
+ },
  "reduce_l2_norm": {
   "base": "ReduceL2Norm",
   "camel": "reduceL2Norm",
+  "versions": [
+   16
+  ]
+ },
+ "reduce_log_sum": {
+  "base": "ReduceLogSum",
+  "camel": "reduceLogSum",
   "versions": [
    16
   ]
@@ -545,6 +824,13 @@
    16
   ]
  },
+ "reduce_sum_square": {
+  "base": "ReduceSumSquare",
+  "camel": "reduceSumSquare",
+  "versions": [
+   16
+  ]
+ },
  "relu": {
   "base": "Relu",
   "camel": "relu",
@@ -561,11 +847,40 @@
    18
   ]
  },
+ "resample": {
+  "base": "Resample",
+  "camel": "resample",
+  "targets": [
+   15
+  ],
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "reshape": {
   "base": "Reshape",
   "camel": "reshape",
   "versions": [
    16,
+   17,
+   18
+  ]
+ },
+ "reshape_like": {
+  "base": null,
+  "camel": "reshapeLike",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "resize": {
+  "base": null,
+  "camel": "resize",
+  "versions": [
    17,
    18
   ]
@@ -577,10 +892,32 @@
    16
   ]
  },
+ "resize_nearest_neighbor": {
+  "base": "ResizeNearestNeighbor",
+  "camel": null,
+  "versions": []
+ },
  "reverse": {
   "base": "Reverse",
   "camel": "reverse",
   "versions": [
+   17,
+   18
+  ]
+ },
+ "reverse_sequence": {
+  "base": "ReverseSequence",
+  "camel": "reverseSequence",
+  "versions": [
+   17,
+   18
+  ]
+ },
+ "rnn": {
+  "base": "Rnn",
+  "camel": "rnn",
+  "versions": [
+   16,
    17,
    18
   ]
@@ -603,9 +940,43 @@
    18
   ]
  },
+ "scaled_dot_product_attention": {
+  "base": null,
+  "camel": "scaledDotProductAttention",
+  "versions": [
+   18
+  ]
+ },
+ "scaled_tanh": {
+  "base": "ScaledTanh",
+  "camel": "scaledTanh",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "scatter": {
   "base": "Scatter",
   "camel": "scatter",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "scatter_along_axis": {
+  "base": "ScatterAlongAxis",
+  "camel": "scatterAlongAxis",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
+ "scatter_nd": {
+  "base": "ScatterNd",
+  "camel": "scatterNd",
   "versions": [
    16,
    17,
@@ -627,6 +998,15 @@
   "camel": "sigmoid",
   "versions": [
    16,
+   18
+  ]
+ },
+ "sigmoid_hard": {
+  "base": "SigmoidHard",
+  "camel": "sigmoidHard",
+  "versions": [
+   16,
+   17,
    18
   ]
  },
@@ -656,6 +1036,15 @@
    18
   ]
  },
+ "sinh": {
+  "base": "Sinh",
+  "camel": "sinh",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "slice_by_index": {
   "base": "SliceByIndex",
   "camel": "sliceByIndex",
@@ -669,6 +1058,13 @@
   "camel": "sliceBySize",
   "versions": [
    17,
+   18
+  ]
+ },
+ "slice_update": {
+  "base": null,
+  "camel": "sliceUpdate",
+  "versions": [
    18
   ]
  },
@@ -696,6 +1092,15 @@
    18
   ]
  },
+ "softplus_parametric": {
+  "base": "SoftplusParametric",
+  "camel": "softplusParametric",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "softsign": {
   "base": "Softsign",
   "camel": "softsign",
@@ -703,6 +1108,11 @@
    16,
    18
   ]
+ },
+ "space_to_batch": {
+  "base": "SpaceToBatch",
+  "camel": null,
+  "versions": []
  },
  "space_to_depth": {
   "base": "SpaceToDepth",
@@ -781,6 +1191,15 @@
    18
   ]
  },
+ "thresholded_relu": {
+  "base": "ThresholdedRelu",
+  "camel": "thresholdedRelu",
+  "versions": [
+   16,
+   17,
+   18
+  ]
+ },
  "tile": {
   "base": "Tile",
   "camel": null,
@@ -819,5 +1238,12 @@
   "base": "WhileLoop",
   "camel": null,
   "versions": []
+ },
+ "write_state": {
+  "base": null,
+  "camel": "writeState",
+  "versions": [
+   18
+  ]
  }
 }

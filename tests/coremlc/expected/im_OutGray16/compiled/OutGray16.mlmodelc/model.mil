@@ -1,0 +1,7 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp16, [1, 1, 8, 8]> x) {
+            tensor<fp16, [1, 1, 8, 8]> image = relu(x = x)[name = tensor<string, []>("image")];
+        } -> (image);
+}

@@ -1,0 +1,302 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1 × 5 × 5 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 5, 5, 3]",
+        "name" : "o_x",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 3]",
+        "name" : "mean_tokens",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 4 × 4 × 3)",
+        "shortDescription" : "",
+        "shape" : "[4, 4, 3]",
+        "name" : "s_image",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "functions" : [
+      {
+        "computePrecision" : "Mixed (Float16, Float32, Int32)",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 3 × 4)",
+            "shortDescription" : "",
+            "shape" : "[3, 4]",
+            "name" : "o_var",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "mean_in0",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 5 × 3 × 5)",
+            "shortDescription" : "",
+            "shape" : "[5, 3, 5]",
+            "name" : "o_tokens",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 2 × 2)",
+            "shortDescription" : "",
+            "shape" : "[1, 2, 2]",
+            "name" : "s_self",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 4 × 2)",
+            "shortDescription" : "",
+            "shape" : "[4, 2]",
+            "name" : "s_features",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+          {
+            "dataType" : "Float16",
+            "isOptional" : "0",
+            "formattedType" : "State (Float16 1 × 2 × 2)",
+            "shortDescription" : "",
+            "shape" : "[1, 2, 2]",
+            "name" : "self",
+            "type" : "State"
+          },
+          {
+            "dataType" : "Float16",
+            "isOptional" : "0",
+            "formattedType" : "State (Float16 4 × 2)",
+            "shortDescription" : "",
+            "shape" : "[4, 2]",
+            "name" : "features",
+            "type" : "State"
+          }
+        ],
+        "name" : "alpha",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios16.reduceMean" : 1,
+          "Ios18.writeState" : 2,
+          "Ios18.add" : 4,
+          "Ios18.cast" : 2,
+          "Identity" : 2,
+          "Ios18.readState" : 4
+        },
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 3 × 4)",
+            "shortDescription" : "",
+            "shape" : "[3, 4]",
+            "name" : "var",
+            "type" : "MultiArray"
+          },
+          {
+            "height" : "6",
+            "colorspace" : "RGB",
+            "isOptional" : "0",
+            "width" : "8",
+            "isColor" : "1",
+            "formattedType" : "Image (Color 8 × 6)",
+            "hasSizeFlexibility" : "0",
+            "type" : "Image",
+            "shortDescription" : "",
+            "name" : "in0"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 5 × 3 × 5)",
+            "shortDescription" : "",
+            "shape" : "[5, 3, 5]",
+            "name" : "tokens",
+            "type" : "MultiArray"
+          }
+        ]
+      },
+      {
+        "computePrecision" : "Mixed (Float16, Float32, Int32)",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 5 × 5 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 5, 5, 3]",
+            "name" : "o_x",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "mean_tokens",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 4 × 4 × 3)",
+            "shortDescription" : "",
+            "shape" : "[4, 4, 3]",
+            "name" : "s_image",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+          {
+            "dataType" : "Float16",
+            "isOptional" : "0",
+            "formattedType" : "State (Float16 4 × 4 × 3)",
+            "shortDescription" : "",
+            "shape" : "[4, 4, 3]",
+            "name" : "image",
+            "type" : "State"
+          }
+        ],
+        "name" : "beta",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios16.reduceMean" : 1,
+          "Ios18.writeState" : 1,
+          "Ios18.add" : 2,
+          "Ios18.cast" : 2,
+          "Identity" : 1,
+          "Ios18.readState" : 2
+        },
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 5 × 5 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 5, 5, 3]",
+            "name" : "x",
+            "type" : "MultiArray"
+          },
+          {
+            "height" : "8",
+            "colorspace" : "BGR",
+            "isOptional" : "0",
+            "width" : "4",
+            "isColor" : "1",
+            "formattedType" : "Image (Color 4 × 8)",
+            "hasSizeFlexibility" : "0",
+            "type" : "Image",
+            "shortDescription" : "",
+            "name" : "tokens"
+          }
+        ]
+      }
+    ],
+    "mlProgramOperationTypeHistogram" : {
+      "Ios16.reduceMean" : 1,
+      "Ios18.writeState" : 1,
+      "Ios18.add" : 2,
+      "Ios18.cast" : 2,
+      "Identity" : 1,
+      "Ios18.readState" : 2
+    },
+    "isUpdatable" : "0",
+    "stateSchema" : [
+      {
+        "dataType" : "Float16",
+        "isOptional" : "0",
+        "formattedType" : "State (Float16 4 × 4 × 3)",
+        "shortDescription" : "",
+        "shape" : "[4, 4, 3]",
+        "name" : "image",
+        "type" : "State"
+      }
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "computePrecision" : "Mixed (Float16, Float32, Int32)",
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1 × 5 × 5 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 5, 5, 3]",
+        "name" : "x",
+        "type" : "MultiArray"
+      },
+      {
+        "height" : "8",
+        "colorspace" : "BGR",
+        "isOptional" : "0",
+        "width" : "4",
+        "isColor" : "1",
+        "formattedType" : "Image (Color 4 × 8)",
+        "hasSizeFlexibility" : "0",
+        "type" : "Image",
+        "shortDescription" : "",
+        "name" : "tokens"
+      }
+    ],
+    "defaultFunctionName" : "beta",
+    "generatedClassName" : "F000",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]

@@ -1,0 +1,46 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}})]
+{
+    func alpha<ios18>(state<tensor<fp16, [4, 2]>> features, tensor<fp32, [1, 3, 6, 8]> in0, state<tensor<fp16, [1, 2, 2]>> self, tensor<int32, [5, 3, 5]> tokens, tensor<int32, [3, 4]> var) {
+            int32 o_var_y_0 = const()[name = string("o_var_y_0"), val = int32(1)];
+            tensor<int32, [3, 4]> o_var = add(x = var, y = o_var_y_0)[name = string("o_var")];
+            tensor<int32, [2]> mean_in0_axes_0 = const()[name = string("mean_in0_axes_0"), val = tensor<int32, [2]>([2, 3])];
+            bool mean_in0_keep_dims_0 = const()[name = string("mean_in0_keep_dims_0"), val = bool(false)];
+            string in0_to_fp16_dtype_0 = const()[name = string("in0_to_fp16_dtype_0"), val = string("fp16")];
+            tensor<fp16, [1, 3, 6, 8]> in0_to_fp16 = cast(dtype = in0_to_fp16_dtype_0, x = in0)[name = string("cast_1")];
+            tensor<fp16, [1, 3]> mean_in0_cast_fp16 = reduce_mean(axes = mean_in0_axes_0, keep_dims = mean_in0_keep_dims_0, x = in0_to_fp16)[name = string("mean_in0_cast_fp16")];
+            string mean_in0_cast_fp16_to_fp32_dtype_0 = const()[name = string("mean_in0_cast_fp16_to_fp32_dtype_0"), val = string("fp32")];
+            int32 o_tokens_y_0 = const()[name = string("o_tokens_y_0"), val = int32(1)];
+            tensor<int32, [5, 3, 5]> o_tokens = add(x = tokens, y = o_tokens_y_0)[name = string("o_tokens")];
+            tensor<fp16, [1, 2, 2]> read_state_0 = read_state(input = self)[name = string("read_state_0")];
+            fp16 add_0_y_0 = const()[name = string("add_0_y_0"), val = fp16(0x1p+0)];
+            tensor<fp16, [1, 2, 2]> add_0 = add(x = read_state_0, y = add_0_y_0)[name = string("add_0")];
+            write_state(data = add_0, input = self)[name = string("coreml_update_state_0_write_state")];
+            tensor<fp16, [1, 2, 2]> coreml_update_state_2 = read_state(input = self)[name = string("coreml_update_state_0")];
+            tensor<fp16, [1, 2, 2]> s_self = identity(x = coreml_update_state_2)[name = string("s_self")];
+            tensor<fp16, [4, 2]> read_state_1 = read_state(input = features)[name = string("read_state_1")];
+            fp16 add_1_y_0 = const()[name = string("add_1_y_0"), val = fp16(0x1p+0)];
+            tensor<fp16, [4, 2]> add_1 = add(x = read_state_1, y = add_1_y_0)[name = string("add_1")];
+            write_state(data = add_1, input = features)[name = string("coreml_update_state_1_write_state")];
+            tensor<fp16, [4, 2]> coreml_update_state_3 = read_state(input = features)[name = string("coreml_update_state_1")];
+            tensor<fp16, [4, 2]> s_features = identity(x = coreml_update_state_3)[name = string("s_features")];
+            tensor<fp32, [1, 3]> mean_in0 = cast(dtype = mean_in0_cast_fp16_to_fp32_dtype_0, x = mean_in0_cast_fp16)[name = string("cast_0")];
+        } -> (o_var, mean_in0, o_tokens, s_self, s_features);
+    func beta<ios18>(state<tensor<fp16, [4, 4, 3]>> image, tensor<fp32, [1, 3, 8, 4]> tokens, tensor<int32, [1, 5, 5, 3]> x) {
+            int32 o_x_y_0 = const()[name = string("o_x_y_0"), val = int32(1)];
+            tensor<int32, [1, 5, 5, 3]> o_x = add(x = x, y = o_x_y_0)[name = string("o_x")];
+            tensor<int32, [2]> mean_tokens_axes_0 = const()[name = string("mean_tokens_axes_0"), val = tensor<int32, [2]>([2, 3])];
+            bool mean_tokens_keep_dims_0 = const()[name = string("mean_tokens_keep_dims_0"), val = bool(false)];
+            string tokens_to_fp16_dtype_0 = const()[name = string("tokens_to_fp16_dtype_0"), val = string("fp16")];
+            tensor<fp16, [1, 3, 8, 4]> tokens_to_fp16 = cast(dtype = tokens_to_fp16_dtype_0, x = tokens)[name = string("cast_1")];
+            tensor<fp16, [1, 3]> mean_tokens_cast_fp16 = reduce_mean(axes = mean_tokens_axes_0, keep_dims = mean_tokens_keep_dims_0, x = tokens_to_fp16)[name = string("mean_tokens_cast_fp16")];
+            string mean_tokens_cast_fp16_to_fp32_dtype_0 = const()[name = string("mean_tokens_cast_fp16_to_fp32_dtype_0"), val = string("fp32")];
+            tensor<fp16, [4, 4, 3]> read_state_0 = read_state(input = image)[name = string("read_state_0")];
+            fp16 add_0_y_0 = const()[name = string("add_0_y_0"), val = fp16(0x1p+0)];
+            tensor<fp16, [4, 4, 3]> add_0 = add(x = read_state_0, y = add_0_y_0)[name = string("add_0")];
+            write_state(data = add_0, input = image)[name = string("coreml_update_state_2_write_state")];
+            tensor<fp16, [4, 4, 3]> coreml_update_state_1 = read_state(input = image)[name = string("coreml_update_state_2")];
+            tensor<fp16, [4, 4, 3]> s_image = identity(x = coreml_update_state_1)[name = string("s_image")];
+            tensor<fp32, [1, 3]> mean_tokens = cast(dtype = mean_tokens_cast_fp16_to_fp32_dtype_0, x = mean_tokens_cast_fp16)[name = string("cast_0")];
+        } -> (o_x, mean_tokens, s_image);
+}

@@ -1,0 +1,15 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(state<tensor<fp16, [4, 4]>> cache, tensor<fp16, [1, 4]> x) {
+            tensor<fp16, [4, 4]> read_state_0 = read_state(input = cache)[name = string("read_state_0")];
+            tensor<int32, [2]> slice_update_0_begin_0 = const()[name = string("slice_update_0_begin_0"), val = tensor<int32, [2]>([0, 0])];
+            tensor<int32, [2]> slice_update_0_end_0 = const()[name = string("slice_update_0_end_0"), val = tensor<int32, [2]>([1, 4])];
+            tensor<fp16, [4, 4]> slice_update_0 = slice_update(begin = slice_update_0_begin_0, end = slice_update_0_end_0, update = x, x = read_state_0)[name = string("slice_update_0")];
+            write_state(data = slice_update_0, input = cache)[name = string("coreml_update_state_1_write_state")];
+            tensor<fp16, [4, 4]> coreml_update_state_1 = read_state(input = cache)[name = string("coreml_update_state_1")];
+            tensor<int32, [1]> reduce_sum_0_axes_0 = const()[name = string("reduce_sum_0_axes_0"), val = tensor<int32, [1]>([0])];
+            bool reduce_sum_0_keep_dims_0 = const()[name = string("reduce_sum_0_keep_dims_0"), val = bool(true)];
+            tensor<fp16, [1, 4]> reduce_sum_0 = reduce_sum(axes = reduce_sum_0_axes_0, keep_dims = reduce_sum_0_keep_dims_0, x = coreml_update_state_1)[name = string("reduce_sum_0")];
+        } -> (reduce_sum_0);
+}

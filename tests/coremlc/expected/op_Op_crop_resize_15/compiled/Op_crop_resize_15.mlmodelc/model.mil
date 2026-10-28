@@ -1,0 +1,15 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios15>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, [1, 1, 5, 1, 1]> crop_resize_0_roi_0 = const()[name = tensor<string, []>("crop_resize_0_roi_0"), val = tensor<fp32, [1, 1, 5, 1, 1]>([[[[[0x0p+0]], [[0x0p+0]], [[0x0p+0]], [[0x1p+0]], [[0x1p+0]]]]])];
+            tensor<int32, []> crop_resize_0_target_height_0 = const()[name = tensor<string, []>("crop_resize_0_target_height_0"), val = tensor<int32, []>(2)];
+            tensor<int32, []> crop_resize_0_target_width_0 = const()[name = tensor<string, []>("crop_resize_0_target_width_0"), val = tensor<int32, []>(2)];
+            tensor<bool, []> crop_resize_0_normalized_coordinates_0 = const()[name = tensor<string, []>("crop_resize_0_normalized_coordinates_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, []> crop_resize_0_spatial_scale_0 = const()[name = tensor<string, []>("crop_resize_0_spatial_scale_0"), val = tensor<fp32, []>(0x1p+0)];
+            tensor<string, []> crop_resize_0_box_coordinate_mode_0 = const()[name = tensor<string, []>("crop_resize_0_box_coordinate_mode_0"), val = tensor<string, []>("CORNERS_HEIGHT_FIRST")];
+            tensor<string, []> crop_resize_0_sampling_mode_0 = const()[name = tensor<string, []>("crop_resize_0_sampling_mode_0"), val = tensor<string, []>("DEFAULT")];
+            tensor<fp32, [1, 1, 1, 2, 2]> crop_resize_0 = crop_resize(box_coordinate_mode = crop_resize_0_box_coordinate_mode_0, normalized_coordinates = crop_resize_0_normalized_coordinates_0, roi = crop_resize_0_roi_0, sampling_mode = crop_resize_0_sampling_mode_0, spatial_scale = crop_resize_0_spatial_scale_0, target_height = crop_resize_0_target_height_0, target_width = crop_resize_0_target_width_0, x = x)[name = tensor<string, []>("crop_resize_0")];
+            tensor<fp32, [1, 1, 1, 2, 2]> o = identity(x = crop_resize_0)[name = tensor<string, []>("o")];
+        } -> (o);
+}

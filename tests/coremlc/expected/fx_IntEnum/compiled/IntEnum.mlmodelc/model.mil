@@ -1,0 +1,8 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<int32, [1, ?]> n) [FlexibleShapeInformation = tuple<tuple<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>, tuple<tensor<string, []>, dict<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>>>((("DefaultShapes", {{"n", [1, 4]}}), ("EnumeratedShapes", {{"n_1_1_1_1_4_", {{"n", [1, 4]}}}, {"n_1_1_1_1_8_", {{"n", [1, 8]}}}})))] {
+            tensor<int32, []> add_0_y_0 = const()[name = tensor<string, []>("add_0_y_0"), val = tensor<int32, []>(1)];
+            tensor<int32, [1, ?]> add_0 = add(x = n, y = add_0_y_0)[name = tensor<string, []>("add_0")];
+        } -> (add_0);
+}

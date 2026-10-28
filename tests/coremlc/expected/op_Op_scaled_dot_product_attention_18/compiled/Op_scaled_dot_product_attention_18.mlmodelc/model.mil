@@ -1,0 +1,14 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, [3]> reshape_9_shape_0 = const()[name = string("reshape_9_shape_0"), val = tensor<int32, [3]>([1, 4, 4])];
+            tensor<fp32, [1, 4, 4]> reshape_9 = reshape(shape = reshape_9_shape_0, x = x)[name = string("reshape_9")];
+            tensor<int32, [3]> reshape_10_shape_0 = const()[name = string("reshape_10_shape_0"), val = tensor<int32, [3]>([1, 4, 4])];
+            tensor<fp32, [1, 4, 4]> reshape_10 = reshape(shape = reshape_10_shape_0, x = x)[name = string("reshape_10")];
+            tensor<int32, [3]> reshape_11_shape_0 = const()[name = string("reshape_11_shape_0"), val = tensor<int32, [3]>([1, 4, 4])];
+            tensor<fp32, [1, 4, 4]> reshape_11 = reshape(shape = reshape_11_shape_0, x = x)[name = string("reshape_11")];
+            tensor<fp32, [1, 4, 4]> scaled_dot_product_attention_0 = scaled_dot_product_attention(key = reshape_10, query = reshape_9, value = reshape_11)[name = string("scaled_dot_product_attention_0")];
+            tensor<fp32, [1, 4, 4]> o = identity(x = scaled_dot_product_attention_0)[name = string("o")];
+        } -> (o);
+}

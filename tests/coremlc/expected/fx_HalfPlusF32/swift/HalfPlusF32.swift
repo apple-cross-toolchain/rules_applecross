@@ -1,0 +1,342 @@
+//
+// HalfPlusF32.swift
+//
+// This file was automatically generated and should not be edited.
+//
+
+import CoreML
+
+
+/// Model Prediction Input Type
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, visionOS 1.0, *)
+public class HalfPlusF32Input : MLFeatureProvider {
+
+    /// x as 1 by 3 matrix of 16-bit floats
+    public var x: MLMultiArray
+
+    /// y as 1 by 3 matrix of floats
+    public var y: MLMultiArray
+
+    public var featureNames: Set<String> { ["x", "y"] }
+
+    public func featureValue(for featureName: String) -> MLFeatureValue? {
+        if featureName == "x" {
+            return MLFeatureValue(multiArray: x)
+        }
+        if featureName == "y" {
+            return MLFeatureValue(multiArray: y)
+        }
+        return nil
+    }
+
+    public init(x: MLMultiArray, y: MLMultiArray) {
+        self.x = x
+        self.y = y
+    }
+
+    #if (os(macOS) || targetEnvironment(macCatalyst)) && arch(x86_64)
+    @available(macOS, unavailable)
+    @available(macCatalyst, unavailable)
+    #else
+    @available(macOS 15.0, *)
+    #endif
+    public convenience init(x: MLShapedArray<Float16>, y: MLShapedArray<Float>) {
+        self.init(x: MLMultiArray(x), y: MLMultiArray(y))
+    }
+
+}
+
+
+/// Model Prediction Output Type
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, visionOS 1.0, *)
+public class HalfPlusF32Output : MLFeatureProvider {
+
+    /// Source provided by CoreML
+    private let provider : MLFeatureProvider
+
+    /// relu_0 as 1 by 3 matrix of 16-bit floats
+    public var relu_0: MLMultiArray {
+        provider.featureValue(for: "relu_0")!.multiArrayValue!
+    }
+
+    /// relu_0 as 1 by 3 matrix of 16-bit floats
+    #if (os(macOS) || targetEnvironment(macCatalyst)) && arch(x86_64)
+    @available(macOS, unavailable)
+    @available(macCatalyst, unavailable)
+    #else
+    @available(macOS 15.0, *)
+    #endif
+    public var relu_0ShapedArray: MLShapedArray<Float16> {
+        MLShapedArray<Float16>(relu_0)
+    }
+
+    /// relu_1 as 1 by 3 matrix of floats
+    public var relu_1: MLMultiArray {
+        provider.featureValue(for: "relu_1")!.multiArrayValue!
+    }
+
+    /// relu_1 as 1 by 3 matrix of floats
+    public var relu_1ShapedArray: MLShapedArray<Float> {
+        MLShapedArray<Float>(relu_1)
+    }
+
+    public var featureNames: Set<String> {
+        provider.featureNames
+    }
+
+    public func featureValue(for featureName: String) -> MLFeatureValue? {
+        provider.featureValue(for: featureName)
+    }
+
+    public init(relu_0: MLMultiArray, relu_1: MLMultiArray) {
+        self.provider = try! MLDictionaryFeatureProvider(dictionary: ["relu_0" : MLFeatureValue(multiArray: relu_0), "relu_1" : MLFeatureValue(multiArray: relu_1)])
+    }
+
+    public init(features: MLFeatureProvider) {
+        self.provider = features
+    }
+}
+
+
+/// Class for model loading and prediction
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, visionOS 1.0, *)
+public class HalfPlusF32 {
+    public let model: MLModel
+
+    /// URL of model assuming it was installed in the same bundle as this class
+    class var urlOfModelInThisBundle : URL {
+        let bundle = Bundle(for: self)
+        return bundle.url(forResource: "HalfPlusF32", withExtension:"mlmodelc")!
+    }
+
+    /**
+        Construct HalfPlusF32 instance with an existing MLModel object.
+
+        Usually the application does not use this initializer unless it makes a subclass of HalfPlusF32.
+        Such application may want to use `MLModel(contentsOfURL:configuration:)` and `HalfPlusF32.urlOfModelInThisBundle` to create a MLModel object to pass-in.
+
+        - parameters:
+          - model: MLModel object
+    */
+    init(model: MLModel) {
+        self.model = model
+    }
+
+    /**
+        Construct a model with configuration
+
+        - parameters:
+           - configuration: the desired model configuration
+
+        - throws: an NSError object that describes the problem
+    */
+    public convenience init(configuration: MLModelConfiguration = MLModelConfiguration()) throws {
+        try self.init(contentsOf: type(of:self).urlOfModelInThisBundle, configuration: configuration)
+    }
+
+    /**
+        Construct HalfPlusF32 instance with explicit path to mlmodelc file
+        - parameters:
+           - modelURL: the file url of the model
+
+        - throws: an NSError object that describes the problem
+    */
+    public convenience init(contentsOf modelURL: URL) throws {
+        try self.init(model: MLModel(contentsOf: modelURL))
+    }
+
+    /**
+        Construct a model with URL of the .mlmodelc directory and configuration
+
+        - parameters:
+           - modelURL: the file url of the model
+           - configuration: the desired model configuration
+
+        - throws: an NSError object that describes the problem
+    */
+    public convenience init(contentsOf modelURL: URL, configuration: MLModelConfiguration) throws {
+        try self.init(model: MLModel(contentsOf: modelURL, configuration: configuration))
+    }
+
+    /**
+        Construct HalfPlusF32 instance asynchronously with optional configuration.
+
+        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.
+
+        - parameters:
+          - configuration: the desired model configuration
+          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully
+    */
+    public class func load(configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<HalfPlusF32, Error>) -> Void) {
+        load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration, completionHandler: handler)
+    }
+
+    /**
+        Construct HalfPlusF32 instance asynchronously with optional configuration.
+
+        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.
+
+        - parameters:
+          - configuration: the desired model configuration
+    */
+    public class func load(configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> HalfPlusF32 {
+        try await load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration)
+    }
+
+    /**
+        Construct HalfPlusF32 instance asynchronously with URL of the .mlmodelc directory with optional configuration.
+
+        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.
+
+        - parameters:
+          - modelURL: the URL to the model
+          - configuration: the desired model configuration
+          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully
+    */
+    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<HalfPlusF32, Error>) -> Void) {
+        MLModel.load(contentsOf: modelURL, configuration: configuration) { result in
+            switch result {
+            case .failure(let error):
+                handler(.failure(error))
+            case .success(let model):
+                handler(.success(HalfPlusF32(model: model)))
+            }
+        }
+    }
+
+    /**
+        Construct HalfPlusF32 instance asynchronously with URL of the .mlmodelc directory with optional configuration.
+
+        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.
+
+        - parameters:
+          - modelURL: the URL to the model
+          - configuration: the desired model configuration
+    */
+    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> HalfPlusF32 {
+        let model = try await MLModel.load(contentsOf: modelURL, configuration: configuration)
+        return HalfPlusF32(model: model)
+    }
+
+    /**
+        Make a prediction using the structured interface
+
+        It uses the default function if the model has multiple functions.
+
+        - parameters:
+           - input: the input to the prediction as HalfPlusF32Input
+
+        - throws: an NSError object that describes the problem
+
+        - returns: the result of the prediction as HalfPlusF32Output
+    */
+    public func prediction(input: HalfPlusF32Input) throws -> HalfPlusF32Output {
+        try prediction(input: input, options: MLPredictionOptions())
+    }
+
+    /**
+        Make a prediction using the structured interface
+
+        It uses the default function if the model has multiple functions.
+
+        - parameters:
+           - input: the input to the prediction as HalfPlusF32Input
+           - options: prediction options
+
+        - throws: an NSError object that describes the problem
+
+        - returns: the result of the prediction as HalfPlusF32Output
+    */
+    public func prediction(input: HalfPlusF32Input, options: MLPredictionOptions) throws -> HalfPlusF32Output {
+        let outFeatures = try model.prediction(from: input, options: options)
+        return HalfPlusF32Output(features: outFeatures)
+    }
+
+    /**
+        Make an asynchronous prediction using the structured interface
+
+        It uses the default function if the model has multiple functions.
+
+        - parameters:
+           - input: the input to the prediction as HalfPlusF32Input
+           - options: prediction options
+
+        - throws: an NSError object that describes the problem
+
+        - returns: the result of the prediction as HalfPlusF32Output
+    */
+    @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, visionOS 1.0, *)
+    public func prediction(input: HalfPlusF32Input, options: MLPredictionOptions = MLPredictionOptions()) async throws -> HalfPlusF32Output {
+        let outFeatures = try await model.prediction(from: input, options: options)
+        return HalfPlusF32Output(features: outFeatures)
+    }
+
+    /**
+        Make a prediction using the convenience interface
+
+        It uses the default function if the model has multiple functions.
+
+        - parameters:
+            - x: 1 by 3 matrix of 16-bit floats
+            - y: 1 by 3 matrix of floats
+
+        - throws: an NSError object that describes the problem
+
+        - returns: the result of the prediction as HalfPlusF32Output
+    */
+    public func prediction(x: MLMultiArray, y: MLMultiArray) throws -> HalfPlusF32Output {
+        let input_ = HalfPlusF32Input(x: x, y: y)
+        return try prediction(input: input_)
+    }
+
+    /**
+        Make a prediction using the convenience interface
+
+        It uses the default function if the model has multiple functions.
+
+        - parameters:
+            - x: 1 by 3 matrix of 16-bit floats
+            - y: 1 by 3 matrix of floats
+
+        - throws: an NSError object that describes the problem
+
+        - returns: the result of the prediction as HalfPlusF32Output
+    */
+
+    #if (os(macOS) || targetEnvironment(macCatalyst)) && arch(x86_64)
+    @available(macOS, unavailable)
+    @available(macCatalyst, unavailable)
+    #else
+    @available(macOS 15.0, *)
+    #endif
+    public func prediction(x: MLShapedArray<Float16>, y: MLShapedArray<Float>) throws -> HalfPlusF32Output {
+        let input_ = HalfPlusF32Input(x: x, y: y)
+        return try prediction(input: input_)
+    }
+
+    /**
+        Make a batch prediction using the structured interface
+
+        It uses the default function if the model has multiple functions.
+
+        - parameters:
+           - inputs: the inputs to the prediction as [HalfPlusF32Input]
+           - options: prediction options
+
+        - throws: an NSError object that describes the problem
+
+        - returns: the result of the prediction as [HalfPlusF32Output]
+    */
+    public func predictions(inputs: [HalfPlusF32Input], options: MLPredictionOptions = MLPredictionOptions()) throws -> [HalfPlusF32Output] {
+        let batchIn = MLArrayBatchProvider(array: inputs)
+        let batchOut = try model.predictions(from: batchIn, options: options)
+        var results : [HalfPlusF32Output] = []
+        results.reserveCapacity(inputs.count)
+        for i in 0..<batchOut.count {
+            let outProvider = batchOut.features(at: i)
+            let result =  HalfPlusF32Output(features: outProvider)
+            results.append(result)
+        }
+        return results
+    }
+}

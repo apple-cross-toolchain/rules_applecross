@@ -1,0 +1,102 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 2 × 4 × 5)",
+        "shortDescription" : "",
+        "shape" : "[2, 4, 5]",
+        "name" : "relu_0",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 5 × 1 × 3 × 2 × 2)",
+        "shortDescription" : "",
+        "shape" : "[5, 1, 3, 2, 2]",
+        "name" : "relu_1",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32)",
+        "shortDescription" : "",
+        "shape" : "[]",
+        "name" : "relu_2",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.relu" : 3,
+      "Ios18.cast" : 4
+    },
+    "computePrecision" : "Mixed (Float16, Float32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.source" : "milinternal",
+      "com.github.apple.coremltools.conversion_date" : "2026-10-28"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 2 × 4 × 5)",
+        "shortDescription" : "",
+        "shape" : "[2, 4, 5]",
+        "name" : "in0",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 5 × 1 × 3 × 2 × 2)",
+        "shortDescription" : "",
+        "shape" : "[5, 1, 3, 2, 2]",
+        "name" : "in1",
+        "type" : "MultiArray"
+      },
+      {
+        "shortDescription" : "",
+        "dataType" : "Float32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "5 × 4 × 5 × 4 | 7 × 6 × 1 × 2",
+        "formattedType" : "MultiArray (Float32 5 × 4 × 5 × 4)",
+        "type" : "MultiArray",
+        "shape" : "[5, 4, 5, 4]",
+        "name" : "in2",
+        "enumeratedShapes" : "[[5, 4, 5, 4], [7, 6, 1, 2]]"
+      }
+    ],
+    "generatedClassName" : "R116",
+    "method" : "predict"
+  }
+]
