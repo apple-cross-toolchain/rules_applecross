@@ -15,9 +15,16 @@ radiosity image can't be guaranteed to be Xcode's (below). Relaxed
 
 Outputs, all byte-identical to Xcode 27.0's for `examples/ios/CleanRoom`:
 `NAME60x60@2x.png` (iPhone), `NAME76x76@2x~ipad.png` (iPad), `Assets.car`
-and the partial Info.plist (`CFBundleIcons`, `CFBundleIcons~ipad`). Xcode's
-output is deterministic: repeated runs are identical, and the timestamp
+and the partial Info.plist (`CFBundleIcons`, `CFBundleIcons~ipad`). For this
+catalog Xcode's output is the same on every run, and the timestamp
 `assetutil --info` prints is the file's modification time, not content.
+
+Xcode's `Assets.car` varies from run to run when a catalog has more than one
+appearance (one dark colour is enough): it writes the blocks of the
+`APPEARANCEKEYS` tree, each appearance's name and id, in a random order. The
+entries and every other block stay the same. This actool always writes them
+in one order. Comparisons with Xcode's output allow exactly that variation
+([README.md](README.md#determinism)).
 
 ## Resampling
 

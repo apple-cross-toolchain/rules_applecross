@@ -16,6 +16,9 @@ Known variations (docs/clean-room/README.md#determinism):
   randomly seeded order: in `coremldata.bin` (the model description, or the
   whole specification of a text model or a pipeline part) and in
   `metadata.json`'s `userDefinedMetadata`.
+- actool writes the blocks of `Assets.car`'s APPEARANCEKEYS tree (each
+  appearance's name and id) in a random order when a catalog has more than
+  one appearance.
 """
 
 import os
@@ -149,6 +152,80 @@ def _metadata_json(data):
     return _USER_DEFINED.sub(sort, data)
 
 
+# --- Assets.car -----------------------------------------------------------------
+
+def _bom(data):
+    """(block table [(address, length)], variables {name: block}, the
+    table's own range) of a BOMStore file."""
+    if data[:8] != b"BOMStore":
+        raise ValueError("not a BOM store")
+    index_at, index_length, vars_at = struct.unpack_from(">III", data, 16)
+    count = struct.unpack_from(">I", data, index_at)[0]
+    blocks = [struct.unpack_from(">II", data, index_at + 4 + 8 * i) for i in range(count)]
+    variables, i = {}, vars_at + 4
+    for _ in range(struct.unpack_from(">I", data, vars_at)[0]):
+        block, length = struct.unpack_from(">IB", data, i)
+        variables[data[i + 5:i + 5 + length]] = block
+        i += 5 + length
+    return blocks, variables, (index_at, index_at + 4 + 8 * count)
+
+
+def _appearance_blocks(data, blocks, variables):
+    """The APPEARANCEKEYS tree's leaf, the blocks of its entries, and the
+    entries (name, id) in order."""
+    tree = variables.get(b"APPEARANCEKEYS")
+    if tree is None:
+        return None, set(), []
+    at = blocks[tree][0]
+    if data[at:at + 4] != b"tree":
+        raise ValueError("APPEARANCEKEYS isn't a tree")
+    leaf = struct.unpack_from(">I", data, at + 8)[0]
+    at = blocks[leaf][0]
+    is_leaf, count, forward = struct.unpack_from(">HHI", data, at)
+    if not is_leaf or forward:
+        raise ValueError("APPEARANCEKEYS has more than one leaf")
+    owned, entries = set(), []
+    for k in range(count):
+        value, key = struct.unpack_from(">II", data, at + 12 + 8 * k)
+        owned |= {value, key}
+        (ka, kl), (va, vl) = blocks[key], blocks[value]
+        entries.append((data[ka:ka + kl], data[va:va + vl]))
+    return leaf, owned, entries
+
+
+def _car_equivalent(xcode, ours):
+    """Two Assets.car files that differ at most in where actool put the
+    blocks of the APPEARANCEKEYS tree (a random order when a catalog has
+    more than one appearance): the same entries in the same order, the same
+    blocks' contents, and every other byte the same."""
+    if len(xcode) != len(ours):
+        return False
+    xb, xv, xi = _bom(xcode)
+    ob, ov, oi = _bom(ours)
+    if xv != ov or len(xb) != len(ob) or xi != oi:
+        return False
+    xl, xs, xe = _appearance_blocks(xcode, xb, xv)
+    ol, os_, oe = _appearance_blocks(ours, ob, ov)
+    if xe != oe or xs != os_ or xl != ol:
+        return False
+    if sorted(xcode[a:a + n] for a, n in (xb[i] for i in xs)) != sorted(ours[a:a + n] for a, n in (ob[i] for i in os_)):
+        return False
+    # Everything else is the same: the leaf but for its entries' block
+    # numbers, and the file outside the entries' blocks and table entries.
+    mask = bytearray(len(xcode))
+    if xl is not None:
+        a = xb[xl][0] + 12
+        mask[a:a + 8 * len(xe)] = b"\1" * (8 * len(xe))
+    for table in (xb, ob):
+        for i in xs:
+            a, n = table[i]
+            mask[a:a + n] = b"\1" * n
+    for i in xs:
+        at = xi[0] + 4 + 8 * i
+        mask[at:at + 8] = b"\1" * 8
+    return all(m or x == o for m, x, o in zip(mask, xcode, ours))
+
+
 def canonical(path, data):
     """`data`, the file at `path`, with what Xcode varies put in one order."""
     parts = path.replace(os.sep, "/").split("/")
@@ -166,7 +243,14 @@ def canonical(path, data):
 
 def equivalent(path, xcode, ours):
     """Whether `ours` is Xcode's output at `path`, up to Xcode's variations."""
-    return xcode == ours or canonical(path, xcode) == canonical(path, ours)
+    if xcode == ours:
+        return True
+    if os.path.basename(path) == "Assets.car":
+        try:
+            return _car_equivalent(xcode, ours)
+        except (ValueError, IndexError, struct.error):
+            return False
+    return canonical(path, xcode) == canonical(path, ours)
 
 
 def tree(root):

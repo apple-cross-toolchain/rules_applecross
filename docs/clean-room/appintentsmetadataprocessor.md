@@ -27,7 +27,9 @@ generated at random. Xcode 27.0's `swiftc` compiled them, Xcode's
 `appintentsmetadataprocessor` processed the constant values (with
 `SWIFT_DETERMINISTIC_HASHING=1`, as rules_apple runs it), and this one
 processed the same constant values. All 378 outputs matched, Xcode's errors
-included. Swift 6.4 on Linux emits the same constant values as Xcode's
+included. Without that variable, Xcode's order of each parameter's
+`resolvableInputTypes` and `typeSpecificMetadata` varies from run to run;
+this tool's doesn't. Swift 6.4 on Linux emits the same constant values as Xcode's
 compiler for these sources. An app built entirely on Linux
 (`//examples/ios/HelloWorldSwift`) carries metadata identical to what Xcode's
 processor writes from the same input. `tests/appintentsmetadataprocessor`
