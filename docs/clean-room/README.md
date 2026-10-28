@@ -68,6 +68,23 @@ Known variations:
   randomly seeded order, in `coremldata.bin` and `metadata.json`
   ([coremlc.md](coremlc.md#xcodes-own-output-varies)). Ours keeps the
   model's own order.
+- `actool` writes the blocks of `Assets.car`'s `APPEARANCEKEYS` tree in a
+  random order when a catalog has more than one appearance
+  ([actool.md](actool.md)). The comparison requires the same entries, the
+  same blocks and every other byte the same. With an Icon Composer `.icon`,
+  Xcode also names renditions with a fresh UUID and varies a facet's part;
+  strict mode refuses `.icon` documents, so that isn't compared.
+- `appintentsmetadataprocessor` varies the order of some arrays unless
+  `SWIFT_DETERMINISTIC_HASHING=1` is set, as rules_apple sets it
+  ([appintentsmetadataprocessor.md](appintentsmetadataprocessor.md)).
+
+An audit ran Xcode 27.0's `actool`, `ibtool`, `xcstringstool`,
+`appintentsmetadataprocessor`, `momc`, `mapc`, `swift-stdlib-tool` and ad hoc
+`codesign` at least five times on each of several inputs, from different
+input and output paths. Apart from the variations above, every output was
+the same on every run. (`actool --export-dependency-info` names absolute
+paths, and `xcstringstool` writes different partial output for an input it
+fails on.)
 
 | Page | Tool |
 | --- | --- |
