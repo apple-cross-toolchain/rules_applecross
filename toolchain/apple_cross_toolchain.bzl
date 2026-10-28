@@ -386,6 +386,9 @@ _RULE_INPUT_FILES = [
     "stubs/sw_vers.sh",
     "stubs/xcstringstool.py",
     "stubs/xcstringstool.sh",
+    "stubs/appintentsmetadataprocessor.py",
+    "stubs/appintentsmetadataprocessor.sh",
+    "stubs/appintentsnltrainingprocessor.sh",
 ]
 
 _LLVM_PREBUILT = {
@@ -687,6 +690,17 @@ def _apple_cross_toolchain_impl(rctx):
     if result.return_code != 0:
         _install_executable(rctx, "stubs/xcstringstool.sh", _xcstringstool_path)
         _install_executable(rctx, "stubs/xcstringstool.py", _xcstringstool_path + ".py")
+
+    # App Intents metadata from the Swift compiler's constant values.
+    _appintents_path = xcode_toolchain_bindir + "appintentsmetadataprocessor"
+    result = rctx.execute(["test", "-e", _appintents_path])
+    if result.return_code != 0:
+        _install_executable(rctx, "stubs/appintentsmetadataprocessor.sh", _appintents_path)
+        _install_executable(rctx, "stubs/appintentsmetadataprocessor.py", _appintents_path + ".py")
+    _nl_training_path = xcode_toolchain_bindir + "appintentsnltrainingprocessor"
+    result = rctx.execute(["test", "-e", _nl_training_path])
+    if result.return_code != 0:
+        _install_executable(rctx, "stubs/appintentsnltrainingprocessor.sh", _nl_training_path)
 
     # Create codesign/codesign_allocate stubs for Linux cross-compilation.
     # Stub codesign unless the ported tools carry one.
