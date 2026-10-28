@@ -1,0 +1,162 @@
+App Intents off a Mac.
+
+The metadata action's command reads $SDKROOT, which only a Mac's Bazel sets
+for Xcode actions: derive it from DEVELOPER_DIR and APPLE_SDK_PLATFORM when
+unset. Give it, and the App Shortcuts Flexible Matching action, the
+toolchain's files (apple_mac_toolchain_info.sdk_tool_files) as inputs, as
+rules_apple_codesign_inputs_sdk_tools.patch does for the other xcrun-based
+resource actions, so that xcrun and the tools it runs are in the sandbox.
+The NL training tool runs xcrun from PATH rather than /usr/bin/xcrun.
+
+diff --git a/apple/internal/ios_rules.bzl b/apple/internal/ios_rules.bzl
+--- a/apple/internal/ios_rules.bzl
++++ b/apple/internal/ios_rules.bzl
+@@ -297,6 +297,7 @@
+             label = label,
+             mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
+             nl_training_tool = apple_mac_toolchain_info.app_intents_nl_training_tool,
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             platform_prerequisites = platform_prerequisites,
+             json_tool = ctx.attr._json_tool.files_to_run,
+         ),
+@@ -1383,6 +1384,7 @@
+             label = label,
+             mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
+             nl_training_tool = apple_mac_toolchain_info.app_intents_nl_training_tool,
++            sdk_tool_files = apple_mac_toolchain_info.sdk_tool_files,
+             platform_prerequisites = platform_prerequisites,
+             json_tool = ctx.attr._json_tool.files_to_run,
+         ),
+diff --git a/apple/internal/partials/app_intents_metadata_bundle.bzl b/apple/internal/partials/app_intents_metadata_bundle.bzl
+--- a/apple/internal/partials/app_intents_metadata_bundle.bzl
++++ b/apple/internal/partials/app_intents_metadata_bundle.bzl
+@@ -37,7 +37,8 @@
+         metadata_bundle,
+         nl_training_tool,
+         partial_outputs,
+-        platform_prerequisites):
++        platform_prerequisites,
++        sdk_tool_files = []):
+     """Implementation of the App Shortcuts Flexible Matching partial.
+ 
+     It consumes the training inputs explicitly exported by resource processing.
+@@ -69,6 +70,7 @@
+         mac_exec_group = mac_exec_group,
+         metadata_bundle = metadata_bundle,
+         nl_training_tool = nl_training_tool,
++        sdk_tool_files = sdk_tool_files,
+         resource_trees = resource_trees,
+         xcode_version_config = platform_prerequisites.xcode_version_config,
+     )
+@@ -88,7 +90,8 @@
+         label,
+         nl_training_tool,
+         platform_prerequisites,
+-        json_tool):
++        json_tool,
++        sdk_tool_files):
+     """Implementation of the AppIntents metadata bundle partial."""
+     if not deps:
+         # No `app_intents` were set by the rule calling this partial.
+@@ -127,6 +130,7 @@
+         ],
+         xcode_version_config = platform_prerequisites.xcode_version_config,
+         json_tool = json_tool,
++        sdk_tool_files = sdk_tool_files,
+     )
+ 
+     bundle_location = processor.location.bundle
+@@ -147,6 +151,7 @@
+             metadata_bundle = metadata_bundle,
+             nl_training_tool = nl_training_tool,
+             platform_prerequisites = platform_prerequisites,
++            sdk_tool_files = sdk_tool_files,
+         )
+ 
+     return struct(
+@@ -169,7 +174,8 @@
+         label,
+         nl_training_tool = None,
+         platform_prerequisites,
+-        json_tool):
++        json_tool,
++        sdk_tool_files = []):
+     """Constructor for the AppIntents metadata bundle processing partial.
+ 
+     This partial generates the Metadata.appintents bundle required for AppIntents functionality.
+@@ -192,6 +198,7 @@
+         json_tool: A `files_to_run` wrapping Python's `json.tool` module
+             (https://docs.python.org/3.5/library/json.html#module-json.tool) for deterministic
+             JSON handling.
++        sdk_tool_files: The toolchain's files the Xcode tools run from, as action inputs.
+     Returns:
+         A partial that generates the Metadata.appintents bundle.
+     """
+@@ -207,4 +214,5 @@
+         nl_training_tool = nl_training_tool,
+         platform_prerequisites = platform_prerequisites,
+         json_tool = json_tool,
++        sdk_tool_files = sdk_tool_files,
+     )
+diff --git a/apple/internal/resource_actions/app_intents.bzl b/apple/internal/resource_actions/app_intents.bzl
+--- a/apple/internal/resource_actions/app_intents.bzl
++++ b/apple/internal/resource_actions/app_intents.bzl
+@@ -52,7 +52,8 @@
+         source_files,
+         target_triples,
+         xcode_version_config,
+-        json_tool):
++        json_tool,
++        sdk_tool_files = []):
+     """Process and generate AppIntents metadata bundle (Metadata.appintents).
+ 
+     Args:
+@@ -115,6 +116,7 @@
+     args.add("--deployment-target", platform_prerequisites.minimum_os)
+     args.add_all(target_triples, before_each = "--target-triple")
+     transitive_inputs.append(depset(constvalues_files))
++    transitive_inputs.append(depset(sdk_tool_files))
+     args.add("--compile-time-extraction")
+ 
+     # Read the build version from the fourth component of the Xcode version.
+@@ -156,6 +158,9 @@
+     mv "$temp_file" "$original_file"
+ }}
+ 
++# Off a Mac nothing sets SDKROOT: the SDK is the platform's under DEVELOPER_DIR.
++SDKROOT="${{SDKROOT:-$DEVELOPER_DIR/Platforms/$APPLE_SDK_PLATFORM.platform/Developer/SDKs/$APPLE_SDK_PLATFORM.sdk}}"
++
+ exit_status=0
+ output=$($@ --sdk-root "$SDKROOT" --toolchain-dir "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain" 2>&1) || exit_status=$?
+ 
+@@ -213,7 +218,8 @@
+         metadata_bundle,
+         nl_training_tool,
+         resource_trees,
+-        xcode_version_config):
++        xcode_version_config,
++        sdk_tool_files = []):
+     """Generates the App Shortcuts Flexible Matching assets (`<locale>.lproj/nlu.appintents`).
+ 
+     Args:
+@@ -259,7 +265,7 @@
+         arguments = [args],
+         exec_group = mac_exec_group,
+         executable = nl_training_tool,
+-        inputs = [infoplist, metadata_bundle] + [f for _, f in lproj_files] + [f for _, f in resource_trees],
++        inputs = [infoplist, metadata_bundle] + [f for _, f in lproj_files] + [f for _, f in resource_trees] + sdk_tool_files,
+         mnemonic = "AppIntentsNLTraining",
+         outputs = [output],
+         xcode_config = xcode_version_config,
+diff --git a/tools/app_intents_nl_training_tool/app_intents_nl_training_tool.py b/tools/app_intents_nl_training_tool/app_intents_nl_training_tool.py
+--- a/tools/app_intents_nl_training_tool/app_intents_nl_training_tool.py
++++ b/tools/app_intents_nl_training_tool/app_intents_nl_training_tool.py
+@@ -125,7 +125,7 @@
+     # The tool writes root.ssu.yaml into the --extracted-metadata-path directory, which is a
+     # read-only input, unless --deployment-postprocessing is passed.
+     returncode, stdout, stderr = execute.execute_and_filter_output([
+-        "/usr/bin/xcrun",
++        "xcrun",
+         "appintentsnltrainingprocessor",
+         "--infoplist-path", args.infoplist,
+         "--temp-dir-path", ssu_dir,

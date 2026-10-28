@@ -16,6 +16,15 @@ swift_library(
     deps = [":ExampleIntents"],
 )
 
+# App Intents: Metadata.appintents comes from this module's constant values.
+swift_library(
+    name = "AppIntents",
+    srcs = ["Sources/AppIntents.swift"],
+    linkopts = ["-Wl,-framework,AppIntents"],
+    module_name = "HelloWorldAppIntents",
+    tags = ["manual"],
+)
+
 swift_intent_library(
     name = "ExampleIntents",
     src = "//examples/resources:Intents.intentdefinition",
@@ -60,9 +69,15 @@ ios_application(
         "iphone",
         "ipad",
     ],
+    app_intents = [":AppIntents"],
+    # Flexible matching trains a language model only Xcode has.
+    app_intents_flexible_matching = False,
     infoplists = [":Info.plist"],
-    minimum_os_version = "15.0",
-    deps = [":Sources"],
+    minimum_os_version = "16.0",
+    deps = [
+        ":AppIntents",
+        ":Sources",
+    ],
 )
 
 build_test(
