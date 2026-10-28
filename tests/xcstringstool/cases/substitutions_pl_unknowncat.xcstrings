@@ -1,0 +1,34 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%lld cat": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld c"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld cs"
+                }
+              },
+              "lots": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld L"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

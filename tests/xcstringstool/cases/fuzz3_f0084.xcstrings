@@ -1,0 +1,92 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "nl\n_kHello": {
+      "comment": "back\\slash&<>_k",
+      "extractionState": "stale",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%s back\\slash %#@n@ %#@count@"
+          },
+          "substitutions": {
+            "n": {
+              "formatSpecifier": "f",
+              "variations": {
+                "plural": {
+                  "few": {
+                    "stringUnit": {
+                      "state": "needs_review",
+                      "value": "back\\slash1Hello %arg %%aq\"uote"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Ü1 %arg x y"
+                    }
+                  }
+                }
+              }
+            },
+            "count": {
+              "formatSpecifier": "f",
+              "variations": {
+                "plural": {
+                  "few": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Üback\\slashx y %arg Hello😀"
+                    }
+                  },
+                  "one": {
+                    "stringUnit": {
+                      "state": "stale",
+                      "value": "_kZ %arg Ü%%"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "back\\slash😀_k"
+          }
+        }
+      }
+    },
+    "Üq\"uote %d Hello": {
+      "localizations": {
+        "Base": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "x y%%nl\n %lld x yx y_k"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "q\"uoteZ&<>"
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "😀 %.1f tab\tHello1"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

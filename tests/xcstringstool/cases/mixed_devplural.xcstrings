@@ -1,0 +1,52 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%lld photos": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "device": {
+              "iphone": {
+                "variations": {
+                  "plural": {
+                    "one": {
+                      "stringUnit": {
+                        "value": "%lld Foto (iPhone)",
+                        "state": "translated"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "value": "%lld Fotos (iPhone)",
+                        "state": "translated"
+                      }
+                    }
+                  }
+                }
+              },
+              "other": {
+                "variations": {
+                  "plural": {
+                    "one": {
+                      "stringUnit": {
+                        "value": "%lld Foto",
+                        "state": "translated"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "value": "%lld Fotos",
+                        "state": "translated"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

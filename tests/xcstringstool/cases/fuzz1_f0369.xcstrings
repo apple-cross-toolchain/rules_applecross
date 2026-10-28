@@ -1,0 +1,50 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "nl\na %i a": {
+      "extractionState": "extracted_with_value"
+    },
+    "Ü": {
+      "localizations": {
+        "Base": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "x y_ka %llu &<>q\"uoteZ"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Ütab\tx y"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "tab\t&<> %llu &<>"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "_ktab\t %f _kq\"uotenl\n"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tab\t"
+          }
+        }
+      }
+    },
+    "1x y %f 1a": {}
+  },
+  "version": "1.0"
+}

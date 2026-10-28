@@ -10,8 +10,7 @@ swift_library(
     srcs = [
         "Sources/BazelApp.swift",
     ],
-    # TODO: Restore Localizable.xcstrings once xcrun is available in sandbox
-    # data = ["//examples/resources:Localizable.xcstrings"],
+    data = ["//examples/resources:Localizable.xcstrings"],
     module_name = "Sources",
     tags = ["manual"],
     deps = [":ExampleIntents"],

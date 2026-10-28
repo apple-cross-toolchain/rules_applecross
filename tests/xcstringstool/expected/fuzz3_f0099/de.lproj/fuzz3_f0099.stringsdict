@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>_k %llu 1nl
+</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>f</string>
+			<key>one</key>
+			<string>1Hello1 %f a</string>
+			<key>other</key>
+			<string>q"uote %f Ü</string>
+			<key>two</key>
+			<string>q"uote %f 😀1</string>
+			<key>zero</key>
+			<string>tab	 %f 😀x y</string>
+		</dict>
+	</dict>
+	<key>nl
+%%a</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>applevision</key>
+			<string>tab	</string>
+			<key>iphone</key>
+			<dict>
+				<key>NSStringLocalizedFormatKey</key>
+				<string>%#@value@</string>
+				<key>value</key>
+				<dict>
+					<key>NSStringFormatSpecTypeKey</key>
+					<string>NSStringPluralRuleType</string>
+					<key>NSStringFormatValueTypeKey</key>
+					<string>d</string>
+					<key>few</key>
+					<string>aa %5d 1</string>
+					<key>one</key>
+					<string>HelloÜback\slash %5d Hello</string>
+					<key>other</key>
+					<string>_k</string>
+				</dict>
+			</dict>
+		</dict>
+	</dict>
+	<key>x yHelloa</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>applevision</key>
+			<string>nl
+</string>
+			<key>ipad</key>
+			<string>_k</string>
+			<key>mac</key>
+			<string>_ka</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

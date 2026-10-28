@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>tap</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>appletv</key>
+			<string>TV</string>
+			<key>applevision</key>
+			<string>V</string>
+			<key>applewatch</key>
+			<string>W</string>
+			<key>ipad</key>
+			<string>Tippen iPad</string>
+			<key>iphone</key>
+			<string>Tippen</string>
+			<key>mac</key>
+			<string>Klicken</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

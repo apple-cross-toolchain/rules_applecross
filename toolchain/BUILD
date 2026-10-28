@@ -7,6 +7,7 @@ package(default_visibility = ["//visibility:public"])
 exports_files([
     "repo_tools/extract_xip.py",
     "repo_tools/link_local_xcode.py",
+    "stubs/xcstringstool.py",
 ])
 
 # Required by every patched rules_apple bundling rule, resource aspect and test

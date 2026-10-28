@@ -1,0 +1,197 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "back\\slash😀x y": {
+      "comment": "😀%%q\"uote",
+      "localizations": {
+        "Base": {
+          "variations": {
+            "plural": {
+              "two": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "nl\n&<> %.1f 😀😀&<>"
+                }
+              }
+            }
+          }
+        },
+        "en-GB": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%%1 %lu 😀nl\n😀 %@ 1_k_k"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "a %@ 1 %lu 😀Hello"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "HelloZ %@ _k %lu 1%%"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "q\"uote %lu 1Za %@ nl\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "_kÜ%% %u nl\n_ka": {
+      "shouldTranslate": false,
+      "localizations": {
+        "pt-BR": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "&<>q\"uote😀 %5d Hellotab\t"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "😀tab\t %5d &<>back\\slash"
+                }
+              }
+            }
+          }
+        },
+        "Base": {
+          "stringUnit": {
+            "state": "new",
+            "value": "a"
+          }
+        }
+      }
+    },
+    "tab\t": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "many": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "1 %@ Hello1q\"uote %lu x y&<>nl\n"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "tab\t1Ü %lu tab\tÜHello %@ x yq\"uoteÜ"
+                }
+              }
+            }
+          }
+        },
+        "pt-BR": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "aHelloback\\slash %x x yback\\slash"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "ÜZÜ %x back\\slashZ%%"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "tab\t1Hello %x tab\tback\\slash"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "back\\slashq\"uote %x _k😀"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Ü %ld 😀%%": {
+      "comment": "1",
+      "localizations": {
+        "en-GB": {
+          "variations": {
+            "device": {
+              "appletv": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "ÜÜ"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "q\"uote%%back\\slash"
+                }
+              },
+              "applewatch": {
+                "variations": {
+                  "plural": {
+                    "one": {
+                      "stringUnit": {
+                        "state": "new",
+                        "value": "x ynl\n%%"
+                      }
+                    },
+                    "other": {
+                      "stringUnit": {
+                        "state": "stale",
+                        "value": "back\\slashZ"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "device": {
+              "iphone": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Helloq\"uotex y"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "q\"uotetab\t": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "&<>aa"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

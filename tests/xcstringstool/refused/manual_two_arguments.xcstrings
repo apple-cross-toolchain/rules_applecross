@@ -1,0 +1,20 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ has %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : { "stringUnit" : { "state" : "translated", "value" : "%@ hat %lld" } },
+              "other" : { "stringUnit" : { "state" : "translated", "value" : "%@ haben %lld" } }
+            }
+          }
+        }
+      }
+    },
+    "o" : { "localizations" : { "fr" : { "stringUnit" : { "state" : "translated", "value" : "O" } } } }
+  },
+  "version" : "1.0"
+}

@@ -1,0 +1,64 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "😀Ünl\n %llu _k😀": {},
+    "x yx y": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "q\"uoteÜÜ"
+          }
+        },
+        "Base": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%%"
+          }
+        }
+      }
+    },
+    "back\\slash": {},
+    "tab\t": {
+      "localizations": {
+        "Base": {
+          "stringUnit": {
+            "state": "new",
+            "value": "😀😀"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "x y"
+          }
+        },
+        "pt-BR": {
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "x y1Ü %@ x yZ_k %5d tab\t%%1"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "_kÜ"
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "x yHelloa %@ a %5d tab\ta"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

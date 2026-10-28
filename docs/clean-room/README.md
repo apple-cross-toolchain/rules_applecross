@@ -31,6 +31,7 @@ other tools refuse such inputs either way.
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
+| [xcstringstool.md](xcstringstool.md) | `xcstringstool`: String Catalogs to `.strings` and `.stringsdict` |
 | [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |
 | [swiftui-macros.md](swiftui-macros.md) | `SwiftUIMacros`: SwiftUI's `@State` macro for the Swift compiler on Linux |
 | [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |

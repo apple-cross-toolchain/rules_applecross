@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>atab	 %llu 1x y1</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>appletv</key>
+			<string>a</string>
+			<key>iphone</key>
+			<string>😀1</string>
+			<key>mac</key>
+			<string>&amp;&lt;&gt;_k</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

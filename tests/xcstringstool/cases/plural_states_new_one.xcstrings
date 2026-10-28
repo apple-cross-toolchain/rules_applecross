@@ -1,0 +1,1 @@
+{"sourceLanguage": "en", "strings": {"%@ %lld": {"localizations": {"de": {"variations": {"plural": {"one": {"stringUnit": {"state": "new", "value": "%lld a"}}, "other": {"stringUnit": {"state": "translated", "value": "%@ %lld b"}}}}}}}}, "version": "1.0"}

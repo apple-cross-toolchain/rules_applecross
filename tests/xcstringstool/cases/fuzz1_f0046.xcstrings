@@ -1,0 +1,94 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%%back\\slash %lu 😀": {
+      "comment": "HelloÜ",
+      "extractionState": "extracted_with_value"
+    },
+    "%%x y %u 1back\\slash&<>": {
+      "comment": "x y1"
+    },
+    "Zx ya %u Zq\"uote1": {
+      "comment": "Hello",
+      "localizations": {
+        "zh-Hans": {
+          "variations": {
+            "device": {
+              "mac": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "Helloback\\slashx y"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "_k %x q\"uote"
+          }
+        },
+        "Base": {
+          "variations": {
+            "plural": {
+              "zero": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "Ü&<>Ü %ld _ka"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "nl\nx ynl\n %ld ÜZ"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "q\"uote %ld 😀😀"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "%%😀😀 %ld _ktab\tx y"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "&<>1": {
+      "localizations": {
+        "zh-Hans": {
+          "variations": {
+            "device": {
+              "mac": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "tab\t_k"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "device": {
+              "applevision": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "q\"uote"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

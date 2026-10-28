@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>%% %f tab	</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>appletv</key>
+			<string>&amp;&lt;&gt;</string>
+			<key>mac</key>
+			<dict>
+				<key>NSStringLocalizedFormatKey</key>
+				<string>%#@value@</string>
+				<key>value</key>
+				<dict>
+					<key>NSStringFormatSpecTypeKey</key>
+					<string>NSStringPluralRuleType</string>
+					<key>NSStringFormatValueTypeKey</key>
+					<string>f</string>
+					<key>few</key>
+					<string>😀Znl
+ %f ZZ</string>
+					<key>many</key>
+					<string>&amp;&lt;&gt;x yx y %f Hello</string>
+					<key>other</key>
+					<string>Zq"uoteÜ %f _kHello</string>
+					<key>two</key>
+					<string>1😀 %f Ü</string>
+				</dict>
+			</dict>
+		</dict>
+	</dict>
+	<key>aaZ %i tab	nl
+</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@value@</string>
+		<key>value</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>i</string>
+			<key>one</key>
+			<string>Ü&amp;&lt;&gt;q"uote %i 1😀tab	 %@ &amp;&lt;&gt;😀&amp;&lt;&gt;</string>
+			<key>other</key>
+			<string>Üa1 %@ ÜHello1 %i a</string>
+			<key>two</key>
+			<string>q"uotenl
+ %@ 😀1Z %i back\slash</string>
+			<key>zero</key>
+			<string>tab	back\slash %@ &amp;&lt;&gt; %i %%</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

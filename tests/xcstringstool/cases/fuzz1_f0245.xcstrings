@@ -1,0 +1,77 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "x yHello %5d tab\t": {
+      "comment": "tab\tback\\slashHello"
+    },
+    "aback\\slashZ": {
+      "localizations": {
+        "ja": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "nl\n %1$x &<>"
+                }
+              },
+              "zero": {
+                "stringUnit": {
+                  "state": "stale",
+                  "value": "back\\slash&<> %1$x x y"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "😀 %1$x Hellox y&<>"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "&<> %u _knl\n"
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "Ü %u %%"
+                }
+              },
+              "zero": {
+                "stringUnit": {
+                  "state": "new",
+                  "value": "ZÜtab\t %u Ü"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "Üq\"uote_k %u q\"uotex y&<>"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "a": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ü"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

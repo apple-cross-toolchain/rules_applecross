@@ -1,0 +1,15 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%lld empty": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {}
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

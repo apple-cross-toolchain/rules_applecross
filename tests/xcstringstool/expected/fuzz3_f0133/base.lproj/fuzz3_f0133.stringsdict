@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>x yback\slash</key>
+	<dict>
+		<key>NSStringDeviceSpecificRuleType</key>
+		<dict>
+			<key>mac</key>
+			<dict>
+				<key>NSStringLocalizedFormatKey</key>
+				<string>%2$#@value@</string>
+				<key>value</key>
+				<dict>
+					<key>NSStringFormatSpecTypeKey</key>
+					<string>NSStringPluralRuleType</string>
+					<key>NSStringFormatValueTypeKey</key>
+					<string>i</string>
+					<key>many</key>
+					<string>tab	 %1$s &amp;&lt;&gt;1 %2$i q"uote</string>
+					<key>other</key>
+					<string>😀Ü&amp;&lt;&gt; %1$s x y %2$i Ü1a</string>
+					<key>two</key>
+					<string>q"uotex y %1$s &amp;&lt;&gt;😀 %2$i anl
+</string>
+				</dict>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>

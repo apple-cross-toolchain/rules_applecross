@@ -1,0 +1,17 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "k": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "value": "K!",
+            "state": "translated"
+          }
+        }
+      }
+    },
+    "j": {}
+  },
+  "version": "1.0"
+}
