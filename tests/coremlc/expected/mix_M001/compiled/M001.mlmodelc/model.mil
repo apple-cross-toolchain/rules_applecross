@@ -1,0 +1,26 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp32, [1, 3, ?, ?]> features, state<tensor<fp16, [1, 1]>> image, tensor<fp32, [1, 1, 8, 6]> z9) [FlexibleShapeInformation = tuple<tuple<string, dict<string, tensor<int32, [?]>>>, tuple<string, dict<string, dict<string, tensor<int32, [?]>>>>>((("DefaultShapes", {{"features", [1, 3, 6, 10]}}), ("EnumeratedShapes", {{"180e303b", {{"features", [1, 3, 8, 12]}, {"image", [1, 1]}, {"z9", [1, 1, 8, 6]}}}, {"723413f5", {{"features", [1, 3, 6, 10]}, {"image", [1, 1]}, {"z9", [1, 1, 8, 6]}}}})))] {
+            tensor<int32, [2]> mean_features_axes_0 = const()[name = string("mean_features_axes_0"), val = tensor<int32, [2]>([2, 3])];
+            bool mean_features_keep_dims_0 = const()[name = string("mean_features_keep_dims_0"), val = bool(false)];
+            string features_to_fp16_dtype_0 = const()[name = string("features_to_fp16_dtype_0"), val = string("fp16")];
+            tensor<fp16, [1, 3, ?, ?]> features_to_fp16 = cast(dtype = features_to_fp16_dtype_0, x = features)[name = string("cast_3")];
+            tensor<fp16, [1, 3]> mean_features_cast_fp16 = reduce_mean(axes = mean_features_axes_0, keep_dims = mean_features_keep_dims_0, x = features_to_fp16)[name = string("mean_features_cast_fp16")];
+            string mean_features_cast_fp16_to_fp32_dtype_0 = const()[name = string("mean_features_cast_fp16_to_fp32_dtype_0"), val = string("fp32")];
+            tensor<int32, [2]> mean_z9_axes_0 = const()[name = string("mean_z9_axes_0"), val = tensor<int32, [2]>([2, 3])];
+            bool mean_z9_keep_dims_0 = const()[name = string("mean_z9_keep_dims_0"), val = bool(false)];
+            string z9_to_fp16_dtype_0 = const()[name = string("z9_to_fp16_dtype_0"), val = string("fp16")];
+            tensor<fp16, [1, 1, 8, 6]> z9_to_fp16 = cast(dtype = z9_to_fp16_dtype_0, x = z9)[name = string("cast_1")];
+            tensor<fp16, [1, 1]> mean_z9_cast_fp16 = reduce_mean(axes = mean_z9_axes_0, keep_dims = mean_z9_keep_dims_0, x = z9_to_fp16)[name = string("mean_z9_cast_fp16")];
+            string mean_z9_cast_fp16_to_fp32_dtype_0 = const()[name = string("mean_z9_cast_fp16_to_fp32_dtype_0"), val = string("fp32")];
+            tensor<fp16, [1, 1]> read_state_0 = read_state(input = image)[name = string("read_state_0")];
+            fp16 add_0_y_0 = const()[name = string("add_0_y_0"), val = fp16(0x1p+0)];
+            tensor<fp16, [1, 1]> add_0 = add(x = read_state_0, y = add_0_y_0)[name = string("add_0")];
+            write_state(data = add_0, input = image)[name = string("coreml_update_state_1_write_state")];
+            tensor<fp16, [1, 1]> coreml_update_state_1 = read_state(input = image)[name = string("coreml_update_state_1")];
+            tensor<fp16, [1, 1]> s_image = identity(x = coreml_update_state_1)[name = string("s_image")];
+            tensor<fp32, [1, 1]> mean_z9 = cast(dtype = mean_z9_cast_fp16_to_fp32_dtype_0, x = mean_z9_cast_fp16)[name = string("cast_0")];
+            tensor<fp32, [1, 3]> mean_features = cast(dtype = mean_features_cast_fp16_to_fp32_dtype_0, x = mean_features_cast_fp16)[name = string("cast_2")];
+        } -> (mean_features, mean_z9, s_image);
+}

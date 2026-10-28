@@ -1,0 +1,14 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, ?, ?, ?]> in0, tensor<fp16, [6, 5, ?, ?, 3]> in1, tensor<int32, [?]> in2) [FlexibleShapeInformation = tuple<tuple<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>, tuple<tensor<string, []>, dict<tensor<string, []>, list<tensor<int32, [2]>, ?>>>>((("DefaultShapes", {{"in0", [1, 4, 53, 5]}, {"in1", [6, 5, 1, 4, 3]}, {"in2", [4]}}), ("RangeDims", {{"in0", [[1, 1], [4, 7], [3, 63], [4, 5]]}, {"in1", [[6, 6], [5, 5], [1, 1], [2, 5], [3, 3]]}, {"in2", [[4, 5]]}})))] {
+            tensor<string, []> in0_to_fp16_dtype_0 = const()[name = tensor<string, []>("in0_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, [1, ?, ?, ?]> in0_to_fp16 = cast(dtype = in0_to_fp16_dtype_0, x = in0)[name = tensor<string, []>("cast_1")];
+            tensor<fp16, [1, ?, ?, ?]> relu_0_cast_fp16 = relu(x = in0_to_fp16)[name = tensor<string, []>("relu_0_cast_fp16")];
+            tensor<string, []> relu_0_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("relu_0_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, [6, 5, ?, ?, 3]> relu_1 = relu(x = in1)[name = tensor<string, []>("relu_1")];
+            tensor<int32, []> add_0_y_0 = const()[name = tensor<string, []>("add_0_y_0"), val = tensor<int32, []>(1)];
+            tensor<int32, [?]> add_0 = add(x = in2, y = add_0_y_0)[name = tensor<string, []>("add_0")];
+            tensor<fp32, [1, ?, ?, ?]> relu_0 = cast(dtype = relu_0_cast_fp16_to_fp32_dtype_0, x = relu_0_cast_fp16)[name = tensor<string, []>("cast_0")];
+        } -> (relu_0, relu_1, add_0);
+}

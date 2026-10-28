@@ -1,0 +1,108 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32)",
+        "shortDescription" : "",
+        "shape" : "[]",
+        "name" : "relu_0",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32)",
+        "shortDescription" : "",
+        "shape" : "[]",
+        "name" : "relu_1",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 3]",
+        "name" : "reduce_mean_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.relu" : 2,
+      "Ios16.reduceMean" : 1
+    },
+    "computePrecision" : "Mixed (Float32, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.source" : "milinternal",
+      "com.github.apple.coremltools.conversion_date" : "2026-10-28"
+    },
+    "inputSchema" : [
+      {
+        "shortDescription" : "",
+        "dataType" : "Float32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "1 × 4 | 1 × 2 | 1 × 5",
+        "formattedType" : "MultiArray (Float32 1 × 4)",
+        "type" : "MultiArray",
+        "shape" : "[1, 4]",
+        "name" : "a",
+        "enumeratedShapes" : "[[1, 4], [1, 2], [1, 5]]"
+      },
+      {
+        "shortDescription" : "",
+        "dataType" : "Float32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "3 × 2 | 5 × 2 | 6 × 2",
+        "formattedType" : "MultiArray (Float32 3 × 2)",
+        "type" : "MultiArray",
+        "shape" : "[3, 2]",
+        "name" : "b",
+        "enumeratedShapes" : "[[3, 2], [5, 2], [6, 2]]"
+      },
+      {
+        "formattedType" : "Image (Color 4 × 4)",
+        "hasSizeFlexibility" : "1",
+        "shortDescription" : "",
+        "enumeratedSizes" : "[[4, 4], [8, 8], [6, 2]]",
+        "width" : "4",
+        "type" : "Image",
+        "isColor" : "1",
+        "height" : "4",
+        "sizeFlexibility" : "4 × 4 | 8 × 8 | 6 × 2",
+        "colorspace" : "RGB",
+        "name" : "c",
+        "isOptional" : "0"
+      }
+    ],
+    "generatedClassName" : "ThreeEnum18",
+    "method" : "predict"
+  }
+]

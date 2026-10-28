@@ -1,0 +1,16 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, [1, 6]> affine_0_transform_matrix_0 = const()[name = tensor<string, []>("affine_0_transform_matrix_0"), val = tensor<fp32, [1, 6]>([[0x1p+0, 0x0p+0, 0x0p+0, 0x0p+0, 0x1p+0, 0x0p+0]])];
+            tensor<int32, []> affine_0_output_height_0 = const()[name = tensor<string, []>("affine_0_output_height_0"), val = tensor<int32, []>(4)];
+            tensor<int32, []> affine_0_output_width_0 = const()[name = tensor<string, []>("affine_0_output_width_0"), val = tensor<int32, []>(4)];
+            tensor<string, []> affine_0_sampling_mode_0 = const()[name = tensor<string, []>("affine_0_sampling_mode_0"), val = tensor<string, []>("bilinear")];
+            tensor<string, []> affine_0_padding_mode_0 = const()[name = tensor<string, []>("affine_0_padding_mode_0"), val = tensor<string, []>("constant")];
+            tensor<fp32, []> affine_0_padding_value_0 = const()[name = tensor<string, []>("affine_0_padding_value_0"), val = tensor<fp32, []>(0x0p+0)];
+            tensor<string, []> affine_0_coordinates_mode_0 = const()[name = tensor<string, []>("affine_0_coordinates_mode_0"), val = tensor<string, []>("normalized_minus_one_to_one")];
+            tensor<bool, []> affine_0_align_corners_0 = const()[name = tensor<string, []>("affine_0_align_corners_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1, 4, 4]> affine_0 = affine(align_corners = affine_0_align_corners_0, coordinates_mode = affine_0_coordinates_mode_0, output_height = affine_0_output_height_0, output_width = affine_0_output_width_0, padding_mode = affine_0_padding_mode_0, padding_value = affine_0_padding_value_0, sampling_mode = affine_0_sampling_mode_0, transform_matrix = affine_0_transform_matrix_0, x = x)[name = tensor<string, []>("affine_0")];
+            tensor<fp32, [1, 1, 4, 4]> o = identity(x = affine_0)[name = tensor<string, []>("o")];
+        } -> (o);
+}

@@ -1,0 +1,69 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 2 × 3 × 2 × 2 × 2)",
+        "shortDescription" : "",
+        "shape" : "[2, 3, 2, 2, 2]",
+        "name" : "add_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.add" : 1,
+      "Ios18.writeState" : 1,
+      "Ios18.readState" : 1
+    },
+    "computePrecision" : "Float16",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+      {
+        "dataType" : "Float16",
+        "isOptional" : "0",
+        "formattedType" : "State (Float16 2 × 3 × 2 × 2 × 2)",
+        "shortDescription" : "",
+        "shape" : "[2, 3, 2, 2, 2]",
+        "name" : "s",
+        "type" : "State"
+      }
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.conversion_date" : "2026-10-28",
+      "com.github.apple.coremltools.source" : "milinternal"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 2 × 3 × 2 × 2 × 2)",
+        "shortDescription" : "",
+        "shape" : "[2, 3, 2, 2, 2]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "generatedClassName" : "StRank5",
+    "method" : "predict"
+  }
+]

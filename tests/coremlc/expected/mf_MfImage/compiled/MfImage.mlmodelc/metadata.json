@@ -1,0 +1,132 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 3]",
+        "name" : "reduce_mean_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "functions" : [
+      {
+        "computePrecision" : "Mixed (Float32, Int32)",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "reduce_mean_0",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+
+        ],
+        "name" : "pool",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios16.reduceMean" : 1
+        },
+        "inputSchema" : [
+          {
+            "height" : "8",
+            "colorspace" : "RGB",
+            "isOptional" : "0",
+            "width" : "8",
+            "isColor" : "1",
+            "formattedType" : "Image (Color 8 × 8)",
+            "hasSizeFlexibility" : "0",
+            "type" : "Image",
+            "shortDescription" : "",
+            "name" : "img"
+          }
+        ]
+      },
+      {
+        "computePrecision" : "Float32",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "relu_0",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+
+        ],
+        "name" : "relu",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.relu" : 1
+        },
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "x",
+            "type" : "MultiArray"
+          }
+        ]
+      }
+    ],
+    "mlProgramOperationTypeHistogram" : {
+      "Ios16.reduceMean" : 1
+    },
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "computePrecision" : "Mixed (Float32, Int32)",
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "height" : "8",
+        "colorspace" : "RGB",
+        "isOptional" : "0",
+        "width" : "8",
+        "isColor" : "1",
+        "formattedType" : "Image (Color 8 × 8)",
+        "hasSizeFlexibility" : "0",
+        "type" : "Image",
+        "shortDescription" : "",
+        "name" : "img"
+      }
+    ],
+    "defaultFunctionName" : "pool",
+    "generatedClassName" : "MfImage",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]

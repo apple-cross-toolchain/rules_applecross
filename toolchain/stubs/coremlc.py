@@ -115,6 +115,9 @@ DATA_TYPES = {
     36: "uint2", 37: "uint1", 38: "uint6", 39: "uint3",
 }
 
+# Byte-packed integer constants, written in decimal.
+PACKED_INTEGERS = {"int8": "b", "uint8": "B", "int16": "h", "uint16": "H", "uint32": "I"}
+
 OPSETS = {"CoreML5": "ios15", "CoreML6": "ios16", "CoreML7": "ios17", "CoreML8": "ios18"}
 
 
@@ -156,7 +159,9 @@ class Printer:
     def dimension(self, d):
         if d.has(1):
             return str(d.msg(1).int(1))
-        unestablished("a dimension other than a constant")
+        if d.has(2) and not d.msg(2).int(1):
+            return "?"
+        unestablished("a dimension other than a constant or unknown")
 
     def value_type(self, t):
         if t.has(1):
@@ -170,13 +175,18 @@ class Printer:
             if not dims and self.scalar_style:
                 return dtype
             return "tensor<%s, [%s]>" % (dtype, ", ".join(dims))
-        unestablished("a value type other than a tensor")
+        if t.has(5):
+            return "state<%s>" % self.value_type(t.msg(5).msg(1))
+        unestablished("a value type other than a tensor or state")
 
     def tensor_values(self, t, value):
         """The values of a TensorValue, written as model.mil writes them."""
         tensor = t.msg(1)
         dtype = DATA_TYPES.get(tensor.int(1))
-        dims = [int(self.dimension(d)) for d in tensor.msgs(3)]
+        dims = [self.dimension(d) for d in tensor.msgs(3)]
+        if "?" in dims:
+            unestablished("a constant of unknown shape")
+        dims = [int(d) for d in dims]
         if value.has(1):
             raw = value.msg(1).bytes(1)
             items = [hex_float(x) for x in struct.unpack("<%df" % (len(raw) // 4), raw)]
@@ -199,6 +209,9 @@ class Printer:
             raw = value.msg(7).bytes(1)
             if dtype == "fp16":
                 items = [hex_float(x) for x in struct.unpack("<%de" % (len(raw) // 2), raw)]
+            elif dtype in PACKED_INTEGERS:
+                code = PACKED_INTEGERS[dtype]
+                items = [str(x) for x in struct.unpack("<%d%s" % (len(raw) // struct.calcsize(code), code), raw)]
             else:
                 unestablished("byte-packed %s values" % dtype)
         else:
@@ -289,14 +302,15 @@ class Printer:
     def operation(self, op, indent):
         pad = " " * indent
         outputs = op.msgs(3)
-        if not outputs:
+        if not outputs and (op.str(1) != "write_state" or op.has(4)):
             unestablished("an operation without outputs")
         inputs = []
         for name, argument in sorted(op.map(2), key=lambda kv: kv[0]):
             bindings = argument.msgs(1)
-            if not bindings or not all(b.has(1) for b in bindings):
-                unestablished("an operation input bound to a value")
-            names = [self.ref(b.str(1)) for b in bindings]
+            if not bindings or not all(b.has(1) or b.has(2) for b in bindings):
+                unestablished("an operation input bound to nothing")
+            # An input bound to a value is written as the value.
+            names = [self.ref(b.str(1)) if b.has(1) else self.value(b.msg(2)) for b in bindings]
             # A variadic input lists its arguments in parentheses.
             inputs.append("%s = %s" % (name, names[0] if len(names) == 1 else "(%s)" % ", ".join(names)))
         attributes = ["%s = %s" % (name, self.value(v)) for name, v in sorted(op.map(5), key=lambda kv: kv[0])]
@@ -306,6 +320,10 @@ class Printer:
             # Several outputs are listed, each with its type.
             return ", ".join("%s %s" % (self.value_type(o.msg(2)), self.declare(o.str(1))) for o in outputs)
         blocks = op.msgs(4)
+        if not outputs:
+            # write_state declares nothing.
+            self.lines.append(head.replace("%s = ", "", 1) + ";")
+            return
         if not blocks:
             self.lines.append(head % declared() + ";")
             return
@@ -323,8 +341,9 @@ class Printer:
         self.lines[at] = head % declared()
 
 
-def print_program(program, spec_version, extra_build_info):
-    """model.mil for an MLProgram message."""
+def print_program(program, spec_version, extra_build_info, function_attributes):
+    """model.mil for an MLProgram message; `function_attributes` gives each
+    function's attributes coremlc derives from the model description."""
     version = program.int(1)
     if version != 1:
         unestablished("program version %d" % version)
@@ -332,11 +351,12 @@ def print_program(program, spec_version, extra_build_info):
     p = Printer(scalar_style)
     p.lines.append("program(%s)" % ("1.3" if scalar_style else "1.0"))
     attributes = program.map(4)
-    if [k for k, _ in attributes] != ["buildInfo"]:
+    if [k for k, _ in attributes] not in (["buildInfo"], []):
         unestablished("program attributes other than buildInfo")
-    info = attributes[0][1]
+    # A program without a buildInfo gets coremlc's own.
+    info = attributes[0][1] if attributes else Message(b"")
     pairs = []
-    for kv in info.msg(3).msg(4).msgs(1):
+    for kv in ((info.msg(3) or Message(b"")).msg(4) or Message(b"")).msgs(1):
         k = kv.msg(1).msg(3).msg(1).msg(4).all(1)[0].decode()
         v = kv.msg(2).msg(3).msg(1).msg(4).all(1)[0].decode()
         pairs.append((k, v))
@@ -345,16 +365,20 @@ def print_program(program, spec_version, extra_build_info):
     p.lines.append("[buildInfo = dict<%s, %s>({%s})]" % (kv_type, kv_type, ", ".join('{"%s", "%s"}' % (p.escape(k), p.escape(v)) for k, v in pairs)))
     p.lines.append("{")
     functions = sorted(program.map(2), key=lambda kv: kv[0])
-    names = []
-    for _, function in functions:
-        names += [i.str(1) for i in function.msgs(1)]
+    for name, function in functions:
+        # Names are numbered within their function.
+        names = [i.str(1) for i in function.msgs(1)]
         for _, b in function.map(3):
             _declared(b, names)
-    p.duplicates = {n for n in names if names.count(n) > 1}
-    for name, function in functions:
+        p.duplicates = {n for n in names if names.count(n) > 1}
+        p.seen = {}
         opset = function.str(2)
+        if function.has(4):
+            unestablished("a function with attributes")
         inputs = ", ".join("%s %s" % (p.value_type(i.msg(2)), i.str(1)) for i in sorted(function.msgs(1), key=lambda i: i.str(1)))
-        p.lines.append("    func %s<%s>(%s) {" % (name, OPSETS.get(opset) or unestablished("opset " + opset), inputs))
+        attributes = function_attributes.get(name)
+        p.lines.append("    func %s<%s>(%s)%s {" % (name, OPSETS.get(opset) or unestablished("opset " + opset), inputs,
+                                                   " [%s]" % ", ".join(attributes) if attributes else ""))
         blocks = dict((k, v) for k, v in function.map(3))
         if list(blocks) != [opset]:
             unestablished("block specializations other than the opset's")
@@ -370,7 +394,9 @@ COREMLC_BUILD_INFO = [("coremlc-component-MIL", "3600.16.1"), ("coremlc-version"
 
 
 def model_mil(model, extra_build_info=COREMLC_BUILD_INFO):
-    return print_program(model.msg(502), model.int(1), extra_build_info)
+    scalar_style = model.int(1) >= 9
+    attributes = {name: function_attributes(inputs, states, scalar_style) for name, inputs, _, states in functions(model)}
+    return print_program(model.msg(502), model.int(1), extra_build_info, attributes)
 
 
 # --- CoreFoundation dictionaries (metadata.json) -------------------------------
@@ -491,17 +517,172 @@ def _json_string(text):
 # --- Model description ----------------------------------------------------------
 
 ARRAY_TYPES = {65568: "Float32", 65600: "Double", 131104: "Int32", 65552: "Float16"}
-COLOR_SPACES = {10: ("Grayscale", "0"), 20: ("RGB", "1"), 30: ("BGR", "1")}
+COLOR_SPACES = {10: ("Grayscale", "0"), 20: ("RGB", "1"), 30: ("BGR", "1"), 40: ("Grayscale16Half", "0")}
+# Images' formatted types name their color space so.
+IMAGE_KINDS = {10: "Grayscale", 20: "Color", 30: "Color", 40: "Grayscale16Half"}
+
+
+def _ints(values):
+    """A repeated integer field's values, packed or not."""
+    out = []
+    for r in values:
+        if isinstance(r, bytes):
+            i = 0
+            while i < len(r):
+                v, i = _varint(r, i)
+                out.append(v)
+        else:
+            out.append(r)
+    return out
+
+
+def _signed(v):
+    return v - (1 << 64) if v >= 1 << 63 else v
+
+
+def functions(model):
+    """[(name, inputs, outputs, states)] of an ML Program's functions, as its
+    description gives them (a single-function model's is "main")."""
+    description = model.msg(2) or Message(b"")
+    if not description.has(20):
+        return [("main", description.msgs(1), description.msgs(10), description.msgs(13))]
+    out = []
+    for f in description.msgs(20):
+        if f.has(4) or f.has(5):
+            unestablished("a classifier function")
+        out.append((f.str(1), f.msgs(2), f.msgs(3), f.msgs(6)))
+    return out
+
+
+def default_value(f):
+    """An optional multi-array input's default, as coremlc writes it (%.9g of a
+    float; 0 when the model gives none)."""
+    t = f.msg(3)
+    if not t.has(5):
+        unestablished("an optional feature other than a multi-array")
+    a = t.msg(5)
+    dtype = ARRAY_TYPES.get(a.int(2))
+    # Xcode refuses a default of another type than the array's.
+    if a.has(61) or (a.has(51) and dtype not in ("Float32", "Float16")) or (a.has(41) and dtype != "Int32"):
+        unestablished("a default value of another type than its multi-array")
+    value = struct.unpack("<f", a.bytes(51))[0] if a.has(51) else float(struct.unpack("<i", struct.pack("<I", a.int(41) & 0xFFFFFFFF))[0]) if a.has(41) else 0.0
+    if value != value or value in (float("inf"), float("-inf")):
+        unestablished("a default value that isn't finite")
+    return "%.9g" % value
+
+
+def _mil_name(text):
+    if not text or any(ch in '"\\' or ord(ch) < 0x20 or ord(ch) >= 0x7F for ch in text):
+        unestablished("a feature named %r in model.mil" % text)
+    return '"%s"' % text
+
+
+def flexibility(f):
+    """(default shape, [(low, high)] or None, [shapes] or None) of an input as
+    model.mil gives it: an image as [1, channels, height, width]."""
+    t = f.msg(3)
+    if t.has(5):
+        a = t.msg(5)
+        shape = _ints(a.all(1))
+        ranges = [(r.int(1), _signed(r.int(2))) for r in a.msg(31).msgs(1)] if a.has(31) else None
+        shapes = [_ints(e.all(1)) for e in a.msg(21).msgs(1)] if a.has(21) else None
+    elif t.has(4):
+        im = t.msg(4)
+        c = 1 if im.int(3) in (10, 40) else 3
+        shape = [1, c, im.int(2), im.int(1)]
+        ranges = shapes = None
+        if im.has(31):
+            w, h = im.msg(31).msg(1) or Message(b""), im.msg(31).msg(2) or Message(b"")
+            ranges = [(1, 1), (c, c), (h.int(1), _signed(h.int(2))), (w.int(1), _signed(w.int(2)))]
+        if im.has(21):
+            shapes = [[1, c, e.int(2), e.int(1)] for e in im.msg(21).msgs(1)]
+    else:
+        return None, None, None
+    if ranges is not None and (len(ranges) != len(shape) or any(hi < lo for lo, hi in ranges)):
+        unestablished("an unbounded or malformed shape range")
+    if shapes is not None and (not shapes or any(len(x) != len(shape) for x in shapes)):
+        unestablished("malformed enumerated shapes")
+    return shape, ranges, shapes
+
+
+def input_defaults(inputs):
+    """[(name, default)] of a function's optional inputs."""
+    defaults = sorted((f.str(1), default_value(f)) for f in inputs if f.msg(3) and f.msg(3).int(1000))
+    if inputs and len(defaults) == len(inputs):
+        # Xcode refuses a model whose inputs are all optional.
+        unestablished("a function whose inputs are all optional")
+    return defaults
+
+
+def function_attributes(inputs, states, scalar_style):
+    """The attributes coremlc gives a function in model.mil: its optional
+    inputs' default values and its inputs' flexible shapes."""
+    S = "string" if scalar_style else "tensor<string, []>"
+    out = []
+    defaults = input_defaults(inputs)
+    if defaults:
+        out.append("CoreML_InputDefaultValues = dict<%s, %s>({%s})" % (S, "fp32" if scalar_style else "tensor<fp32, []>",
+                                                                       ", ".join("{%s, %s}" % (_mil_name(n), v) for n, v in defaults)))
+    flex = {f.str(1): flexibility(f) for f in inputs}
+    ranged = sorted(n for n, (_, r, _) in flex.items() if r is not None)
+    enumerated = sorted(n for n, (_, _, e) in flex.items() if e is not None)
+    if not ranged and not enumerated:
+        return out
+
+    def shape(dims):
+        return "[%s]" % ", ".join(map(str, dims))
+    default_shapes = "(\"DefaultShapes\", {%s})" % ", ".join("{%s, %s}" % (_mil_name(n), shape(flex[n][0])) for n in ranged + enumerated)
+    if ranged and enumerated:
+        # Xcode refuses a model with both.
+        unestablished("a mixture of enumerated and range shape flexibility")
+    if ranged:
+        out.append("FlexibleShapeInformation = tuple<tuple<%s, dict<%s, tensor<int32, [?]>>>, tuple<%s, dict<%s, list<tensor<int32, [2]>, ?>>>>((%s, (\"RangeDims\", {%s})))" % (
+            S, S, S, S, default_shapes, ", ".join("{%s, [%s]}" % (_mil_name(n), ", ".join("[%d, %d]" % r for r in flex[n][1])) for n in ranged)))
+        return out
+    # Several inputs' enumerated shapes (specification 9) go together by
+    # their position.
+    counts = {len(flex[n][2]) for n in enumerated}
+    if len(enumerated) > 1 and (not scalar_style or len(counts) != 1):
+        unestablished("several inputs with enumerated shapes before specification 9 or of different counts")
+    if not scalar_style and any(f.msg(3).has(4) and f.msg(3).msg(4).int(3) == 40 and f.str(1) in enumerated for f in inputs):
+        # Xcode gives these three channels, and refuses some.
+        unestablished("a Grayscale16Half image with enumerated sizes before specification 9")
+    # Each enumerated shape is named for every input's and state's shape,
+    # padded to rank 5 (name_1_1_1_2_3_name2_...), from specification 9 by
+    # that name's SHA-256, eight hex digits.
+    for f in states:
+        flex[f.str(1)] = (_ints(f.msg(3).msg(8).msg(1).all(1)), None, None)
+    names = sorted(flex)
+    if any(flex[n][0] is None or len(flex[n][0]) > 5 for n in names):
+        unestablished("enumerated shapes beside an input of another kind or rank")
+    entries = {}
+    for k in range(counts.pop()):
+        shapes = [(n, flex[n][2][k] if n in enumerated else flex[n][0]) for n in names]
+        key = "".join("%s_%s_" % (n, "_".join(map(str, [1] * (5 - len(d)) + d))) for n, d in shapes)
+        if scalar_style:
+            key = hashlib.sha256(key.encode()).hexdigest()[:8]
+        if key in entries:
+            unestablished("repeated enumerated shapes")
+        entries[key] = "{%s}" % ", ".join("{%s, %s}" % (_mil_name(n), shape(d)) for n, d in shapes)
+    out.append("FlexibleShapeInformation = tuple<tuple<%s, dict<%s, tensor<int32, [?]>>>, tuple<%s, dict<%s, dict<%s, tensor<int32, [?]>>>>>((%s, (\"EnumeratedShapes\", {%s})))" % (
+        S, S, S, S, S, default_shapes, ", ".join("{%s, %s}" % (_mil_name(k), v) for k, v in sorted(entries.items()))))
+    return out
 
 # Keys in the order coremlc inserts them (CoreFoundation's enumeration
 # order depends on it where keys collide), fitted to Xcode 27.0's output.
 TOP_KEYS = ["author", "inputSchema", "modelParameters", "shortDescription", "version", "method", "modelType",
-            "license", "metadataOutputVersion", "outputSchema", "stateSchema", "isUpdatable", "classLabels",
-            "specificationVersion", "availability", "generatedClassName", "userDefinedMetadata",
-            "storagePrecision", "mlProgramOperationTypeHistogram", "computePrecision"]
-SCHEMA_KEYS = ["isColor", "colorspace", "hasSizeFlexibility", "shape", "keyType", "type", "sizeRange", "dataType",
-            "width", "height", "name", "isOptional", "hasShapeFlexibility", "shortDescription", "formattedType",
-            "valueType"]
+            "license", "metadataOutputVersion", "outputSchema", "defaultFunctionName", "stateSchema", "isUpdatable",
+            "classLabels", "specificationVersion", "availability", "generatedClassName", "userDefinedMetadata",
+            "storagePrecision", "functions", "mlProgramOperationTypeHistogram", "computePrecision"]
+SCHEMA_KEYS = ["sizeFlexibility", "enumeratedSizes", "isColor", "colorspace", "hasSizeFlexibility", "shape", "keyType", "type",
+            "sizeRange", "dataType", "width", "height", "name", "isOptional", "hasShapeFlexibility", "shortDescription",
+            "formattedType", "valueType"]
+# A flexible multi-array's keys go in in another order.
+FLEXIBLE_ARRAY_KEYS = ["shapeRange", "enumeratedShapes", "shapeFlexibility", "shape", "type", "name", "dataType",
+                       "hasShapeFlexibility", "isOptional", "shortDescription", "formattedType"]
+# A multi-function model's functions.
+FUNCTION_KEYS = ["name", "inputSchema", "outputSchema", "stateSchema", "storagePrecision", "mlProgramOperationTypeHistogram",
+                 "computePrecision"]
 
 # Deployment availability by specification version.
 AVAILABILITY = {
@@ -526,39 +707,63 @@ def ordered(pairs, order):
     return CFDict([(k, values[k]) for k in order if k in values])
 
 
+def _dims(dims):
+    return " × ".join(map(str, dims))
+
+
 def feature(f):
     t = f.msg(3) or unestablished("a feature without a type")
     optional = "1" if t.int(1000) else "0"
+    if t.int(1000) and not t.has(5):
+        unestablished("an optional feature other than a multi-array")
     pairs = [("isOptional", optional), ("name", f.str(1)), ("shortDescription", f.str(2))]
     if t.has(5):
         a = t.msg(5)
-        if a.has(21) or a.has(31) or a.has(41) or a.has(51) or a.has(61):
-            unestablished("a multi-array with flexible shapes or a default value")
         dtype = ARRAY_TYPES.get(a.int(2)) or unestablished("array data type %d" % a.int(2))
-        shape = []
-        raw = a.all(1)
-        for r in raw:
-            if isinstance(r, bytes):
-                i = 0
-                while i < len(r):
-                    v, i = _varint(r, i)
-                    shape.append(v)
-            else:
-                shape.append(r)
+        shape, ranges, shapes = flexibility(f)
         pairs += [("type", "MultiArray"), ("dataType", dtype), ("shape", "[" + ", ".join(map(str, shape)) + "]"),
-                  ("hasShapeFlexibility", "0"),
-                  ("formattedType", "MultiArray (%s)" % " ".join([dtype] + ([" × ".join(map(str, shape))] if shape else [])))]
+                  ("hasShapeFlexibility", "1" if ranges or shapes else "0"),
+                  # An optional feature's type ends in "?".
+                  ("formattedType", "MultiArray (%s)%s" % (" ".join([dtype] + ([_dims(shape)] if shape else [])), "?" if t.int(1000) else ""))]
+        if ranges and shapes:
+            unestablished("a multi-array with both shape ranges and enumerated shapes")
+        if ranges:
+            pairs += [("shapeRange", "[%s]" % ", ".join("[%d, %d]" % r for r in ranges)),
+                      ("shapeFlexibility", " × ".join(str(lo) if lo == hi else "%d...%d" % (lo, hi) for lo, hi in ranges))]
+        if shapes:
+            pairs += [("enumeratedShapes", "[%s]" % ", ".join("[%s]" % ", ".join(map(str, x)) for x in shapes)),
+                      ("shapeFlexibility", " | ".join(_dims(x) for x in shapes))]
+        if ranges or shapes:
+            return ordered(pairs, FLEXIBLE_ARRAY_KEYS)
     elif t.has(4):
         im = t.msg(4)
-        if im.has(21) or im.has(31):
-            unestablished("an image with flexible sizes")
         space, color = COLOR_SPACES.get(im.int(3)) or unestablished("color space %d" % im.int(3))
         w, h = im.int(1), im.int(2)
         pairs += [("type", "Image"), ("width", str(w)), ("height", str(h)), ("colorspace", space), ("isColor", color),
-                  ("hasSizeFlexibility", "0"),
-                  ("formattedType", "Image (%s %d × %d)" % ("Color" if color == "1" else "Grayscale", w, h))]
-        if w != h:
-            unestablished("a non-square image's formatted type")
+                  ("hasSizeFlexibility", "1" if im.has(21) or im.has(31) else "0"),
+                  ("formattedType", "Image (%s %d × %d)" % (IMAGE_KINDS[im.int(3)], w, h))]
+        if im.has(21) and im.has(31):
+            unestablished("an image with both size ranges and enumerated sizes")
+        if im.has(31):
+            ranges = [(r.int(1), _signed(r.int(2))) for r in (im.msg(31).msg(1) or Message(b""), im.msg(31).msg(2) or Message(b""))]
+            if any(hi < -1 or -1 < hi < lo for lo, hi in ranges):
+                unestablished("an image size range out of order")
+            # Width first; an unbounded range is written "1...".
+            pairs += [("sizeRange", "[%s]" % ", ".join("[%d, %d]" % r for r in ranges)),
+                      ("sizeFlexibility", " × ".join(str(lo) if lo == hi else "%d...%s" % (lo, "" if hi < 0 else hi) for lo, hi in ranges))]
+        if im.has(21):
+            sizes = [(e.int(1), e.int(2)) for e in im.msg(21).msgs(1)]
+            pairs += [("enumeratedSizes", "[%s]" % ", ".join("[%d, %d]" % x for x in sizes)),
+                      ("sizeFlexibility", " | ".join("%d × %d" % x for x in sizes))]
+    elif t.has(8):
+        a = t.msg(8).msg(1) or unestablished("a state that isn't a multi-array")
+        if any(a.has(n) for n in (21, 31, 41, 51, 61)):
+            unestablished("a state with flexible shapes or a default value")
+        dtype = ARRAY_TYPES.get(a.int(2)) or unestablished("array data type %d" % a.int(2))
+        shape = _ints(a.all(1))
+        pairs += [
+            ("type", "State"), ("dataType", dtype), ("shape", "[" + ", ".join(map(str, shape)) + "]"),
+            ("formattedType", "State (%s %s)" % (dtype, _dims(shape)))]
     elif t.has(1):
         pairs += [("type", "Int64"), ("formattedType", "Int64")]
     elif t.has(2):
@@ -579,7 +784,7 @@ def feature(f):
         pairs += [("type", "Sequence"), ("valueType", value), ("sizeRange", "[%d, %d]" % (low, high)),
                   ("formattedType", "Sequence (%s %d...%d)" % (value, low, high))]
     else:
-        unestablished("a feature type other than a multi-array, image, Int64, String or dictionary")
+        unestablished("a feature type other than a multi-array, image, state, Int64, String or dictionary")
     return ordered(pairs, SCHEMA_KEYS)
 
 
@@ -593,6 +798,9 @@ def histogram_name(op, spec_version):
             OP_NAMES = json.load(f)
     entry = OP_NAMES.get(op) or unestablished("operation %s's histogram name" % op)
     target = {6: 15, 7: 16, 8: 17, 9: 18}.get(spec_version) or unestablished("specification version %d" % spec_version)
+    # An entry that lists its targets was compiled for those alone.
+    if target not in entry.get("targets", [target]):
+        unestablished("operation %s's histogram name for iOS %d" % (op, target))
     versions = [v for v in entry["versions"] if v <= target]
     if versions:
         return "Ios%d.%s" % (max(versions), entry["camel"])
@@ -606,22 +814,30 @@ def _walk_ops(block, out):
             _walk_ops(b, out)
 
 
-PRECISION_NAMES = {"fp16": "Float16", "fp32": "Float32", "fp64": "Float64", "int32": "Int32", "int64": "Int64", "uint16": "UInt16"}
+PRECISION_NAMES = {"fp16": "Float16", "fp32": "Float32", "fp64": "Float64", "int32": "Int32", "int64": "Int64", "uint16": "UInt16",
+                   "int8": "Int8", "uint8": "UInt8", "uint32": "UInt32"}
 
 
-def program_facts(program, spec_version):
-    """(histogram pairs in first-use order, compute precision, class labels)."""
+def program_facts(program, spec_version, only=None):
+    """(histogram pairs in first-use order, compute precision, class labels)
+    of the program, or of its function `only`."""
     ops = []
     declared = []
     # Compute precision counts what operations produce (constants
     # included), not the function's inputs.
-    for _, function in sorted(program.map(2), key=lambda kv: kv[0]):
+    for name, function in sorted(program.map(2), key=lambda kv: kv[0]):
+        if only is not None and name != only:
+            continue
         for _, b in function.map(3):
             _walk_ops(b, ops)
     counts = {}
     labels = None
     for op in ops:
         kind = op.str(1)
+        if kind in ("constexpr_lut_to_dense", "constexpr_sparse_to_dense", "constexpr_lut_to_sparse", "constexpr_sparse_blockwise_shift_scale"):
+            # Their storage precision is described in their own terms
+            # ("Palettized (2 bits)", "Sparse").
+            unestablished("palettized or sparse weights")
         declared += [o.msg(2) for o in op.msgs(3)]
         if kind == "const":
             continue
@@ -639,14 +855,26 @@ def program_facts(program, spec_version):
                 if b.has(1):
                     read.add(b.str(1))
     stored = set()
+
+    def store(v):
+        dtype = DATA_TYPES.get(v.msg(2).msg(1).int(1))
+        stored.add(PRECISION_NAMES.get(dtype) or unestablished("weights stored as %s" % dtype))
     for op in ops:
         if op.str(1) != "const":
+            # Other operations' own weights count: attributes and inputs
+            # bound to a value.
+            for _, v in op.map(5):
+                if v.has(5):
+                    store(v)
+            for _, argument in op.map(2):
+                for b in argument.msgs(1):
+                    if b.has(2) and b.msg(2).has(5):
+                        store(b.msg(2))
             continue
         out = op.msgs(3)[0]
         for _, v in op.map(5):
             if v.has(5) and out.str(1) in read:
-                dtype = DATA_TYPES.get(v.msg(2).msg(1).int(1))
-                stored.add(PRECISION_NAMES.get(dtype) or unestablished("weights stored as %s" % dtype))
+                store(v)
     types = set()
 
     def collect(t):
@@ -666,9 +894,7 @@ def program_facts(program, spec_version):
     names = sorted(types)
     precision = names[0] if len(names) == 1 else "Mixed (%s)" % ", ".join(names)
     storage = sorted(stored)
-    if len(storage) > 1:
-        unestablished("weights stored as %s" % ", ".join(storage))
-    storage = storage[0] if storage else None
+    storage = (storage[0] if len(storage) == 1 else "Mixed (%s)" % ", ".join(storage)) if storage else None
     return list(counts.items()), precision, labels, storage
 
 
@@ -718,12 +944,18 @@ def class_labels(program):
 def metadata_json(model, name):
     spec_version = model.int(1)
     description = model.msg(2) or Message(b"")
-    if description.has(13) or description.has(20) or description.has(50):
-        unestablished("a model with states, functions or training inputs")
+    if description.has(50):
+        unestablished("a model with training inputs")
+    if not model.has(502) and (description.has(13) or description.has(20)):
+        unestablished("states or functions outside an ML Program")
     meta = description.msg(100) or Message(b"")
     program = model.msg(502)
+    inputs, outputs, states = description.msgs(1), description.msgs(10), description.msgs(13)
     if program is not None:
-        histogram, precision, classifier, storage = program_facts(program, spec_version)
+        fns = functions(model)
+        default = default_function(model)
+        histogram, precision, classifier, storage = program_facts(program, spec_version, default if description.has(20) else None)
+        _, inputs, outputs, states = next(f for f in fns if f[0] == default)
         model_type = "MLModelType_mlProgram"
     elif pipeline_parts(model) is not None:
         kind, parts = pipeline_parts(model)
@@ -751,7 +983,7 @@ def metadata_json(model, name):
         if meta.has(number) and meta.str(number):
             pairs.append((key, meta.str(number)))
     pairs += [
-        ("outputSchema", [feature(f) for f in description.msgs(10)]),
+        ("outputSchema", [feature(f) for f in outputs]),
         ("modelParameters", []),
         ("specificationVersion", spec_version),
     ]
@@ -759,10 +991,10 @@ def metadata_json(model, name):
         pairs += [("mlProgramOperationTypeHistogram", CFDict(histogram)), ("computePrecision", precision)]
     pairs += [
         ("isUpdatable", "0"),
-        ("stateSchema", []),
+        ("stateSchema", [feature(f) for f in states]),
         ("availability", CFDict([(k, "unavailable" if k == "watchOS" and vision else (AVAILABILITY.get(spec_version) or unestablished("availability for specification %d" % spec_version))[k]) for k in AVAILABILITY_KEYS])),
         ("modelType", model_type if isinstance(model_type, CFDict) else CFDict([("name", model_type)])),
-        ("inputSchema", [feature(f) for f in description.msgs(1)]),
+        ("inputSchema", [feature(f) for f in inputs]),
         ("generatedClassName", generated_class_name(name)),
         ("method", "predict"),
     ]
@@ -778,7 +1010,32 @@ def metadata_json(model, name):
             pairs.append(("classLabels", class_labels(program)))
         if storage:
             pairs.append(("storagePrecision", storage))
+        if description.has(20):
+            entries = []
+            for fname, finputs, foutputs, fstates in fns:
+                fhistogram, fprecision, _, fstorage = program_facts(program, spec_version, fname)
+                fpairs = [("name", fname), ("inputSchema", [feature(f) for f in finputs]), ("outputSchema", [feature(f) for f in foutputs]),
+                          ("stateSchema", [feature(f) for f in fstates]), ("mlProgramOperationTypeHistogram", CFDict(fhistogram)),
+                          ("computePrecision", fprecision)] + ([("storagePrecision", fstorage)] if fstorage else [])
+                entries.append(ordered(fpairs, FUNCTION_KEYS))
+            pairs += [("functions", entries), ("defaultFunctionName", default)]
     return "[\n  " + ns_json(ordered(pairs, TOP_KEYS), 1) + "\n]"
+
+
+def default_function(model):
+    """The function a multi-function model's predictions use; "main" otherwise."""
+    description = model.msg(2) or Message(b"")
+    if not description.has(20):
+        if description.has(21):
+            unestablished("a default function without functions")
+        return "main"
+    names = [f.str(1) for f in description.msgs(20)]
+    program = [n for n, _ in model.msg(502).map(2)]
+    if sorted(names) != sorted(program) or len(set(names)) != len(names) or description.str(21) not in names:
+        unestablished("functions that don't match the program's")
+    if description.has(1) or description.has(10) or description.has(13) or description.has(11) or description.has(12):
+        unestablished("a multi-function model with its own features")
+    return description.str(21)
 
 
 def generated_class_name(name):
@@ -803,7 +1060,8 @@ def canonical_description(model):
     order) is kept in the model's order."""
     for number, wire, value in model.fields:
         if number == 2:
-            return value
+            # A description without metadata gets an empty one.
+            return value if Message(value).has(100) else value + b"\xa2\x06\x00"
     return b""
 
 
@@ -815,7 +1073,8 @@ def coremldata(model):
             + _u64(len(description)) + description)
     classifier = classifier_facts(model.msg(502))
     if classifier is None:
-        return head + _u32(502) + b"\0" * 12
+        # One per function.
+        return head + (_u32(502) + b"\0" * 12) * len(functions(model))
     # A classifier's labels and the output its probabilities come from.
     labels, probabilities = classifier
     if all(isinstance(x, str) for x in labels):
@@ -1520,7 +1779,7 @@ nil default switch case operator typealias extension init deinit subscript stati
 super where as is break continue fallthrough enum union const signed unsigned long short auto register extern volatile
 goto sizeof typedef oneway bycopy byref restrict inline Self do else convenience dynamic final lazy optional required
 override weak unowned mutating nonmutating prefix postfix infix get set didSet NULL Class SEL IMP nonatomic atomic
-error _Bool dynamicType
+error _Bool dynamicType left right
 """.split())
 
 ARRAY_SWIFT = {"Float32": ("Float", "floats"), "Float16": ("Float16", "16-bit floats"), "Double": ("Double", "doubles"),
@@ -1532,8 +1791,9 @@ class Feature:
         self.name = f.str(1)
         self.description = f.str(2)
         t = f.msg(3)
-        if t.int(1000):
-            unestablished("an optional feature's generated code")
+        self.optional = bool(t.int(1000))
+        if self.optional and not t.has(5):
+            unestablished("an optional feature other than a multi-array's generated code")
         self.swift_name = self.name + "_" if self.name in SWIFT_RESERVED else self.name
         if not self.swift_name.replace("_", "a").isalnum() or not self.swift_name.isascii() or self.swift_name[0].isdigit():
             unestablished("generated code for a feature named %r" % self.name)
@@ -1542,15 +1802,7 @@ class Feature:
             a = t.msg(5)
             dtype = ARRAY_TYPES.get(a.int(2)) or unestablished("array data type %d" % a.int(2))
             self.element, words = ARRAY_SWIFT[dtype]
-            shape = []
-            for r in a.all(1):
-                if isinstance(r, bytes):
-                    i = 0
-                    while i < len(r):
-                        v, i = _varint(r, i)
-                        shape.append(v)
-                else:
-                    shape.append(r)
+            shape = _ints(a.all(1))
             if len(shape) == 1:
                 shaped = "%d element vector of %s" % (shape[0], words)
             elif len(shape) == 2:
@@ -1565,15 +1817,16 @@ class Feature:
         elif t.has(4):
             im = t.msg(4)
             space = im.int(3)
-            if space not in (10, 20, 30):
+            if space not in (10, 20, 30, 40):
                 unestablished("color space %d" % space)
             self.width, self.height = im.int(1), im.int(2)
             self.kind = "image"
             self.swift_type = "CVPixelBuffer"
-            fmt = "kCVPixelFormatType_OneComponent8" if space == 10 else "kCVPixelFormatType_32BGRA"
+            fmt = {10: "kCVPixelFormatType_OneComponent8", 40: "kCVPixelFormatType_OneComponent16Half"}.get(space, "kCVPixelFormatType_32BGRA")
             self.phrase = "%s (%s) image buffer, %d pixels wide by %d pixels high" % (
-                "grayscale" if space == 10 else "color", fmt, self.width, self.height)
-            self.cg_format = {10: "kCVPixelFormatType_OneComponent8", 20: "kCVPixelFormatType_32ARGB", 30: "kCVPixelFormatType_32BGRA"}[space]
+                "grayscale" if space in (10, 40) else "color", fmt, self.width, self.height)
+            self.cg_format = {10: "kCVPixelFormatType_OneComponent8", 20: "kCVPixelFormatType_32ARGB", 30: "kCVPixelFormatType_32BGRA",
+                              40: "kCVPixelFormatType_OneComponent16Half"}[space]
         elif t.has(3):
             self.kind, self.swift_type, self.phrase = "string", "String", "string value"
         elif t.has(1):
@@ -1596,6 +1849,8 @@ class Feature:
                 unestablished("generated code for a sequence of another type")
         else:
             unestablished("generated code for this feature type")
+        if self.optional:
+            self.phrase = "optional " + self.phrase
         self.doc = "%s as %s" % (label, self.phrase)
         self.param_doc = ("%s as %s" % (self.description, self.phrase)) if self.description else self.phrase
 
@@ -1618,52 +1873,107 @@ class Feature:
                 "dictionary": "provider.featureValue(for: \"%s\")!.dictionaryValue as! " + self.swift_type}[self.kind] % self.name
 
 
+def interface(model):
+    """(inputs, outputs, states) the generated classes use: a multi-function
+    model's default function's."""
+    description = model.msg(2) or Message(b"")
+    if not model.has(502):
+        if description.has(13) or description.has(20):
+            unestablished("states or functions outside an ML Program")
+        return [Feature(f) for f in description.msgs(1)], [Feature(f) for f in description.msgs(10)], []
+    default = default_function(model)
+    out = None
+    for fname, inputs, outputs, states in functions(model):
+        # Xcode checks every function, not just the default.
+        input_defaults(inputs)
+        features = [Feature(f) for f in inputs], [Feature(f) for f in outputs], [state_name(f) for f in states]
+        if fname == default:
+            out = features
+    return out
+
+
+def state_name(f):
+    """(name, the name the generated code gives it) of a state."""
+    t = f.msg(3)
+    if not (t and t.has(8)) or t.int(1000):
+        unestablished("a state that isn't a multi-array")
+    name = f.str(1)
+    swift = name + "_" if name in SWIFT_RESERVED else name
+    if not swift.replace("_", "a").isalnum() or not swift.isascii() or swift[0].isdigit():
+        unestablished("generated code for a state named %r" % name)
+    return name, swift
+
+
+IMAGE_SOURCES = (("cgImage", "With", "CGImage"), ("imageAt", "At", "URL"))
+
+
 def swift_source(model, name):
     spec_version = model.int(1)
-    description = model.msg(2) or Message(b"")
-    if description.has(13) or description.has(20):
-        unestablished("generated code for a model with states or functions")
     available = "@available(%s, *)" % (AVAILABILITY_LINE.get(spec_version) or unestablished("specification version %d" % spec_version))
     if vision_model(model):
         available = re.sub(r", watchOS [0-9.]+", "", available) + "\n@available(watchOS, unavailable)"
-    inputs = [Feature(f) for f in description.msgs(1)]
-    outputs = [Feature(f) for f in description.msgs(10)]
-    # MLShapedArray came with iOS 15.
+    inputs, outputs, states = interface(model)
+    # Initializers and predictions take optional inputs last.
+    params = [f for f in inputs if not f.optional] + [f for f in inputs if f.optional]
+    # MLShapedArray came with iOS 15; MLShapedArray<Float16> isn't on Intel
+    # Macs, and on others came with macOS 15.
     ios15 = "    @available(%s, *)\n" % AVAILABILITY_LINE[6] if spec_version < 6 else ""
+    half = ("    #if (os(macOS) || targetEnvironment(macCatalyst)) && arch(x86_64)\n    @available(macOS, unavailable)\n    @available(macCatalyst, unavailable)\n"
+            + ("    #else\n    @available(macOS 15.0, *)\n" if spec_version < 9 else "") + "    #endif\n")
+
+    def shaped(features):
+        return ios15 + (half if any(f.kind == "array" and f.element == "Float16" for f in features) else "")
+    mk = "MLFeatureValue(%s: %s, pixelsWide: %d, pixelsHigh: %d, pixelFormatType: %s, options: nil).imageBufferValue!"
+
+    def param(f, shape=False, default=True, source=None):
+        if source and f.kind == "image":
+            return "%s%s %s: %s" % (f.swift_name, source[1], f.swift_name, source[2])
+        t = "MLShapedArray<%s>" % f.element if shape and f.kind == "array" else f.swift_type
+        return "%s: %s%s" % (f.swift_name, t, ("? = nil" if default else "?") if f.optional else "")
+
+    def arg(f, shape=False, source=None):
+        n = f.swift_name
+        if source and f.kind == "image":
+            return "%s: try %s" % (n, mk % (source[0], n, f.width, f.height, f.cg_format))
+        if shape and f.kind == "array":
+            return "%s: %s" % (n, ("%s != nil ? MLMultiArray(%s!) : nil" % (n, n)) if f.optional else "MLMultiArray(%s)" % n)
+        return "%s: %s" % (n, n)
     L = []
     w = L.append
     w("//\n// %s.swift\n//\n// This file was automatically generated and should not be edited.\n//\n\nimport CoreML\n\n" % name)
     # Input.
     w("/// Model Prediction Input Type\n%s\npublic class %sInput : MLFeatureProvider {\n" % (available, name))
     for f in inputs:
-        w("    /// %s\n    public var %s: %s\n" % (f.doc, f.swift_name, f.swift_type))
+        w("    /// %s\n    public var %s: %s%s\n" % (f.doc, f.swift_name, f.swift_type, "? = nil" if f.optional else ""))
     w("    public var featureNames: Set<String> { [%s] }\n" % ", ".join('"%s"' % f.name for f in inputs))
     w("    public func featureValue(for featureName: String) -> MLFeatureValue? {")
     for f in inputs:
-        w("        if featureName == \"%s\" {\n            return %s\n        }" % (f.name, f.value(f.swift_name)))
+        value = ("%s == nil ? nil : %s" % (f.swift_name, f.value(f.swift_name + "!"))) if f.optional else f.value(f.swift_name)
+        w("        if featureName == \"%s\" {\n            return %s\n        }" % (f.name, value))
     w("        return nil\n    }\n")
-    w("    public init(%s) {" % ", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in inputs))
-    for f in inputs:
+    w("    public init(%s) {" % ", ".join(param(f) for f in params))
+    for f in params:
         w("        self.%s = %s" % (f.swift_name, f.swift_name))
     w("    }\n")
     arrays = [f for f in inputs if f.kind == "array"]
     if arrays:
-        w(ios15 + "    public convenience init(%s) {" % ", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs))
-        w("        self.init(%s)" % ", ".join("%s: %s" % (f.swift_name, "MLMultiArray(%s)" % f.swift_name if f.kind == "array" else f.swift_name) for f in inputs))
+        w(shaped(inputs) + "    public convenience init(%s) {" % ", ".join(param(f, True) for f in params))
+        w("        self.init(%s)" % ", ".join(arg(f, True) for f in params))
         w("    }\n")
     images = [f for f in inputs if f.kind == "image"]
     if images:
-        if len(inputs) != 1:
-            unestablished("generated code for images among other inputs")
-        f = images[0]
-        mk = "MLFeatureValue(%s: %s, pixelsWide: %d, pixelsHigh: %d, pixelFormatType: %s, options: nil).imageBufferValue!"
         # Images from CGImage and URL came with iOS 13.
         ios13 = "    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, visionOS 1.0, *)\n" if spec_version < 4 else ""
-        w(ios13 + "    public convenience init(%sWith %s: CGImage) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
-        w(ios13 + "    public convenience init(%sAt %s: URL) throws {\n        self.init(%s: try %s)\n    }\n" % (f.swift_name, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
-        cap = f.swift_name[:1].upper() + f.swift_name[1:]
-        w(ios13 + "    public func set%s(with %s: CGImage) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("cgImage", f.swift_name, f.width, f.height, f.cg_format)))
-        w(ios13 + "    public func set%s(with %s: URL) throws  {\n        self.%s = try %s\n    }\n" % (cap, f.swift_name, f.swift_name, mk % ("imageAt", f.swift_name, f.width, f.height, f.cg_format)))
+        # From each source, with arrays as MLMultiArray and then as MLShapedArray.
+        for source in IMAGE_SOURCES:
+            for shape in (False, True) if arrays else (False,):
+                w(ios13 + (shaped(inputs) if shape else "") + "    public convenience init(%s) throws {\n        self.init(%s)\n    }\n" % (
+                    ", ".join(param(f, shape, source=source) for f in params), ", ".join(arg(f, shape, source) for f in params)))
+        for source in IMAGE_SOURCES:
+            for f in images:
+                cap = f.swift_name[:1].upper() + f.swift_name[1:]
+                w(ios13 + "    public func set%s(with %s: %s) throws  {\n        self.%s = try %s\n    }\n" % (
+                    cap, f.swift_name, source[2], f.swift_name, mk % (source[0], f.swift_name, f.width, f.height, f.cg_format)))
     w("}\n\n")
     # Output.
     w("/// Model Prediction Output Type\n%s\npublic class %sOutput : MLFeatureProvider {\n" % (available, name))
@@ -1671,15 +1981,25 @@ def swift_source(model, name):
     for f in outputs:
         w("    /// %s\n    public var %s: %s {\n        %s\n    }\n" % (f.doc, f.swift_name, f.swift_type, f.read()))
         if f.kind == "array":
-            w("    /// %s\n" % f.doc + ios15 + "    public var %sShapedArray: MLShapedArray<%s> {\n        MLShapedArray<%s>(%s)\n    }\n" % (f.swift_name, f.element, f.element, f.swift_name))
+            w("    /// %s\n" % f.doc + shaped([f]) + "    public var %sShapedArray: MLShapedArray<%s> {\n        MLShapedArray<%s>(%s)\n    }\n" % (f.swift_name, f.element, f.element, f.swift_name))
     w("    public var featureNames: Set<String> {\n        provider.featureNames\n    }\n")
     w("    public func featureValue(for featureName: String) -> MLFeatureValue? {\n        provider.featureValue(for: featureName)\n    }\n")
     w("    public init(%s) {" % ", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in outputs))
     w("        self.provider = try! MLDictionaryFeatureProvider(dictionary: [%s])" % ", ".join('"%s" : %s' % (f.name, f.value(f.swift_name)) for f in outputs))
     w("    }\n")
     w("    public init(features: MLFeatureProvider) {\n        self.provider = features\n    }\n}\n\n")
+    if states:
+        L[-1] = L[-1].rstrip("\n") + "\n\n" + (SWIFT_STATE.replace("{available}", available).replace("{N}", name).replace(
+            "{cases}", "\n".join('        case %s = "%s"' % (swift, n) for n, swift in states)))
     template = MODEL_CLASS_SPEC3 if spec_version < 6 else MODEL_CLASS
     model_class = template.replace("{available}", available).replace("{N}", name).rstrip("\n") + "\n"
+    if states:
+        # Predictions use and update a state.
+        for old, new, count in SWIFT_STATE_PREDICTIONS:
+            old, new = old.replace("{N}", name), new.replace("{N}", name).replace("{first}", states[0][1])
+            if model_class.count(old) != count:
+                unestablished("the predictions of a model with states")
+            model_class = model_class.replace(old, new)
     if spec_version < 3:
         # Configurations and batches need iOS 12 and its contemporaries.
         ios12 = "    @available(%s, *)\n" % AVAILABILITY_LINE[3]
@@ -1696,13 +2016,21 @@ def swift_source(model, name):
         model_class = model_class.replace(anchor, "    @available(%s, *)\n" % AVAILABILITY_LINE[8] + anchor)
     w(model_class)
     # Convenience predictions.
-    params = "\n".join("            - %s: %s" % (f.swift_name, f.param_doc) for f in inputs)
+    docs = "\n".join("            - %s: %s" % (f.swift_name, f.param_doc) for f in params)
+    if states:
+        docs += "\n            - state: the state that the prediction will use and update."
     doc = ("    /**\n        Make a prediction using the convenience interface\n\n        It uses the default function if the model has multiple functions.\n\n"
-           "        - parameters:\n%s\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as %sOutput\n    */\n") % (params, name)
-    call = "        let input_ = %sInput(%s)\n        return try prediction(input: input_)\n    }\n" % (name, ", ".join("%s: %s" % (f.swift_name, f.swift_name) for f in inputs))
-    w(doc + "    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in inputs), name) + call)
+           "        - parameters:\n%s\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as %sOutput\n    */\n") % (docs, name)
+    using = ", using state: %sState" % name if states else ""
+    call = "        let input_ = %sInput(%s)\n        return try prediction(input: input_%s)\n    }\n" % (
+        name, ", ".join("%s: %s" % (f.swift_name, f.swift_name) for f in params), ", using: state" if states else "")
+    w(doc + "    public func prediction(%s%s) throws -> %sOutput {\n" % (", ".join(param(f, default=False) for f in params), using, name) + call)
     if arrays:
-        w(doc + "\n" + ios15 + "    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs), name) + call)
+        w(doc + "\n" + shaped(inputs) + "    public func prediction(%s%s) throws -> %sOutput {\n" % (", ".join(param(f, True, default=False) for f in params), using, name) + call)
+    if states:
+        # No batch predictions with a state.
+        L[-1] += "}\n"
+        return "\n".join(L)
     batch = (BATCH_SPEC3 if spec_version < 6 else BATCH).replace("{N}", name)
     if spec_version < 3:
         anchor = "    public func predictions(inputs: [%sInput]" % name
@@ -1712,6 +2040,21 @@ def swift_source(model, name):
     w(batch)
     return "\n".join(L)
 
+
+SWIFT_STATE = '/// Model Prediction State Type\n{available}\npublic final class {N}State {\n    public enum Name: String, CaseIterable {\n{cases}\n    }\n\n    let handle: MLState\n\n    init(handle: MLState) {\n        self.handle = handle\n    }\n\n    public func withMultiArray<R>(for stateName: Name, _ body: (MLMultiArray) throws -> R) rethrows -> R {\n        try handle.withMultiArray(for: stateName.rawValue, body)\n    }\n}\n'
+
+# (text, its replacement, occurrences) turning MODEL_CLASS's predictions into
+# those of a model with states.
+SWIFT_STATE_PREDICTIONS = [
+    ('    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n\n',
+     '    /**\n        Make a new state.\n\n        Core ML framework will allocate the state buffers declared in the model.\n\n        The allocated state buffers are initialized to zeros. To initialize with different values, use `.withMultiArray(for:)` to get the mutable `MLMultiArray`-view to the state buffer.\n\n        ```swift\n        let state = model.makeState()\n        state.withMultiArray(for: .{first}) { stateMultiArray in\n            stateMultiArray[0] = 0.42\n        }\n        ```\n    */\n    public func makeState() -> {N}State {\n        {N}State(handle: model.makeState())\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - state: the state that the prediction will use and update.\n\n', 1),
+    ('           - input: the input to the prediction as {N}Input\n           - options: prediction options\n',
+     '           - input: the input to the prediction as {N}Input\n           - state: the state that the prediction will use and update.\n           - options: prediction options\n', 2),
+    ('    public func prediction(input: {N}Input) throws -> {N}Output {\n        try prediction(input: input, options: MLPredictionOptions())',
+     '    public func prediction(input: {N}Input, using state: {N}State) throws -> {N}Output {\n        try prediction(input: input, using: state, options: MLPredictionOptions())', 1),
+    ('prediction(input: {N}Input, options:', 'prediction(input: {N}Input, using state: {N}State, options:', 2),
+    ('prediction(from: input, options: options)', 'prediction(from: input, using: state.handle, options: options)', 2),
+]
 
 MODEL_CLASS = '/// Class for model loading and prediction\n{available}\npublic class {N} {\n    public let model: MLModel\n\n    /// URL of model assuming it was installed in the same bundle as this class\n    class var urlOfModelInThisBundle : URL {\n        let bundle = Bundle(for: self)\n        return bundle.url(forResource: "{N}", withExtension:"mlmodelc")!\n    }\n\n    /**\n        Construct {N} instance with an existing MLModel object.\n\n        Usually the application does not use this initializer unless it makes a subclass of {N}.\n        Such application may want to use `MLModel(contentsOfURL:configuration:)` and `{N}.urlOfModelInThisBundle` to create a MLModel object to pass-in.\n\n        - parameters:\n          - model: MLModel object\n    */\n    init(model: MLModel) {\n        self.model = model\n    }\n\n    /**\n        Construct a model with configuration\n\n        - parameters:\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(configuration: MLModelConfiguration = MLModelConfiguration()) throws {\n        try self.init(contentsOf: type(of:self).urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance with explicit path to mlmodelc file\n        - parameters:\n           - modelURL: the file url of the model\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL) throws {\n        try self.init(model: MLModel(contentsOf: modelURL))\n    }\n\n    /**\n        Construct a model with URL of the .mlmodelc directory and configuration\n\n        - parameters:\n           - modelURL: the file url of the model\n           - configuration: the desired model configuration\n\n        - throws: an NSError object that describes the problem\n    */\n    public convenience init(contentsOf modelURL: URL, configuration: MLModelConfiguration) throws {\n        try self.init(model: MLModel(contentsOf: modelURL, configuration: configuration))\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration, completionHandler: handler)\n    }\n\n    /**\n        Construct {N} instance asynchronously with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - configuration: the desired model configuration\n    */\n    public class func load(configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        try await load(contentsOf: self.urlOfModelInThisBundle, configuration: configuration)\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n          - handler: the completion handler to be called when the model loading completes successfully or unsuccessfully\n    */\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration(), completionHandler handler: @escaping (Swift.Result<{N}, Error>) -> Void) {\n        MLModel.load(contentsOf: modelURL, configuration: configuration) { result in\n            switch result {\n            case .failure(let error):\n                handler(.failure(error))\n            case .success(let model):\n                handler(.success({N}(model: model)))\n            }\n        }\n    }\n\n    /**\n        Construct {N} instance asynchronously with URL of the .mlmodelc directory with optional configuration.\n\n        Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n        - parameters:\n          - modelURL: the URL to the model\n          - configuration: the desired model configuration\n    */\n    public class func load(contentsOf modelURL: URL, configuration: MLModelConfiguration = MLModelConfiguration()) async throws -> {N} {\n        let model = try await MLModel.load(contentsOf: modelURL, configuration: configuration)\n        return {N}(model: model)\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input) throws -> {N}Output {\n        try prediction(input: input, options: MLPredictionOptions())\n    }\n\n    /**\n        Make a prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input, options: MLPredictionOptions) throws -> {N}Output {\n        let outFeatures = try model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n    /**\n        Make an asynchronous prediction using the structured interface\n\n        It uses the default function if the model has multiple functions.\n\n        - parameters:\n           - input: the input to the prediction as {N}Input\n           - options: prediction options\n\n        - throws: an NSError object that describes the problem\n\n        - returns: the result of the prediction as {N}Output\n    */\n    public func prediction(input: {N}Input, options: MLPredictionOptions = MLPredictionOptions()) async throws -> {N}Output {\n        let outFeatures = try await model.prediction(from: input, options: options)\n        return {N}Output(features: outFeatures)\n    }\n\n'
 
@@ -1738,71 +2081,102 @@ API_AVAILABLE = {
 def _objc(f):
     """(property attributes and type, parameter type, value expression, read expression) of a feature."""
     if f.kind == "array":
-        return "(readwrite, nonatomic, strong) MLMultiArray * ", "MLMultiArray *", "featureValueWithMultiArray:self.%s", "(MLMultiArray *)[%%s featureValueForName:@\"%s\"].multiArrayValue"
-    if f.kind == "image":
-        return "(readwrite, nonatomic) CVPixelBufferRef ", "CVPixelBufferRef", "featureValueWithPixelBuffer:self.%s", "(CVPixelBufferRef)[%%s featureValueForName:@\"%s\"].imageBufferValue"
-    if f.kind == "string":
-        return "(readwrite, nonatomic, strong) NSString * ", "NSString *", "featureValueWithString:self.%s", "(NSString *)[%%s featureValueForName:@\"%s\"].stringValue"
-    if f.kind == "int64":
-        return "(readwrite, nonatomic) int64_t ", "int64_t", "featureValueWithInt64:self.%s", "[%%s featureValueForName:@\"%s\"].int64Value"
-    if f.kind == "double":
-        return "(readwrite, nonatomic) double ", "double", "featureValueWithDouble:self.%s", "[%%s featureValueForName:@\"%s\"].doubleValue"
-    if f.kind == "sequence":
+        out = "(readwrite, nonatomic, strong) MLMultiArray * ", "MLMultiArray *", "featureValueWithMultiArray:self.%s", "(MLMultiArray *)[%%s featureValueForName:@\"%s\"].multiArrayValue"
+    elif f.kind == "image":
+        out = "(readwrite, nonatomic) CVPixelBufferRef ", "CVPixelBufferRef", "featureValueWithPixelBuffer:self.%s", "(CVPixelBufferRef)[%%s featureValueForName:@\"%s\"].imageBufferValue"
+    elif f.kind == "string":
+        out = "(readwrite, nonatomic, strong) NSString * ", "NSString *", "featureValueWithString:self.%s", "(NSString *)[%%s featureValueForName:@\"%s\"].stringValue"
+    elif f.kind == "int64":
+        out = "(readwrite, nonatomic) int64_t ", "int64_t", "featureValueWithInt64:self.%s", "[%%s featureValueForName:@\"%s\"].int64Value"
+    elif f.kind == "double":
+        out = "(readwrite, nonatomic) double ", "double", "featureValueWithDouble:self.%s", "[%%s featureValueForName:@\"%s\"].doubleValue"
+    elif f.kind == "sequence":
         element = "NSString *" if f.sequence == "string" else "NSNumber *"
         t = "NSArray<%s> *" % element
         make = "sequenceWithStringArray" if f.sequence == "string" else "sequenceWithInt64Array"
         values = "stringValues" if f.sequence == "string" else "int64Values"
-        return ("(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithSequence:[MLSequence %s:self.%%s]" % make,
-                "(" + t + ")[%%s featureValueForName:@\"%s\"].sequenceValue." + values)
-    key = "NSNumber *" if "Int64" in f.swift_type else "NSString *"
-    t = "NSDictionary<%s, NSNumber *> *" % key
-    return "(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithDictionary:self.%s error:nil", "(" + t + ")[%%s featureValueForName:@\"%s\"].dictionaryValue"
+        out = ("(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithSequence:[MLSequence %s:self.%%s]" % make,
+               "(" + t + ")[%%s featureValueForName:@\"%s\"].sequenceValue." + values)
+    else:
+        key = "NSNumber *" if "Int64" in f.swift_type else "NSString *"
+        t = "NSDictionary<%s, NSNumber *> *" % key
+        out = "(readwrite, nonatomic, strong) %s " % t, t, "featureValueWithDictionary:self.%s error:nil", "(" + t + ")[%%s featureValueForName:@\"%s\"].dictionaryValue"
+    if f.optional:
+        # An optional multi-array is nullable.
+        out = (out[0].replace(") ", ", nullable) ", 1), "nullable " + out[1],
+               "self.%s == nil ? nil : [MLFeatureValue featureValueWithMultiArray:(MLMultiArray *)self.%s]", out[3])
+    return out
 
 
-def _selector(prefix, features, value):
+def _selector(prefix, features, value, source=None):
     """`prefixFirst:(value) second:(value) ...`: the first part capitalizes
-    the feature's own name, later parts use the name the code gives it."""
+    the feature's own name, later parts use the name the code gives it; an
+    image from a CGImage or URL says so."""
     parts = []
     for k, f in enumerate(features):
         label = prefix + f.name[:1].upper() + f.name[1:] if k == 0 else f.swift_name
+        # The convenience prediction keeps clear of the standard
+        # predictionFromFeatures:.
+        if label == "predictionFromFeatures":
+            label += "_"
+        if source and f.kind == "image":
+            label += ("FromCGImage" if k == 0 else "CGImage") if source[0] == "cgImage" else "AtURL"
         parts.append("%s:%s" % (label, value(f)))
     return " ".join(parts)
 
 
+def _objc_param(f, source=None):
+    if source and f.kind == "image":
+        return "(CGImageRef)%s" % f.swift_name if source[0] == "cgImage" else "(NSURL *)%sURL" % f.swift_name
+    return "(%s)%s" % (_objc(f)[1], f.swift_name)
+
+
 def objc_sources(model, name):
     spec_version = model.int(1)
-    description = model.msg(2) or Message(b"")
-    if description.has(13) or description.has(20):
-        unestablished("generated code for a model with states or functions")
     available = "API_AVAILABLE(%s) __attribute__((visibility(\"hidden\")))" % (API_AVAILABLE.get(spec_version) or unestablished("specification version %d" % spec_version))
     if vision_model(model):
         available = re.sub(r", watchos\([0-9.]+\)", "", available).replace(") __attribute__", ") API_UNAVAILABLE(watchos)  __attribute__", 1)
-    inputs = [Feature(f) for f in description.msgs(1)]
-    outputs = [Feature(f) for f in description.msgs(10)]
+    inputs, outputs, states = interface(model)
     for f in inputs + outputs:
         if not (f.name[:1].isalpha() or f.name[:1] == "_"):
             unestablished("generated code for a feature named %r" % f.name)
     images = [f for f in inputs if f.kind == "image"]
-    if images and len(inputs) != 1:
-        unestablished("generated code for images among other inputs")
-    if any(f.kind == "image" for f in outputs):
-        unestablished("generated code for image outputs")
+    # Initializers without the optional inputs come first.
+    required = [f for f in inputs if not f.optional]
+    reduced = required if len(required) < len(inputs) else None
+    ios13 = " API_AVAILABLE(macos(10.15), ios(13.0), watchos(6.0), tvos(13.0)) __attribute__((visibility(\"hidden\")))" if spec_version < 4 else ""
+    error = " error:(NSError * _Nullable __autoreleasing * _Nullable)error"
     H = []
     H.append("//\n// %s.h\n//\n// This file was automatically generated and should not be edited.\n//\n\n#import <Foundation/Foundation.h>\n#import <CoreML/CoreML.h>\n#include <stdint.h>\n#include <os/log.h>\n\nNS_ASSUME_NONNULL_BEGIN\n" % name)
     for kind, features in (("Input", inputs), ("Output", outputs)):
         H.append("/// Model Prediction %s Type\n%s\n@interface %s%s : NSObject<MLFeatureProvider>\n" % (kind, available, name, kind))
         H.append("\n\n".join("/// %s\n@property %s%s;" % (f.doc, _objc(f)[0], f.swift_name) for f in features))
-        H[-1] += "\n- (instancetype)init NS_UNAVAILABLE;\n- (instancetype)%s NS_DESIGNATED_INITIALIZER;\n" % _selector("initWith", features, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name))
+        H[-1] += "\n- (instancetype)init NS_UNAVAILABLE;\n"
+        if kind == "Input" and reduced is not None:
+            H[-1] += "- (instancetype)%s;\n" % _selector("initWith", reduced, _objc_param)
+        H[-1] += "- (instancetype)%s NS_DESIGNATED_INITIALIZER;\n" % _selector("initWith", features, _objc_param)
         if kind == "Input" and images:
-            f = images[0]
-            cap = f.name[:1].upper() + f.name[1:]
-            ios13 = " API_AVAILABLE(macos(10.15), ios(13.0), watchos(6.0), tvos(13.0)) __attribute__((visibility(\"hidden\")))" if spec_version < 4 else ""
-            H.append("- (nullable instancetype)initWith%sFromCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error%s;\n" % (cap, f.swift_name, ios13))
-            H.append("- (nullable instancetype)initWith%sAtURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error%s;\n" % (cap, f.swift_name, ios13))
-            H.append("-(BOOL)set%sWithCGImage:(CGImageRef)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error %s;" % (cap, f.swift_name, ios13))
-            H.append("-(BOOL)set%sWithURL:(NSURL *)%sURL error:(NSError * _Nullable __autoreleasing * _Nullable)error %s;" % (cap, f.swift_name, ios13))
+            for source in IMAGE_SOURCES:
+                H.append("".join("- (nullable instancetype)%s%s%s;\n" % (_selector("initWith", fs, lambda f: _objc_param(f, source), source), error, ios13)
+                                 for fs in ([reduced] if reduced is not None else []) + [inputs]))
+            for source in IMAGE_SOURCES:
+                for f in images:
+                    cap = f.swift_name[:1].upper() + f.swift_name[1:]
+                    H.append("-(BOOL)set%sWith%s:%s%s %s;" % (cap, source[2], _objc_param(f, source), error, ios13))
         H.append("@end\n")
+    if states:
+        H[-1] += "\n/// Model Prediction State Names\ntypedef NS_ENUM(NSInteger, %sStateName) {\n%s\n} %s;\n" % (
+            name, "\n".join("    %sStateName%s," % (name, swift[:1].upper() + swift[1:]) for _, swift in states), available)
+        H[-1] += "\n/// Model Prediction State Type\n%s\n@interface %sState : NSObject\n@property (readonly, strong, nonatomic) MLState *state;\n" % (available, name)
+        H[-1] += "- (void)getMultiArrayForState:(%sStateName)stateName\n                      handler:(void (NS_NOESCAPE ^)(MLMultiArray *buffer))handler;\n@end\n" % name
     header_model = H_MODEL.replace("{available}", available).replace("{N}", name)
+    if states:
+        # Predictions use and update a state.
+        for old, new, count in OBJC_STATE_PREDICTIONS:
+            old, new = old.replace("{N}", name), new.replace("{N}", name)
+            if header_model.count(old) != count:
+                unestablished("the predictions of a model with states")
+            header_model = header_model.replace(old, new)
     if spec_version < 6:
         # Loading with a completion handler needs iOS 14 and its contemporaries.
         for anchor in ("completionHandler:(void (^)(%s * _Nullable model, NSError * _Nullable error))handler;" % name,):
@@ -1822,49 +2196,79 @@ def objc_sources(model, name):
                 unestablished("the configurations of an older model")
             header_model = header_model.replace(anchor, anchor[:-1] + " API_AVAILABLE(%s) __attribute__((visibility(\"hidden\")));" % API_AVAILABLE[3])
     H.append(header_model.rstrip("\n"))
-    params = "\n".join("    @param %s %s" % (f.swift_name, f.param_doc) for f in inputs)
-    H.append("\n/**\n    Make a prediction using the convenience interface\n%s\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the prediction as %sOutput\n*/\n- (nullable %sOutput *)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n" % (
-        params, name, name, _selector("predictionFrom", inputs, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name))))
-    batch = H_BATCH.replace("{N}", name)
-    if spec_version < 3:
-        batch = batch.replace("error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n@end", "error:(NSError * _Nullable __autoreleasing * _Nullable)error API_AVAILABLE(%s) __attribute__((visibility(\"hidden\")));\n@end" % API_AVAILABLE[3], 1)
-    H.append(batch)
+    params = "\n".join("    @param %s %s" % (f.swift_name, f.param_doc) for f in inputs) + ("\n    @param state prediction state" if states else "")
+    using = " usingState:(%sState *)state" % name if states else ""
+    H.append("\n/**\n    Make a prediction using the convenience interface\n%s\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the prediction as %sOutput\n*/\n- (nullable %sOutput *)%s%s error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n" % (
+        params, name, name, _selector("predictionFrom", inputs, _objc_param), using))
+    if states:
+        # No batch predictions with a state.
+        H[-1] = H[-1].rstrip("\n") + "\n@end\n\nNS_ASSUME_NONNULL_END\n"
+    else:
+        batch = H_BATCH.replace("{N}", name)
+        if spec_version < 3:
+            batch = batch.replace("error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n@end", "error:(NSError * _Nullable __autoreleasing * _Nullable)error API_AVAILABLE(%s) __attribute__((visibility(\"hidden\")));\n@end" % API_AVAILABLE[3], 1)
+        H.append(batch)
     header = "\n".join(H)
 
     def make_output(src):
-        return "[[%sOutput alloc] %s]" % (name, _selector("initWith", outputs, lambda f: _objc(f)[3] % src % f.name if False else (_objc(f)[3] % f.name) % src))
+        return "[[%sOutput alloc] %s]" % (name, _selector("initWith", outputs, lambda f: (_objc(f)[3] % f.name) % src))
 
     M = []
     M.append("//\n// %s.m\n//\n// This file was automatically generated and should not be edited.\n//\n\n#if !__has_feature(objc_arc)\n#error This file must be compiled with automatic reference counting enabled (-fobjc-arc)\n#endif\n\n#import \"%s.h\"\n" % (name, name))
     for kind, features in (("Input", inputs), ("Output", outputs)):
         M.append("@implementation %s%s\n" % (name, kind))
-        M.append("- (instancetype)%s {\n    self = [super init];\n    if (self) {" % _selector("initWith", features, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name)))
+        designated = "- (instancetype)%s {\n    self = [super init];\n    if (self) {\n" % _selector("initWith", features, _objc_param)
         for f in features:
-            M.append("        _%s = %s;" % (f.swift_name, f.swift_name))
+            designated += "        _%s = %s;\n" % (f.swift_name, f.swift_name)
             if f.kind == "image":
-                M.append("        CVPixelBufferRetain(_%s);" % f.swift_name)
-        M.append("    }\n    return self;\n}\n")
-        if kind == "Input" and images:
-            M.append(_image_methods(images[0]))
+                designated += "        CVPixelBufferRetain(_%s);\n" % f.swift_name
+        designated += "    }\n    return self;\n}\n"
+        if kind == "Input" and reduced is not None:
+            # The initializers without the optional inputs pass nil for them.
+            designated = ("- (instancetype)%s {\n    return [self %s];\n}\n" % (
+                _selector("initWith", reduced, _objc_param),
+                _selector("initWith", inputs, lambda f: "nil" if f.optional else f.swift_name))
+                + "".join(_image_init(source, reduced, reduced) + "\n" for source in IMAGE_SOURCES if images) + designated)
+        M.append(designated)
+        pictures = [f for f in features if f.kind == "image"]
+        if pictures:
+            methods = ["- (void)dealloc {\n%s}\n" % "".join("    CVPixelBufferRelease(_%s);\n" % f.swift_name for f in pictures)]
+            if kind == "Input":
+                methods += [_image_init(source, inputs, inputs) for source in IMAGE_SOURCES]
+                methods += [_image_setter(source, f) for source in IMAGE_SOURCES for f in pictures]
+            M.append("\n".join(methods))
         M.append("- (NSSet<NSString *> *)featureNames {\n    return [NSSet setWithArray:@[%s]];\n}\n" % ", ".join('@"%s"' % f.name for f in features))
         M.append("- (nullable MLFeatureValue *)featureValueForName:(NSString *)featureName {")
         for f in features:
-            M.append("    if ([featureName isEqualToString:@\"%s\"]) {\n        return [MLFeatureValue %s];\n    }" % (f.name, _objc(f)[2] % f.swift_name))
+            value = _objc(f)[2] % ((f.swift_name, f.swift_name) if f.optional else f.swift_name)
+            M.append("    if ([featureName isEqualToString:@\"%s\"]) {\n        return %s;\n    }" % (f.name, value if f.optional else "[MLFeatureValue %s]" % value))
         M.append("    return nil;\n}\n\n@end\n")
+    if states:
+        M.append(OBJC_STATE.replace("{N}", name).replace("{cases}", "".join(
+            "        case %sStateName%s:\n            stateNameString = @\"%s\";\n            break;\n" % (name, swift[:1].upper() + swift[1:], n) for n, swift in states)))
     M.append(M_MODEL.replace("{N}", name).rstrip("\n") + "\n")
-    M.append(("- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
-              "    return [self predictionFromFeatures:input options:[[MLPredictionOptions alloc] init] error:error];\n}\n").replace("{N}", name))
-    M.append(("- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
-              "    id<MLFeatureProvider> outFeatures = [self.model predictionFromFeatures:input options:options error:error];\n"
-              "    if (!outFeatures) { return nil; }\n    return %s;\n}\n").replace("{N}", name) % make_output("outFeatures"))
+    state_arg = " usingState:state" if states else ""
+    if states:
+        M.append("\n/**\n    Make a new state.\n*/\n- ({N}State *)newState {\n    MLState *state = [self.model newState];\n    return [[{N}State alloc] initWithState:state];\n}\n".replace("{N}", name))
+    M.append(("- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
+              "    return [self predictionFromFeatures:input%s options:[[MLPredictionOptions alloc] init] error:error];\n}\n").replace("{N}", name) % (using, state_arg))
+    M.append(("- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input%s options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
+              "    id<MLFeatureProvider> outFeatures = [self.model predictionFromFeatures:input%s options:options error:error];\n"
+              "    if (!outFeatures) { return nil; }\n    return %s;\n}\n").replace("{N}", name) % (using, state_arg + ".state" if states else "", make_output("outFeatures")))
     for opts in ("", " options:(MLPredictionOptions *)options"):
         call = " options:options" if opts else ""
-        M.append(("- (void)predictionFromFeatures:({N}Input *)input%s completionHandler:(void (^)({N}Output * _Nullable output, NSError * _Nullable error))completionHandler {\n"
+        if states:
+            # With a state, both pass options.
+            call = " usingState:state.state options:" + ("options" if opts else "[[MLPredictionOptions alloc] init]")
+        M.append(("- (void)predictionFromFeatures:({N}Input *)input%s%s completionHandler:(void (^)({N}Output * _Nullable output, NSError * _Nullable error))completionHandler {\n"
                   "    [self.model predictionFromFeatures:input%s completionHandler:^(id<MLFeatureProvider> prediction, NSError *predictionError) {\n"
                   "        if (prediction != nil) {\n            {N}Output *output = %s;\n            completionHandler(output, predictionError);\n"
-                  "        } else {\n            completionHandler(nil, predictionError);\n        }\n    }];\n}\n").replace("{N}", name) % (opts, call, make_output("prediction")))
-    M.append("- (nullable %sOutput *)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    %sInput *input_ = [[%sInput alloc] %s];\n    return [self predictionFromFeatures:input_ error:error];\n}\n" % (
-        name, _selector("predictionFrom", inputs, lambda f: "(%s)%s" % (_objc(f)[1], f.swift_name)), name, name, _selector("initWith", inputs, lambda f: f.swift_name)))
+                  "        } else {\n            completionHandler(nil, predictionError);\n        }\n    }];\n}\n").replace("{N}", name) % (using, opts, call, make_output("prediction")))
+    M.append("- (nullable %sOutput *)%s%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    %sInput *input_ = [[%sInput alloc] %s];\n    return [self predictionFromFeatures:input_%s error:error];\n}\n" % (
+        name, _selector("predictionFrom", inputs, _objc_param), using, name, name, _selector("initWith", inputs, lambda f: f.swift_name), state_arg))
+    if states:
+        M.append("@end\n")
+        return header, "\n".join(M)
     M.append(("- (nullable NSArray<{N}Output *> *)predictionsFromInputs:(NSArray<{N}Input*> *)inputArray options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
               "    id<MLBatchProvider> inBatch = [[MLArrayBatchProvider alloc] initWithFeatureProviderArray:inputArray];\n"
               "    id<MLBatchProvider> outBatch = [self.model predictionsFromBatch:inBatch options:options error:error];\n"
@@ -1877,25 +2281,48 @@ def objc_sources(model, name):
     return header, "\n".join(M)
 
 
-def _image_methods(f):
-    cap = f.name[:1].upper() + f.name[1:]
-    n = f.swift_name
+def _image_init(source, features, target):
+    """An initializer taking `features`' images from a CGImage or URL, which
+    calls the one for `target`."""
     make = "[MLFeatureValue featureValueWith%s:%s pixelsWide:%d pixelsHigh:%d pixelFormatType:%s options:nil error:&localError]"
-    out = []
-    for source, label, arg in (("CGImage", "FromCGImage:(CGImageRef)%s" % n, n), ("ImageAtURL", "AtURL:(NSURL *)%sURL" % n, n + "URL")):
-        out.append(("- (nullable instancetype)initWith%s%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
-                    "    if (self) {\n        NSError *localError;\n        BOOL result = YES;\n        id retVal = nil;\n        @autoreleasepool {\n            do {\n"
-                    "                MLFeatureValue * __%s = %s;\n                if (__%s == nil) {\n                    result = NO;\n                    break;\n                }\n"
-                    "                retVal = [self initWith%s:(CVPixelBufferRef)__%s.imageBufferValue];\n            }\n            while(0);\n        }\n"
-                    "        if (error != NULL) {\n            *error = localError;\n        }\n        return result ? retVal : nil;\n    }\n    return self;\n}\n") % (
-                    cap, label, n, make % (source, arg, f.width, f.height, f.cg_format), n, cap, n))
-    for source, label, arg in (("CGImage", "CGImage:(CGImageRef)%s" % n, n), ("ImageAtURL", "URL:(NSURL *)%sURL" % n, n + "URL")):
-        out.append(("-(BOOL)set%sWith%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    NSError *localError;\n    BOOL result = NO;\n    @autoreleasepool {\n"
-                    "        MLFeatureValue * __%s = %s;\n        if (__%s != nil) {\n            CVPixelBufferRelease(self.%s);\n"
-                    "            self.%s =  (CVPixelBufferRef)__%s.imageBufferValue;\n            CVPixelBufferRetain(self.%s);\n            result = YES;\n        }\n    }\n"
-                    "    if (error != NULL) {\n        *error = localError;\n    }\n    return result;\n}\n") % (
-                    cap, label, n, make % (source, arg, f.width, f.height, f.cg_format), n, n, n, n, n))
-    return "- (void)dealloc {\n    CVPixelBufferRelease(_%s);\n}\n\n" % n + "\n".join(out)
+    out = ("- (nullable instancetype)%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n"
+           "    if (self) {\n        NSError *localError;\n        BOOL result = YES;\n        id retVal = nil;\n        @autoreleasepool {\n            do {\n") % (
+        _selector("initWith", features, lambda f: _objc_param(f, source), source))
+    for f in features:
+        if f.kind == "image":
+            n = f.swift_name
+            out += ("                MLFeatureValue * __%s = %s;\n                if (__%s == nil) {\n                    result = NO;\n                    break;\n                }\n") % (
+                n, make % ("CGImage" if source[0] == "cgImage" else "ImageAtURL", n if source[0] == "cgImage" else n + "URL", f.width, f.height, f.cg_format), n)
+    out += ("                retVal = [self %s];\n            }\n            while(0);\n        }\n"
+            "        if (error != NULL) {\n            *error = localError;\n        }\n        return result ? retVal : nil;\n    }\n    return self;\n}\n") % (
+        _selector("initWith", target, lambda f: "(CVPixelBufferRef)__%s.imageBufferValue" % f.swift_name if f.kind == "image" else f.swift_name))
+    return out
+
+
+def _image_setter(source, f):
+    cap = f.swift_name[:1].upper() + f.swift_name[1:]
+    n = f.swift_name
+    make = "[MLFeatureValue featureValueWith%s:%s pixelsWide:%d pixelsHigh:%d pixelFormatType:%s options:nil error:&localError]" % (
+        "CGImage" if source[0] == "cgImage" else "ImageAtURL", n if source[0] == "cgImage" else n + "URL", f.width, f.height, f.cg_format)
+    return ("-(BOOL)set%sWith%s:%s error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    NSError *localError;\n    BOOL result = NO;\n    @autoreleasepool {\n"
+            "        MLFeatureValue * __%s = %s;\n        if (__%s != nil) {\n            CVPixelBufferRelease(self.%s);\n"
+            "            self.%s =  (CVPixelBufferRef)__%s.imageBufferValue;\n            CVPixelBufferRetain(self.%s);\n            result = YES;\n        }\n    }\n"
+            "    if (error != NULL) {\n        *error = localError;\n    }\n    return result;\n}\n") % (cap, source[2], _objc_param(f, source), n, make, n, n, n, n, n)
+
+
+OBJC_STATE = '@implementation {N}State\n\n- (instancetype)initWithState:(MLState *)state {\n    self = [super init];\n    if (self) {\n        _state = state;\n    }\n    return self;\n}\n\n- (void)getMultiArrayForState:({N}StateName)stateName\n                      handler:(void (NS_NOESCAPE ^)(MLMultiArray *buffer))handler {\n    NSString *stateNameString = nil;\n    switch (stateName) {\n{cases}    }\n\n    [self.state getMultiArrayForStateNamed:stateNameString handler:handler];\n}\n\n@end\n'
+
+# (text, its replacement, occurrences) turning H_MODEL's predictions into
+# those of a model with states.
+OBJC_STATE_PREDICTIONS = [
+    ('/**\n    Make a prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param error',
+     '/**\n    Make a new state.\n*/\n- ({N}State *)newState;\n\n/**\n    Make a prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param error', 1),
+    ('    @param input an instance of {N}Input to predict from\n', '    @param input an instance of {N}Input to predict from\n    @param state prediction state\n', 4),
+    ('predictionFromFeatures:({N}Input *)input error:', 'predictionFromFeatures:({N}Input *)input usingState:({N}State *)state error:', 1),
+    ('predictionFromFeatures:({N}Input *)input options:', 'predictionFromFeatures:({N}Input *)input usingState:({N}State *)state options:', 2),
+    ('predictionFromFeatures:({N}Input *)input completionHandler:', 'predictionFromFeatures:({N}Input *)input usingState:({N}State *)state completionHandler:', 1),
+]
+
 
 H_MODEL = '/// Class for model loading and prediction\n{available}\n@interface {N} : NSObject\n@property (readonly, nonatomic, nullable) MLModel * model;\n\n/**\n    URL of the underlying .mlmodelc directory.\n*/\n+ (nullable NSURL *)URLOfModelInThisBundle;\n\n/**\n    Initialize {N} instance from an existing MLModel object.\n\n    Usually the application does not use this initializer unless it makes a subclass of {N}.\n    Such application may want to use `-[MLModel initWithContentsOfURL:configuration:error:]` and `+URLOfModelInThisBundle` to create a MLModel object to pass-in.\n*/\n- (instancetype)initWithMLModel:(MLModel *)model NS_DESIGNATED_INITIALIZER;\n\n/**\n    Initialize {N} instance with the model in this bundle.\n*/\n- (nullable instancetype)init;\n\n/**\n    Initialize {N} instance with the model in this bundle.\n\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithConfiguration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Construct {N} instance asynchronously with configuration.\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadWithConfiguration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler;\n\n/**\n    Construct {N} instance asynchronously with URL of .mlmodelc directory and optional configuration.\n\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param modelURL The model URL.\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler;\n\n/**\n    Make a prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the prediction as {N}Output\n*/\n- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Make a prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param options prediction options\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n    @return the prediction as {N}Output\n*/\n- (nullable {N}Output *)predictionFromFeatures:({N}Input *)input options:(MLPredictionOptions *)options error:(NSError * _Nullable __autoreleasing * _Nullable)error;\n\n/**\n    Make an asynchronous prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param completionHandler a block that will be called upon completion of the prediction. error will be nil if no error occurred.\n*/\n- (void)predictionFromFeatures:({N}Input *)input completionHandler:(void (^)({N}Output * _Nullable output, NSError * _Nullable error))completionHandler;\n\n/**\n    Make an asynchronous prediction using the standard interface\n    @param input an instance of {N}Input to predict from\n    @param options prediction options\n    @param completionHandler a block that will be called upon completion of the prediction. error will be nil if no error occurred.\n*/\n- (void)predictionFromFeatures:({N}Input *)input options:(MLPredictionOptions *)options completionHandler:(void (^)({N}Output * _Nullable output, NSError * _Nullable error))completionHandler;\n\n'
 

@@ -1,0 +1,150 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 3]",
+        "name" : "add_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "functions" : [
+      {
+        "computePrecision" : "Float32",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "add_0",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+
+        ],
+        "name" : "main",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.add" : 1
+        },
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "x",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "1",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)?",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "y",
+            "type" : "MultiArray"
+          }
+        ]
+      },
+      {
+        "computePrecision" : "Float32",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32)",
+            "shortDescription" : "",
+            "shape" : "[]",
+            "name" : "relu_2",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+
+        ],
+        "name" : "other",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.relu" : 1
+        },
+        "inputSchema" : [
+          {
+            "dataType" : "Float32",
+            "hasShapeFlexibility" : "1",
+            "isOptional" : "0",
+            "shapeFlexibility" : "1 × 1...9",
+            "shapeRange" : "[[1, 1], [1, 9]]",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "type" : "MultiArray",
+            "shape" : "[1, 3]",
+            "name" : "x",
+            "shortDescription" : ""
+          }
+        ]
+      }
+    ],
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.add" : 1
+    },
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "computePrecision" : "Float32",
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3)",
+        "shortDescription" : "",
+        "shape" : "[1, 3]",
+        "name" : "x",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "1",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 3)?",
+        "shortDescription" : "",
+        "shape" : "[1, 3]",
+        "name" : "y",
+        "type" : "MultiArray"
+      }
+    ],
+    "defaultFunctionName" : "main",
+    "generatedClassName" : "MfDefault",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]

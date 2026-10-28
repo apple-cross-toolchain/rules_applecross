@@ -1,0 +1,14 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<fp32, []> quantize_0_scale_0 = const()[name = tensor<string, []>("quantize_0_scale_0"), val = tensor<fp32, []>(0x1.99999ap-4)];
+            tensor<string, []> quantize_0_output_dtype_0 = const()[name = tensor<string, []>("quantize_0_output_dtype_0"), val = tensor<string, []>("int8")];
+            tensor<int8, [1, 1, 4, 4]> quantize_0 = quantize(input = x, output_dtype = quantize_0_output_dtype_0, scale = quantize_0_scale_0)[name = tensor<string, []>("quantize_0")];
+            tensor<fp32, []> dequantize_0_scale_0 = const()[name = tensor<string, []>("dequantize_0_scale_0"), val = tensor<fp32, []>(0x1.99999ap-4)];
+            tensor<fp32, [1, 1, 4, 4]> dequantize_0 = dequantize(input = quantize_0, scale = dequantize_0_scale_0)[name = tensor<string, []>("dequantize_0")];
+            tensor<string, []> cast_0_dtype_0 = const()[name = tensor<string, []>("cast_0_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [1, 1, 4, 4]> cast_0 = cast(dtype = cast_0_dtype_0, x = dequantize_0)[name = tensor<string, []>("cast_0")];
+            tensor<fp32, [1, 1, 4, 4]> o = identity(x = cast_0)[name = tensor<string, []>("o")];
+        } -> (o);
+}

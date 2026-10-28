@@ -1,0 +1,15 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 1, 4, 4]> x) {
+            tensor<int32, [?, 4]> non_zero_0 = non_zero(x = x)[name = tensor<string, []>("non_zero_0")];
+            tensor<string, []> cast_0_dtype_0 = const()[name = tensor<string, []>("cast_0_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, [?, 4]> cast_0 = cast(dtype = cast_0_dtype_0, x = non_zero_0)[name = tensor<string, []>("cast_0")];
+            tensor<int32, [2]> reduce_sum_0_axes_0 = const()[name = tensor<string, []>("reduce_sum_0_axes_0"), val = tensor<int32, [2]>([0, 1])];
+            tensor<bool, []> reduce_sum_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_sum_0_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, []> reduce_sum_0 = reduce_sum(axes = reduce_sum_0_axes_0, keep_dims = reduce_sum_0_keep_dims_0, x = cast_0)[name = tensor<string, []>("reduce_sum_0")];
+            tensor<string, []> cast_1_dtype_0 = const()[name = tensor<string, []>("cast_1_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp32, []> cast_1 = cast(dtype = cast_1_dtype_0, x = reduce_sum_0)[name = tensor<string, []>("cast_1")];
+            tensor<fp32, []> o = identity(x = cast_1)[name = tensor<string, []>("o")];
+        } -> (o);
+}

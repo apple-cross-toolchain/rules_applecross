@@ -1,0 +1,7 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 2]> default, tensor<fp32, [1, 2]> x) [CoreML_InputDefaultValues = dict<tensor<string, []>, tensor<fp32, []>>({{"default", 1}})] {
+            tensor<fp32, [1, 2]> add_0 = add(x = x, y = default)[name = tensor<string, []>("add_0")];
+        } -> (add_0);
+}

@@ -1,0 +1,12 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}})]
+{
+    func acc<ios18>(state<tensor<fp16, [1, 4]>> acc, tensor<fp16, [1, 4]> x) {
+            tensor<fp16, [1, 4]> read_state_0 = read_state(input = acc)[name = string("read_state_0")];
+            tensor<fp16, [1, 4]> add_0 = add(x = read_state_0, y = x)[name = string("add_0")];
+            write_state(data = add_0, input = acc)[name = string("coreml_update_state_0_write_state")];
+        } -> (add_0);
+    func relu<ios18>(tensor<fp32, [1, 3]> x) {
+            tensor<fp32, [1, 3]> relu_0 = relu(x = x)[name = string("relu_0")];
+        } -> (relu_0);
+}

@@ -1,0 +1,10 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, ?]> x, tensor<fp32, [1, 3]> y) [CoreML_InputDefaultValues = dict<tensor<string, []>, tensor<fp32, []>>({{"x", 1.5}}), FlexibleShapeInformation = tuple<tuple<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>, tuple<tensor<string, []>, dict<tensor<string, []>, list<tensor<int32, [2]>, ?>>>>((("DefaultShapes", {{"x", [1, 3]}}), ("RangeDims", {{"x", [[1, 1], [1, 8]]}})))] {
+            tensor<int32, [1]> reduce_sum_0_axes_0 = const()[name = tensor<string, []>("reduce_sum_0_axes_0"), val = tensor<int32, [1]>([1])];
+            tensor<bool, []> reduce_sum_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_sum_0_keep_dims_0"), val = tensor<bool, []>(true)];
+            tensor<fp32, [1, 1]> reduce_sum_0 = reduce_sum(axes = reduce_sum_0_axes_0, keep_dims = reduce_sum_0_keep_dims_0, x = x)[name = tensor<string, []>("reduce_sum_0")];
+            tensor<fp32, [1, 3]> add_0 = add(x = reduce_sum_0, y = y)[name = tensor<string, []>("add_0")];
+        } -> (add_0);
+}

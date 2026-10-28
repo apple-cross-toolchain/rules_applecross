@@ -1,0 +1,148 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 4]",
+        "name" : "add_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "functions" : [
+      {
+        "computePrecision" : "Float16",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 4)",
+            "shortDescription" : "",
+            "shape" : "[1, 4]",
+            "name" : "add_0",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+          {
+            "dataType" : "Float16",
+            "isOptional" : "0",
+            "formattedType" : "State (Float16 1 × 4)",
+            "shortDescription" : "",
+            "shape" : "[1, 4]",
+            "name" : "acc",
+            "type" : "State"
+          }
+        ],
+        "name" : "acc",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.add" : 1,
+          "Ios18.writeState" : 1,
+          "Ios18.readState" : 1
+        },
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 4)",
+            "shortDescription" : "",
+            "shape" : "[1, 4]",
+            "name" : "x",
+            "type" : "MultiArray"
+          }
+        ]
+      },
+      {
+        "computePrecision" : "Float32",
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "relu_0",
+            "type" : "MultiArray"
+          }
+        ],
+        "stateSchema" : [
+
+        ],
+        "name" : "relu",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.relu" : 1
+        },
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 3)",
+            "shortDescription" : "",
+            "shape" : "[1, 3]",
+            "name" : "x",
+            "type" : "MultiArray"
+          }
+        ]
+      }
+    ],
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.add" : 1,
+      "Ios18.writeState" : 1,
+      "Ios18.readState" : 1
+    },
+    "isUpdatable" : "0",
+    "stateSchema" : [
+      {
+        "dataType" : "Float16",
+        "isOptional" : "0",
+        "formattedType" : "State (Float16 1 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 4]",
+        "name" : "acc",
+        "type" : "State"
+      }
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "computePrecision" : "Float16",
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 4]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "defaultFunctionName" : "acc",
+    "generatedClassName" : "MfStateDefault",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]

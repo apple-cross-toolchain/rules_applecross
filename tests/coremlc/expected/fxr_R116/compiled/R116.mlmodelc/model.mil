@@ -1,0 +1,17 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(tensor<fp16, [2, 4, 5]> in0, tensor<fp32, [5, 1, 3, 2, 2]> in1, tensor<fp32, [?, ?, ?, ?]> in2) [FlexibleShapeInformation = tuple<tuple<string, dict<string, tensor<int32, [?]>>>, tuple<string, dict<string, dict<string, tensor<int32, [?]>>>>>((("DefaultShapes", {{"in2", [5, 4, 5, 4]}}), ("EnumeratedShapes", {{"2901b13e", {{"in0", [2, 4, 5]}, {"in1", [5, 1, 3, 2, 2]}, {"in2", [5, 4, 5, 4]}}}, {"345131b5", {{"in0", [2, 4, 5]}, {"in1", [5, 1, 3, 2, 2]}, {"in2", [7, 6, 1, 2]}}}})))] {
+            tensor<fp16, [2, 4, 5]> relu_0 = relu(x = in0)[name = string("relu_0")];
+            string in1_to_fp16_dtype_0 = const()[name = string("in1_to_fp16_dtype_0"), val = string("fp16")];
+            tensor<fp16, [5, 1, 3, 2, 2]> in1_to_fp16 = cast(dtype = in1_to_fp16_dtype_0, x = in1)[name = string("cast_3")];
+            tensor<fp16, [5, 1, 3, 2, 2]> relu_1_cast_fp16 = relu(x = in1_to_fp16)[name = string("relu_1_cast_fp16")];
+            string relu_1_cast_fp16_to_fp32_dtype_0 = const()[name = string("relu_1_cast_fp16_to_fp32_dtype_0"), val = string("fp32")];
+            string in2_to_fp16_dtype_0 = const()[name = string("in2_to_fp16_dtype_0"), val = string("fp16")];
+            tensor<fp16, [?, ?, ?, ?]> in2_to_fp16 = cast(dtype = in2_to_fp16_dtype_0, x = in2)[name = string("cast_1")];
+            tensor<fp16, [?, ?, ?, ?]> relu_2_cast_fp16 = relu(x = in2_to_fp16)[name = string("relu_2_cast_fp16")];
+            string relu_2_cast_fp16_to_fp32_dtype_0 = const()[name = string("relu_2_cast_fp16_to_fp32_dtype_0"), val = string("fp32")];
+            tensor<fp32, [?, ?, ?, ?]> relu_2 = cast(dtype = relu_2_cast_fp16_to_fp32_dtype_0, x = relu_2_cast_fp16)[name = string("cast_0")];
+            tensor<fp32, [5, 1, 3, 2, 2]> relu_1 = cast(dtype = relu_1_cast_fp16_to_fp32_dtype_0, x = relu_1_cast_fp16)[name = string("cast_2")];
+        } -> (relu_0, relu_1, relu_2);
+}

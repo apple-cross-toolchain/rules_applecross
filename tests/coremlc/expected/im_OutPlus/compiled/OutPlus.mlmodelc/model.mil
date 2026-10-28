@@ -1,0 +1,10 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios16>(tensor<fp32, [1, 3, 8, 8]> x) {
+            tensor<fp32, [1, 3, 8, 8]> image = relu(x = x)[name = tensor<string, []>("image")];
+            tensor<int32, [3]> mean_axes_0 = const()[name = tensor<string, []>("mean_axes_0"), val = tensor<int32, [3]>([1, 2, 3])];
+            tensor<bool, []> mean_keep_dims_0 = const()[name = tensor<string, []>("mean_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<fp32, [1]> mean = reduce_mean(axes = mean_axes_0, keep_dims = mean_keep_dims_0, x = x)[name = tensor<string, []>("mean")];
+        } -> (image, mean);
+}

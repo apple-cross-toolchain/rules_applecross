@@ -1,0 +1,14 @@
+program(1.0)
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios17>(tensor<fp32, [1, 3, 8, 10]> in1, tensor<fp16, [2, 3, 5, 2]> z9) [CoreML_InputDefaultValues = dict<tensor<string, []>, tensor<fp32, []>>({{"z9", 3}})] {
+            tensor<int32, [2]> mean_in1_axes_0 = const()[name = tensor<string, []>("mean_in1_axes_0"), val = tensor<int32, [2]>([2, 3])];
+            tensor<bool, []> mean_in1_keep_dims_0 = const()[name = tensor<string, []>("mean_in1_keep_dims_0"), val = tensor<bool, []>(false)];
+            tensor<string, []> in1_to_fp16_dtype_0 = const()[name = tensor<string, []>("in1_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];
+            tensor<fp16, [1, 3, 8, 10]> in1_to_fp16 = cast(dtype = in1_to_fp16_dtype_0, x = in1)[name = tensor<string, []>("cast_1")];
+            tensor<fp16, [1, 3]> mean_in1_cast_fp16 = reduce_mean(axes = mean_in1_axes_0, keep_dims = mean_in1_keep_dims_0, x = in1_to_fp16)[name = tensor<string, []>("mean_in1_cast_fp16")];
+            tensor<string, []> mean_in1_cast_fp16_to_fp32_dtype_0 = const()[name = tensor<string, []>("mean_in1_cast_fp16_to_fp32_dtype_0"), val = tensor<string, []>("fp32")];
+            tensor<fp16, [2, 3, 5, 2]> o_z9 = relu(x = z9)[name = tensor<string, []>("o_z9")];
+            tensor<fp32, [1, 3]> mean_in1 = cast(dtype = mean_in1_cast_fp16_to_fp32_dtype_0, x = mean_in1_cast_fp16)[name = tensor<string, []>("cast_0")];
+        } -> (mean_in1, o_z9);
+}
