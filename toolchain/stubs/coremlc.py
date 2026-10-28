@@ -507,6 +507,8 @@ SCHEMA_KEYS = ["isColor", "colorspace", "hasSizeFlexibility", "shape", "keyType"
 AVAILABILITY = {
     1: {"macOS": "10.13", "tvOS": "11.0", "visionOS": "1.0", "watchOS": "4.0", "iOS": "11.0", "macCatalyst": "11.0"},
     3: {"macOS": "10.14", "tvOS": "12.0", "visionOS": "1.0", "watchOS": "5.0", "iOS": "12.0", "macCatalyst": "12.0"},
+    4: {"macOS": "10.15", "tvOS": "13.0", "visionOS": "1.0", "watchOS": "6.0", "iOS": "13.0", "macCatalyst": "13.0"},
+    5: {"macOS": "11.0", "tvOS": "14.0", "visionOS": "1.0", "watchOS": "7.0", "iOS": "14.0", "macCatalyst": "14.0"},
     6: {"macOS": "12.0", "tvOS": "15.0", "visionOS": "1.0", "watchOS": "8.0", "iOS": "15.0", "macCatalyst": "15.0"},
     7: {"macOS": "13.0", "tvOS": "16.0", "visionOS": "1.0", "watchOS": "9.0", "iOS": "16.0", "macCatalyst": "16.0"},
     8: {"macOS": "14.0", "tvOS": "17.0", "visionOS": "1.0", "watchOS": "10.0", "iOS": "17.0", "macCatalyst": "17.0"},
@@ -729,15 +731,12 @@ def metadata_json(model, name):
                              ("structure", [CFDict([("name", "MLModelType_" + PART_TYPES[pk])]) for pk, _ in parts])])
         labels = None
         for pk, part in parts:
-            if pk == 400:
-                glm = Message(part).msg(400)
-                if glm.has(100):
-                    labels = [v.decode() for v in glm.msg(100).all(1)]
-                elif glm.has(101):
-                    raw, labels, i = glm.msg(101).bytes(1), [], 0
-                    while i < len(raw):
-                        v, i = _varint(raw, i)
-                        labels.append(v - (1 << 64) if v >= 1 << 63 else v)
+            if pk in (400, 402):
+                labels = model_class_labels(Message(part).msg(pk))
+    elif tree_kind(model) is not None:
+        kind = tree_kind(model)
+        model_type = "MLModelType_" + TREE_TYPES[kind]
+        labels = model_class_labels(model.msg(kind)) if kind == 402 else None
     else:
         kind = SPEC_ARCHIVED.get(next((n for n, _, _ in model.fields if n in SPEC_ARCHIVED), None))
         if kind is None:
@@ -909,7 +908,29 @@ def compile_spec_model(model_bytes, name, outdir):
 PIPELINE_TYPES = {200: "pipelineClassifier", 201: "pipelineRegressor"}
 # Pipeline parts compiled to a header and their own specification, by Model
 # field, and the names metadata.json gives them.
-PART_TYPES = {300: "glmRegressor", 400: "glmClassifier", 600: "oneHotEncoder", 602: "featureVectorizer", 2002: "visionFeaturePrint"}
+PART_TYPES = {300: "glmRegressor", 400: "glmClassifier", 600: "oneHotEncoder", 602: "featureVectorizer", 2002: "visionFeaturePrint",
+              302: "treeEnsembleRegressor", 402: "treeEnsembleClassifier"}
+# Tree ensembles, compiled to their own packed form.
+TREE_TYPES = {302: "treeEnsembleRegressor", 402: "treeEnsembleClassifier"}
+
+
+def tree_kind(model):
+    """A standalone tree ensemble's Model field, or None."""
+    return next((n for n, _, _ in model.fields if n in TREE_TYPES), None)
+
+
+def model_class_labels(classifier):
+    """A linear or tree classifier's labels: strings (field 100) or 64-bit
+    integers (field 101)."""
+    if classifier.has(100):
+        return [v.decode() for v in classifier.msg(100).all(1)]
+    if classifier.has(101):
+        raw, labels, i = classifier.msg(101).bytes(1), [], 0
+        while i < len(raw):
+            v, i = _varint(raw, i)
+            labels.append(v - (1 << 64) if v >= 1 << 63 else v)
+        return labels
+    return None
 
 
 def pipeline_parts(model):
@@ -940,6 +961,448 @@ def image_classifier(kind, parts):
             and Message(parts[0][1]).msg(2002).has(20))
 
 
+# --- Tree ensembles ---------------------------------------------------------------
+#
+# A tree ensemble (Model field 302 or 402) compiles to `coremldata.bin` and
+# `_B0000.DAT`, the trees in a packed binary form. The layout was fitted
+# black-box to Xcode's output for constructed ensembles; the bracketed probe
+# names below are those of docs/clean-room/coremlc-trees/README.md.
+
+
+def _wire_fields(b):
+    """Yield (field, wiretype, value, raw_bytes_of_whole_field)."""
+    o = 0
+    while o < len(b):
+        start = o
+        key, o = _varint(b, o)
+        f, wt = key >> 3, key & 7
+        if wt == 0:
+            v, o = _varint(b, o)
+        elif wt == 1:
+            v = b[o:o + 8]; o += 8
+        elif wt == 2:
+            n, o = _varint(b, o); v = b[o:o + n]; o += n
+        elif wt == 5:
+            v = b[o:o + 4]; o += 4
+        else:
+            raise ValueError('unsupported wire type %d' % wt)
+        if o > len(b):
+            raise ValueError('truncated field')
+        yield f, wt, v, b[start:o]
+
+
+def _enc_varint(v):
+    out = bytearray()
+    while True:
+        c = v & 0x7f; v >>= 7
+        if v:
+            out.append(c | 0x80)
+        else:
+            out.append(c); return bytes(out)
+
+
+def _s64(v):
+    return v - (1 << 64) if v >= 1 << 63 else v
+
+
+def _dbl(v):
+    return struct.unpack('<d', v)[0]
+
+
+def _packed_or_single(wt, v, kind):
+    """Repeated scalar: either one element or a packed run."""
+    if kind == 'double':
+        if wt == 1:
+            return [_dbl(v)]
+        if wt == 2:
+            if len(v) % 8:
+                raise ValueError('bad packed double')
+            return list(struct.unpack('<%dd' % (len(v) // 8), v))
+    if kind == 'varint':
+        if wt == 0:
+            return [v]
+        if wt == 2:
+            out, o = [], 0
+            while o < len(v):
+                x, o = _varint(v, o); out.append(x)
+            return out
+    raise ValueError('unexpected wire type %d for %s' % (wt, kind))
+
+
+# ------------------------------------------------------------- spec model --
+
+NEGATE = {0: 3, 3: 0, 1: 2, 2: 1, 4: 5, 5: 4}   # LTE<->GT, LT<->GTE, EQ<->NE
+
+
+def _parse_node(b):
+    n = dict(treeId=0, nodeId=0, beh=0, fi=0, fv=0.0, t=0, f=0, miss=False, ev=[])
+    for f, wt, v, _ in _wire_fields(b):
+        if f == 1: n['treeId'] = v
+        elif f == 2: n['nodeId'] = v
+        elif f == 3: n['beh'] = v
+        elif f == 10: n['fi'] = v
+        elif f == 11: n['fv'] = _dbl(v)
+        elif f == 12: n['t'] = v
+        elif f == 13: n['f'] = v
+        elif f == 14: n['miss'] = bool(v)
+        elif f == 20:
+            idx, val = 0, 0.0
+            for g, _wt, w, _ in _wire_fields(v):
+                if g == 1: idx = w
+                elif g == 2: val = _dbl(w)
+            n['ev'].append((idx, val))
+        elif f == 30: pass   # relativeHitRate: no effect on output (probe H_hit)
+        else:
+            raise Unestablished('TreeNode field %d' % f)
+    if n['beh'] > 6:
+        raise Unestablished('TreeNode behavior %d' % n['beh'])
+    return n
+
+
+def _parse_params(b):
+    nodes, npd, base = [], 0, []
+    for f, wt, v, _ in _wire_fields(b):
+        if f == 1: nodes.append(_parse_node(v))
+        elif f == 2: npd = v
+        elif f == 3: base += _packed_or_single(wt, v, 'double')
+        else: raise Unestablished('TreeEnsembleParameters field %d' % f)
+    return nodes, npd, base
+
+
+def _parse_model(b):
+    m = dict(sv=0, desc=None, kind=None, tf=0, strs=None, ints=None, params=None)
+    for f, wt, v, _ in _wire_fields(b):
+        if f == 1: m['sv'] = v
+        elif f == 2: m['desc'] = v
+        elif f in (302, 402):
+            if m['kind'] is not None:
+                raise Unestablished('two model types')
+            m['kind'] = f
+            for g, wt2, w, _ in _wire_fields(v):
+                if g == 1: m['params'] = w
+                elif g == 2: m['tf'] = w
+                elif f == 402 and g == 100:
+                    m['strs'] = [s for h, _a, s, _b in _wire_fields(w) if h == 1]
+                elif f == 402 and g == 101:
+                    vals = []
+                    for h, wt3, s, _b in _wire_fields(w):
+                        if h == 1: vals += _packed_or_single(wt3, s, 'varint')
+                    m['ints'] = [_s64(x) for x in vals]
+                else:
+                    raise Unestablished('tree ensemble field %d.%d' % (f, g))
+        elif f == 10:   # isUpdatable: not probed
+            raise Unestablished('Model.isUpdatable')
+        else:
+            raise Unestablished('Model type field %d (not a tree ensemble)' % f)
+    if m['kind'] is None:
+        raise Unestablished('not a tree ensemble model')
+    if m['tf'] > 3:
+        raise Unestablished('postEvaluationTransform %d' % m['tf'])
+    return m
+
+
+# -------------------------------------------------------------- helpers --
+
+def _tree_width(m):
+    """Record-field width rule (NOTES.md 'W'): 0 for 0, else bitlen(m-1)+1."""
+    return 0 if m == 0 else (m - 1).bit_length() + 1
+
+
+def _bl1(m):
+    return max(1, m.bit_length())
+
+
+def _f32_exact(x):
+    if x != x:
+        return False
+    try:
+        return struct.unpack('<f', struct.pack('<f', x))[0] == x
+    except OverflowError:
+        return False
+
+
+def _packed_array(vals, w):
+    """[u32 0][u32 w][u64 n] then, if n: [u64 a][u64 a][a words]."""
+    if not vals:                       # empty arrays always carry width 1
+        return struct.pack('<IIQQ', 0, 1, 0, 0)
+    out = struct.pack('<IIQ', 0, w, len(vals))
+    a = ((len(vals) - 1) * w) // 64 + 3
+    acc = 0
+    for i, v in enumerate(vals):
+        if v >> w:
+            raise ValueError('value does not fit width')
+        acc |= v << (i * w)
+    out += struct.pack('<QQ', a, a)
+    out += b''.join(struct.pack('<Q', (acc >> (64 * i)) & (2**64 - 1)) for i in range(a))
+    return out
+
+
+def _pad8(b):
+    return b + b'\0' * (-len(b) % 8)
+
+
+# ----------------------------------------------------------------- DAT --
+
+def _encode_dat(nodes, npd, base, tf):
+    if npd < 1:
+        raise Unestablished('numPredictionDimensions %d' % npd)
+    if len(base) not in (0, npd):
+        raise Unestablished('basePredictionValue length %d != %d' % (len(base), npd))
+    base = list(base) if base else [0.0] * npd
+
+    trees = {}
+    for n in nodes:
+        t = trees.setdefault(n['treeId'], {})
+        if n['nodeId'] in t:
+            raise Unestablished('duplicate node (%d,%d)' % (n['treeId'], n['nodeId']))
+        t[n['nodeId']] = n
+        if n['beh'] == 6:
+            if not n['ev']:
+                raise Unestablished('leaf without evaluation values')
+            dims = [i for i, _ in n['ev']]
+            if len(set(dims)) != len(dims):
+                raise Unestablished('leaf with duplicate evaluation index')
+            if max(dims) >= npd:
+                raise Unestablished('evaluation index >= numPredictionDimensions')
+
+    # double precision if any branch threshold or any leaf value (spec values,
+    # including single-leaf trees) is not exactly a float32  (D_*, F_*, FoldF)
+    dbl = any(not _f32_exact(n['fv']) for n in nodes if n['beh'] != 6) or \
+        any(not _f32_exact(v) for n in nodes if n['beh'] == 6 for _, v in n['ev'])
+
+    # trees in treeId order (S2_rev, Tree_order, FoldA); single-leaf trees fold
+    # into base in that order, after basePredictionValue (FoldB, Fold2)
+    recs, roots = [], []
+    tree_leaves = []          # per kept tree: list of leaf ev lists (in order)
+    all_branch = []
+    for tid in sorted(trees):
+        t = trees[tid]
+        children = set()
+        for n in t.values():
+            if n['beh'] != 6:
+                children.update((n['t'], n['f']))
+        rootc = [i for i in t if i not in children]
+        if len(rootc) != 1:
+            raise Unestablished('tree %d: cannot determine unique root' % tid)
+        root = t[rootc[0]]
+        if root['beh'] == 6:
+            if len(t) != 1:
+                raise Unestablished('tree %d: unreachable nodes' % tid)
+            for i, v in root['ev']:
+                base[i] += v
+            continue
+        roots.append(len(recs))
+        lv = []
+        seen = set()
+
+        def visit(n):
+            if n['nodeId'] in seen:
+                raise Unestablished('tree %d: node reached twice' % tid)
+            seen.add(n['nodeId'])
+            for c in (n['t'], n['f']):
+                if c not in t:
+                    raise Unestablished('tree %d: missing child %d' % (tid, c))
+            tn, fn = t[n['t']], t[n['f']]
+            beh, miss = n['beh'], n['miss']
+            all_branch.append(n)
+            tl, fl = tn['beh'] == 6, fn['beh'] == 6
+            if tl and not fl:      # leaf must be the false child (Chain3, Swap_*)
+                tn, fn, tl, fl = fn, tn, fl, tl
+                beh, miss = NEGATE[beh], not miss
+            rec = dict(fi=n['fi'], fv=n['fv'], beh=beh, miss=miss, tl=tl, fl=fl)
+            recs.append(rec)
+            if tl:
+                seen.add(tn['nodeId']); rec['leaf'] = len(lv); lv.append(tn['ev'])
+            if fl:
+                seen.add(fn['nodeId'])
+                if not tl: rec['leaf'] = len(lv)
+                lv.append(fn['ev'])
+            if not tl:
+                me = len(recs) - 1
+                visit(tn)
+                if not fl:
+                    rec['off'] = len(recs) - me
+                    visit(fn)
+        visit(root)
+        if len(seen) != len(t):
+            raise Unestablished('tree %d: unreachable nodes' % tid)
+        tree_leaves.append(lv)
+
+    nrec = len(recs)
+    # value-layout choice counts every leaf node of the spec, including the
+    # single-leaf trees folded into base (RND44, RND55, RND62, RND65)
+    L_all = [n['ev'] for n in nodes if n['beh'] == 6]
+    n_vals = sum(len(ev) for ev in L_all)
+    D = len(L_all) * npd
+    if npd == 1:
+        kind = 3
+    elif n_vals < (3 * D) // 4:            # grid G_*, GT_* (180 points)
+        kind = 4 if all(len(ev) == 1 for ev in L_all) else 5
+    else:
+        kind = 6
+
+    # comparison-mode family (j) and flag bits (d)
+    fams = set()
+    for n in all_branch:
+        fams.add({0: 'le', 3: 'le', 1: 'lt', 2: 'lt'}.get(n['beh'], 'eq'))
+    allmiss = all(n['miss'] for n in all_branch)
+    if fams <= {'le'}:
+        j, d = (1 if allmiss else 0), 4
+    elif fams == {'lt'}:
+        j, d = (3 if allmiss else 2), 4
+    else:
+        j, d = 4, 6
+
+    maxL = max((len(lv) for lv in tree_leaves), default=0)
+    hdim = _tree_width(npd - 1)
+    if nrec == 0:
+        c, e, g = 65, 65, 0            # Bal0, Fold2, N2_leaf
+    else:
+        c = _tree_width(max(r['fi'] for r in recs))
+        g = _tree_width(nrec)
+        if kind == 5:
+            e = _tree_width(maxL * npd)
+        else:
+            e = _tree_width(maxL)
+    # S5_2t, S5_lf, GT_3_*, RND62: width over all spec leaves x npd, k=5 only
+    i_w = _tree_width(len(L_all) * npd) if kind == 5 else 0
+    h = hdim + (1 if kind == 5 else 0)
+    tagbits = c + d + e
+    T = (tagbits + 7) // 8
+    vbytes = 8 if dbl else 4
+    recbytes = T + vbytes
+
+    # per-leaf child field value: leaf index, or value offset within tree (k=5)
+    rec_list = []
+    for lv in tree_leaves:
+        offs, acc = [], 0
+        for ev in lv:
+            offs.append(acc); acc += len(ev)
+        rec_list.append(offs)
+    # assign records to trees for value offsets
+    tree_of_rec = []
+    for ti, r0 in enumerate(roots):
+        r1 = roots[ti + 1] if ti + 1 < len(roots) else nrec
+        tree_of_rec += [ti] * (r1 - r0)
+
+    body = bytearray()
+    for idx, r in enumerate(recs):
+        tag = r['fi']
+        sh = c
+        tag |= int(r['tl']) << sh; tag |= int(r['fl']) << (sh + 1)
+        tag |= int(r['miss']) << (sh + 2)
+        if d == 4:
+            tag |= int(r['beh'] in (2, 3)) << (sh + 3)
+        else:
+            tag |= r['beh'] << (sh + 3)
+        if 'leaf' in r:
+            fld = rec_list[tree_of_rec[idx]][r['leaf']] if kind == 5 else r['leaf']
+        else:
+            fld = r.get('off', 0)
+        if fld >> e:
+            raise ValueError('child field overflow')
+        tag |= fld << (8 * T - e)
+        body += tag.to_bytes(T, 'little')
+        body += struct.pack('<d' if dbl else '<f', r['fv'])
+    body += b'\0' * recbytes          # trailing zero record
+
+    out = bytearray()
+    out += struct.pack('<QQQ', 0, kind | (8 if dbl else 0), npd)
+    out += struct.pack('<%dd' % npd, *base)
+    out += struct.pack('<I', 0)
+    out += struct.pack('<HBBBBBBBBH', recbytes, c, d, e, 0, g, h, i_w, j, 0)
+    out += struct.pack('<QQQ', 0, npd, len(body))
+    out += body
+    out = bytearray(_pad8(bytes(out)))
+    out += _packed_array(roots, _bl1(max(roots, default=0)))
+
+    vals, idxs, tail = [], [], []
+    for lv in tree_leaves:
+        tail.append(len(vals) if kind == 5 else 0)
+        for ev in lv:
+            evs = sorted(ev)
+            if kind == 3:
+                vals.append(evs[0][1])
+            elif kind == 4:
+                idxs.append(evs[0][0]); vals.append(evs[0][1])
+            elif kind == 5:
+                for k2, (dim, v) in enumerate(evs):
+                    idxs.append(dim | ((k2 == len(evs) - 1) << hdim)); vals.append(v)
+            else:
+                dense = [0.0] * npd
+                for dim, v in evs: dense[dim] = v
+                vals += dense
+    if kind == 4:
+        out += _packed_array(idxs, _bl1(max(idxs, default=0)))
+    elif kind == 5:
+        out += _packed_array(idxs, h)
+    else:
+        out += _packed_array([], 1)
+    out += struct.pack('<Q', len(vals))
+    out += struct.pack('<%d%s' % (len(vals), 'd' if dbl else 'f'), *vals)
+    out = bytearray(_pad8(bytes(out)))
+    if kind == 5:
+        out += _packed_array(tail, _bl1(max(tail, default=0)))
+    else:
+        out += _packed_array([], 1)
+    out += struct.pack('<I', tf)
+    return bytes(out)
+
+
+# ------------------------------------------------------- coremldata.bin --
+
+def _canon_description(desc):
+    """Re-serialize ModelDescription as Xcode does (MD1, MD2, MD3): fields in
+    field-number order, empty proto3 strings dropped, metadata (100) always
+    present. Nested messages are copied; they must already be canonical."""
+    fl = []
+    for f, wt, v, raw in _wire_fields(desc or b''):
+        if f in (11, 12) and wt == 2 and len(v) == 0:
+            continue
+        if f in (1, 10, 50):
+            last = 0
+            for g, _wt, _v, _r in _wire_fields(v):
+                if g < last:
+                    raise Unestablished('non-canonical FeatureDescription field order')
+                last = g
+        fl.append((f, raw))
+    if not any(f == 100 for f, _ in fl):
+        fl.append((100, b'\xa2\x06\x00'))
+    fl.sort(key=lambda x: x[0])            # stable
+    return b''.join(r for _, r in fl)
+
+
+def _encode_coremldata(m, npd):
+    desc = _canon_description(m['desc'])
+    out = struct.pack('<II', m['kind'], 1) + b'\0' * 20
+    out += struct.pack('<Q', 7) + b'generic'
+    out += struct.pack('<I', m['sv']) + b'\0' * 28
+    out += struct.pack('<Q', len(desc)) + desc
+    out += struct.pack('<Q', 0)
+    out += struct.pack('<Q', 10) + b'_B0000.DAT'
+    out += struct.pack('<Q', npd)
+    if m['kind'] == 402:
+        strs = m['strs'] or []
+        ints = m['ints'] or []
+        if not strs and not ints:
+            raise Unestablished('classifier without class labels')
+        out += struct.pack('<Q', len(strs))
+        for s in strs:
+            out += struct.pack('<Q', len(s)) + s
+        out += struct.pack('<Q', len(ints))
+        out += b''.join(struct.pack('<q', x) for x in ints)
+    return out
+
+
+def encode_tree_part(part_model_bytes: bytes) -> dict:
+    m = _parse_model(part_model_bytes)
+    nodes, npd, base = _parse_params(m['params'] or b'')
+    return {
+        'coremldata.bin': _encode_coremldata(m, npd),
+        '_B0000.DAT': _encode_dat(nodes, npd, base, m['tf']),
+    }
+
+
 def compile_pipeline(model_bytes, name, outdir):
     """A pipeline of models compiled each to model<N>/, behind an archive
     naming them."""
@@ -948,7 +1411,7 @@ def compile_pipeline(model_bytes, name, outdir):
     spec_version = model.int(1)
     if spec_version not in ((1, 3, 8) if image_classifier(kind, parts) else (1,)):
         unestablished("a pipeline of specification %d" % spec_version)
-    tag = ("generic." + ".".join("model%dv1.0.0spec" % i for i in range(len(parts)))).encode()
+    tag = ("generic." + ".".join("model%dv1.0.0%s" % (i, "generic" if pk in TREE_TYPES else "spec") for i, (pk, _) in enumerate(parts))).encode()
     description = canonical_description(model)
     files = {
         "coremldata.bin": (_u32(kind) + _u32(1) + b"\0" * 12 + _u32(1) + _u32(0) + _u64(len(tag)) + tag + _u32(spec_version) + b"\0" * 28
@@ -963,8 +1426,33 @@ def compile_pipeline(model_bytes, name, outdir):
                                          + s("SpecificationDetails") + _u64(2) + s("modelHash")
                                          + s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + s("modelName") + s(name))
     for i, (pk, part) in enumerate(parts):
+        if pk in TREE_TYPES:
+            for rel, data in encode_tree_part(part).items():
+                files["model%d/%s" % (i, rel)] = data
+            continue
         part_version = Message(part).int(1)
         files["model%d/coremldata.bin" % i] = _u32(pk) + _u32(1) + b"\0" * 20 + _u64(4) + b"spec" + _u32(part_version) + b"\0" * 28 + part
+    bundle = os.path.join(outdir, name + ".mlmodelc")
+    for rel, data in files.items():
+        os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
+        with open(os.path.join(bundle, rel), "wb") as f:
+            f.write(data)
+
+
+def compile_tree(model_bytes, name, outdir):
+    """A tree ensemble on its own: its packed trees, behind the archive a
+    pipeline's tree part has."""
+    model = Message(model_bytes)
+    if model.int(1) not in AVAILABILITY:
+        unestablished("a tree ensemble of specification %d" % model.int(1))
+
+    def s(text):
+        raw = text.encode()
+        return _u64(len(raw)) + raw
+    files = dict(encode_tree_part(model_bytes))
+    files["metadata.json"] = metadata_json(model, name).encode("utf-8")
+    files["analytics/coremldata.bin"] = (s("SpecificationDetails") + _u64(2) + s("modelHash")
+                                         + s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + s("modelName") + s(name))
     bundle = os.path.join(outdir, name + ".mlmodelc")
     for rel, data in files.items():
         os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
@@ -1140,6 +1628,8 @@ def swift_source(model, name):
         available = re.sub(r", watchOS [0-9.]+", "", available) + "\n@available(watchOS, unavailable)"
     inputs = [Feature(f) for f in description.msgs(1)]
     outputs = [Feature(f) for f in description.msgs(10)]
+    # MLShapedArray came with iOS 15.
+    ios15 = "    @available(%s, *)\n" % AVAILABILITY_LINE[6] if spec_version < 6 else ""
     L = []
     w = L.append
     w("//\n// %s.swift\n//\n// This file was automatically generated and should not be edited.\n//\n\nimport CoreML\n\n" % name)
@@ -1158,7 +1648,7 @@ def swift_source(model, name):
     w("    }\n")
     arrays = [f for f in inputs if f.kind == "array"]
     if arrays:
-        w("    public convenience init(%s) {" % ", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs))
+        w(ios15 + "    public convenience init(%s) {" % ", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs))
         w("        self.init(%s)" % ", ".join("%s: %s" % (f.swift_name, "MLMultiArray(%s)" % f.swift_name if f.kind == "array" else f.swift_name) for f in inputs))
         w("    }\n")
     images = [f for f in inputs if f.kind == "image"]
@@ -1181,7 +1671,7 @@ def swift_source(model, name):
     for f in outputs:
         w("    /// %s\n    public var %s: %s {\n        %s\n    }\n" % (f.doc, f.swift_name, f.swift_type, f.read()))
         if f.kind == "array":
-            w("    /// %s\n    public var %sShapedArray: MLShapedArray<%s> {\n        MLShapedArray<%s>(%s)\n    }\n" % (f.doc, f.swift_name, f.element, f.element, f.swift_name))
+            w("    /// %s\n" % f.doc + ios15 + "    public var %sShapedArray: MLShapedArray<%s> {\n        MLShapedArray<%s>(%s)\n    }\n" % (f.swift_name, f.element, f.element, f.swift_name))
     w("    public var featureNames: Set<String> {\n        provider.featureNames\n    }\n")
     w("    public func featureValue(for featureName: String) -> MLFeatureValue? {\n        provider.featureValue(for: featureName)\n    }\n")
     w("    public init(%s) {" % ", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in outputs))
@@ -1212,7 +1702,7 @@ def swift_source(model, name):
     call = "        let input_ = %sInput(%s)\n        return try prediction(input: input_)\n    }\n" % (name, ", ".join("%s: %s" % (f.swift_name, f.swift_name) for f in inputs))
     w(doc + "    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, f.swift_type) for f in inputs), name) + call)
     if arrays:
-        w(doc + "\n    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs), name) + call)
+        w(doc + "\n" + ios15 + "    public func prediction(%s) throws -> %sOutput {\n" % (", ".join("%s: %s" % (f.swift_name, "MLShapedArray<%s>" % f.element if f.kind == "array" else f.swift_type) for f in inputs), name) + call)
     batch = (BATCH_SPEC3 if spec_version < 6 else BATCH).replace("{N}", name)
     if spec_version < 3:
         anchor = "    public func predictions(inputs: [%sInput]" % name
@@ -1448,7 +1938,7 @@ def generate(argv):
         else:
             with open(source, "rb") as f:
                 model = Message(f.read())
-            if not any(model.has(n) for n in SPEC_ARCHIVED) and pipeline_parts(model) is None:
+            if not any(model.has(n) for n in SPEC_ARCHIVED) and tree_kind(model) is None and pipeline_parts(model) is None:
                 refuse_model_file(model)
         name = generated_class_name(os.path.splitext(os.path.basename(source.rstrip("/")))[0])
         if language == "Swift":
@@ -1491,6 +1981,8 @@ def main(argv):
             model = Message(model_bytes)
             if any(model.has(n) for n in SPEC_ARCHIVED):
                 compile_spec_model(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
+            elif tree_kind(model) is not None:
+                compile_tree(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
             elif pipeline_parts(model) is not None:
                 compile_pipeline(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
             else:

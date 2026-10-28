@@ -1,0 +1,54 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "y",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 1,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.13",
+      "tvOS" : "11.0",
+      "visionOS" : "1.0",
+      "watchOS" : "4.0",
+      "iOS" : "11.0",
+      "macCatalyst" : "11.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_treeEnsembleRegressor"
+    },
+    "userDefinedMetadata" : {
+
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "x0",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "x1",
+        "shortDescription" : ""
+      }
+    ],
+    "generatedClassName" : "S1f",
+    "method" : "predict"
+  }
+]
