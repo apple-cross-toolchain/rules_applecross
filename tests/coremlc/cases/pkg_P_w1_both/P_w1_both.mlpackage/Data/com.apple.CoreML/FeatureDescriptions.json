@@ -1,0 +1,7 @@
+{
+  "Inputs" : {
+    "x" : {
+      "MLFeatureShortDescription" : "In x"
+    }
+  }
+}

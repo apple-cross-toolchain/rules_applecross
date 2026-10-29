@@ -1,0 +1,3 @@
+coremlc: error: compiler error: Error reading protobuf spec. validator error: Error(s) in tree structure: 
+
+  Specified output dimension (1) does not match the given number of classes (1).;

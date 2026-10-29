@@ -3,8 +3,9 @@
 runs it (`compile MODEL OUTDIR --output-partial-info-plist PLIST`); see
 docs/clean-room/coremlc.md.
 
-ML Programs (.mlpackage) and the other model types (.mlmodel) compile to
-the files Xcode 27.0's coremlc writes, read from the model's specification
+ML Programs (.mlpackage) and the other model types (.mlmodel, or in a
+.mlpackage with the overlays Xcode's model editor writes) compile to the
+files Xcode 27.0's coremlc writes, read from the model's specification
 (Apple's published Core ML protobuf schema). Neural networks, an older
 format, are refused; so is what hasn't
 been established against Xcode, strict (the default). Relaxed
@@ -856,6 +857,11 @@ SCHEMA_KEYS = ["sizeFlexibility", "enumeratedSizes", "isColor", "colorspace", "h
 FLEXIBLE_ARRAY_KEYS = ["shapeRange", "enumeratedShapes", "shapeFlexibility", "shape", "type", "name", "dataType",
                        "hasShapeFlexibility", "isOptional", "shortDescription", "formattedType"]
 # A multi-function model's functions.
+# A multi-function model's keys go in in another order.
+MULTI_FUNCTION_TOP_KEYS = ["author", "inputSchema", "modelParameters", "shortDescription", "version", "method", "modelType",
+                           "license", "metadataOutputVersion", "outputSchema", "stateSchema", "defaultFunctionName",
+                           "specificationVersion", "availability", "isUpdatable", "generatedClassName", "userDefinedMetadata",
+                           "storagePrecision", "functions", "mlProgramOperationTypeHistogram", "computePrecision"]
 FUNCTION_KEYS = ["name", "inputSchema", "outputSchema", "stateSchema", "storagePrecision", "mlProgramOperationTypeHistogram",
                  "computePrecision"]
 
@@ -1245,7 +1251,7 @@ def metadata_json(model, name):
                           ("computePrecision", fprecision)] + ([("storagePrecision", fstorage)] if fstorage else [])
                 entries.append(ordered(fpairs, FUNCTION_KEYS))
             pairs += [("functions", entries), ("defaultFunctionName", default)]
-    return "[\n  " + ns_json(ordered(pairs, TOP_KEYS), 1) + "\n]"
+    return "[\n  " + ns_json(ordered(pairs, MULTI_FUNCTION_TOP_KEYS if program is not None and description.has(20) else TOP_KEYS), 1) + "\n]"
 
 
 def model_parameters(model, scope=""):
@@ -1363,18 +1369,18 @@ def classifier_facts(program):
     return None
 
 
-def analytics(model_bytes, model_name):
-    def s(text):
-        raw = text.encode()
-        return _u64(len(raw)) + raw
-    sections = [
-        ("NeuralNetworkModelDetails", [("containsCustomLayer", "0"), ("modelDimension", "0")]),
-        ("SpecificationDetails", [("modelHash", base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()), ("modelName", model_name)]),
-    ]
-    out = b""
-    for name, entries in sections:
-        out += s(name) + _u64(len(entries)) + b"".join(s(k) + s(v) for k, v in entries)
-    return out
+def analytics_sections(sections):
+    """analytics/coremldata.bin's sections: [(name, [(key, value)])]."""
+    return b"".join(_s(name) + _u64(len(entries)) + b"".join(_s(k) + _s(v) for k, v in entries) for name, entries in sections)
+
+
+def program_files(model):
+    """An ML Program's own files: model.mil, coremldata.bin and its analytics."""
+    return {
+        "model.mil": model_mil(model).encode("utf-8"),
+        "coremldata.bin": coremldata(model),
+        "analytics/coremldata.bin": analytics_sections([("NeuralNetworkModelDetails", [("containsCustomLayer", "0"), ("modelDimension", "0")])]),
+    }
 
 
 PARTIAL_INFO_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1448,28 +1454,16 @@ def spec_bytes(model_bytes):
     return out
 
 
-def compile_spec_model(model_bytes, name, outdir):
-    """A text classifier or word tagger: coremldata.bin is a header and the
-    model's own bytes."""
+def spec_files(model_bytes):
+    """A model compiled to its specification: coremldata.bin is a header and
+    the model's own bytes."""
     model = Message(model_bytes)
     kind = next(n for n, _, _ in model.fields if n in SPEC_ARCHIVED)
     spec_version = model.int(1)
     if spec_version not in SPEC_VERSIONS.get(kind, AVAILABILITY):
         unestablished("specification version %d of a %s" % (spec_version, MODEL_TYPES[kind]))
     header = _u32(kind) + _u32(1) + b"\0" * 20 + _u64(4) + b"spec" + _u32(spec_version) + b"\0" * 28
-    def s(text):
-        raw = text.encode()
-        return _u64(len(raw)) + raw
-    files = {
-        "coremldata.bin": header + spec_bytes(model_bytes),
-        "metadata.json": metadata_json(model, name).encode("utf-8"),
-        "analytics/coremldata.bin": s("SpecificationDetails") + _u64(2) + s("modelHash") + s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + s("modelName") + s(name),
-    }
-    bundle = os.path.join(outdir, name + ".mlmodelc")
-    for rel, data in files.items():
-        os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
-        with open(os.path.join(bundle, rel), "wb") as f:
-            f.write(data)
+    return {"coremldata.bin": header + spec_bytes(model_bytes)}
 
 
 PIPELINE_TYPES = {200: "pipelineClassifier", 201: "pipelineRegressor", 202: "pipeline"}
@@ -2054,40 +2048,18 @@ def _s(text):
     return _u64(len(raw)) + raw
 
 
-def compile_pipeline(model_bytes, name, outdir):
+def pipeline_files(model_bytes):
     """A pipeline of models compiled each to model<N>/, behind an archive
     naming them."""
-    model = Message(model_bytes)
-    files, _ = pipeline_archive(model_bytes)
-    files["metadata.json"] = metadata_json(model, name).encode("utf-8")
-    files["analytics/coremldata.bin"] += (_s("SpecificationDetails") + _u64(2) + _s("modelHash")
-                                          + _s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + _s("modelName") + _s(name))
-    bundle = os.path.join(outdir, name + ".mlmodelc")
-    for rel, data in files.items():
-        os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
-        with open(os.path.join(bundle, rel), "wb") as f:
-            f.write(data)
+    return pipeline_archive(model_bytes)[0]
 
 
-def compile_tree(model_bytes, name, outdir):
+def tree_files(model_bytes):
     """A tree ensemble on its own: its packed trees, behind the archive a
     pipeline's tree part has."""
-    model = Message(model_bytes)
-    if model.int(1) not in AVAILABILITY:
-        unestablished("a tree ensemble of specification %d" % model.int(1))
-
-    def s(text):
-        raw = text.encode()
-        return _u64(len(raw)) + raw
-    files = dict(encode_tree_part(model_bytes))
-    files["metadata.json"] = metadata_json(model, name).encode("utf-8")
-    files["analytics/coremldata.bin"] = (s("SpecificationDetails") + _u64(2) + s("modelHash")
-                                         + s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + s("modelName") + s(name))
-    bundle = os.path.join(outdir, name + ".mlmodelc")
-    for rel, data in files.items():
-        os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
-        with open(os.path.join(bundle, rel), "wb") as f:
-            f.write(data)
+    if Message(model_bytes).int(1) not in AVAILABILITY:
+        unestablished("a tree ensemble of specification %d" % Message(model_bytes).int(1))
+    return dict(encode_tree_part(model_bytes))
 
 
 # --- Item similarity recommenders ---------------------------------------------------
@@ -2779,6 +2751,16 @@ def validate(model):
         for _, part in pipeline_parts(model)[1]:
             validate(Message(part))
         return
+    if kind in TREE_TYPES:
+        # The trees must be well formed (each leaf with its values), and a
+        # classifier of two or more classes predicts a value per class, or
+        # one for two classes.
+        encode_tree_part(model.data)
+        if kind == 402:
+            labels = model_class_labels(model.msg(402)) or []
+            dimensions = (model.msg(402).msg(1) or Message(b"")).int(2)
+            if len(labels) < 2 or (dimensions != len(labels) and not (len(labels) == 2 and dimensions == 1)):
+                unestablished("a tree classifier predicting %d values for %d classes" % (dimensions, len(labels)))
     if kind in CHECKS:
         check, optional = CHECKS[kind]
         inputs, outputs = check_description(model, optional)
@@ -2790,7 +2772,7 @@ def validate(model):
 OWN_ARCHIVES = {404: knn_archive, 501: item_similarity_archive}
 
 
-def compile_own_archive(model_bytes, name, outdir):
+def own_archive_files(model_bytes):
     """A k-nearest neighbors classifier or item similarity recommender."""
     model = Message(model_bytes)
     kind = next(n for n, _, _ in model.fields if n in OWN_ARCHIVES)
@@ -2800,10 +2782,7 @@ def compile_own_archive(model_bytes, name, outdir):
     if model.int(10):
         # An updatable model's update parameters: none.
         files["updateParameters/coremldata.bin"] = _u64(0)
-    files["metadata.json"] = metadata_json(model, name).encode("utf-8")
-    files["analytics/coremldata.bin"] = (_s("SpecificationDetails") + _u64(2) + _s("modelHash")
-                                         + _s(base64.b64encode(hashlib.sha256(model_bytes).digest()).decode()) + _s("modelName") + _s(name))
-    write_bundle(outdir, name, files)
+    return files
 
 
 def write_bundle(outdir, name, files):
@@ -2830,35 +2809,339 @@ def refuse_model_file(model):
     unestablished("a %s model (.mlmodel)" % kind)
 
 
-def compile_package(package, outdir):
-    with open(os.path.join(package, "Manifest.json")) as f:
-        manifest = json.load(f)
-    root = manifest["itemInfoEntries"][manifest["rootModelIdentifier"]]
-    model_path = os.path.join(package, "Data", root["path"])
-    with open(model_path, "rb") as f:
-        model_bytes = f.read()
-    model = Message(model_bytes)
-    if model.has(500) or model.has(403) or model.has(303):
-        unestablished("a neural network (an older Core ML format; convert the model to an ML Program)")
-    if not model.has(502):
-        unestablished("a model that isn't an ML Program")
-    check_encoding(model_bytes)
-    name = os.path.splitext(os.path.basename(package.rstrip("/")))[0]
-    files = {
-        "model.mil": model_mil(model).encode("utf-8"),
-        "coremldata.bin": coremldata(model),
-        "metadata.json": metadata_json(model, name).encode("utf-8"),
-        "analytics/coremldata.bin": analytics(model_bytes, os.path.splitext(os.path.basename(root["path"]))[0]),
-    }
-    bundle = os.path.join(outdir, name + ".mlmodelc")
-    for rel, data in files.items():
-        os.makedirs(os.path.dirname(os.path.join(bundle, rel)), exist_ok=True)
-        with open(os.path.join(bundle, rel), "wb") as f:
-            f.write(data)
-    weights = os.path.join(os.path.dirname(model_path), "weights")
-    if os.path.isdir(weights):
-        shutil.copytree(weights, os.path.join(bundle, "weights"))
+# --- Packages ---------------------------------------------------------------------
+#
+# A .mlpackage holds any model type, not only ML Programs: Manifest.json lists
+# its items by identifier, and rootModelIdentifier names the specification.
+# Xcode compiles and generates a package's model as it does the same
+# specification in a .mlmodel named after the package, except that
+# analytics/coremldata.bin names the specification's own file, and that
+# compiling (not generating) applies the package's overlays: the items Xcode
+# writes when a model's metadata is edited in its model editor.
 
+PACKAGE_FORMAT = "1.0.0"
+ITEM_KEYS = ("author", "description", "name", "path")
+# Overlays are found by item name and author (not path or description).
+OVERLAY_AUTHOR = "com.apple.CoreML"
+METADATA_OVERLAY, FEATURES_OVERLAY = "Metadata.json", "FeatureDescriptions.json"
+# The Metadata overlay's keys (MLModelMetadataKey) and their Metadata fields.
+METADATA_KEYS = (("MLModelDescriptionKey", 1), ("MLModelVersionStringKey", 2), ("MLModelAuthorKey", 3), ("MLModelLicenseKey", 4))
+CREATOR_DEFINED_KEY = "MLModelCreatorDefinedKey"
+# The FeatureDescriptions overlay's sections and their ModelDescription fields.
+FEATURE_SECTIONS = (("Inputs", 1), ("Outputs", 10), ("TrainingInputs", 50))
+FEATURE_DESCRIPTION_KEY = "MLFeatureShortDescription"
+
+
+def _json_object(raw, what, encodings):
+    """A JSON document's top-level object; duplicate keys, non-finite numbers
+    and encodings other than those given are refused."""
+    for bom, encoding in ((b"\xef\xbb\xbf", "utf-8"), (b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be"), (b"", "utf-8")):
+        if raw.startswith(bom) and (bom or not raw[:4].count(b"\0")):
+            if encoding not in encodings or (bom and encoding == "utf-8" and "bom" not in encodings):
+                unestablished("%s in another encoding" % what)
+            break
+    else:
+        unestablished("%s in another encoding" % what)
+
+    def pairs(items):
+        keys = [k for k, _ in items]
+        if len(set(keys)) != len(keys):
+            unestablished("%s with a key given twice" % what)
+        return dict(items)
+
+    def constant(name):
+        unestablished("%s with %s" % (what, name))
+    try:
+        text = raw[len(bom):].decode(encoding)
+        value = json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
+        # Lone surrogates can't be written out.
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except (ValueError, UnicodeError):
+        unestablished("%s that isn't JSON" % what)
+    if not isinstance(value, dict):
+        unestablished("%s that isn't a JSON object" % what)
+    return value
+
+
+def _is_program(model_bytes):
+    try:
+        return Message(model_bytes).has(502)
+    except (ValueError, IndexError):
+        return False
+
+
+class Package:
+    """A package's specification (its bytes, directory and file name) and
+    overlays (the Metadata and FeatureDescriptions JSON objects, or None)."""
+
+    def __init__(self, path, overlays):
+        manifest_path = os.path.join(path, "Manifest.json")
+        if not os.path.isfile(manifest_path):
+            unestablished("a package without a manifest")
+        with open(manifest_path, "rb") as f:
+            manifest = _json_object(f.read(), "a manifest", ("utf-8",))
+        if manifest.get("fileFormatVersion") != PACKAGE_FORMAT:
+            unestablished("a package of format %r" % (manifest.get("fileFormatVersion"),))
+        entries = manifest.get("itemInfoEntries")
+        if not isinstance(entries, dict):
+            unestablished("a manifest without items")
+        data = os.path.join(path, "Data")
+        items, missing = {}, []
+        for identifier, item in entries.items():
+            if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in ITEM_KEYS):
+                unestablished("a manifest item without an author, description, name and path")
+            rel = item["path"]
+            if not rel or os.path.isabs(rel) or os.path.normpath(rel).split(os.sep)[0] == "..":
+                unestablished("an item path outside the package's Data")
+            if not os.path.exists(os.path.join(data, rel)):
+                missing.append(os.path.normpath(os.path.join(data, rel)))
+            items[identifier] = item
+        root = manifest.get("rootModelIdentifier")
+        # Looked up exactly (not, say, ignoring a UUID's case).
+        if not isinstance(root, str) or root not in items:
+            unestablished("a package whose root model isn't one of its items")
+        root_path = os.path.join(data, items[root]["path"])
+        if not os.path.isfile(root_path):
+            unestablished("a root model that isn't a file")
+        with open(root_path, "rb") as f:
+            self.model_bytes = f.read()
+        self.model_dir = os.path.dirname(root_path)
+        # Xcode refuses a package missing any item it lists. But an empty
+        # directory isn't kept by git or Bazel, and coremltools lists an ML
+        # Program's weights directory even when it holds nothing: that one,
+        # missing, is taken as empty.
+        weights = os.path.normpath(os.path.join(self.model_dir, "weights"))
+        for item_path in missing:
+            if item_path != weights or not _is_program(self.model_bytes):
+                unestablished("a package missing an item it lists")
+        # analytics names the specification's file, less its extension.
+        self.model_name = os.path.splitext(os.path.basename(os.path.normpath(root_path)))[0]
+        self.metadata = self.features = None
+        if not overlays:
+            return
+        for name in (METADATA_OVERLAY, FEATURES_OVERLAY):
+            found = [i for k, i in items.items() if i["name"] == name and i["author"] == OVERLAY_AUTHOR]
+            if not found:
+                continue
+            if len(found) > 1:
+                unestablished("a package with two %s overlays" % name)
+            if found[0] is items[root]:
+                unestablished("a root model that is an overlay")
+            overlay_path = os.path.join(data, found[0]["path"])
+            if not os.path.isfile(overlay_path):
+                unestablished("an overlay that isn't a file")
+            with open(overlay_path, "rb") as f:
+                value = _json_object(f.read(), "a %s overlay" % name, ("utf-8", "bom", "utf-16-le", "utf-16-be"))
+            if name == METADATA_OVERLAY:
+                self.metadata = check_metadata_overlay(value)
+            else:
+                self.features = check_features_overlay(value)
+
+
+def check_metadata_overlay(value):
+    """Its strings and creator-defined map; any other key is ignored."""
+    for key, _ in METADATA_KEYS:
+        if key in value and not isinstance(value[key], str):
+            unestablished("a Metadata overlay's %s that isn't a string" % key)
+    creator = value.get(CREATOR_DEFINED_KEY, {})
+    if not isinstance(creator, dict) or not all(isinstance(v, str) for v in creator.values()):
+        unestablished("a Metadata overlay's %s that isn't a map of strings" % CREATOR_DEFINED_KEY)
+    return value
+
+
+def check_features_overlay(value):
+    """Each section's features' descriptions; any other key is ignored."""
+    for section, _ in FEATURE_SECTIONS:
+        features = value.get(section, {})
+        if not isinstance(features, dict):
+            unestablished("a FeatureDescriptions overlay's %s that isn't an object" % section)
+        for f in features.values():
+            if not isinstance(f, dict) or not isinstance(f.get(FEATURE_DESCRIPTION_KEY), str):
+                unestablished("a FeatureDescriptions overlay's feature without a %s string" % FEATURE_DESCRIPTION_KEY)
+    return value
+
+
+def _ld(number, payload):
+    """A length-delimited field."""
+    return _enc_varint(number << 3 | 2) + _enc_varint(len(payload)) + payload
+
+
+def _with_strings(message, values):
+    """`message` (encoded as protobuf encodes it) with string fields set
+    ({number: text}; an empty one left out, as proto3 leaves it)."""
+    fields = [(n, raw) for n, _, _, raw in _wire_fields(message) if n not in values]
+    fields += [(n, _ld(n, text.encode("utf-8"))) for n, text in values.items() if text]
+    return b"".join(raw for _, raw in sorted(fields, key=lambda x: x[0]))
+
+
+def _metadata_entries(message, entries):
+    """A Metadata message with user-defined entries set: one already there
+    keeps its place, a new one is added after them. Each entry is written
+    with its key and value, as protobuf writes a map's entries."""
+    out, done = [], set()
+    for n, _, v, raw in _wire_fields(message):
+        if n == 100:
+            key = Message(v).str(1)
+            if key in done:
+                unestablished("user-defined metadata with a key given twice")
+            if key in entries:
+                raw = _ld(100, _ld(1, key.encode("utf-8")) + _ld(2, entries[key].encode("utf-8")))
+            done.add(key)
+        out.append(raw)
+    out += [_ld(100, _ld(1, k.encode("utf-8")) + _ld(2, v.encode("utf-8"))) for k, v in entries.items() if k not in done]
+    return b"".join(out)
+
+
+def _described_features(features, overlay, section):
+    """Features (FeatureDescription messages) with the overlay's
+    descriptions; every feature the overlay names must be there."""
+    given = overlay.get(section, {})
+    names = {Message(f).str(1) for f in features}
+    missing = [n for n in given if n not in names]
+    if missing:
+        unestablished("a FeatureDescriptions overlay naming %s, which isn't among the model's %s" % (missing[0], section))
+    return [_with_strings(f, {2: given[Message(f).str(1)][FEATURE_DESCRIPTION_KEY]}) if Message(f).str(1) in given else f
+            for f in features]
+
+
+def _overlaid_description(description, metadata, features, described):
+    """A ModelDescription with overlays applied, re-encoded as protobuf
+    encodes it: as compiled, or as metadata.json describes it (`described`)."""
+    fields = list(_wire_fields(description))
+    default = Message(description).str(21)
+    # Replacements by field number and occurrence.
+    replaced = {}
+    if features is not None:
+        functions = [v for n, _, v, _ in fields if n == 20]
+        sections = [(section, [v for n, _, v, _ in fields if n == number]) for section, number in FEATURE_SECTIONS]
+        if functions:
+            # A multi-function model's features are its default function's;
+            # only metadata.json describes them with the overlay.
+            function = next((v for v in functions if Message(v).str(1) == default), None)
+            if function is None:
+                unestablished("functions without the default function")
+            inner = list(_wire_fields(function))
+            ins = _described_features([v for n, _, v, _ in inner if n == 2], features, "Inputs")
+            outs = _described_features([v for n, _, v, _ in inner if n == 3], features, "Outputs")
+            _described_features(sections[2][1], features, "TrainingInputs")
+            if described:
+                new = iter(ins + outs)
+                replaced[(20, functions.index(function))] = b"".join(_ld(n, next(new)) if n in (2, 3) else raw for n, _, _, raw in inner)
+        else:
+            for (section, old), (_, number) in zip(sections, FEATURE_SECTIONS):
+                replaced.update(((number, i), f) for i, f in enumerate(_described_features(old, features, section)))
+    out, seen = [], {}
+    for n, _, v, raw in fields:
+        i = seen[n] = seen.get(n, -1) + 1
+        if n != 100:
+            out.append((n, _ld(n, replaced[(n, i)]) if (n, i) in replaced else raw))
+    metas = [v for n, _, v, _ in fields if n == 100]
+    if len(metas) > 1:
+        unestablished("a description with its metadata given twice")
+    meta = metas[0] if metas else None
+    if metadata is not None:
+        strings = {number: metadata.get(key, "") for key, number in METADATA_KEYS}
+        creator = metadata.get(CREATOR_DEFINED_KEY, {})
+        if described:
+            # metadata.json's metadata is the overlay's alone.
+            meta = _metadata_entries(_with_strings(b"", strings), creator)
+        else:
+            # Compiled, a string given (and not empty) replaces the model's;
+            # creator-defined entries are added to the model's.
+            meta = _metadata_entries(_with_strings(meta or b"", {n: t for n, t in strings.items() if t}), creator)
+    if meta is not None:
+        out.append((100, _ld(100, meta)))
+    return b"".join(raw for _, raw in sorted(out, key=lambda x: x[0]))
+
+
+def _with_description(model_bytes, description):
+    """A Model with its description replaced (the rest as it is)."""
+    out = []
+    for n, _, _, raw in _wire_fields(model_bytes):
+        out.append((n, _ld(2, description) if n == 2 else raw))
+    if not any(n == 2 for n, _ in out):
+        out.append((2, _ld(2, description)))
+    return b"".join(raw for _, raw in sorted(out, key=lambda x: x[0]))
+
+
+def overlaid(model_bytes, package):
+    """(the specification compiled, the one metadata.json describes) with a
+    package's overlays applied. Compiled, the Metadata overlay's strings that
+    aren't empty replace the model's and its creator-defined entries are
+    added to the model's; metadata.json takes the model's metadata from the
+    overlay alone. Both take the FeatureDescriptions overlay's descriptions
+    (a multi-function model's default function's, in metadata.json only)."""
+    if package is None or (package.metadata is None and package.features is None):
+        return model_bytes, model_bytes
+    description = Message(model_bytes).bytes(2)
+    compiled = _overlaid_description(description, package.metadata, package.features, False)
+    described = _overlaid_description(description, package.metadata, package.features, True)
+    return _with_description(model_bytes, compiled), _with_description(model_bytes, described)
+
+
+# --- Compiling ----------------------------------------------------------------------
+
+def blob_files(mil):
+    """The weight files model.mil reads, by name in weights/."""
+    out = []
+    paths = re.findall(r'BLOBFILE\(path = [^(]*\("([^"\\]*)"\)', mil)
+    if len(paths) != mil.count("BLOBFILE("):
+        unestablished("a weight file path needing escapes")
+    for path in paths:
+        rest = path[len("@model_path/weights/"):] if path.startswith("@model_path/weights/") else ""
+        if not rest or "/" in rest or rest in (".", ".."):
+            unestablished("weights at %s" % path)
+        if rest not in out:
+            out.append(rest)
+    return out
+
+
+def compile_model(source, outdir):
+    """Compiles a .mlmodel file or .mlpackage directory."""
+    package = Package(source, True) if os.path.isdir(source) else None
+    if package is None:
+        with open(source, "rb") as f:
+            file_bytes = f.read()
+    else:
+        file_bytes = package.model_bytes
+    name = generated_class_name(os.path.splitext(os.path.basename(source.rstrip("/")))[0])
+    try:
+        model = Message(file_bytes)
+    except (ValueError, IndexError):
+        unestablished("a specification that isn't a Core ML model")
+    if package is not None and model.has(502):
+        check_encoding(file_bytes)
+        compiled, described = overlaid(file_bytes, package)
+        files = program_files(Message(compiled))
+        weights = [(os.path.join(package.model_dir, "weights", f), "weights/" + f) for f in blob_files(files["model.mil"].decode("utf-8"))]
+    else:
+        if not compiled_type(model):
+            refuse_model_file(model)
+        validate(model)
+        if tree_kind(model) is None:
+            # A tree ensemble's description is re-encoded here as Xcode does.
+            check_encoding(file_bytes)
+        compiled, described = overlaid(file_bytes, package)
+        if any(model.has(n) for n in SPEC_ARCHIVED):
+            files = spec_files(compiled)
+        elif tree_kind(model) is not None:
+            files = tree_files(compiled)
+        elif pipeline_parts(model) is not None:
+            files = pipeline_files(compiled)
+        else:
+            files = own_archive_files(compiled)
+        weights = []
+    files["metadata.json"] = metadata_json(Message(described), name).encode("utf-8")
+    files["analytics/coremldata.bin"] = files.get("analytics/coremldata.bin", b"") + analytics_sections([("SpecificationDetails", [
+        ("modelHash", base64.b64encode(hashlib.sha256(file_bytes).digest()).decode()),
+        ("modelName", package.model_name if package else name)])])
+    for path, _ in weights:
+        if not os.path.isfile(path):
+            unestablished("a package without the weights its program reads")
+    write_bundle(outdir, name, files)
+    for path, rel in weights:
+        os.makedirs(os.path.dirname(os.path.join(outdir, name + ".mlmodelc", rel)), exist_ok=True)
+        shutil.copyfile(path, os.path.join(outdir, name + ".mlmodelc", rel))
 
 
 # --- coremlc generate (Swift) ----------------------------------------------------
@@ -3499,14 +3782,6 @@ H_BATCH = '/**\n    Batch prediction\n    @param inputArray array of {N}Input in
 M_MODEL = '@implementation {N}\n\n\n/**\n    URL of the underlying .mlmodelc directory.\n*/\n+ (nullable NSURL *)URLOfModelInThisBundle {\n    NSString *assetPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"{N}" ofType:@"mlmodelc"];\n    if (nil == assetPath) { os_log_error(OS_LOG_DEFAULT, "Could not load {N}.mlmodelc in the bundle resource"); return nil; }\n    return [NSURL fileURLWithPath:assetPath];\n}\n\n\n/**\n    Initialize {N} instance from an existing MLModel object.\n\n    Usually the application does not use this initializer unless it makes a subclass of {N}.\n    Such application may want to use `-[MLModel initWithContentsOfURL:configuration:error:]` and `+URLOfModelInThisBundle` to create a MLModel object to pass-in.\n*/\n- (instancetype)initWithMLModel:(MLModel *)model {\n    if (model == nil) {\n        return nil;\n    }\n    self = [super init];\n    if (self != nil) {\n        _model = model;\n    }\n    return self;\n}\n\n\n/**\n    Initialize {N} instance with the model in this bundle.\n*/\n- (nullable instancetype)init {\n    return [self initWithContentsOfURL:(NSURL * _Nonnull)self.class.URLOfModelInThisBundle error:nil];\n}\n\n\n/**\n    Initialize {N} instance with the model in this bundle.\n\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithConfiguration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    return [self initWithContentsOfURL:(NSURL * _Nonnull)self.class.URLOfModelInThisBundle configuration:configuration error:error];\n}\n\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    MLModel *model = [MLModel modelWithContentsOfURL:modelURL error:error];\n    if (model == nil) { return nil; }\n    return [self initWithMLModel:model];\n}\n\n\n/**\n    Initialize {N} instance from the model URL.\n\n    @param modelURL URL to the .mlmodelc directory for {N}.\n    @param configuration The model configuration object\n    @param error If an error occurs, upon return contains an NSError object that describes the problem. If you are not interested in possible errors, pass in NULL.\n*/\n- (nullable instancetype)initWithContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration error:(NSError * _Nullable __autoreleasing * _Nullable)error {\n    MLModel *model = [MLModel modelWithContentsOfURL:modelURL configuration:configuration error:error];\n    if (model == nil) { return nil; }\n    return [self initWithMLModel:model];\n}\n\n\n/**\n    Construct {N} instance asynchronously with configuration.\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadWithConfiguration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler {\n    [self loadContentsOfURL:(NSURL * _Nonnull)[self URLOfModelInThisBundle]\n              configuration:configuration\n          completionHandler:handler];\n}\n\n\n/**\n    Construct {N} instance asynchronously with URL of .mlmodelc directory and optional configuration.\n\n    Model loading may take time when the model content is not immediately available (e.g. encrypted model). Use this factory method especially when the caller is on the main thread.\n\n    @param modelURL The model URL.\n    @param configuration The model configuration\n    @param handler When the model load completes successfully or unsuccessfully, the completion handler is invoked with a valid {N} instance or NSError object.\n*/\n+ (void)loadContentsOfURL:(NSURL *)modelURL configuration:(MLModelConfiguration *)configuration completionHandler:(void (^)({N} * _Nullable model, NSError * _Nullable error))handler {\n    [MLModel loadContentsOfURL:modelURL\n                 configuration:configuration\n             completionHandler:^(MLModel *model, NSError *error) {\n        if (model != nil) {\n            {N} *typedModel = [[{N} alloc] initWithMLModel:model];\n            handler(typedModel, nil);\n        } else {\n            handler(nil, error);\n        }\n    }];\n}\n\n'
 
 
-def read_package(package):
-    with open(os.path.join(package, "Manifest.json")) as f:
-        manifest = json.load(f)
-    root = manifest["itemInfoEntries"][manifest["rootModelIdentifier"]]
-    with open(os.path.join(package, "Data", root["path"]), "rb") as f:
-        return Message(f.read())
-
-
 def generate(argv):
     source, outdir, language, public = None, None, "Objective-C", False
     rest = list(argv)
@@ -3526,13 +3801,19 @@ def generate(argv):
     try:
         if (language == "Swift") != public or language not in ("Swift", "Objective-C"):
             unestablished("generated %s%s code" % ("public " if public else "", language))
-        if os.path.isdir(source):
-            model = read_package(source)
-            if not model.has(502):
-                unestablished("a model that isn't an ML Program")
-        else:
+        # A package's overlays aren't read: generated code describes the
+        # model as its specification does.
+        package = Package(source, False) if os.path.isdir(source) else None
+        if package is None:
             with open(source, "rb") as f:
-                model = Message(f.read())
+                model_bytes = f.read()
+        else:
+            model_bytes = package.model_bytes
+        try:
+            model = Message(model_bytes)
+        except (ValueError, IndexError):
+            unestablished("a specification that isn't a Core ML model")
+        if package is None or not model.has(502):
             if not compiled_type(model):
                 refuse_model_file(model)
             # Xcode checks the model as it reads it, for either.
@@ -3570,28 +3851,7 @@ def main(argv):
             print("error: coremlc: unsupported option %s" % rest[0], file=sys.stderr)
             return 1
     try:
-        if os.path.isdir(source):
-            compile_package(source, outdir)
-        else:
-            with open(source, "rb") as f:
-                model_bytes = f.read()
-            model = Message(model_bytes)
-            if not compiled_type(model):
-                refuse_model_file(model)
-            validate(model)
-            if tree_kind(model) is None:
-                # A tree ensemble's description is re-encoded here as Xcode does.
-                check_encoding(model_bytes)
-            if any(model.has(n) for n in SPEC_ARCHIVED):
-                compile_spec_model(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
-            elif tree_kind(model) is not None:
-                compile_tree(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
-            elif pipeline_parts(model) is not None:
-                compile_pipeline(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
-            elif any(model.has(n) for n in OWN_ARCHIVES):
-                compile_own_archive(model_bytes, generated_class_name(os.path.splitext(os.path.basename(source))[0]), outdir)
-            else:
-                refuse_model_file(model)
+        compile_model(source, outdir)
     except Unestablished as e:
         print("error: coremlc: %s is not compiled as Xcode compiles it" % e, file=sys.stderr)
         return 1

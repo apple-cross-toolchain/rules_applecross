@@ -1,0 +1,78 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "shortDescription" : "Déjà — \"q\" \\ \/\n\t×",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 2 × 3)",
+        "shortDescription" : "orig add_1",
+        "shape" : "[2, 3]",
+        "name" : "add_1",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.readState" : 2,
+      "Ios18.add" : 2,
+      "Ios18.mul" : 1,
+      "Ios18.writeState" : 2
+    },
+    "computePrecision" : "Float16",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+      {
+        "dataType" : "Float16",
+        "isOptional" : "0",
+        "formattedType" : "State (Float16 2 × 3)",
+        "shortDescription" : "",
+        "shape" : "[2, 3]",
+        "name" : "k",
+        "type" : "State"
+      },
+      {
+        "dataType" : "Float16",
+        "isOptional" : "0",
+        "formattedType" : "State (Float16 2 × 3)",
+        "shortDescription" : "",
+        "shape" : "[2, 3]",
+        "name" : "v",
+        "type" : "State"
+      }
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 2 × 3)",
+        "shortDescription" : "orig x",
+        "shape" : "[2, 3]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "userDefinedMetadata" : {
+      "é" : "☃"
+    },
+    "generatedClassName" : "P_StTwo_unicode",
+    "method" : "predict"
+  }
+]

@@ -69,7 +69,8 @@ Known variations:
   other maps of a specification it copies into `coremldata.bin` (a custom
   model's parameters, a categorical mapping's map)
   ([coremlc.md](coremlc.md#xcodes-own-output-varies)). Ours keeps the
-  model's own order.
+  model's own order. A package's Metadata overlay adds its creator-defined
+  entries to that map; packages compiled twice varied in nothing else.
 - `actool` writes the blocks of `Assets.car`'s `APPEARANCEKEYS` tree in a
   random order when a catalog has more than one appearance
   ([actool.md](actool.md)). The comparison requires the same entries, the

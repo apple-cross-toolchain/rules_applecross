@@ -1,0 +1,10 @@
+{
+  "TrainingInputs" : {
+    "x" : {
+      "MLFeatureShortDescription" : "Train x"
+    },
+    "label" : {
+      "MLFeatureShortDescription" : "Train label"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+program(1.3)
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+{
+    func main<ios18>(state<tensor<fp16, [2, 3]>> k, state<tensor<fp16, [2, 3]>> v, tensor<fp16, [2, 3]> x) {
+            tensor<fp16, [2, 3]> read_state_0 = read_state(input = k)[name = string("read_state_0")];
+            tensor<fp16, [2, 3]> read_state_1 = read_state(input = v)[name = string("read_state_1")];
+            tensor<fp16, [2, 3]> add_0 = add(x = read_state_0, y = x)[name = string("add_0")];
+            write_state(data = add_0, input = k)[name = string("coreml_update_state_2_write_state")];
+            tensor<fp16, [2, 3]> mul_0 = mul(x = read_state_1, y = x)[name = string("mul_0")];
+            write_state(data = mul_0, input = v)[name = string("coreml_update_state_3_write_state")];
+            tensor<fp16, [2, 3]> add_1 = add(x = read_state_0, y = read_state_1)[name = string("add_1")];
+        } -> (add_1);
+}

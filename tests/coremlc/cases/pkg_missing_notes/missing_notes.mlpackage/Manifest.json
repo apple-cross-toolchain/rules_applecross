@@ -1,0 +1,18 @@
+{
+    "fileFormatVersion": "1.0.0",
+    "itemInfoEntries": {
+        "9C9841E7-8CA1-4F5C-8A33-B9AA887FE7EE": {
+            "author": "com.example",
+            "description": "Notes",
+            "name": "notes.txt",
+            "path": "com.example/notes.txt"
+        },
+        "A436AD82-6037-4C10-9A38-5B6875A4824A": {
+            "author": "com.apple.CoreML",
+            "description": "CoreML Model Specification",
+            "name": "model.mlmodel",
+            "path": "com.apple.CoreML/model.mlmodel"
+        }
+    },
+    "rootModelIdentifier": "A436AD82-6037-4C10-9A38-5B6875A4824A"
+}

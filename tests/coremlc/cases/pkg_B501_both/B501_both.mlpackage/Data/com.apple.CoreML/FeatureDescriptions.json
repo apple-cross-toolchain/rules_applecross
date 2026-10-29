@@ -1,0 +1,10 @@
+{
+  "Inputs" : {
+    "items" : {
+      "MLFeatureShortDescription" : "In items"
+    },
+    "k" : {
+      "MLFeatureShortDescription" : "In k"
+    }
+  }
+}

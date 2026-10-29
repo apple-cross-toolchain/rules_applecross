@@ -1,0 +1,66 @@
+[
+  {
+    "shortDescription" : "Desc two",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "probs",
+        "shortDescription" : "orig probs"
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "Int64",
+        "formattedType" : "Dictionary (Int64 → Double)",
+        "type" : "Dictionary",
+        "name" : "z0",
+        "shortDescription" : "orig z0"
+      }
+    ],
+    "version" : "2.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Author two",
+    "specificationVersion" : 3,
+    "license" : "License two",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.14",
+      "tvOS" : "12.0",
+      "visionOS" : "1.0",
+      "watchOS" : "5.0",
+      "iOS" : "12.0",
+      "macCatalyst" : "12.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_glmClassifier"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "b_24",
+        "shortDescription" : "orig b_24"
+      }
+    ],
+    "classLabels" : [
+      -1,
+      20,
+      16,
+      33
+    ],
+    "generatedClassName" : "B400_full",
+    "userDefinedMetadata" : {
+      "b" : "overlaid",
+      "kx" : "vx"
+    },
+    "method" : "predict"
+  }
+]

@@ -15,7 +15,8 @@ Known variations (docs/clean-room/README.md#determinism):
 - coremlc writes a model's user-defined metadata, a protobuf map, in a
   randomly seeded order: in `coremldata.bin` (the model description, or the
   whole specification of a model compiled to its specification or a
-  pipeline part) and in `metadata.json`'s `userDefinedMetadata`. So it
+  pipeline part) and in `metadata.json`'s `userDefinedMetadata` (a
+  package's Metadata overlay adds its creator-defined entries). So it
   writes the other maps of a specification it copies: a custom model's
   parameters, a categorical mapping's map and an imputer's dictionary.
 - actool writes the blocks of `Assets.car`'s APPEARANCEKEYS tree (each

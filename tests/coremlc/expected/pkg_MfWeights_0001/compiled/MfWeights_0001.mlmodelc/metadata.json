@@ -1,0 +1,132 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "storagePrecision" : "Float32",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 4)",
+        "shortDescription" : "",
+        "shape" : "[1, 4]",
+        "name" : "linear_0",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "license" : "x",
+    "functions" : [
+      {
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 8)",
+            "shortDescription" : "",
+            "shape" : "[1, 8]",
+            "name" : "x",
+            "type" : "MultiArray"
+          }
+        ],
+        "computePrecision" : "Float32",
+        "storagePrecision" : "Float32",
+        "stateSchema" : [
+
+        ],
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 4)",
+            "shortDescription" : "",
+            "shape" : "[1, 4]",
+            "name" : "linear_0",
+            "type" : "MultiArray"
+          }
+        ],
+        "name" : "half",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.linear" : 1
+        }
+      },
+      {
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 8)",
+            "shortDescription" : "",
+            "shape" : "[1, 8]",
+            "name" : "x",
+            "type" : "MultiArray"
+          }
+        ],
+        "computePrecision" : "Float32",
+        "storagePrecision" : "Float32",
+        "stateSchema" : [
+
+        ],
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float32",
+            "formattedType" : "MultiArray (Float32 1 × 4)",
+            "shortDescription" : "",
+            "shape" : "[1, 4]",
+            "name" : "linear_0",
+            "type" : "MultiArray"
+          }
+        ],
+        "name" : "quarter",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.linear" : 1
+        }
+      }
+    ],
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.linear" : 1
+    },
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "computePrecision" : "Float32",
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 8)",
+        "shortDescription" : "",
+        "shape" : "[1, 8]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "defaultFunctionName" : "half",
+    "generatedClassName" : "MfWeights_0001",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]
