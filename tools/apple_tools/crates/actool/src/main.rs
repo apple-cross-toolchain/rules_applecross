@@ -877,6 +877,16 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
         _ => return Err(format!("this actool compiles icon sets with an image per size for the iOS and watchOS simulators and macOS, with their own target devices, not --platform {}", o.platform)),
     }
     let compiled = iconset::compile(icon_name, name_identifier(icon_name), slots, phone, pad, watch, mac)?;
+    // An icon set's atlases take their scale and idiom's indices in order
+    // with the image sets' atlases (translucent colour, translucent grey,
+    // opaque colour, opaque grey), and its images pack with the opaque
+    // colour images (12 probes, iPhone image sets beside an iPhone icon
+    // set); neither is done here.
+    let attr = |r: &car::Rendition, k: u16| r.attrs.iter().find(|a| a.0 == k).map_or(0, |a| a.1);
+    let atlases: Vec<(u32, u16)> = compiled.renditions.iter().filter(|r| attr(r, car::ATTR_ELEMENT) == 9).map(|r| (attr(r, car::ATTR_SCALE) as u32, attr(r, car::ATTR_IDIOM))).collect();
+    if images.packable.iter().any(|p| p.1 == 0 && atlases.contains(&(p.0, p.2))) {
+        return Err(format!("image sets packed at a scale and idiom of the {icon_name} icon set's atlases are not supported by this actool"));
+    }
     for (name, source) in &compiled.bundle_files {
         let p = out_dir.join(name);
         std::fs::copy(source, &p).map_err(|e| format!("{}: {e}", source.display()))?;

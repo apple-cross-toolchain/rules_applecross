@@ -37,22 +37,30 @@ impl Curve {
     /// The curve's 12-bit linear value for each 8-bit input.
     fn table(self) -> [i64; 256] {
         std::array::from_fn(|v| {
-            let x = v as f64 / 255.0;
             let l = match self {
-                Curve::Linear => x,
-                Curve::GammaWithToe(g) => x.powf(g).max(x / 16.0),
-                Curve::Gamma(g) => x.powf(g),
                 Curve::Gamma22 => (((257 * v + 8) >> 4) as f64 / 4096.0).powf(2.2),
-                Curve::Parametric([g, a, b, c, d]) => {
-                    if x >= d {
-                        (a * x + b).max(0.0).powf(g)
-                    } else {
-                        c * x
-                    }
-                }
+                _ => self.linear(v as f64 / 255.0),
             };
             (l * 4096.0 + 0.5).floor() as i64
         })
+    }
+
+    /// The linear value for an encoded one, both 0 to 1 (Gamma22 widened
+    /// to 12 bits only in [`Curve::table`]).
+    fn linear(self, x: f64) -> f64 {
+        match self {
+            Curve::Linear => x,
+            Curve::GammaWithToe(g) => x.powf(g).max(x / 16.0),
+            Curve::Gamma(g) => x.powf(g),
+            Curve::Gamma22 => x.powf(2.2),
+            Curve::Parametric([g, a, b, c, d]) => {
+                if x >= d {
+                    (a * x + b).max(0.0).powf(g)
+                } else {
+                    c * x
+                }
+            }
+        }
     }
 
     /// The curve a `curv` or `para` tag gives, where established.
@@ -98,6 +106,13 @@ impl Curve {
                 if (p[0] - 1.0 / 0.45).abs() < 0.1 && (p[1] - 1.0 / 1.099).abs() < 0.02 {
                     return unsupported("a curve near BT.709's");
                 }
+                let distance = srgb_distance(|x| Curve::Parametric(p).linear(x));
+                if distance <= SRGB_NEAR {
+                    return Ok(Curve::Parametric(SRGB_PARAMETERS));
+                }
+                if distance < SRGB_FAR {
+                    return unsupported("a curve near sRGB's");
+                }
                 Ok(Curve::Parametric(p))
             }
             _ => unsupported("a curve that isn't `curv` or `para`"),
@@ -105,20 +120,35 @@ impl Curve {
     }
 }
 
-/// Whether ColorSync takes a curve table for sRGB's curve. Tables whose
-/// linear interpolation came within 4.78 (of 65535) of it everywhere were,
-/// and 6.32 or more away weren't; between those isn't established.
+/// Whether ColorSync takes a curve table for sRGB's curve: see
+/// [`srgb_distance`].
 fn srgb_like(table: &[u16]) -> bool {
     let n = table.len();
-    (0..=4096).all(|j| {
-        let x = j as f64 / 4096.0;
+    srgb_distance(|x| {
         let p = x * (n - 1) as f64;
         let i = (p as usize).min(n - 2);
-        let t = table[i] as f64 + (table[i + 1] as f64 - table[i] as f64) * (p - i as f64);
-        let srgb = if x > 0.04045 { ((x + 0.055) / 1.055).powf(2.4) } else { x / 12.92 };
-        (t - srgb * 65535.0).abs() <= 4.78
-    })
+        (table[i] as f64 + (table[i + 1] as f64 - table[i] as f64) * (p - i as f64)) / 65535.0
+    }) <= SRGB_NEAR
 }
+
+/// How far a curve (linear value for an encoded one, both 0 to 1) comes
+/// from sRGB's, at most, in units of 1/65535. ColorSync takes curves for
+/// sRGB's that came within 4.78 of it everywhere: tables, and a parametric
+/// curve 4.19 away (Display P3's of 2015, whose image compiled as under
+/// today's Display P3, 7,555 colours); tables 6.32 or more away it didn't.
+/// Between those isn't established.
+fn srgb_distance(curve: impl Fn(f64) -> f64) -> f64 {
+    (0..=4096)
+        .map(|j| {
+            let x = j as f64 / 4096.0;
+            let srgb = if x > 0.04045 { ((x + 0.055) / 1.055).powf(2.4) } else { x / 12.92 };
+            (curve(x) - srgb).abs() * 65535.0
+        })
+        .fold(0.0, f64::max)
+}
+
+const SRGB_NEAR: f64 = 4.78;
+const SRGB_FAR: f64 = 6.32;
 
 /// The matrix from linear values in `colorants`' space to linear sRGB, in
 /// units of 2^-16: the source's rows scaled to sum as the sRGB colorants'

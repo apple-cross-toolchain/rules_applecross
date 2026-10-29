@@ -173,8 +173,31 @@ fn ycocg_values(b: i32, g: i32, r: i32) -> [i32; 3] {
     [t + cg, co, cg]
 }
 
-/// Row predictors by code; the order ties go in.
-const TIE_ORDER: [u8; 5] = [0, 2, 3, 1, 4];
+/// Row predictors by code, in the order Xcode tries them: a row takes the
+/// first whose cost is lowest (4 before 1: 119 grey rows where they alone
+/// tie exactly).
+const ORDER: [u8; 5] = [0, 2, 3, 4, 1];
+
+/// `ln(1 + n)` in single precision, as Xcode's `logf` gives it for every
+/// magnitude a 16-bit residual code holds (the first that differ from
+/// `ln` rounded to single precision are over 73,000).
+fn ln_1p(n: u32) -> f32 {
+    static TABLE: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| (0..1u32 << 16).map(|n| (1.0 + n as f64).ln() as f32).collect());
+    table.get(n as usize).copied().unwrap_or_else(|| (1.0 + n as f64).ln() as f32)
+}
+
+/// A row's cost under a predictor: `ln(1 + |residual|)` summed in single
+/// precision, value by value, except that predictor 1 sums each pixel's
+/// three first (which decides between rows that 1 and 2 predict alike:
+/// 16,956 colour rows of Xcode's, 3,781 of them 16-bit, and 3,720 grey).
+fn cost(code: u8, residuals: &[[i32; 3]], channels: usize) -> f32 {
+    if code == 1 && channels == 3 {
+        residuals.iter().fold(0.0, |s, p| s + (ln_1p(p[0].unsigned_abs()) + ln_1p(p[1].unsigned_abs()) + ln_1p(p[2].unsigned_abs())))
+    } else {
+        residuals.iter().flat_map(|p| &p[..channels]).fold(0.0, |s, d| s + ln_1p(d.unsigned_abs()))
+    }
+}
 
 fn predict(code: u8, v: &[[i32; 3]], width: usize, i: usize, x: usize, y: usize, k: usize) -> i32 {
     if code == 0 {
@@ -199,20 +222,17 @@ fn predict(code: u8, v: &[[i32; 3]], width: usize, i: usize, x: usize, y: usize,
     }
 }
 
-/// Mode 2's data for rows of an image, and whether any row's predictor is
-/// not established: costs that tie, or as good as, other than between rows
-/// predicted exactly.
-fn transform(width: usize, height: usize, bgra: &[u8]) -> (Vec<u8>, bool) {
+/// Mode 2's data for rows of an image.
+fn transform(width: usize, height: usize, bgra: &[u8]) -> Vec<u8> {
     let v: Vec<[i32; 3]> = bgra.chunks_exact(4).map(|p| ycocg(p[0], p[1], p[2])).collect();
     transform_values(width, height, bgra.chunks_exact(4).map(|p| p[3]).collect(), v, 3)
 }
 
 /// Mode 2's data for values per pixel: YCoCg (3 channels), or grey (1,
 /// the first) for GA8.
-fn transform_values(width: usize, height: usize, alpha: Vec<u8>, v: Vec<[i32; 3]>, channels: usize) -> (Vec<u8>, bool) {
+fn transform_values(width: usize, height: usize, alpha: Vec<u8>, v: Vec<[i32; 3]>, channels: usize) -> Vec<u8> {
     let n = width * height;
     let mut codes = Vec::with_capacity(height);
-    let mut ambiguous = false;
     let mut residuals = vec![[0i32; 3]; n];
     let row = |code: u8, y: usize| -> Vec<[i32; 3]> {
         (0..width)
@@ -223,28 +243,18 @@ fn transform_values(width: usize, height: usize, alpha: Vec<u8>, v: Vec<[i32; 3]
             .collect()
     };
     for y in 0..height {
-        let candidates: &[u8] = if y == 0 { &[0, 2] } else { &[0, 1, 2, 3, 4] };
-        let rows: Vec<(u8, Vec<[i32; 3]>, f64)> = candidates
-            .iter()
-            .map(|&c| {
-                let r = row(c, y);
-                let cost = r.iter().flat_map(|p| &p[..channels]).map(|d| (1.0 + d.unsigned_abs() as f64).log2()).sum();
-                (c, r, cost)
-            })
-            .collect();
-        let best = rows.iter().map(|r| r.2).fold(f64::INFINITY, f64::min);
-        let mut tied: Vec<&(u8, Vec<[i32; 3]>, f64)> = rows.iter().filter(|r| r.2 - best < 1e-3).collect();
-        // Rows every candidate in the tie predicts exactly go by TIE_ORDER,
-        // as do a grey row's ties between 1 and 3, 3 and 4 or 1 and 2 (all
-        // of 4,018 such rows in 29 probes); other ties are not established
-        // (in colour, 1 and 2 with the same residuals go either way).
-        let pair: Vec<u8> = tied.iter().map(|r| r.0).collect();
-        let grey_known = channels == 1 && [[1, 3], [3, 4], [1, 2]].iter().any(|k| pair == k);
-        ambiguous |= tied.len() > 1 && best != 0.0 && !grey_known;
-        tied.sort_by_key(|r| TIE_ORDER.iter().position(|&c| c == r.0));
-        let (code, r, _) = tied[0];
-        codes.push(*code);
-        residuals[y * width..(y + 1) * width].copy_from_slice(r);
+        let candidates: &[u8] = if y == 0 { &[0, 2] } else { &ORDER };
+        let mut best: Option<(u8, Vec<[i32; 3]>, f32)> = None;
+        for &c in candidates {
+            let r = row(c, y);
+            let s = cost(c, &r, channels);
+            if best.as_ref().is_none_or(|b| s < b.2) {
+                best = Some((c, r, s));
+            }
+        }
+        let (code, r, _) = best.unwrap();
+        codes.push(code);
+        residuals[y * width..(y + 1) * width].copy_from_slice(&r);
     }
     let mut raw = Vec::with_capacity((1 + 2 * channels) * n + height + 16);
     raw.extend(alpha);
@@ -253,7 +263,7 @@ fn transform_values(width: usize, height: usize, alpha: Vec<u8>, v: Vec<[i32; 3]
     raw.extend(coded.iter().map(|c| (c >> 8) as u8));
     raw.extend(coded.iter().map(|c| *c as u8));
     raw.resize(raw.len().div_ceil(16) * 16, 0);
-    (raw, ambiguous)
+    raw
 }
 
 /// The `dmp2` stream of rows of an image: whichever mode is smallest.
@@ -263,7 +273,11 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
         return Ok(raw(width, height, bgra, 4));
     }
     let row = 4 * width;
-    let lzfse_only = striped(3, width, height, row, |y, h| bgra[y * row..(y + h) * row].to_vec());
+    // Mode 3's strips are 2 MiB of its rows unrounded, as a GA8 image's
+    // (two corpus images 750 px wide and a probe 601 px wide; mode 2's are
+    // rounded).
+    let rows3 = std::cmp::min(height, (1 << 21) / row);
+    let lzfse_only = striped_rows(3, width, height, rows3, 4, |y, h| bgra[y * row..(y + h) * row].to_vec());
     let mut candidates = vec![lzfse_only];
     for p in [palette(width, height, bgra), palette_alpha(width, height, bgra)] {
         match p {
@@ -271,27 +285,15 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
             p => candidates.extend(p),
         }
     }
-    let mut ambiguous = false;
-    let predictive = striped(2, width, height, 7 * width + 1, |y, h| {
-        let (raw, a) = transform(width, h, &bgra[y * row..(y + h) * row]);
-        ambiguous |= a;
-        raw
-    });
-    let smallest_other = candidates.iter().map(Vec::len).min().unwrap();
-    if !ambiguous {
-        candidates.push(predictive);
-    } else if predictive.len() <= smallest_other + smallest_other / 100 + 64 {
-        // Another choice of predictors could make mode 2 the smallest.
-        return Err("this image's dmp2 encoding (its row predictors) is not established for this actool".into());
-    }
+    candidates.push(striped(2, width, height, 7 * width + 1, |y, h| transform(width, h, &bgra[y * row..(y + h) * row])));
     let min = candidates.iter().map(Vec::len).min().unwrap();
     if candidates.iter().filter(|c| c.len() == min).count() > 1 && 12 + bgra.len() > min {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
     let chosen = candidates.into_iter().find(|c| c.len() == min).unwrap();
     let lzvn_input = match chosen[4] {
-        2 if strip_rows(7 * width + 1, height) == height => Some(transform(width, height, bgra).0),
-        3 if strip_rows(row, height) == height => Some(bgra.to_vec()),
+        2 if strip_rows(7 * width + 1, height) == height => Some(transform(width, height, bgra)),
+        3 if rows3 == height => Some(bgra.to_vec()),
         _ => None,
     };
     smallest_or_raw(width, height, bgra, 4, chosen, lzvn_input)
@@ -309,26 +311,20 @@ fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String
     // of them (three probes of over 4 MiB as BGRA).
     let rows = std::cmp::min(height, (1 << 21) / row);
     let lzfse_only = striped_rows(3, width, height, rows, 2, |y, h| ga[y * row..(y + h) * row].to_vec());
-    let mut ambiguous = false;
     let predictive = striped_bpp(2, width, height, 3 * width + 1, 2, |y, h| {
         let rows = &ga[y * row..(y + h) * row];
         let v: Vec<[i32; 3]> = rows.chunks_exact(2).map(|p| [p[0] as i32, 0, 0]).collect();
-        let (raw, a) = transform_values(width, h, rows.chunks_exact(2).map(|p| p[1]).collect(), v, 1);
-        ambiguous |= a;
-        raw
+        transform_values(width, h, rows.chunks_exact(2).map(|p| p[1]).collect(), v, 1)
     });
-    if ambiguous && predictive.len() <= lzfse_only.len() + lzfse_only.len() / 100 + 64 {
-        return Err("this image's dmp2 encoding (its row predictors) is not established for this actool".into());
-    }
-    if !ambiguous && predictive.len() == lzfse_only.len() {
+    if predictive.len() == lzfse_only.len() {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
-    let (chosen, lzvn_input) = if !ambiguous && predictive.len() < lzfse_only.len() {
+    let (chosen, lzvn_input) = if predictive.len() < lzfse_only.len() {
         // Mode 2's strips go as a colour image's (one probe: 809 rows of
         // 862 pixels).
         let input = (strip_rows(3 * width + 1, height) == height).then(|| {
             let v: Vec<[i32; 3]> = ga.chunks_exact(2).map(|p| [p[0] as i32, 0, 0]).collect();
-            transform_values(width, height, ga.chunks_exact(2).map(|p| p[1]).collect(), v, 1).0
+            transform_values(width, height, ga.chunks_exact(2).map(|p| p[1]).collect(), v, 1)
         });
         (predictive, input)
     } else {
@@ -360,21 +356,18 @@ fn stream16(width: usize, height: usize, halves: &[u16], alpha: &[u8]) -> Result
         })
         .collect();
     let transform16 = |y: usize, h: usize| transform_values(width, h, alpha[y * width..(y + h) * width].to_vec(), values[y * width..(y + h) * width].to_vec(), 3);
-    let mut ambiguous = false;
-    let predictive = striped_bpp(2, width, height, 7 * width + 1, HALF, |y, h| {
-        let (raw, a) = transform16(y, h);
-        ambiguous |= a;
-        raw
-    });
-    if ambiguous && predictive.len() <= lzfse_only.len() + lzfse_only.len() / 100 + 64 {
-        return Err("this image's dmp2 encoding (its row predictors) is not established for this actool".into());
-    }
-    if !ambiguous && predictive.len() == lzfse_only.len() {
+    let predictive = striped_bpp(2, width, height, 7 * width + 1, HALF, transform16);
+    if predictive.len() == lzfse_only.len() {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
-    let (chosen, lzvn_input) = if !ambiguous && predictive.len() < lzfse_only.len() {
-        (predictive, (strip_rows(7 * width + 1, height) == height).then(|| transform16(0, height).0))
+    let (chosen, lzvn_input) = if predictive.len() < lzfse_only.len() {
+        (predictive, (strip_rows(7 * width + 1, height) == height).then(|| transform16(0, height)))
     } else {
+        if strip_rows(row, height) != std::cmp::min(height, (1 << 21) / row) {
+            // Whether these rows are rounded, as mode 2's are, or not, as
+            // 8-bit mode 3's aren't, is not established.
+            return Err("this image's 16-bit dmp2 strips are not established for this actool".into());
+        }
         (lzfse_only, (strip_rows(row, height) == height).then(|| data.clone()))
     };
     smallest_or_raw(width, height, &data, HALF, chosen, lzvn_input)

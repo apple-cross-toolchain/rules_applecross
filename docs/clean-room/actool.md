@@ -295,6 +295,15 @@ catalogs, watchOS 7 and 10).
 In BITMAPKEYS a subtype is a bit from a list (0: 0, 320: 8, 384: 9, 1792:
 16); size and layer are tracked too.
 
+An icon set's atlases share their scale and idiom with the catalog's
+image sets: Xcode indexes them together in the image sets' group order
+(translucent colour, translucent grey, opaque colour, opaque grey), the
+icons being opaque colour images, and packs the icons together with that
+scale and idiom's opaque colour images (12 probes of iPhone image sets
+beside an iPhone icon set, and one corpus catalog). Neither is done here:
+an image set packed at a scale and idiom of an icon set's atlases is
+refused. Universal image sets are indexed apart (seven probes).
+
 For the simulators the bundle's 60pt@2x and 76pt@2x icons are the set's
 files, copied. In the partial Info.plist each target device's entry
 (`CFBundleIcons`, `CFBundleIcons~ipad`) names the icon and lists the
@@ -413,10 +422,12 @@ mode, `01 0a 04`, the width and the rows per strip (16 bits each), and by
 mode the strips' data. Image sets and a stack's back layer are opaque when
 every pixel is; a stack's other layers when their PNG has no alpha (no
 colour type with it, no `tRNS`), whatever their pixels. Modes 2 and 3
-compress strips of as many rows as fit 2 MiB (their data per row, rounded
-up to 16 bytes), each on its own: a 1024 px image is four strips in mode
-2 (291 rows each, the last 151). Each mode-2 strip is transformed as an
-image of its own. Modes:
+compress strips of as many rows as fit 2 MiB, each on its own: in mode 2
+their data per row rounded up to 16 bytes (a 1024 px image is four strips,
+291 rows each, the last 151), in mode 3 the rows' pixels unrounded (two
+corpus images 750 px wide, 699 rows a strip, and a probe 601 px wide; a
+16-bit image's mode 3 is unprobed, and refused where rounding would
+matter). Each mode-2 strip is transformed as an image of its own. Modes:
 
 - 1: the premultiplied BGRA pixels as they are;
 - 3: a 32-bit length and those pixels compressed: from 4096 bytes on as the
@@ -451,38 +462,31 @@ all three values: 0 zero, 1 left or up (left when |U - UL| <= |L - UL| in
 Y), 2 left, 3 up, 4 `(L + U + 1) / 2`. At x = 0 the prediction is the
 pixel above (0 for codes 0 and 2, and in row 0); in row 0 it is the pixel
 to the left. Residuals are sign-magnitude, `2|r| + (r < 0)`. Row 0 weighs
-codes 0 and 2, later rows all five, choosing the smallest sum of
-log2(1 + |r|) over the row's residuals, ties going to 0, 2, 3, 1, 4 in
-that order. That matches 6,667 of 6,670 probe rows; the other three are
-ties broken the other way, two between different residuals with equal
-integer costs and one between identical residuals, so the tie rule is not
-fully established. In 346 of the corpus's images (up to 300 px) the order
-settles 684 of 693 tied rows of non-zero cost, and no other fixed order,
-nor one starting from the row above's predictor, settles more. All nine
-others tie with predictor 1: Xcode picks it over 2 or 3 where they leave
-the same residuals (five rows; the same image gives the same choice each
-time, and the residuals are those of the code it picks), so the choice depends on
-something besides the row's residuals. Costs from unpremultiplied pixels
-contradict other rows, and other left-or-up rules in predictor 1's cost
-explain at most two. Nor do these, each tried on all 32,621 rows of the
-149 corpus images Xcode stores in mode 2 (339 tied rows in the 129 it
-otherwise fits): float summation orders for one predictor against the
-others (in order, per channel, in 4, 8 or 16 lanes, per pixel, in double),
-log2 rounded to a float, the alpha plane's residuals counted too (4,502
-rows then contradict), predictor 1 costed at the better of left and up
-per value or per pixel (17,490 rows contradict), and costs taken on a
-lossless YCoCg-R or on RGB (4,234 to 6,854 rows contradict, against 173
-for the lossy values above, most of those in images whose colours are
-converted).
+codes 0 and 2, later rows all five. Each row's cost is the sum of
+`ln(1 + |r|)` over its residuals in single precision (`logf`), added value
+by value, except that predictor 1's adds each pixel's three values first
+and then the pixel. Codes are tried in the order 0, 2, 3, 4, 1, and a row
+takes the first whose cost is lowest (4 goes before 1: 119 grey rows where
+the two alone tie exactly, one of them a corpus image's; no colour row was
+seen to tie them exactly). The summation order is what
+decides between rows that 1 and 2 predict alike (common: the row under an
+atlas's empty top row). The rule was fitted on 15 such rows, the only
+ties left among 9,564 rows of probe and corpus images; it then held for
+all 1,769 more in images made to tie after it was written, and for every
+row of every mode-2 image decoded: 16,956 colour rows, 3,781 rows of
+16-bit renditions and 3,720 grey rows. In double precision, or with
+`log2` in single precision (tried before), those ties go undecided, which
+kept such images refused.
+Apple's `logf` and `ln` rounded to single precision first differ at
+|r| = 73,908, beyond a 16-bit residual.
 
 A greyscale image (GA8, below) is the same with 2-byte pixels: the stream
 header's last byte and the body header's second word are 2, mode 3 holds
 premultiplied grey and alpha per pixel, and mode 2 the alpha plane, the
 row codes and one 16-bit residual per pixel (high bytes, then low), the
 predictors working on the grey alone. No palette was seen for one, even
-of 16 grey-alpha pairs. In grey rows Xcode breaks ties between 1 and 3, 3
-and 4, and 1 and 2 by the order above (4,018 rows of 29 probes; 40 more
-probes were byte-identical).
+of 16 grey-alpha pairs. Grey rows' costs are the same sums of the one
+value, so their ties go by the order above.
 
 An image of more than 4 MiB (4 bytes a pixel) is `MLEC` with flags 1 (3
 when opaque), method 11 and a count of `KCBC` chunks: each `KCBC`, two zero
@@ -517,8 +521,9 @@ either way, and the test is the encoder's own: mode 1 when
 `lzvn_encode_buffer` into the pixels' size less 4 bytes fails. That matches
 194 of 194 small mode-2 images within 30 bytes of the margin, and 1,355 of
 1,355 small random images (gradients with noise and with copied pixels,
-4 to 16 pixels a side) compiled byte-identical; 245 more are refused for
-their row predictors. Whether that holds for a stream compressed with LZFSE
+4 to 16 pixels a side) compiled byte-identical; 245 more were refused for
+their row predictors before their rule above was found, and were not
+compiled again. Whether that holds for a stream compressed with LZFSE
 (4096 bytes of data on) or a palette's is not established: one within 32
 bytes of mode 1 is refused, as is an image that would be stored that way
 in strips. Greyscale images are given the same test, unprobed near the
@@ -552,15 +557,16 @@ converted, then premultiplied. Refused:
 
 What compiled byte-identical against Xcode 27.0:
 - Generic RGB and ITU-709: 50 image sets (gradients, noise, few colours
-  and patterns, opaque and translucent, 6 to 300 px; 14 more refused for
-  their row predictors) and 6 icon sets (a single 1024 pt image, an image
-  per size, legacy slots).
+  and patterns, opaque and translucent, 6 to 300 px; 14 more were refused
+  for their row predictors, before their rule) and 6 icon sets (a single
+  1024 pt image, an image per size, legacy slots).
 - The corpus's display profiles and the wide-gamut system profiles, on
   grey, muted, gradient, noise, pastel (also translucent) and saturated
   images, with their 16-bit renditions (below): 59 of 63 image sets, the
-  rest refused for their row predictors.
+  rest refused for their row predictors before their rule.
 - Profiles of our own with Generic RGB's colorants and each curve form:
-  44 image sets, the rest refused for their row predictors.
+  44 image sets, the rest refused for their row predictors before their
+  rule.
 - A display profile's icon sets (single size and an image per size).
 - RxExample's catalog, an app icon with a display profile whose curves
   are 1024-entry tables, a WebRTC catalog with a Display P3 image, and
@@ -589,7 +595,12 @@ What compiled byte-identical against Xcode 27.0:
 - `para` type 3: in double precision, except BT.709's parameters as
   ITU-709 and ITU-2020 write them, taken as gamma 2.4. Parameters near
   BT.709's are taken the same way by a rule not established, and are
-  refused. Other types aren't established.
+  refused. A curve within 4.78 of sRGB's everywhere, as a table is
+  measured, is taken for sRGB's: Display P3's profile of 2015 (4.19 away;
+  today's is 0.27) compiled 7,555 colours exactly as today's does, where
+  its own parameters miss 26 of 1,555 colours of a corpus image by one.
+  Curves 4.78 to 6.32 away are refused, as tables are. Other types aren't
+  established.
 
 With a different curve on each channel, ColorSync widens every channel's
 input to 12 bits (`v12`): gamma 1.8 with its toe then
@@ -844,11 +855,7 @@ without a word, an image or icon whose file is missing (five probes:
 an icon set of only missing files compiles to nothing; one whose 1024 px
 image is missing but whose dark and tinted ones aren't is refused).
 
-Refused: atlases whose `dmp2` row
-predictors aren't established (common: the row under an atlas's empty top
-row ties between predictors 1 and 2, which Xcode breaks neither by cost,
-summation order, nor compressed size),
-vector images (SVG, PDF) and other properties,
+Refused: vector images (SVG, PDF) and other properties,
 and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,
