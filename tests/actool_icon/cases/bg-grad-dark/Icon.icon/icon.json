@@ -1,0 +1,18 @@
+{
+  "fill": {
+    "automatic-gradient": "srgb:0.1,0.1,0.1,1"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "w.svg",
+          "name": "w"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

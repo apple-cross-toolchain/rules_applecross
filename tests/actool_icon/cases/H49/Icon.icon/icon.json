@@ -1,0 +1,214 @@
+{
+  "fill-specializations": [
+    {
+      "value": "system-dark"
+    },
+    {
+      "appearance": "tinted",
+      "value": {
+        "solid": "extended-srgb:0.95018,0.90000,0.95000,0.50000"
+      }
+    },
+    {
+      "appearance": "light",
+      "value": {
+        "linear-gradient": [
+          "display-p3:0.90000,0.58081,0.90000,1.00000",
+          "gray:0.05194,1.00000"
+        ]
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "k.svg",
+          "name": "L0",
+          "opacity": 0.25,
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              -37.5,
+              83.42
+            ]
+          }
+        },
+        {
+          "image-name": "w.svg",
+          "name": "L1",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "gray:1.00000,0.50000"
+              }
+            },
+            {
+              "appearance": "light",
+              "value": "system-light"
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "linear-gradient": [
+                  "extended-srgb:0.90000,0.90000,0.78345,1.00000",
+                  "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+                ]
+              }
+            }
+          ],
+          "position": {
+            "scale": 0.575,
+            "translation-in-points": [
+              10,
+              20
+            ]
+          },
+          "hidden": true
+        },
+        {
+          "image-name": "p.png",
+          "name": "L2",
+          "glass": false
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "w4.svg",
+          "name": "L10",
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "light",
+              "value": 0.5
+            },
+            {
+              "idiom": "square",
+              "value": 1
+            }
+          ],
+          "fill": {
+            "solid": "extended-gray:0.16029,0.50000"
+          },
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              -51.15,
+              20
+            ]
+          },
+          "hidden": true
+        },
+        {
+          "image-name": "c.svg",
+          "name": "L11",
+          "opacity": 0.8,
+          "fill": "system-light"
+        },
+        {
+          "image-name": "w.svg",
+          "name": "L12",
+          "glass": true,
+          "opacity": 0.8,
+          "blend-mode": "overlay",
+          "fill": {
+            "solid": "extended-gray:1.00000,1.00000"
+          }
+        }
+      ],
+      "shadow-specializations": [
+        {
+          "value": {
+            "kind": "neutral",
+            "opacity": 0.5
+          }
+        },
+        {
+          "appearance": "tinted",
+          "value": {
+            "kind": "layer-color",
+            "opacity": 0.3
+          }
+        }
+      ],
+      "specular": false,
+      "hidden": true
+    },
+    {
+      "layers": [
+        {
+          "image-name": "uB2FFB2.svg",
+          "name": "L20",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "tinted",
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            }
+          ]
+        },
+        {
+          "image-name": "w4.svg",
+          "name": "L21",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "idiom": "macOS",
+              "value": false
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 0.5
+            }
+          ],
+          "blend-mode": "screen",
+          "position": {
+            "scale": 0.75,
+            "translation-in-points": [
+              51.63,
+              49.25
+            ]
+          }
+        },
+        {
+          "image-name": "q.png",
+          "name": "L22",
+          "glass": false
+        }
+      ],
+      "name": "Back"
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

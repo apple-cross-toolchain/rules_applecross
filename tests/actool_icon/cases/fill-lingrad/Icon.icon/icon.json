@@ -1,0 +1,21 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.20000,0.40000,0.60000,1.00000",
+      "srgb:0.90000,0.10000,0.10000,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "a.svg",
+          "name": "a"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

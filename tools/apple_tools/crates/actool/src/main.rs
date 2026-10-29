@@ -459,14 +459,11 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
                 return Err(format!("{name}: both an Icon Composer document and an app icon set; this actool compiles one"));
             }
             if !o.relax_icon_composer {
-                // Xcode's own output names renditions with a fresh UUID each
-                // run, and this one is a flat rendering: never Xcode's.
-                return Err(format!("{}: Icon Composer documents are rendered flat by this actool, not as Xcode compiles them (docs/clean-room/actool.md); --config=relax_actool_icon_composer accepts the flat rendering", doc.display()));
+                // The layers are Xcode's, but the rasters beside them are
+                // this actool's own renderings: never Xcode's pixels.
+                return Err(format!("{}: Icon Composer documents' flattened images are this actool's own renderings, not Xcode's (docs/clean-room/actool.md); --config=relax_actool_icon_composer accepts them", doc.display()));
             }
-            if o.target_devices.iter().any(|d| d == "mac") {
-                return document_mac_icon(o, &out_dir, platform, name, &icon::render(doc)?, outputs, images);
-            }
-            Some((name.clone(), IconSource::Single(format!("{name}1024x1024.png"), icon::render(doc)?, Vec::new())))
+            return document_icon(o, &out_dir, platform, name, doc, outputs, images);
         }
         (Some(name), None) if scan.sticker_icons.iter().any(|(n, _)| n == name) => None,
         (Some(name), None) => {
@@ -688,6 +685,8 @@ enum Kind {
     Ios { phone: Option<iconset::DeviceIcons>, pad: Option<iconset::DeviceIcons> },
     Watch,
     Mac,
+    /// An Icon Composer document's: a macOS catalog with an appearance table.
+    MacLayered,
 }
 
 /// Writes Assets.car and the partial Info.plist of an app icon.
@@ -699,10 +698,11 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
     // A wide-gamut image's 16-bit rendition brings the gamut attribute, after
     // dimension 1 (iOS; macOS catalogs aren't established).
     let has_gamut = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_GAMUT));
-    if has_gamut && matches!(kind, Kind::Mac) {
+    let mac = matches!(kind, Kind::Mac | Kind::MacLayered);
+    if has_gamut && mac {
         return Err("a 16-bit rendition of an image with colours outside sRGB in a macOS catalog is not supported by this actool".into());
     }
-    let key_format = if matches!(kind, Kind::Mac) {
+    let key_format = if mac {
         vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_ELEMENT, car::ATTR_PART, car::ATTR_SIZE, car::ATTR_IDENTIFIER, car::ATTR_DIMENSION2, car::ATTR_LAYER, car::ATTR_SCALE]
     } else {
         let mut k = vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_SCALE, car::ATTR_IDIOM, car::ATTR_SUBTYPE];
@@ -718,7 +718,6 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         k.extend([car::ATTR_IDENTIFIER, car::ATTR_ELEMENT, car::ATTR_PART]);
         k
     };
-    let mac = matches!(kind, Kind::Mac);
     let sticker = o.sticker_icon.borrow().as_deref().map(name_identifier);
     let catalog = car::Catalog {
         key_format,
@@ -729,7 +728,9 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
             .collect(),
         // A catalog of data alone, or with a sticker icon, has no
         // appearance table (one probe; an image set beside them brings one).
-        appearances: if mac || renditions.iter().all(|r| r.is_data() || sticker.is_some_and(|id| r.attrs.contains(&(car::ATTR_IDENTIFIER, id)))) {
+        appearances: if matches!(kind, Kind::MacLayered) {
+            ["ISAppearanceTintable", "NSAppearanceNameAqua", "NSAppearanceNameDarkAqua", "NSAppearanceNameSystem"].into_iter().zip([10, 8, 1, 0]).map(|(n, v)| (n.to_string(), v)).collect()
+        } else if mac || renditions.iter().all(|r| r.is_data() || sticker.is_some_and(|id| r.attrs.contains(&(car::ATTR_IDENTIFIER, id)))) {
             Vec::new()
         } else {
             appearances(&renditions)
@@ -786,7 +787,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         }
         // A watch app's icons are all in the catalog.
         Kind::Watch => vec![("CFBundleIcons", Value::dict([("CFBundlePrimaryIcon", Value::dict([("CFBundleIconName", Value::string(icon_name))]))]))],
-        Kind::Mac => vec![("CFBundleIconFile", Value::string(icon_name)), ("CFBundleIconName", Value::string(icon_name))],
+        Kind::Mac | Kind::MacLayered => vec![("CFBundleIconFile", Value::string(icon_name)), ("CFBundleIconName", Value::string(icon_name))],
     };
     write_partial_info_plist(o, entries, &mut outputs)?;
     Ok(outputs)
@@ -824,29 +825,99 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
     finish(o, out_dir, platform, Some(icon_name), compiled.has_dimension1, compiled.renditions, images, kind, outputs)
 }
 
-/// An Icon Composer document's macOS icon, relaxed: its flat rendering
-/// compiled as a macOS icon set with an image per size, giving Assets.car,
-/// the .icns and CFBundleIconFile and CFBundleIconName, as an icon set does.
-fn document_mac_icon(
-    o: &Options, out_dir: &Path, platform: &str, name: &str, flat: &image::Rgba, outputs: Vec<PathBuf>, images: imageset::Compiled,
-) -> Result<Vec<PathBuf>, String> {
-    let bgra = flat.to_bgra();
-    let dir = std::env::temp_dir().join(format!("actool-icon-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let mut slots = Vec::new();
-    for size in [16, 32, 128, 256, 512] {
-        for scale in [1, 2] {
-            let filename = if scale == 1 { format!("icon_{size}x{size}.png") } else { format!("icon_{size}x{size}@2x.png") };
-            let px = (size * scale) as usize;
-            let rgba = image::resize(&bgra, px, px).opaque_rgba().ok_or("a translucent Icon Composer rendering is not supported by this actool for macOS")?;
-            let file = dir.join(&filename);
-            std::fs::write(&file, image::plain_png(&rgba, false)).map_err(|e| format!("{}: {e}", file.display()))?;
-            slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file, filename });
+/// An Icon Composer document, relaxed: its layers as Xcode compiles them,
+/// beside this actool's own renderings where Xcode writes its flattened
+/// images (docs/clean-room/actool.md#icon-composer-documents).
+fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &Path, mut outputs: Vec<PathBuf>, images: imageset::Compiled) -> Result<Vec<PathBuf>, String> {
+    let mac = o.target_devices.iter().any(|d| d == "mac");
+    let phone = o.target_devices.iter().any(|d| d == "iphone");
+    let pad = o.target_devices.iter().any(|d| d == "ipad");
+    let ios = platform == "ios" && (phone || pad) && !mac && o.target_devices.iter().all(|d| d == "iphone" || d == "ipad");
+    if !(ios || (platform == "macosx" && mac && o.target_devices.len() == 1)) {
+        return Err(format!("{}: Icon Composer documents are supported by this actool for iOS (--target-device iphone and/or ipad) and macOS (--target-device mac)", doc.display()));
+    }
+    if !o.alternate_icons.is_empty() {
+        return Err(format!("{}: an Icon Composer document beside alternate icons is not supported by this actool", doc.display()));
+    }
+    let document = icon::read(doc, name, icon::Platform { mac })?;
+    let layered = document.layered()?;
+    let id = name_identifier(name);
+    let mut compiled = imageset::Compiled { facets: layered.facets, renditions: layered.renditions };
+    compiled.facets.extend(images.facets);
+    compiled.renditions.extend(images.renditions);
+    if mac {
+        // macOS: the light appearance at 16 to 512 pt @2x and 1024 pt @1x,
+        // packed as an icon set's images are, and the icon family.
+        let flat = document.render_mac()?.to_bgra();
+        let at = |px: usize| unpremultiplied(&image::resize(&flat, px, px));
+        let mut slots = Vec::new();
+        for (size, scale) in [(16, 2), (32, 2), (64, 2), (128, 2), (256, 2), (512, 2), (1024, 1)] {
+            let filename = icon::raster_name(name, size, "NSAppearanceNameSystem");
+            slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file: PathBuf::new(), filename, image: Some(at((size * scale) as usize)) });
+        }
+        let rasters = iconset::compile_with(name, id, &slots, false, false, false, true, false)?;
+        let icns = image::icns(&[
+            (b"ic13", image::plain_png(&at(256).premultiplied_round_trip(), false)),
+            (b"ic11", image::plain_png(&at(32).premultiplied_round_trip(), false)),
+            (b"ic04", image::icns_argb(&at(16).premultiplied_round_trip())),
+            (b"ic07", image::plain_png(&at(128).premultiplied_round_trip(), false)),
+        ]);
+        let p = out_dir.join(format!("{name}.icns"));
+        std::fs::write(&p, icns).map_err(|e| e.to_string())?;
+        outputs.push(p);
+        return finish(o, out_dir, platform, Some(name), rasters.has_dimension1, rasters.renditions, compiled, Kind::MacLayered, outputs);
+    }
+
+    // iOS: per target idiom, the 1024 px image of each appearance (opaque,
+    // BGRA even when grey) and the index of its sizes; the bundle's icons
+    // from the default appearance's, as an icon set's.
+    let mut renditions = Vec::new();
+    let any = document.render(icon::Appearance::Light)?;
+    let rasters = [
+        (None, "UIAppearanceAny", any.clone()),
+        (Some(icon::Appearance::Dark.value(false)), "UIAppearanceDark", document.render(icon::Appearance::Dark)?),
+        (Some(TINTED), "ISAppearanceTintable", document.render(icon::Appearance::Tinted)?),
+    ];
+    for (wanted, idiom) in [(phone, car::IDIOM_PHONE), (pad, car::IDIOM_PAD)] {
+        if !wanted {
+            continue;
+        }
+        renditions.push(car::Rendition {
+            attrs: vec![(car::ATTR_SCALE, 1), (car::ATTR_IDIOM, idiom), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_MULTISIZED_IMAGE)],
+            csi: car::multisized_csi(name, &[(1024, 1024, 1)]),
+        });
+        for (appearance, appearance_name, image) in &rasters {
+            let mut attrs = vec![(car::ATTR_SCALE, 1), (car::ATTR_IDIOM, idiom), (car::ATTR_DIMENSION2, 1), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_ICON_IMAGE)];
+            if let Some(a) = appearance {
+                attrs.push((car::ATTR_APPEARANCE, *a));
+            }
+            let filename = icon::raster_name(name, 1024, appearance_name);
+            renditions.push(car::Rendition { attrs, csi: car::icon_image_csi(&filename, 1024, 1024, 1, &image.to_bgra().data, car::MlecVersions::opacity(true)) });
         }
     }
-    let result = per_size_icon(o, out_dir, platform, name, &slots, false, false, outputs, images);
-    let _ = std::fs::remove_dir_all(&dir);
-    result
+    let bgra = any.to_bgra();
+    let cgbi = !o.platform.ends_with("simulator") && o.compress_pngs;
+    for (file, size) in [(format!("{name}60x60@2x.png"), 120), (format!("{name}76x76@2x~ipad.png"), 152)] {
+        let resized = image::resize(&bgra, size, size);
+        let png = if cgbi { image::cgbi_png(&resized) } else { image::plain_png(&resized.opaque_rgba().ok_or("a translucent rendering")?, true) };
+        let p = out_dir.join(file);
+        std::fs::write(&p, png).map_err(|e| e.to_string())?;
+        outputs.push(p);
+    }
+    let phone_icons = iconset::DeviceIcons { files: vec![format!("{name}60x60")], named: phone };
+    let pad_icons = iconset::DeviceIcons { files: vec![format!("{name}60x60"), format!("{name}76x76")], named: pad };
+    finish(o, out_dir, platform, Some(name), false, renditions, compiled, Kind::Ios { phone: Some(phone_icons), pad: Some(pad_icons) }, outputs)
+}
+
+/// Straight RGBA from premultiplied BGRA, rounding to nearest.
+fn unpremultiplied(img: &image::Bgra) -> image::Rgba {
+    let mut data = Vec::with_capacity(img.data.len());
+    for p in img.data.chunks_exact(4) {
+        let a = p[3] as u32;
+        let c = |c: u8| if a == 0 { 0 } else { ((c as u32 * 255 + a / 2) / a).min(255) as u8 };
+        data.extend_from_slice(&[c(p[2]), c(p[1]), c(p[0]), p[3]]);
+    }
+    image::Rgba { width: img.width, height: img.height, data }
 }
 
 fn main() -> ExitCode {

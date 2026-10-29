@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - .github/workflows/ported-tools.yml
+      - tests/actool_icon/**
+      - tools/xcode_equivalence.py
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
       - tools/linux_vm/Containerfile
@@ -13,6 +15,8 @@ on:
       - main
     paths:
       - .github/workflows/ported-tools.yml
+      - tests/actool_icon/**
+      - tools/xcode_equivalence.py
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
       - tools/linux_vm/Containerfile
@@ -48,7 +52,8 @@ jobs:
           'git config --global --add safe.directory "$PWD" &&
           tools/build-ported-tools.sh dist &&
           cd tools/apple_tools &&
-          bazel test -c opt //...'
+          bazel test -c opt //... &&
+          python3 ../../tests/actool_icon/actool_icon_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)"'
       - uses: actions/upload-artifact@v7
         with:
           name: ported-tools-linux-${{ matrix.arch }}

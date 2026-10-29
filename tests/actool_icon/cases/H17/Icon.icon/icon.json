@@ -1,0 +1,200 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "gray:0.90000,0.50000",
+      "display-p3:0.70517,0.90000,1.00000,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "tFFFFDF.svg",
+          "name": "L0",
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              -37.5,
+              68.8
+            ]
+          }
+        },
+        {
+          "image-name": "gwb.svg",
+          "name": "L1",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "light",
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": false
+            }
+          ],
+          "opacity": 0.8,
+          "fill": {
+            "automatic-gradient": "display-p3:0.90000,0.83178,0.86451,1.00000"
+          },
+          "position": {
+            "scale": 1.415,
+            "translation-in-points": [
+              0,
+              20
+            ]
+          }
+        },
+        {
+          "image-name": "w.svg",
+          "name": "L2",
+          "glass": false,
+          "opacity": 0.5
+        }
+      ],
+      "name": "Main",
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.63
+      },
+      "lighting": "combined",
+      "hidden": true
+    },
+    {
+      "layers": [
+        {
+          "image-name": "gwb.svg",
+          "name": "L10",
+          "opacity": 0.5,
+          "blend-mode": "screen",
+          "fill": "system-light",
+          "hidden-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ]
+        },
+        {
+          "image-name": "p.png",
+          "name": "L11",
+          "position": {
+            "scale": 0.75,
+            "translation-in-points": [
+              -2.99,
+              20
+            ]
+          },
+          "hidden-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ]
+        }
+      ],
+      "name": "Main"
+    },
+    {
+      "layers": [
+        {
+          "image-name": "wp.png",
+          "name": "L20",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "appearance": "light",
+              "value": false
+            }
+          ]
+        },
+        {
+          "image-name": "grad.svg",
+          "name": "L21",
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "light",
+              "value": 0.5
+            }
+          ],
+          "position": {
+            "scale": 0.75,
+            "translation-in-points": [
+              0,
+              20
+            ]
+          },
+          "hidden-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ]
+        },
+        {
+          "image-name": "b.svg",
+          "name": "L22",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "light",
+              "value": false
+            }
+          ],
+          "blend-mode": "multiply",
+          "position": {
+            "scale": 0.5,
+            "translation-in-points": [
+              -17.69,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.06
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.78
+      },
+      "position": {
+        "scale": 1.25,
+        "translation-in-points": [
+          -4.52,
+          20
+        ]
+      },
+      "hidden": true
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

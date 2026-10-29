@@ -1,0 +1,28 @@
+{
+  "fill": {
+    "automatic-gradient": "srgb:0.20000,0.40000,0.60000,1.00000",
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 1
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 0.3
+      }
+    }
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "a.svg",
+          "name": "a"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

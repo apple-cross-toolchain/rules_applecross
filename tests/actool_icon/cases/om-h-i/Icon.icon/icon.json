@@ -1,0 +1,28 @@
+{
+  "fill": {
+    "solid": "gray:0.30000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "k.svg",
+          "name": "P",
+          "hidden-specializations": [
+            {
+              "value": false
+            },
+            {
+              "idiom": "iOS",
+              "value": true
+            }
+          ]
+        },
+        {
+          "image-name": "a.svg",
+          "name": "Keep"
+        }
+      ]
+    }
+  ]
+}

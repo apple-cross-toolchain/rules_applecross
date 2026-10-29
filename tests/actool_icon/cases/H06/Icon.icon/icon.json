@@ -1,0 +1,175 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "gray:0.90000,1.00000",
+      "extended-srgb:1.00000,0.95000,0.70079,0.50000"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "wp.png",
+          "name": "L0",
+          "opacity": 0.5,
+          "fill": {
+            "automatic-gradient": "srgb:0.90000,1.00000,1.00000,1.00000"
+          }
+        },
+        {
+          "image-name": "uB2FFB2.svg",
+          "name": "L1",
+          "opacity": 0.8,
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "gray:0.55781,0.50000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.90000,0.08891,0.90000,0.50000"
+              }
+            },
+            {
+              "appearance": "light",
+              "value": {
+                "automatic-gradient": "gray:1.00000,1.00000",
+                "orientation": {
+                  "start": {
+                    "x": 0.61,
+                    "y": 0.63
+                  },
+                  "stop": {
+                    "x": 0.41,
+                    "y": 0.54
+                  }
+                }
+              }
+            }
+          ],
+          "position": {
+            "scale": 0.75,
+            "translation-in-points": [
+              0,
+              20
+            ]
+          }
+        },
+        {
+          "image-name": "rgb.png",
+          "name": "L2",
+          "fill": {
+            "solid": "extended-srgb:0.90000,0.20313,0.95000,1.00000"
+          },
+          "position": {
+            "scale": 1.25,
+            "translation-in-points": [
+              -57.53,
+              20
+            ]
+          },
+          "hidden-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": true
+            }
+          ]
+        }
+      ],
+      "name": "Main"
+    },
+    {
+      "layers": [
+        {
+          "image-name": "wp.png",
+          "name": "L10",
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "image-name": "a.svg",
+          "name": "L11",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            },
+            {
+              "appearance": "light",
+              "value": false
+            }
+          ],
+          "fill": "automatic",
+          "position": {
+            "scale": 1.25,
+            "translation-in-points": [
+              -37.5,
+              0
+            ]
+          }
+        },
+        {
+          "image-name": "gwb.svg",
+          "name": "L12",
+          "fill": {
+            "automatic-gradient": "extended-srgb:0.90000,0.90000,0.59436,1.00000",
+            "orientation": {
+              "start": {
+                "x": 0.41,
+                "y": 0.43
+              },
+              "stop": {
+                "x": 0.76,
+                "y": 0.73
+              }
+            }
+          }
+        }
+      ],
+      "specular": true
+    },
+    {
+      "layers": [
+        {
+          "image-name": "wp.png",
+          "name": "L20",
+          "opacity": 0.8,
+          "blend-mode": "normal",
+          "fill": {
+            "solid": "extended-srgb:0.08973,0.47449,0.95000,1.00000"
+          }
+        },
+        {
+          "image-name": "w4.svg",
+          "name": "L21",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "lighting": "individual"
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

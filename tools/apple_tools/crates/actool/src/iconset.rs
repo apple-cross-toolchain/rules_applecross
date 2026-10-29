@@ -14,6 +14,8 @@ pub struct Slot {
     pub scale: u32,
     pub file: PathBuf,
     pub filename: String,
+    /// Its image, when it isn't read from `file`.
+    pub image: Option<image::Rgba>,
 }
 
 /// A rendition to pack or store: its group, `dimension2` and pixels.
@@ -161,6 +163,14 @@ pub(crate) fn place_n<T: Copy>(atlas: &mut [T], width: usize, n: usize, ah: u32,
 /// Compiles an icon set for the target devices; `mac` for a macOS catalog,
 /// whose renditions have no idiom or subtype.
 pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool) -> Result<Compiled, String> {
+    compile_with(name, identifier, slots, phone, pad, watch, mac, true)
+}
+
+/// [`compile`], with a macOS catalog's icon family left out unless `icns`.
+/// Without it, the images are an Icon Composer document's flattened ones,
+/// which Xcode stores in colour even when grey (two probes).
+#[allow(clippy::too_many_arguments)]
+pub fn compile_with(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool, icns: bool) -> Result<Compiled, String> {
     let wanted = |s: &&Slot| {
         (s.idiom == "iphone" && phone)
             || (s.idiom == "ipad" && pad)
@@ -200,8 +210,13 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
             return Err(format!("{}: two images for one size and scale", s.filename));
         }
         seen.push((s.idiom, s.subtype, s.size.to_bits(), s.scale));
-        let bytes = std::fs::read(&s.file).map_err(|e| format!("{}: {e}", s.file.display()))?;
-        let img = image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?;
+        let img = match &s.image {
+            Some(img) => img.clone(),
+            None => {
+                let bytes = std::fs::read(&s.file).map_err(|e| format!("{}: {e}", s.file.display()))?;
+                image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?
+            }
+        };
         let px = (s.size * s.scale as f64).round() as usize;
         if img.width != px || img.height != px {
             return Err(format!("{}: is {}x{} but should be {px}x{px}", s.file.display(), img.width, img.height));
@@ -217,8 +232,8 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
     // even those under 40 pixels are packed (one icon set, QReader's). A
     // set mixing grey and colour icons, a grey one for macOS and a grey one
     // stored on its own under 40 pixels are not established.
-    let gray = items.first().is_some_and(|i| i.image.is_gray());
-    if items.iter().any(|i| i.image.is_gray() != gray) || (gray && mac) {
+    let gray = icns && items.first().is_some_and(|i| i.image.is_gray());
+    if icns && (items.iter().any(|i| i.image.is_gray() != gray) || (gray && mac)) {
         return Err(format!("{name}: grey icons beside colour ones, or for macOS, are not supported by this actool"));
     }
     let ga = |i: &Item| -> Vec<u8> { i.image.premultiplied_bgra().chunks_exact(4).flat_map(|p| [p[0], p[3]]).collect() };
@@ -394,7 +409,7 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
     }
     // A macOS app's icon family: its 16 and 128 pt images at 1x and 2x, in
     // the order Xcode writes them.
-    let icns = if mac {
+    let icns = if mac && icns {
         let image = |size: f64, scale: u32| -> Result<&image::Rgba, String> {
             items.iter().find(|i| i.scale == scale && i.dimension2 == rank(size) && sizes.contains(&size)).map(|i| &i.image).ok_or_else(|| format!("{name}: a macOS icon set needs a {size}pt @{scale}x image for this actool"))
         };
@@ -486,7 +501,7 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             ("watch", Some("notificationCenter" | "quickLook"), Some("42mm")) => 384,
             (_, role, subtype) => return Err(format!("{filename}: role {} and subtype {} are not supported by this actool", role.unwrap_or("none"), subtype.unwrap_or("none"))),
         };
-        out.push(Slot { idiom, subtype, size, scale, file: icon_dir.join(filename), filename: filename.to_string() });
+        out.push(Slot { idiom, subtype, size, scale, file: icon_dir.join(filename), filename: filename.to_string(), image: None });
     }
     Ok(out)
 }

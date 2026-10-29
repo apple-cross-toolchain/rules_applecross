@@ -1,0 +1,148 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "gray:1.00000,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "automatic-gradient": "extended-srgb:1.00000,0.39210,1.00000,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "b.svg",
+          "name": "L0",
+          "fill": {
+            "solid": "srgb:1.00000,0.32591,0.76973,0.50000"
+          },
+          "position": {
+            "scale": 0.75,
+            "translation-in-points": [
+              10,
+              20
+            ]
+          }
+        },
+        {
+          "image-name": "m.svg",
+          "name": "L1",
+          "opacity": 0.25
+        },
+        {
+          "image-name": "odd.svg",
+          "name": "L2",
+          "glass": true,
+          "blend-mode": "multiply"
+        }
+      ],
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.03
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "m.svg",
+          "name": "L10",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "light",
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": false
+            }
+          ],
+          "fill": "automatic",
+          "position": {
+            "scale": 0.75,
+            "translation-in-points": [
+              -37.5,
+              0
+            ]
+          },
+          "hidden": true
+        }
+      ],
+      "name": "Back",
+      "translucency": {
+        "enabled": false,
+        "value": 0.82
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "b.svg",
+          "name": "L20",
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "light",
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 1
+            },
+            {
+              "idiom": "macOS",
+              "value": 0
+            }
+          ],
+          "blend-mode": "plus-lighter"
+        }
+      ],
+      "name": "Main",
+      "shadow-specializations": [
+        {
+          "value": {
+            "kind": "neutral",
+            "opacity": 0.5
+          }
+        },
+        {
+          "appearance": "dark",
+          "value": {
+            "kind": "none",
+            "opacity": 0.3
+          }
+        },
+        {
+          "idiom": "square",
+          "value": {
+            "kind": "layer-color",
+            "opacity": 0.3
+          }
+        }
+      ],
+      "lighting": "combined",
+      "position": {
+        "scale": 0.5,
+        "translation-in-points": [
+          10,
+          20
+        ]
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

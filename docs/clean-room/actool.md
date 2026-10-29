@@ -151,20 +151,71 @@ actool on the same document differ: the Icon Image renditions are named
 with a fresh UUID each time
 (`Visor1024x1024_UIAppearanceAny_<UUID>-<pid>-<time>.png`).
 
-Not reproducible, then. Strict (the default), this actool refuses Icon
-Composer documents. Relaxed (`--config=relax_actool_icon_composer`), it approximates: it renders the
-document's default appearance flat (the fill, then each group's layers back
-to front with a blurred, downward-offset shadow of the group's opacity, no
-glass, specular or translucency; SVG layers through resvg, PNG layers
-scaled about the centre) and compiles that image exactly as an icon set's
-1024 px image, named `NAME1024x1024.png`. For macOS (`--target-device
-mac`) it compiles that image, scaled to each size, as a macOS icon set with
-an image per size (`icon_16x16.png` to `icon_512x512@2x.png`): Assets.car,
-`NAME.icns` and a partial Info.plist naming both, `CFBundleIconFile` and
-`CFBundleIconName`, which are the outputs and keys Xcode writes for the
-document, its `.icns` with the same four entries. The result has the renditions an
-icon set gives, which iOS before 26 draws icons from. Xcode's flattened image is square and
-opaque, as this one is.
+This actool writes all of it, and everything but the flattened images'
+pixels is Xcode's, byte for byte:
+- the document's SVGs as Vector renditions (its PNGs as bitmaps), its
+  colours (named `Color-N` in the order Xcode first uses them, equal ones
+  shared, `Color-1` white) and gradients (`Gradient-N`, `system-light` and
+  `system-dark`);
+- for each appearance (light, dark and tintable; `UIAppearance…` or
+  `NSAppearanceName…`), an IconImageStack of the background and the groups,
+  and an IconGroup of each group's layers: frame, blend mode, opacity,
+  glass, blur, specular, translucency, shadow and fill;
+- the facets, the appearance keys, the MultiSized Image, the partial
+  Info.plist, and the bundle PNGs and `.icns` but for their pixels.
+
+Beside an iOS app's asset catalogs (rules_apple passes them in the same run)
+the document's renditions join the catalog's, as Xcode's do: rules_apple's
+test catalog, with dark variants, beside Visor's and Isomer's documents, for
+the simulator and devices. macOS catalogs of image sets aren't compiled by
+this actool yet (below).
+
+The rules came from documents written to vary one thing at a time, Xcode's
+output for each compared rendition by rendition. Among them, for dark: a
+light layer with no fill or opacity of its own for dark takes the
+background's light fill (as it is, or with the alpha of its fill's first
+colour; a translucent `system-light` becomes a gradient from white to 0.961
+grey); a layer is left out only when every appearance hides it or makes it
+transparent without glass; and a layer's frame is its image's size times
+its group's and its own scale, about the canvas centre, its corner rounded
+down. Random documents made after the rules were written then caught what
+the targeted ones missed, until a batch caught nothing: five batches, of 60,
+100, 100, 150 and 150 documents for iOS and macOS, with no difference left
+in the last two. With Visor's, Isomer's and rules_apple's documents, the
+probes and the batches, 2,737 compiles are Xcode's.
+
+Xcode's own runs differ in the flattened images' names (a fresh UUID,
+process id and time) and in the icon facet's part (220 or 245, at random);
+`tools/xcode_equivalence.py` allows exactly those, and, for a document, the
+flattened images' pixels. The flattened images (1024 px per appearance for
+iOS, 16 to 1024 px for macOS, the smallest packed together) are this actool's own: the
+document's appearance rendered flat (the fill, then each group's layers back
+to front with a blurred, downward-offset shadow; no glass, specular or
+translucency), stored as Xcode stores its. Strict (the default), this
+actool refuses Icon Composer documents, since those pixels can't be
+Xcode's; `--config=relax_actool_icon_composer` accepts them. An app built
+that way shows the document's light, dark, tinted and clear icons as Xcode's
+does on iOS and macOS 26 and later, which draw them from the layers.
+
+`tests/actool_icon` compiles 55 of these documents (Visor's, Isomer's,
+rules_apple's, and a sample of the probes and random batches) for the
+simulator and macOS, three for devices, and one beside rules_apple's test
+catalog, and compares the output with
+digests of Xcode's (`tools/xcode_equivalence.py`'s `icon_output_digest`,
+made by `update_expected.py` from two runs of Xcode each). CI runs it with
+the actool it builds.
+
+Refused, as not established:
+- a scaled layer larger than half the icon, from an image other than 1024
+  points at a scale not a multiple of 1/1024, with an edge exactly on a
+  whole point: Xcode puts some of those edges a point further out (in bands
+  of scale; 101 of 1,934 edges of a sweep of image sizes and scales), by a
+  rule not found;
+- a background or colour too near Xcode's threshold of light to tell which
+  side it falls on;
+- colour-managed PNG layers, SVG CSS (`<style>`), `currentColor`, paints
+  with fallbacks or missing references, and keys Xcode's documents don't
+  have.
 
 What the system draws from (an experiment on the iOS 27 simulator and a
 macOS 27 VM, with Assets.car files Xcode compiled from two different
