@@ -54,7 +54,8 @@ on its own, by a `--config=relax_*` in `.bazelrc` (an `--action_env` of
 `RULES_APPLECROSS_RELAX_<DEVIATION>=1`), so a project accepts only the ones
 it can live with; `--config=relaxed` accepts them all. The table is in the
 top-level [README.md](../../README.md#byte-identical-output):
-- `actool`: Icon Composer documents rendered flat; tvOS radiosity images
+- `actool`: Icon Composer documents' flattened images (their layers are
+  Xcode's); tvOS radiosity images
   that may round apart from Xcode's; catalogs it can't reproduce handed to
   xcbuild's actool (`tools/apple_tools/xcbuild`);
 - `ibtool`: files it can't compile left uncompiled, as the stub it replaced
@@ -88,8 +89,10 @@ Known variations:
   random order when a catalog has more than one appearance
   ([actool.md](actool.md)). The comparison requires the same entries, the
   same blocks and every other byte the same. With an Icon Composer `.icon`,
-  Xcode also names renditions with a fresh UUID and varies a facet's part;
-  strict mode refuses `.icon` documents, so that isn't compared.
+  Xcode also names its flattened images with a fresh UUID, process id and
+  time, and gives the icon's facet part 220 or 245 at random; the
+  comparison allows those too (and, accepting
+  `--config=relax_actool_icon_composer`, those images' pixels).
 - `appintentsmetadataprocessor` varies the order of some arrays unless
   `SWIFT_DETERMINISTIC_HASHING=1` is set, as rules_apple sets it
   ([appintentsmetadataprocessor.md](appintentsmetadataprocessor.md)).

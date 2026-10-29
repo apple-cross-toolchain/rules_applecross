@@ -1,0 +1,173 @@
+{
+  "fill": {
+    "solid": "extended-gray:0.22562,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "p.png",
+          "name": "L0",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": "system-light"
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "display-p3:1.00000,0.95000,1.00000,1.00000"
+              }
+            }
+          ],
+          "position": {
+            "scale": 0.955,
+            "translation-in-points": [
+              10,
+              0
+            ]
+          }
+        },
+        {
+          "image-name": "b.svg",
+          "name": "L1",
+          "opacity": 0.25,
+          "fill": {
+            "automatic-gradient": "extended-gray:0.51858,1.00000"
+          },
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              10,
+              -28.21
+            ]
+          }
+        },
+        {
+          "image-name": "k.svg",
+          "name": "L2",
+          "glass": false,
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "light",
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 1
+            },
+            {
+              "idiom": "iOS",
+              "value": 0
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "automatic-gradient": "srgb:1.00000,0.90000,0.95000,0.50000",
+                "orientation": {
+                  "start": {
+                    "x": 0.27,
+                    "y": 0.59
+                  },
+                  "stop": {
+                    "x": 0.91,
+                    "y": 0.76
+                  }
+                }
+              }
+            },
+            {
+              "appearance": "light",
+              "value": {
+                "solid": "extended-gray:1.00000,0.50000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": "automatic"
+            }
+          ]
+        }
+      ],
+      "name": "Front"
+    },
+    {
+      "layers": [
+        {
+          "image-name": "uB2FFB2.svg",
+          "name": "L10",
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 1
+            },
+            {
+              "appearance": "light",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "image-name": "wp.png",
+          "name": "L11",
+          "opacity": 0.25,
+          "blend-mode": "normal",
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "display-p3:0.95000,0.81691,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": "automatic"
+            }
+          ]
+        }
+      ],
+      "shadow-specializations": [
+        {
+          "value": {
+            "kind": "neutral",
+            "opacity": 0.5
+          }
+        },
+        {
+          "appearance": "light",
+          "value": {
+            "kind": "none",
+            "opacity": 0.3
+          }
+        },
+        {
+          "appearance": "dark",
+          "value": {
+            "kind": "layer-color",
+            "opacity": 0.3
+          }
+        },
+        {
+          "idiom": "iOS",
+          "value": {
+            "kind": "none",
+            "opacity": 0.3
+          }
+        }
+      ],
+      "blend-mode": "multiply"
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

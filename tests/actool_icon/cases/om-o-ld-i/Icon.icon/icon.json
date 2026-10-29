@@ -1,0 +1,36 @@
+{
+  "fill": {
+    "solid": "gray:0.30000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "k.svg",
+          "name": "P",
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "light",
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 1
+            },
+            {
+              "idiom": "iOS",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "image-name": "a.svg",
+          "name": "Keep"
+        }
+      ]
+    }
+  ]
+}

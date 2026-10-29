@@ -1,0 +1,137 @@
+{
+  "fill": {
+    "solid": "extended-gray:0.90000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "wp.png",
+          "name": "L0",
+          "glass": false,
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 0.5
+            }
+          ],
+          "fill": {
+            "automatic-gradient": "gray:0.95000,1.00000"
+          }
+        },
+        {
+          "image-name": "w4.svg",
+          "name": "L1"
+        },
+        {
+          "image-name": "odd.svg",
+          "name": "L2"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.94
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.61
+      },
+      "position": {
+        "scale": 0.36,
+        "translation-in-points": [
+          -37.5,
+          -27.79
+        ]
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "tFFFFDF.svg",
+          "name": "L10"
+        },
+        {
+          "image-name": "odd.svg",
+          "name": "L11",
+          "position": {
+            "scale": 0.5,
+            "translation-in-points": [
+              10,
+              61.75
+            ]
+          }
+        }
+      ],
+      "name": "Front",
+      "shadow-specializations": [
+        {
+          "value": {
+            "kind": "neutral",
+            "opacity": 0.5
+          }
+        },
+        {
+          "appearance": "tinted",
+          "value": {
+            "kind": "none",
+            "opacity": 0.3
+          }
+        },
+        {
+          "idiom": "macOS",
+          "value": {
+            "kind": "none",
+            "opacity": 0.3
+          }
+        }
+      ],
+      "translucency": {
+        "enabled": true,
+        "value": 0.53
+      },
+      "specular": false,
+      "blend-mode": "lighten"
+    },
+    {
+      "layers": [
+        {
+          "image-name": "frac.svg",
+          "name": "L20",
+          "position": {
+            "scale": 1.4,
+            "translation-in-points": [
+              10,
+              0
+            ]
+          }
+        },
+        {
+          "image-name": "gwb.svg",
+          "name": "L21",
+          "fill": "automatic"
+        },
+        {
+          "image-name": "b.svg",
+          "name": "L22",
+          "opacity": 0.5,
+          "fill": "system-light"
+        }
+      ],
+      "name": "Main",
+      "translucency": {
+        "enabled": false,
+        "value": 0.54
+      },
+      "opacity": 0.5
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

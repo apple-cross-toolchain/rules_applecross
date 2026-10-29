@@ -1,0 +1,39 @@
+{
+  "fill": {
+    "solid": "srgb:0.20000,0.40000,0.60000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "a.svg",
+          "name": "a",
+          "position-specializations": [
+            {
+              "value": {
+                "scale": 0.5,
+                "translation-in-points": [
+                  0,
+                  0
+                ]
+              }
+            },
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 0.75,
+                "translation-in-points": [
+                  0,
+                  0
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "w.svg",
+          "name": "L",
+          "fill": {
+            "linear-gradient": [
+              "gray:0.95000,0.50000",
+              "gray:0.97000,1.00000"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "fill": {
+    "solid": "gray:0.93000,1.00000"
+  }
+}

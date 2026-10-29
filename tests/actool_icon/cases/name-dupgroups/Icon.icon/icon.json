@@ -1,0 +1,28 @@
+{
+  "fill": {
+    "solid": "srgb:0.20000,0.40000,0.60000,1.00000"
+  },
+  "groups": [
+    {
+      "name": "G",
+      "layers": [
+        {
+          "image-name": "a.svg",
+          "name": "a"
+        }
+      ]
+    },
+    {
+      "name": "G",
+      "layers": [
+        {
+          "image-name": "b.svg",
+          "name": "b"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

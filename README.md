@@ -50,8 +50,10 @@ one fails:
   Xcode's model editor saves there
   ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
 - Reality Composer content (`realitytool`), DocC, and `.xib` files;
-- tvOS app icons and Icon Composer icons
-  ([docs/clean-room](docs/clean-room/README.md)).
+- tvOS app icons, and Icon Composer icons, whose layers (all iOS and macOS
+  26 and later draw) are Xcode's but whose flattened images aren't
+  (`--config=relax_actool_icon_composer` accepts them;
+  [docs/clean-room/actool.md](docs/clean-room/actool.md)).
 
 `--config=relax_metal` lets Metal through as an empty Metal library. String
 Catalogs compile as Xcode compiles them; the few it can't yet reproduce, it
@@ -257,7 +259,7 @@ draw the icon from its layers:
 
 | Config | Variable (`=1`) | Accepts |
 | --- | --- | --- |
-| `relax_actool_icon_composer` | `RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER` | Icon Composer documents rendered flat |
+| `relax_actool_icon_composer` | `RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER` | Icon Composer documents whose flattened images are this actool's (their layers are Xcode's) |
 | `relax_actool_tvos_radiosity` | `RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY` | tvOS radiosity images that may round apart from Xcode's |
 | `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |

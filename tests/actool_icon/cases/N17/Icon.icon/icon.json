@@ -1,0 +1,85 @@
+{
+  "fill": "system-dark",
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "grad.svg",
+          "name": "L0",
+          "opacity": 0.25,
+          "hidden": true
+        },
+        {
+          "image-name": "rgb.png",
+          "name": "L1",
+          "glass-specializations": [
+            {
+              "value": true
+            },
+            {
+              "appearance": "light",
+              "value": false
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 0
+            },
+            {
+              "appearance": "tinted",
+              "value": 0.5
+            }
+          ],
+          "fill": {
+            "automatic-gradient": "gray:0.90000,0.50000"
+          },
+          "position": {
+            "scale": 0.5,
+            "translation-in-points": [
+              -78.2,
+              0
+            ]
+          }
+        }
+      ],
+      "name": "Back"
+    },
+    {
+      "layers": [
+        {
+          "image-name": "frac.svg",
+          "name": "L10",
+          "glass": false,
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 0.5
+            },
+            {
+              "appearance": "light",
+              "value": 0
+            }
+          ],
+          "fill": {
+            "solid": "extended-gray:1.00000,1.00000"
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.93
+      },
+      "specular": true
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

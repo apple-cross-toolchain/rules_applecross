@@ -27,7 +27,8 @@ build:remote --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolc
 # Xcode's output can be accepted on its own; --config=relaxed accepts them all.
 # See docs/clean-room/README.md#deviations.
 #
-# Icon Composer documents rendered flat (their rasters aren't Xcode's).
+# Icon Composer documents: their layers are Xcode's, their flattened images
+# (rasters) this actool's.
 build:relax_actool_icon_composer --action_env=RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER=1
 # tvOS app icons' radiosity images, whose rounding may differ from Xcode's.
 build:relax_actool_tvos_radiosity --action_env=RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY=1

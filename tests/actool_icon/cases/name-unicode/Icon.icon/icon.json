@@ -1,0 +1,19 @@
+{
+  "fill": {
+    "solid": "srgb:0.20000,0.40000,0.60000,1.00000"
+  },
+  "groups": [
+    {
+      "name": "Gr\u00fc\u00dfe \u2713",
+      "layers": [
+        {
+          "image-name": "a.svg",
+          "name": "\u00e9"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "fill": "system-light",
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "w.svg",
+          "name": "L",
+          "fill": {
+            "solid": "gray:0.95000,0.50000"
+          }
+        }
+      ]
+    }
+  ]
+}
