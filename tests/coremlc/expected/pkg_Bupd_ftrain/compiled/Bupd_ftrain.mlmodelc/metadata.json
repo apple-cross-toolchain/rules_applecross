@@ -1,0 +1,96 @@
+[
+  {
+    "shortDescription" : "Desc one",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : "orig label"
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "labelProbs",
+        "shortDescription" : "orig labelProbs"
+      }
+    ],
+    "version" : "1.0",
+    "modelParameters" : [
+      {
+        "defaultValue" : "3",
+        "scope" : "",
+        "allowedRange" : "[1, 1000]",
+        "name" : "numberOfNeighbors",
+        "dataType" : "Int64",
+        "shortDescription" : "Number of neighbors to use for prediction"
+      }
+    ],
+    "author" : "Author one",
+    "specificationVersion" : 4,
+    "license" : "License one",
+    "updateParameters" : [
+
+    ],
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "1",
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_kNearestNeighborsClassifier"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 2)",
+        "shortDescription" : "orig x",
+        "shape" : "[2]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "classLabels" : [
+      "a",
+      "b"
+    ],
+    "generatedClassName" : "Bupd_ftrain",
+    "userDefinedMetadata" : {
+      "b" : "2",
+      "a" : "1"
+    },
+    "trainingInputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 2)",
+        "shortDescription" : "Train x",
+        "shape" : "[2]",
+        "name" : "x",
+        "type" : "MultiArray"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : "Train label"
+      }
+    ],
+    "method" : "predict"
+  }
+]

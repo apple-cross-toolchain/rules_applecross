@@ -1,0 +1,64 @@
+[
+  {
+    "shortDescription" : "Desc two",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 32)",
+        "shortDescription" : "orig out",
+        "shape" : "[1, 32]",
+        "name" : "out",
+        "type" : "MultiArray"
+      }
+    ],
+    "version" : "2.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Author two",
+    "specificationVersion" : 8,
+    "storagePrecision" : "Float16",
+    "license" : "License two",
+    "mlProgramOperationTypeHistogram" : {
+      "Ios17.linear" : 1,
+      "Ios17.cast" : 2
+    },
+    "computePrecision" : "Mixed (Float16, Float32)",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "10.0",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 64)",
+        "shortDescription" : "In x",
+        "shape" : "[1, 64]",
+        "name" : "x",
+        "type" : "MultiArray"
+      }
+    ],
+    "userDefinedMetadata" : {
+      "b" : "overlaid",
+      "kx" : "vx"
+    },
+    "generatedClassName" : "P_w1_both",
+    "method" : "predict"
+  }
+]

@@ -11,7 +11,9 @@ non-maximum suppression, class confidence thresholding, custom and linked
 models, Vision and audio feature prints and sound analysis preprocessing,
 pipelines of any of these, and Create ML's text classifiers, word taggers,
 gazetteers, word embeddings, recommenders, and tabular, image and sound
-classifiers; as rules_apple runs them. Compiling writes
+classifiers; any of these in a `.mlpackage` as well, with the overlays
+Xcode's model editor writes there ([Packages](#packages)); as rules_apple
+runs them. Compiling writes
 `<Name>.mlmodelc/` and the partial Info.plist. Generating writes the Swift class
 (`--public-access --language Swift`) or the Objective-C pair. The
 implementation is `toolchain/stubs/coremlc.py`, pure Python, with its
@@ -37,6 +39,12 @@ Provenance: black-box, as [README.md](README.md) describes. Sources:
   `.mlmodel` probes were written with the specification's protobuf
   messages.
 - CoreFoundation's published string hash and hash tables, for key order.
+- rules_apple's test package `test/testdata/resources/sample.mlpackage`
+  (Apache-2.0), a text classifier with the overlays Xcode's model editor
+  writes: the layout the package probes follow (they were written by hand,
+  Xcode's editor not being driven), and a test case
+  (`tests/coremlc/cases/pkg_sample`). The overlays' keys are Core ML's
+  public `MLModelMetadataKey` and `MLFeatureDescription` names.
 
 Generating writes Xcode's fixed template text, taken from its outputs, around
 what comes from each model. No Apple binary was read.
@@ -69,9 +77,10 @@ none.
 
 An app built entirely on Linux (`//examples/ios/HelloWorldSwift`, with
 `examples/resources/Doubler.mlpackage`) carries a compiled model and a generated class byte-identical to Xcode's.
-`tests/coremlc` keeps 338 models with Xcode's output: 318 compiled, 7 that
-Xcode refuses, and 268 with generated classes (the 67 `classic_*` cases
-are the other `.mlmodel` types).
+`tests/coremlc` keeps 362 models with Xcode's output: 337 compiled, 12 that
+Xcode refuses, and 290 with generated classes (the 67 `classic_*` cases
+are the other `.mlmodel` types, the 24 `pkg_*` cases packages of every kind
+with overlays).
 
 ## Xcode's own output varies
 
@@ -86,7 +95,9 @@ most one entry it matches byte for byte. The tests compare compiled models
 with `tools/xcode_equivalence.py`, which sorts that map on both sides and
 then compares the bytes, so a model's metadata is checked like the rest.
 Every probe for the features below was compiled twice by Xcode; no other
-output varied, compressed weights included.
+output varied, compressed weights included. So were the 1,872 packages
+(below): only this map varied, a Metadata overlay's creator-defined entries
+being entries of the same map.
 
 A model compiled to its own specification (below) is the specification as
 Xcode re-encodes it, so its other maps vary from run to run too: a custom
@@ -119,8 +130,10 @@ similarity recommender without items; that is refused.
     default values and flexible shapes (below);
   - a classifier's `classify` is left out, its function returning the
     probabilities instead.
-- **`weights/`** is copied from the package as it is, compressed weights
-  included.
+- **`weights/`** holds the weight files `model.mil` reads
+  (`@model_path/weights/<file>`), copied as they are from the `weights/`
+  beside the package's specification, compressed weights included. Other
+  files there are left out, and an empty `weights/` isn't written.
 - **`coremldata.bin`** is a small archive:
   - u32 502, then a version (5 for specifications 6 and 7, otherwise the specification);
   - 20 zero bytes, then the length-prefixed tag `generic` and the specification version;
@@ -138,7 +151,9 @@ similarity recommender without items; that is refused.
   values, with `modelHash` the base64 of the source model's SHA-256.
 - **`metadata.json`** is NSJSONSerialization's pretty printing of a
   CoreFoundation dictionary, enumerated in CFBasicHash's order:
-  - Keys go in in coremlc's order, fitted to every observation; operations are counted in first-use order.
+  - Keys go in in coremlc's order, fitted to every observation (a
+    multi-function model's in an order of its own, below); operations are
+    counted in first-use order.
   - `computePrecision` lists what the operations produce, constants included (a list counts its elements' type), but not the function's inputs; bool and string don't count.
   - `storagePrecision` gives the type of the weight-file constants some
     operation reads and of the weight-file values bound to other operations'
@@ -249,6 +264,16 @@ mixtures: all matched. They showed that `left` and `right` get a trailing
 18 written for this (states, images, weights shared or not, flexible and
 optional inputs, defaults first or not) and 30 random ones from the
 mixtures compared: all matched, byte for byte.
+
+`metadata.json`'s top-level keys go in in another order for a
+multi-function model: `defaultFunctionName` after `stateSchema`, and
+`isUpdatable` after `availability`. The single order fitted before
+mispredicted the 14 multi-function models (of 64 written for this, four
+models with each set of the four metadata strings) whose metadata had just
+a description, a version or a license, where two keys share a bucket; this
+order fits all 32 multi-function key sets seen, and the single one every
+other model's. Of 120 random multi-function packages made afterwards, the
+107 Xcode compiles all matched.
 
 ## Operations and compressed weights
 
@@ -430,6 +455,11 @@ Not reproduced: updatable trees, transforms other than the four the
 specification defines, trees that aren't well formed (no single root,
 unreachable or missing nodes), and descriptions whose features' own
 fields are out of order.
+
+A tree ensemble is checked as Xcode checks it, for compiling and generating
+alike: every leaf has its values, and a classifier has at least two classes
+and predicts a value per class (or one value for two). Both were
+found while probing packages, accepted here and refused by Xcode.
 
 ## Image classifiers
 
@@ -669,6 +699,103 @@ Of the 900, 806 compile with Xcode: 802 compile and generate the same here,
 4 (pipelines with an optional input, which Xcode accepts) are refused. The
 94 that Xcode refuses are refused too.
 
+## Packages
+
+A `.mlpackage` holds any model type, not only an ML Program. Its
+`Manifest.json` lists items by identifier (`author`, `description`, `name`,
+`path` under `Data/`) and names the specification with
+`rootModelIdentifier`. Xcode compiles and generates a package's model as it
+does the same specification in a `.mlmodel` named after the package, but
+for these:
+- **`analytics/coremldata.bin`** names the specification's own file, its
+  last path component less its extension (`model` for
+  `com.apple.CoreML/model.mlmodel`, `my.model.v2` for `my.model.v2.mlmodel`),
+  and hashes that file's bytes, overlays or not.
+- **Overlays**, which Xcode's model editor writes when a model's metadata is
+  edited, are applied when compiling. Generating ignores them: the classes
+  document the specification's own descriptions, and a broken overlay
+  doesn't stop them.
+- **An ML Program's weights** come from the `weights/` beside the
+  specification, whatever the manifest says of them (above).
+
+The manifest, as Xcode reads it:
+- `fileFormatVersion` must be `1.0.0` (`1.0.1`, `1.1.0`, `2.0.0`, `1.0` and a
+  number were refused), and every item needs all four strings; other keys
+  are ignored.
+- `rootModelIdentifier` must name an item exactly (a UUID in another case
+  was refused). The root is found by identifier alone: any file name or
+  extension, any directory, any author or description.
+- Every listed item must exist (a listed file or directory missing is
+  refused); unlisted files and other items, Apple's or not, are ignored, and
+  so are weights in a package of another model type. One exception here: an
+  ML Program's own `weights/` listed but missing is taken as empty, since
+  neither git nor Bazel keeps an empty directory and coremltools lists it
+  for every program; Xcode, given the empty directory, compiles the same.
+
+An overlay is the item named `Metadata.json` or `FeatureDescriptions.json`
+with author `com.apple.CoreML`, wherever its path; its description doesn't
+matter, a name in another case isn't one, and an overlay not listed is
+ignored. Each is a JSON object (NSJSONSerialization's: UTF-8, with or
+without a byte order mark, or UTF-16 with one; trailing text, `NaN`, an
+empty file or another top-level value refused).
+- **`Metadata.json`** takes `MLModelDescriptionKey`,
+  `MLModelVersionStringKey`, `MLModelAuthorKey`, `MLModelLicenseKey` (each a
+  string) and `MLModelCreatorDefinedKey` (an object of strings); other keys
+  are ignored, whatever their values. Compiled, the model description gets
+  each string that isn't empty in place of its own, and the creator-defined
+  entries added to its user-defined metadata (replacing one with the same
+  key, empty values and keys included), re-encoded as protobuf encodes it.
+  `metadata.json`, though, takes the model's metadata from the overlay
+  alone: its description, author, version, license and user-defined
+  metadata are the overlay's (an empty string left out, as ever), the
+  specification's ignored, even for an empty overlay.
+- **`FeatureDescriptions.json`** has `Inputs`, `Outputs` and
+  `TrainingInputs`, each an object of features by name, each an object with
+  an `MLFeatureShortDescription` string, which replaces that feature's
+  description (an empty one too) in `coremldata.bin` and `metadata.json`.
+  Other keys are ignored. Every feature named must be one of the model's in
+  that section. A multi-function model's are its default function's, and
+  only `metadata.json` describes them with the overlay (its top-level
+  schemas and the default function's entry); `coremldata.bin` keeps every
+  function's description as it is.
+
+Xcode stops on (and so this tool refuses): a manifest or overlay that isn't
+JSON, an overlay's string or creator-defined value of another type, a
+feature named that the model hasn't (in that section; an input's name
+under `Outputs` included), a feature without its description string, a
+section that isn't an object, an overlay that is a directory, a root that is
+an overlay or no model, and the manifest forms above.
+
+Probes: 1,452 packages written for these, then 420 random ones made after
+the rules were written:
+- 38 on rules_apple's sample, which found the first rules;
+- every `.mlmodel` type of the probes above wrapped in a package,
+  Xcode-accepted or not (156), with the specification under its own name,
+  `model.mlmodel` and others;
+- 38 bases (one of each `.mlmodel` type, an updatable k-nearest neighbors
+  classifier, ML Programs with weights, states, a classifier and several
+  functions), each with metadata, user-defined entries and feature
+  descriptions of its own, under 29 overlays (1,103): every key alone and
+  together, empty strings and objects, overlapping creator-defined keys,
+  escapes, unknown keys and values of other types, features by section,
+  missing and misnamed, malformed JSON, overlays not listed;
+- 90 for the manifest and overlays' identification (item names, paths,
+  authors, descriptions, duplicates, encodings, root paths and identifiers,
+  format versions, missing and extra items, weights placement) and the 64
+  multi-function metadata sets above; and the sample under its own name.
+- the holdout: 300 random packages of every type with random metadata,
+  overlays (some broken) and manifest shapes, and 120 random multi-function
+  ones. It caught nothing.
+
+Of the 1,872, 1,337 compile with Xcode: 1,327 compile the same here (541
+byte for byte, the rest up to the map order), and 10 are refused (forms
+refused for `.mlmodel` files too, and the duplicate overlays and keys
+below). Of the 535 Xcode refuses, 534 are refused too; the other is a tree
+ensemble classifier of one class, which Xcode refuses and this tool
+compiles as a `.mlmodel` too. All 1,813 of each language that Xcode
+generates, but 8 refused, generate the same Swift and Objective-C; of the
+51 it refuses, 2 tree ensembles are generated here (also as `.mlmodel`).
+
 ## Generated code
 
 The Swift class and the Objective-C header and implementation follow
@@ -724,6 +851,16 @@ Refused, strict or relaxed:
     and Int4, UInt2, UInt3, UInt4 and UInt6, and weights held as
     attributes of operations other than iOS 16's compression operations;
   - operations not in the table.
+- **Unestablished package forms:**
+  - two items both named as the same overlay (Xcode picks one), an overlay
+    with a key given twice (Xcode takes the first), or a model's
+    user-defined metadata with a key given twice when an overlay applies;
+  - a manifest with a byte order mark or in another encoding, an overlay in
+    UTF-16 without one or in UTF-32;
+  - item paths outside `Data/`, and weight files `model.mil` reads from
+    anywhere but `weights/` or under a name needing escapes;
+  - a package name Xcode turns into another class name (`a-b` becomes
+    `a_b`), as for `.mlmodel` files.
 - **`serializedModel`**, which Xcode doesn't compile.
 - **Refused by Xcode too:** the `.mlmodel` checks above, models mixing
   ranges and enumerated shapes, defaults of another type than their array,

@@ -1,0 +1,16 @@
+{
+  "Inputs" : {
+    "x0" : {
+      "MLFeatureShortDescription" : "In x0"
+    }
+  },
+  "Outputs" : {
+    "label" : {
+      "MLFeatureShortDescription" : "Out label"
+    },
+    "classProbability" : {
+      "MLFeatureShortDescription" : "Out classProbability"
+    }
+  },
+  "TrainingInputs" : {}
+}

@@ -1,0 +1,12 @@
+{
+  "Inputs" : {
+    "x" : {
+      "MLFeatureShortDescription" : "In two"
+    }
+  },
+  "Outputs" : {
+    "relu_0" : {
+      "MLFeatureShortDescription" : "Out two"
+    }
+  }
+}

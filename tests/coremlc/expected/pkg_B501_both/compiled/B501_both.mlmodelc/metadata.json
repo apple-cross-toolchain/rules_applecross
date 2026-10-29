@@ -1,0 +1,62 @@
+[
+  {
+    "shortDescription" : "Desc two",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "valueType" : "String",
+        "isOptional" : "0",
+        "formattedType" : "Sequence (String 0)",
+        "sizeRange" : "[0, 0]",
+        "shortDescription" : "orig recs",
+        "type" : "Sequence",
+        "name" : "recs"
+      }
+    ],
+    "version" : "2.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Author two",
+    "specificationVersion" : 4,
+    "license" : "License two",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_itemSimilarityRecommender"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "items",
+        "shortDescription" : "In items"
+      },
+      {
+        "isOptional" : "1",
+        "formattedType" : "Int64?",
+        "type" : "Int64",
+        "name" : "k",
+        "shortDescription" : "In k"
+      }
+    ],
+    "userDefinedMetadata" : {
+      "b" : "overlaid",
+      "kx" : "vx"
+    },
+    "generatedClassName" : "B501_both",
+    "method" : "predict"
+  }
+]

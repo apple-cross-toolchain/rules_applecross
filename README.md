@@ -45,7 +45,9 @@ one fails:
   recommenders, the feature transforms, non-maximum suppression, custom and
   linked models, Vision and audio feature prints, and pipelines of any of
   these; and Create ML's text classifiers, word taggers, gazetteers, word
-  embeddings, recommenders, and image, sound and tabular models
+  embeddings, recommenders, and image, sound and tabular models; any of
+  these in a `.mlpackage` too, with the metadata and feature descriptions
+  Xcode's model editor saves there
   ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
 - Reality Composer content (`realitytool`), DocC, and `.xib` files;
 - tvOS app icons and Icon Composer icons

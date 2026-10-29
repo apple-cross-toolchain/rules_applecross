@@ -1,0 +1,51 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : "Text label"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 3,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.14",
+      "tvOS" : "12.0",
+      "visionOS" : "1.0",
+      "watchOS" : "5.0",
+      "iOS" : "12.0",
+      "macCatalyst" : "12.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_textClassifier"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "text",
+        "shortDescription" : "Input text"
+      }
+    ],
+    "classLabels" : [
+      "true",
+      "false"
+    ],
+    "generatedClassName" : "T_emptyobj",
+    "userDefinedMetadata" : {
+
+    },
+    "method" : "predict"
+  }
+]

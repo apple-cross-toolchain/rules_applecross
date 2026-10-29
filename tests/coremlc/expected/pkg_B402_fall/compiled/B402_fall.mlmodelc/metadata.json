@@ -1,0 +1,65 @@
+[
+  {
+    "shortDescription" : "Desc one",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "label",
+        "shortDescription" : "Out label"
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "classProbability",
+        "shortDescription" : "Out classProbability"
+      }
+    ],
+    "version" : "1.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Author one",
+    "specificationVersion" : 1,
+    "license" : "License one",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.13",
+      "tvOS" : "11.0",
+      "visionOS" : "1.0",
+      "watchOS" : "4.0",
+      "iOS" : "11.0",
+      "macCatalyst" : "11.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_treeEnsembleClassifier"
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "x0",
+        "shortDescription" : "In x0"
+      }
+    ],
+    "classLabels" : [
+      "lo",
+      "mid",
+      "hi"
+    ],
+    "generatedClassName" : "B402_fall",
+    "userDefinedMetadata" : {
+      "a" : "1",
+      "b" : "2"
+    },
+    "method" : "predict"
+  }
+]

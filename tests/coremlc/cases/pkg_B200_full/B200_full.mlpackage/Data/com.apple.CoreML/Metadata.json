@@ -1,0 +1,10 @@
+{
+  "MLModelDescriptionKey" : "Desc two",
+  "MLModelAuthorKey" : "Author two",
+  "MLModelVersionStringKey" : "2.0",
+  "MLModelLicenseKey" : "License two",
+  "MLModelCreatorDefinedKey" : {
+    "kx" : "vx",
+    "b" : "overlaid"
+  }
+}

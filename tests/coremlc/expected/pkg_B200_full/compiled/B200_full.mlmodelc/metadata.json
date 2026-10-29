@@ -1,0 +1,78 @@
+[
+  {
+    "shortDescription" : "Desc two",
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "z",
+        "shortDescription" : "orig z"
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "Int64",
+        "formattedType" : "Dictionary (Int64 → Double)",
+        "type" : "Dictionary",
+        "name" : "x",
+        "shortDescription" : "orig x"
+      }
+    ],
+    "version" : "2.0",
+    "modelParameters" : [
+
+    ],
+    "author" : "Author two",
+    "specificationVersion" : 4,
+    "license" : "License two",
+    "stateSchema" : [
+
+    ],
+    "isUpdatable" : "0",
+    "availability" : {
+      "macOS" : "10.15",
+      "tvOS" : "13.0",
+      "visionOS" : "1.0",
+      "watchOS" : "6.0",
+      "iOS" : "13.0",
+      "macCatalyst" : "13.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_pipelineClassifier",
+      "structure" : [
+        {
+          "name" : "MLModelType_identity"
+        },
+        {
+          "name" : "MLModelType_scaler"
+        },
+        {
+          "name" : "MLModelType_glmClassifier"
+        }
+      ]
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Double",
+        "formattedType" : "MultiArray (Double 1)",
+        "shortDescription" : "orig label0",
+        "shape" : "[1]",
+        "name" : "label0",
+        "type" : "MultiArray"
+      }
+    ],
+    "classLabels" : [
+      3,
+      46
+    ],
+    "generatedClassName" : "B200_full",
+    "userDefinedMetadata" : {
+      "kx" : "vx",
+      "b" : "overlaid"
+    },
+    "method" : "predict"
+  }
+]
