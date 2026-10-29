@@ -10,8 +10,8 @@ visionOS's: `--platform iphonesimulator`, `watchsimulator` and `macosx`,
 app icon sets with an image per size (below), iOS image sets of PNG images
 (below), and catalogs that compile to nothing. visionOS's (`xrsimulator`: image stacks, below) is byte-identical
 too. tvOS's (`appletvsimulator`) is refused when strict, the default: its
-radiosity image can't be guaranteed to be Xcode's (below). Relaxed
-(`--config=relaxed`), the output is byte-identical to Xcode's.
+radiosity image can't be guaranteed to be Xcode's (below). Accepting that
+(`--config=relax_actool_tvos_radiosity`), the output is byte-identical to Xcode's.
 
 Outputs, all byte-identical to Xcode 27.0's for `examples/ios/CleanRoom`:
 `NAME60x60@2x.png` (iPhone), `NAME76x76@2x~ipad.png` (iPad), `Assets.car`
@@ -152,7 +152,7 @@ with a fresh UUID each time
 (`Visor1024x1024_UIAppearanceAny_<UUID>-<pid>-<time>.png`).
 
 Not reproducible, then. Strict (the default), this actool refuses Icon
-Composer documents. Relaxed (`--config=relaxed`), it approximates: it renders the
+Composer documents. Relaxed (`--config=relax_actool_icon_composer`), it approximates: it renders the
 document's default appearance flat (the fill, then each group's layers back
 to front with a blurred, downward-offset shadow of the group's opacity, no
 glass, specular or translucency; SVG layers through resvg, PNG layers
@@ -163,9 +163,32 @@ an image per size (`icon_16x16.png` to `icon_512x512@2x.png`): Assets.car,
 `NAME.icns` and a partial Info.plist naming both, `CFBundleIconFile` and
 `CFBundleIconName`, which are the outputs and keys Xcode writes for the
 document, its `.icns` with the same four entries. The result has the renditions an
-icon set gives, which iOS before 26 draws icons from; how iOS 26 draws it
-(presumably as an icon set's, without glass) has not been checked. Xcode's flattened image is square and opaque, as this
-one is.
+icon set gives, which iOS before 26 draws icons from. Xcode's flattened image is square and
+opaque, as this one is.
+
+What the system draws from (an experiment on the iOS 27 simulator and a
+macOS 27 VM, with Assets.car files Xcode compiled from two different
+documents and then mixed): every appearance (light, dark, and the Dark,
+Tinted and Clear icon styles, on the home screen, Spotlight, the App
+Library, Settings, the Dock and Finder) is drawn from the document's layers,
+the Vector, IconGroup, IconImageStack, Color and Named Gradient renditions,
+about 7 KB for Visor's. The rasters (the flattened Icon Images, 97–99% of
+the file, the bundle PNGs and the `.icns`) were never shown; a car without
+them drew correctly. They presumably serve systems before 26 and places not
+checked (notifications, share sheets, the App Store). Xcode writes them for
+a minimum of iOS 26 too.
+
+The layers are structured data, to be reproduced as the rest of the catalog
+is. The rasters are Apple's Liquid Glass rendering (rasterized SVGs,
+compositing, blur, specular highlights, translucency), which can't be fitted
+pixel for pixel from outputs alone. Xcode's own are deterministic on a Mac
+(seven runs gave the same pixels; only their names change), but the
+Tintable raster came out different on a macOS VM with the same Xcode, while
+the Any and Dark ones and the bundle PNGs matched: perhaps because the VM's
+graphics are virtualized, so which is "Xcode's" may depend on the machine.
+Reproducing them exactly is left for later. Until then a document's rasters
+are this actool's own, and accepting them takes
+`--config=relax_actool_icon_composer`.
 
 ## Dark and tinted app icons
 
@@ -1012,8 +1035,9 @@ and Metal shaders with and without fast math.
 So when strict (the default), actool refuses a tvOS icon with any value
 within 2 * 2^-24 of its terms' magnitude plus 0.005 of a whole number
 (values in (-1, 1) excepted, which truncate to 0 either way). That refuses
-most icons, including the examples'. Relaxed, `--config=relaxed`
-(`RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`), it writes them anyway:
+most icons, including the examples'. Relaxed,
+`--config=relax_actool_tvos_radiosity`
+(`RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY=1`), it writes them anyway:
 the examples' icon is then byte-identical, and of 20 random three-layer
 stacks 13 were, the others one value off. What remains to find is how Xcode computes the
 cells; the measured cells and probes are described above.

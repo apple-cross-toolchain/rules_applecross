@@ -214,7 +214,7 @@ fn radiosity(flat: &[u8], width: usize, height: usize, strict: bool) -> Result<V
         }
     }
     if at_risk > 0 {
-        return Err(format!("{at_risk} of this tvOS app icon's radiosity values are close enough to a whole number that Xcode's rounding of them, which this actool doesn't reproduce, could differ (docs/clean-room/actool.md)"));
+        return Err(format!("{at_risk} of this tvOS app icon's radiosity values are close enough to a whole number that Xcode's rounding of them, which this actool doesn't reproduce, could differ (docs/clean-room/actool.md); --config=relax_actool_tvos_radiosity accepts this actool's rounding"));
     }
     let mut body = Vec::new();
     body.extend((cw as u16).to_le_bytes());

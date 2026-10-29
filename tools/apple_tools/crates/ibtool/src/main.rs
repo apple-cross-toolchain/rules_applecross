@@ -110,11 +110,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
 }
 
 /// An input this ibtool can't compile as Xcode would: an error when strict
-/// (the default), left uncompiled when relaxed
-/// (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, `--config=relaxed`).
+/// (the default), left uncompiled when relaxed (`--config=relax_ibtool`,
+/// RULES_APPLECROSS_RELAX_IBTOOL=1, or all of `--config=relaxed`).
 fn skip(reason: String) -> Result<(), String> {
-    if std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").map_or(true, |v| v != "relaxed") {
-        return Err(format!("{reason}; build with --config=relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to leave it uncompiled"));
+    let relaxed = std::env::var("RULES_APPLECROSS_RELAX_IBTOOL").is_ok_and(|v| v == "1")
+        || std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").is_ok_and(|v| v == "relaxed");
+    if !relaxed {
+        return Err(format!("{reason}; build with --config=relax_ibtool to leave it uncompiled"));
     }
     eprintln!("note: {reason}; not compiled");
     Ok(())

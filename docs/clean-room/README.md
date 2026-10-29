@@ -44,15 +44,28 @@ giving:
 The tests keep a sample of those comparisons with Xcode's output, so a reader
 can see the evidence for what each tool writes.
 
+## Deviations
+
 The tools are strict by default: their output is byte-identical to Xcode's,
-or the build fails on the input. Known gaps are on each page; the largest is
-tvOS's radiosity image ([actool.md](actool.md)), which fails tvOS app icons.
-Relaxed, `--config=relaxed` (in `.bazelrc`: `--action_env` of
-`RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`), accepts a near match
-instead: `actool` writes its closest output, or hands what it doesn't
-support to xcbuild's actool (`tools/apple_tools/xcbuild`), and `ibtool`
-leaves what it can't compile uncompiled, as the stub it replaced did. The
-other tools refuse such inputs either way.
+or the build fails on the input. Known gaps are on each page; the largest are
+tvOS's radiosity image and Icon Composer documents ([actool.md](actool.md)).
+Each deviation from Xcode's output that a tool can make instead is accepted
+on its own, by a `--config=relax_*` in `.bazelrc` (an `--action_env` of
+`RULES_APPLECROSS_RELAX_<DEVIATION>=1`), so a project accepts only the ones
+it can live with; `--config=relaxed` accepts them all. The table is in the
+top-level [README.md](../../README.md#byte-identical-output):
+- `actool`: Icon Composer documents rendered flat; tvOS radiosity images
+  that may round apart from Xcode's; catalogs it can't reproduce handed to
+  xcbuild's actool (`tools/apple_tools/xcbuild`);
+- `ibtool`: files it can't compile left uncompiled, as the stub it replaced
+  did;
+- Metal: an empty library;
+- `xcstringstool`: entries not yet reproduced, in their nearest form;
+- `appintentsmetadataprocessor`: intents not yet reproduced, left out, and
+  Flexible Matching's assets left out.
+
+`coremlc` and the other tools have no near match to write, and refuse such
+inputs either way.
 
 ## Determinism
 
