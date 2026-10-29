@@ -167,8 +167,10 @@ pixels is Xcode's, byte for byte:
 Beside an iOS app's asset catalogs (rules_apple passes them in the same run)
 the document's renditions join the catalog's, as Xcode's do: rules_apple's
 test catalog, with dark variants, beside Visor's and Isomer's documents, for
-the simulator and devices. macOS catalogs of image sets aren't compiled by
-this actool yet (below).
+the simulator and devices. On macOS too (below, macOS catalogs): the
+catalog's atlases at 2x are numbered after the document's own, and images
+that would share it (2x, no appearance, translucent colour, small enough to
+pack) are refused, its pixels being this actool's.
 
 The rules came from documents written to vary one thing at a time, Xcode's
 output for each compared rendition by rendition. Among them, for dark: a
@@ -761,9 +763,9 @@ table under Packed images; 54 of 54 random catalogs of 2 to 39 colour sets
 were byte-identical with it (25 of 54 like them had identifiers sharing a
 bucket, which the earlier model refused).
 
-Refused: idioms other than universal (Xcode thins them by target device: an
-iPhone build kept iphone and car and dropped universal), macOS catalogs,
-and keys not above. In the 350-catalog comparison 13 more catalogs matched:
+Refused: idioms other than universal for iOS (Xcode thins them by target
+device: an iPhone build kept iphone and car and dropped universal), and keys
+not above. For macOS, see macOS catalogs. In the 350-catalog comparison 13 more catalogs matched:
 8 byte-identical and 5 matching but for the appearance blocks' order.
 
 A colour may refer to a system colour (`"reference"`, with platform
@@ -937,6 +939,43 @@ identifier and a NUL) and 0x3ee 1, and its payload the file as `RAWD`
 no appearance table. Without a type identifier Xcode looks one up for the
 file's extension (`.drawing` is `com.apple.drawing`), which this actool
 refuses, as it does several files or other idioms (eight probes).
+
+## macOS catalogs
+
+For macOS (`--platform macosx`), image, colour and data sets compile as for
+iOS, renditions and all, but for:
+- the key format: appearance, localization, element, part, size,
+  identifier, then dimension1 and dimension2 when something uses them,
+  layer and scale (no idiom or subtype);
+- the appearances, numbered and named as macOS has them: Any 0
+  (`NSAppearanceNameSystem`), Dark 1 (`NSAppearanceNameDarkAqua`), high
+  contrast 3 (`NSAppearanceNameAccessibilitySystem`), dark high contrast 6
+  (`…AccessibilityDarkAqua`), Light 8 (`NSAppearanceNameAqua`) and light
+  high contrast 9 (`…AccessibilityAqua`), atlases' links included. The
+  table holds those used, System only when an image or colour has no
+  appearance (data never has one), and is left out when nothing has one;
+  an Icon Composer document's always holds System, Dark, Aqua and
+  `ISAppearanceTintable`;
+- the idioms: a `mac` image or colour takes its scale and appearance from a
+  universal one, and the other idioms' are left out (a set of iPhone images
+  alone compiles to nothing).
+
+Xcode takes either of a `mac` and a universal image for one scale and
+appearance when one names its scale and the other doesn't, from run to run;
+this actool refuses them. An app icon set `--app-icon` names whose images
+are all for other platforms is an error, as it is for Xcode ("did not have
+any applicable content"); one without images compiles to nothing.
+
+Targeted catalogs (colours in every space and appearance, data, images at
+each scale, translucent, grey, template, packed, several atlases, by idiom)
+and random ones made after the rules were written, of up to six image,
+colour and data sets each: of 506 catalogs, 485 match Xcode's (byte for
+byte, or but for the appearance blocks' order) and 21 are refused for the
+reasons above or elsewhere here (dmp2 encodings, data without a type
+identifier); the last 150 random ones needed no change. Beside Visor's Icon
+Composer document, 112 catalogs: 102 Xcode's (its flattened images aside),
+10 refused as above. `tests/actool_catalog` keeps 31 of these catalogs with Xcode's
+output, and `tests/actool_icon` two beside the document.
 
 ## Launch images
 

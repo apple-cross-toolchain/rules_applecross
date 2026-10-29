@@ -19,9 +19,8 @@ PLATFORMS = {
 DEVICE_CASES = {"C-Visor", "C-Isomer", "C-app_icon"}
 
 
-# Cases with an asset catalog beside the document: iOS only, as this
-# actool compiles image sets for iOS only.
-IOS_ONLY = {"combo-catalog"}
+# Cases with an asset catalog beside the document, for one platform.
+ONLY = {"combo-catalog": ["sim", "ios"], "combo-catalog-mac": ["mac"], "combo-catalog-mac-hc": ["mac"]}
 
 
 def cases():
@@ -30,7 +29,7 @@ def cases():
         files = sorted(os.listdir(os.path.join(HERE, "cases", case)))
         icon = [f for f in files if f.endswith(".icon")][0]
         catalogs = [os.path.join(HERE, "cases", case, f) for f in files if f.endswith(".xcassets")]
-        platforms = ["sim", "ios"] if case in IOS_ONLY else ["sim", "mac"] + (["ios"] if case in DEVICE_CASES else [])
+        platforms = ONLY.get(case) or ["sim", "mac"] + (["ios"] if case in DEVICE_CASES else [])
         yield case, os.path.join(HERE, "cases", case, icon), catalogs, platforms
 
 

@@ -10,6 +10,9 @@ use crate::{dmp2, image, read_json};
 pub struct Compiled {
     pub facets: Vec<Facet>,
     pub renditions: Vec<Rendition>,
+    /// The packing groups (scale, appearance, idiom, opaque, grey) with an
+    /// image small enough to pack, packed or alone.
+    pub packable: Vec<(u32, u16, u16, bool, bool)>,
 }
 
 impl Compiled {
@@ -25,7 +28,21 @@ impl Compiled {
 /// rendering intent.
 /// Small images are packed into an atlas per scale; anything else is
 /// refused.
-pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
+/// An image's scale (1 without one) and appearance.
+fn slot(dir: &std::path::Path, entry: &serde_json::Value) -> Result<(u32, u16), String> {
+    let scale = match entry["scale"].as_str() {
+        None => 1,
+        Some(s) => s.strip_suffix('x').and_then(|n| n.parse::<u32>().ok()).filter(|n| (1..=3).contains(n)).ok_or_else(|| format!("{}: scale {s} is not supported by this actool", dir.display()))?,
+    };
+    let appearance = crate::colorset::appearance(entry).ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
+    Ok((scale, appearance))
+}
+
+/// `mac`: for macOS, where a `mac` image takes its scale and appearance from
+/// a universal one, and other idioms' are left out (eight probes).
+/// `reserved`: atlases (scale, count) indexed before the catalog's, as a
+/// macOS Icon Composer document's at 2x (one of the holdout's catalogs).
+pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, mac: bool, reserved: &[(u32, usize)], identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
     for (name, dir) in sets {
@@ -54,8 +71,16 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
         }
         let id = identifier(name);
         let mut scales = Vec::new();
+        let listed = contents["images"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let present = |e: &&serde_json::Value| e["filename"].as_str().is_some_and(|f| dir.join(f).is_file());
+        // A mac image's slot, and whether it names its scale.
+        let mac_slots = if mac {
+            listed.iter().filter(present).filter(|e| e["idiom"] == "mac").map(|e| Ok((slot(dir, e)?, e["scale"].is_string()))).collect::<Result<Vec<_>, String>>()?
+        } else {
+            Vec::new()
+        };
         // No images list is as an empty one (two probes).
-        for entry in contents["images"].as_array().map(Vec::as_slice).unwrap_or_default() {
+        for entry in listed {
             let Some(filename) = entry["filename"].as_str() else { continue };
             // An image whose file is missing is left out, without a word
             // (one probe: rules_apple's imageset_missing_child).
@@ -67,8 +92,19 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
                     return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
                 }
             }
+            let here = if mac { Some(slot(dir, entry)?) } else { None };
             let idiom = match entry["idiom"].as_str() {
+                Some("mac") if mac => 0,
+                Some("universal") if mac && mac_slots.iter().any(|(s, _)| Some(*s) == here) => {
+                    // One of them with a scale and one without: Xcode takes
+                    // either, from run to run (one of the holdout's catalogs).
+                    if mac_slots.iter().any(|(s, named)| Some(*s) == here && *named != entry["scale"].is_string()) {
+                        return Err(format!("{}: a mac and a universal image for one scale and appearance, one naming the scale and one not, is not supported by this actool (Xcode takes either at random)", dir.display()));
+                    }
+                    continue;
+                }
                 Some("universal") => 0,
+                _ if mac => continue,
                 Some("iphone") => 1,
                 Some("ipad") => 2,
                 Some("car") => 4,
@@ -87,7 +123,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
                 None => 1,
                 Some(s) => s.strip_suffix('x').and_then(|n| n.parse::<u32>().ok()).filter(|n| (1..=3).contains(n)).ok_or_else(|| format!("{}: scale {s} is not supported by this actool", dir.display()))?,
             };
-            let appearance = crate::colorset::appearance(entry)
+            let appearance = crate::colorset::appearance_for(entry, mac)
                 .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
             if scales.contains(&(scale, appearance, idiom)) {
                 return Err(format!("{}: two images at scale {scale}x for one appearance and idiom", dir.display()));
@@ -155,6 +191,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
             group.sort_by_key(|i| (std::cmp::Reverse(i.image.width * i.image.height), i.identifier));
             let cap = crate::stack::PACKING_AREA * scale as usize;
             let (standalone, packable): (Vec<&SetImage>, Vec<&SetImage>) = group.into_iter().partition(|i| i.image.width * i.image.height > cap);
+            if gamut == 0 && !packable.is_empty() {
+                out.packable.push((scale, appearance, idiom, opaque, gray));
+            }
             let (standalone, packable) = if packable.len() < 2 { (standalone.into_iter().chain(packable).collect::<Vec<_>>(), Vec::new()) } else { (standalone, packable) };
             if !packable.is_empty() {
                 if packable.windows(2).any(|w| w[0].image.width * w[0].image.height == w[1].image.width * w[1].image.height && w[0].identifier == w[1].identifier) {
@@ -194,10 +233,11 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, ident
         // 3rd is 11 (a catalog of 19, all else identical).
         for gamut in [0, 1] {
             let atlases: Vec<&(usize, bool, bool, Vec<&SetImage>)> = planned.iter().filter(|a| a.0 == gamut).collect();
-            let mut names: Vec<String> = (0..atlases.len()).map(|k| k.to_string()).collect();
+            let before = if gamut == 0 && appearance == 0 && idiom == 0 { reserved.iter().filter(|r| r.0 == scale).map(|r| r.1).sum() } else { 0 };
+            let mut names: Vec<String> = (0..before + atlases.len()).map(|k| k.to_string()).collect();
             names.sort();
             for (k, (_, opaque, gray, atlas)) in atlases.into_iter().enumerate() {
-                let index = names.iter().position(|n| *n == k.to_string()).unwrap() as u16;
+                let index = names.iter().position(|n| *n == (before + k).to_string()).unwrap() as u16;
                 if gamut == 0 {
                     pack(scale, (appearance, idiom), *opaque, *gray, index, atlas, &mut out.renditions)?;
                 } else {
@@ -603,6 +643,7 @@ pub fn sticker_icon(name: &str, dir: &std::path::Path, id: u16) -> Result<Option
     Ok(Some(Compiled {
         facets: vec![Facet { name: name.to_string(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] }],
         renditions: vec![standalone_rendition(&image).map_err(|e| format!("{}: {e}", path.display()))?],
+        packable: Vec::new(),
     }))
 }
 

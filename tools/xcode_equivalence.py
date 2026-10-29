@@ -399,6 +399,14 @@ def _is_icon_catalog(blocks, variables):
     return any(_key_attributes(blocks, variables, blocks[k]).get(2) == _ICON_STACK for _, k in _tree_entries(blocks, names[b"RENDITIONS"]))
 
 
+def _is_icon_atlas(attributes, block):
+    """The atlas of a macOS document's smallest flattened images: 2x, no
+    appearance, translucent colour. A catalog's own atlases beside it are
+    exact (actool refuses catalog images that would share this one)."""
+    return (attributes.get(1) == 9 and attributes.get(2) == _PACKED and attributes.get(12) == 2 and not attributes.get(7)
+            and block[40:168].split(b"\0")[0] == b"ZZZZPackedAsset-2.0.0-gamut0")
+
+
 def _digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -422,7 +430,7 @@ def icon_car_digest(data, approximate_rasters):
         layout = struct.unpack_from("<H", block, 36)[0] if len(block) >= 40 else None
         if attributes.get(2) == _ICON_IMAGE and layout == 1003:
             signature[value] = ("link", block[:40], _raster_name(block[40:168]), _digest(block[168:]))
-        elif (attributes.get(2) == _ICON_IMAGE and layout == 12) or (attributes.get(1) == 9 and attributes.get(2) == _PACKED):
+        elif (attributes.get(2) == _ICON_IMAGE and layout == 12) or _is_icon_atlas(attributes, block):
             signature[value] = _raster_signature(block, approximate_rasters)
     # The icon's facet (a hotspot of three attributes: element 85, part 220
     # or 245, identifier), its part aside.

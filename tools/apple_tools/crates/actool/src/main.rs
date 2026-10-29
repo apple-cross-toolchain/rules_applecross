@@ -413,7 +413,11 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         }
         *o.launch_entries.borrow_mut() = compiled.entries;
     }
-    let mut images = imageset::compile(&scan.image_sets, phone && pad, name_identifier)?;
+    let mac = platform == "macosx";
+    // A macOS Icon Composer document's smallest flattened images take the
+    // first atlas at 2x.
+    let reserved: &[(u32, usize)] = if mac && document.is_some() { &[(2, 1)] } else { &[] };
+    let mut images = imageset::compile(&scan.image_sets, phone && pad, mac, reserved, name_identifier)?;
     // A sticker icon set compiles only when --app-icon names it (two
     // probes), for iOS; its name goes in the partial Info.plist.
     if let Some((name, dir)) = scan.sticker_icons.iter().find(|(n, _)| o.app_icon.as_deref() == Some(n.as_str())) {
@@ -430,13 +434,14 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             *o.sticker_icon.borrow_mut() = Some(name.clone());
         }
     }
-    let (color_facets, colors) = colorset::compile(&scan.color_sets, name_identifier)?;
+    let (color_facets, colors) = colorset::compile(&scan.color_sets, mac, name_identifier)?;
     images.facets.extend(color_facets);
     images.renditions.extend(colors);
     let (data_facets, data) = dataset::compile(&scan.data_sets, name_identifier)?;
     images.facets.extend(data_facets);
     images.renditions.extend(data);
-    if !images.is_empty() && platform != "ios" {
+
+    if !images.is_empty() && platform != "ios" && platform != "macosx" {
         return Err("image, colour and data sets are supported by this actool for iOS only".into());
     }
     if !images.is_empty() && (!scan.brand_assets.is_empty() || !scan.solid_stacks.is_empty()) {
@@ -468,13 +473,23 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         (Some(name), None) if scan.sticker_icons.iter().any(|(n, _)| n == name) => None,
         (Some(name), None) => {
             let (_, dir) = scan.icon_sets.iter().find(|(n, _)| n == name).ok_or_else(|| format!("none of the input catalogs contains an app icon set named \"{name}\""))?;
-            app_icon_set(dir, platform == "ios")?.map(|source| (name.clone(), source))
+            // An icon set whose images are all for other platforms is an error,
+            // as Xcode has it (a macOS icon set for iOS); one without images
+            // compiles to nothing (the SwiftUI template's).
+            match app_icon_set(dir, platform == "ios")? {
+                Some(source) => Some((name.clone(), source)),
+                None if !icon_images(dir)?.is_empty() => {
+                    return Err(format!("The stickers icon set, app icon set, or icon stack named \"{name}\" did not have any applicable content."));
+                }
+                None => None,
+            }
         }
         (None, _) => None,
     };
     let Some((icon_name, source)) = icon else {
         if !images.is_empty() {
-            return finish(o, &out_dir, platform, None, false, Vec::new(), images, Kind::Ios { phone: None, pad: None }, outputs);
+            let kind = if platform == "macosx" { Kind::Mac } else { Kind::Ios { phone: None, pad: None } };
+            return finish(o, &out_dir, platform, None, false, Vec::new(), images, kind, outputs);
         }
         // Nothing to compile: no Assets.car, an empty partial Info.plist.
         write_partial_info_plist(o, Vec::new(), &mut outputs)?;
@@ -663,6 +678,31 @@ fn stack_icon(o: &Options, out_dir: &Path, platform: &str, scan: &Scan, outputs:
     Ok(Some(outputs))
 }
 
+/// macOS's appearances by number, as image and colour sets
+/// (colorset::MAC_APPEARANCE_VALUES) and Icon Composer documents use them.
+const MAC_APPEARANCES: [(&str, u16); 7] = [
+    ("NSAppearanceNameSystem", 0),
+    ("NSAppearanceNameDarkAqua", 1),
+    ("NSAppearanceNameAccessibilitySystem", 3),
+    ("NSAppearanceNameAccessibilityDarkAqua", 6),
+    ("NSAppearanceNameAqua", 8),
+    ("NSAppearanceNameAccessibilityAqua", 9),
+    ("ISAppearanceTintable", TINTED),
+];
+
+/// A macOS catalog's table of appearances: none when no rendition has one,
+/// otherwise those used, System only when an image or colour has no
+/// appearance (data never has one; two of the holdout's catalogs), by name.
+fn mac_appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
+    let used: Vec<u16> = renditions.iter().filter(|r| !r.is_data()).map(|r| r.attrs.iter().find(|a| a.0 == car::ATTR_APPEARANCE).map_or(0, |a| a.1)).collect();
+    if used.iter().all(|&v| v == 0) {
+        return Vec::new();
+    }
+    let mut table: Vec<(String, u16)> = MAC_APPEARANCES.iter().filter(|(_, v)| used.contains(v)).map(|(n, v)| (n.to_string(), *v)).collect();
+    table.sort();
+    table
+}
+
 /// The catalog's table of appearances: Any, and those its renditions use,
 /// by name.
 fn appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
@@ -693,6 +733,7 @@ enum Kind {
 #[allow(clippy::too_many_arguments)]
 fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, has_dimension1: bool, mut renditions: Vec<car::Rendition>, images: imageset::Compiled, kind: Kind, mut outputs: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
     renditions.extend(images.renditions);
+
     let has_dimension2 = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION2));
     let has_dimension1 = has_dimension1 || renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DIMENSION1 && a.1 != 0));
     // A wide-gamut image's 16-bit rendition brings the gamut attribute, after
@@ -703,7 +744,17 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         return Err("a 16-bit rendition of an image with colours outside sRGB in a macOS catalog is not supported by this actool".into());
     }
     let key_format = if mac {
-        vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_ELEMENT, car::ATTR_PART, car::ATTR_SIZE, car::ATTR_IDENTIFIER, car::ATTR_DIMENSION2, car::ATTR_LAYER, car::ATTR_SCALE]
+        // dimension1 and dimension2 only when something uses them, as on
+        // iOS (one probe and one of the holdout's catalogs).
+        let mut k = vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_ELEMENT, car::ATTR_PART, car::ATTR_SIZE, car::ATTR_IDENTIFIER];
+        if has_dimension1 {
+            k.push(car::ATTR_DIMENSION1);
+        }
+        if has_dimension2 || icon_name.is_some() {
+            k.push(car::ATTR_DIMENSION2);
+        }
+        k.extend([car::ATTR_LAYER, car::ATTR_SCALE]);
+        k
     } else {
         let mut k = vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_SCALE, car::ATTR_IDIOM, car::ATTR_SUBTYPE];
         if has_dimension2 {
@@ -729,8 +780,21 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         // A catalog of data alone, or with a sticker icon, has no
         // appearance table (one probe; an image set beside them brings one).
         appearances: if matches!(kind, Kind::MacLayered) {
-            ["ISAppearanceTintable", "NSAppearanceNameAqua", "NSAppearanceNameDarkAqua", "NSAppearanceNameSystem"].into_iter().zip([10, 8, 1, 0]).map(|(n, v)| (n.to_string(), v)).collect()
-        } else if mac || renditions.iter().all(|r| r.is_data() || sticker.is_some_and(|id| r.attrs.contains(&(car::ATTR_IDENTIFIER, id)))) {
+            // An Icon Composer document's: always these four, and any other
+            // its catalog's sets use (two probes).
+            let mut table = mac_appearances(&renditions);
+            for v in [0, 1, 8, TINTED] {
+                if !table.iter().any(|t| t.1 == v) {
+                    table.push((MAC_APPEARANCES.iter().find(|a| a.1 == v).unwrap().0.to_string(), v));
+                }
+            }
+            table.sort();
+            table
+        } else if mac {
+            // macOS: a table only when an image or colour has an appearance
+            // (seven probes and the holdouts).
+            mac_appearances(&renditions)
+        } else if renditions.iter().all(|r| r.is_data() || sticker.is_some_and(|id| r.attrs.contains(&(car::ATTR_IDENTIFIER, id)))) {
             Vec::new()
         } else {
             appearances(&renditions)
@@ -842,7 +906,14 @@ fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &
     let document = icon::read(doc, name, icon::Platform { mac })?;
     let layered = document.layered()?;
     let id = name_identifier(name);
-    let mut compiled = imageset::Compiled { facets: layered.facets, renditions: layered.renditions };
+    // For macOS, the document's smallest flattened images (2x, no
+    // appearance, translucent colour) are packed with the catalog's images
+    // of that group small enough to pack, in an atlas whose pixels can't then
+    // be Xcode's (one of the holdout's catalogs).
+    if mac && images.packable.contains(&(2, 0, 0, false, false)) {
+        return Err(format!("{}: an Icon Composer document beside translucent colour images small enough to pack at 2x is not supported by this actool for macOS", doc.display()));
+    }
+    let mut compiled = imageset::Compiled { facets: layered.facets, renditions: layered.renditions, ..Default::default() };
     compiled.facets.extend(images.facets);
     compiled.renditions.extend(images.renditions);
     if mac {
