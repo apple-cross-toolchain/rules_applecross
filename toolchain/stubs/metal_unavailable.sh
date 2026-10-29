@@ -1,12 +1,13 @@
 #!/bin/bash
 # metal and metallib off a Mac: Apple's Metal compiler has no Linux version.
 # Strict (the default), compiling a shader fails the build. Relaxed
-# (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, --config=relaxed), it writes
-# an empty output, so the app builds and its shaders fail when it runs.
+# (--config=relax_metal, RULES_APPLECROSS_RELAX_METAL=1, or all of
+# --config=relaxed), it writes an empty output, so the app builds and its
+# shaders fail when it runs.
 
 tool="${0##*/}"
-if [[ "${RULES_APPLECROSS_RESOURCE_OUTPUT_MODE:-}" != "relaxed" ]]; then
-  echo "error: $tool: Apple's Metal compiler has no Linux version, so Metal shaders can't be compiled off a Mac; build them on a Mac, or with --config=relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to write an empty $tool output" >&2
+if [[ "${RULES_APPLECROSS_RELAX_METAL:-}" != "1" && "${RULES_APPLECROSS_RESOURCE_OUTPUT_MODE:-}" != "relaxed" ]]; then
+  echo "error: $tool: Apple's Metal compiler has no Linux version, so Metal shaders can't be compiled off a Mac; build them on a Mac, or with --config=relax_metal to write an empty $tool output" >&2
   exit 1
 fi
 

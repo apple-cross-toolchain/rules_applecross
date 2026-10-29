@@ -18,7 +18,8 @@ HERE = os.path.dirname(RUNFILES.Rlocation("rules_applecross/tests/coremlc/BUILD"
 
 def run(*args):
     env = dict(os.environ)
-    env.pop("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE", None)
+    for name in [n for n in env if n.startswith("RULES_APPLECROSS_RELAX") or n == "RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"]:
+        del env[name]
     return subprocess.run([sys.executable, TOOL] + list(args), env=env, capture_output=True, text=True)
 
 

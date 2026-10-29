@@ -53,9 +53,12 @@ one fails:
 - tvOS app icons and Icon Composer icons
   ([docs/clean-room](docs/clean-room/README.md)).
 
-`--config=relaxed` lets Metal through as an empty Metal library. String
+`--config=relax_metal` lets Metal through as an empty Metal library. String
 Catalogs compile as Xcode compiles them; the few it can't yet reproduce, it
-refuses unless relaxed ([docs/clean-room/xcstringstool.md](docs/clean-room/xcstringstool.md)).
+refuses unless `--config=relax_xcstrings`
+([docs/clean-room/xcstringstool.md](docs/clean-room/xcstringstool.md)). Each
+deviation has its own config, and `--config=relaxed` accepts them all
+([Byte-identical output](#byte-identical-output)).
 
 ## Setup
 
@@ -245,12 +248,33 @@ everything remotely and can live with that.
 
 The clean-room tools that bundle on Linux are strict by default: their
 output is byte-identical to Xcode's, or the build fails on the input, as
-tvOS app icons do for now (`docs/clean-room`). To accept a near match
-instead, relax them with `RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed` for
-actions, as this repository's `--config=relaxed` does:
+tvOS app icons do for now (`docs/clean-room`). Each deviation from Xcode's
+output can be accepted on its own, with an action environment variable that
+this repository's `.bazelrc` names as a config, so a project accepts just the
+ones it can live with. An app that only runs on iOS 26 and later, say, may
+accept Icon Composer icons whose rasters aren't Xcode's, since those systems
+draw the icon from its layers:
+
+| Config | Variable (`=1`) | Accepts |
+| --- | --- | --- |
+| `relax_actool_icon_composer` | `RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER` | Icon Composer documents rendered flat |
+| `relax_actool_tvos_radiosity` | `RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY` | tvOS radiosity images that may round apart from Xcode's |
+| `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
+| `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
+| `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library |
+| `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |
+| `relax_app_intents` | `RULES_APPLECROSS_RELAX_APP_INTENTS` | App Intents not yet reproduced, left out |
+| `relax_app_intents_flexible_matching` | `RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING` | App Shortcuts Flexible Matching's assets, left out |
+
+`--config=relaxed` accepts all of them, and so does
+`RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`, which it also sets for
+ported tools from before these configs (whose actool and ibtool read only
+that). Copy the lines you want from this repository's `.bazelrc`, for
+example:
 
 ```
-build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
+build:relax_actool_icon_composer --action_env=RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER=1
+build:ios26 --config=relax_actool_icon_composer
 ```
 
 Info.plist's `BuildMachineOSBuild` records the Mac an app was built on, so

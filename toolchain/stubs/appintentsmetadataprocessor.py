@@ -7,8 +7,8 @@ docs/clean-room/appintentsmetadataprocessor.md.
 It writes extract.actionsdata and version.json with the content Xcode 27's
 writes, for the intents, parameters, parameter summaries, App Shortcuts and
 enums it has been compared on. What hasn't been established against Xcode
-is refused, strict (the default); relaxed
-(RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, --config=relaxed), it is
+is refused, strict (the default); relaxed (--config=relax_app_intents,
+RULES_APPLECROSS_RELAX_APP_INTENTS=1, or all of --config=relaxed), it is
 left out, with a warning.
 """
 
@@ -17,7 +17,8 @@ import os
 import sys
 import unicodedata
 
-STRICT = os.environ.get("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE") != "relaxed"
+STRICT = not (os.environ.get("RULES_APPLECROSS_RELAX_APP_INTENTS") == "1"
+              or os.environ.get("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE") == "relaxed")
 
 
 class Unestablished(Exception):
@@ -929,8 +930,8 @@ def main(argv):
         print(e, file=sys.stderr)
         return 1
     except Unestablished as e:
-        print("error: appintentsmetadataprocessor: {} is not reproduced as Xcode writes it; build with --config=relaxed "
-              "(RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to leave it out".format(e), file=sys.stderr)
+        print("error: appintentsmetadataprocessor: {} is not reproduced as Xcode writes it; build with "
+              "--config=relax_app_intents to leave it out".format(e), file=sys.stderr)
         return 1
     directory = os.path.join(options["--output"][0], "Metadata.appintents")
     os.makedirs(directory, exist_ok=True)

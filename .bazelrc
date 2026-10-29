@@ -23,10 +23,35 @@ build:remote --action_env=DEVELOPER_DIR=external/+apple_cross_toolchain+apple_cr
 build:remote --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolchain/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:/bin:/usr/bin:/usr/local/bin
 
 # The clean-room Apple tools (actool, ibtool, ...) are strict by default: their
-# output is byte-identical to Xcode's, or the build fails. Relaxed accepts a
-# near match: actool writes its closest output (tvOS radiosity images) or hands
-# the catalog to xcbuild's actool, and ibtool leaves what it can't compile
-# uncompiled. See docs/clean-room/README.md.
+# output is byte-identical to Xcode's, or the build fails. Each deviation from
+# Xcode's output can be accepted on its own; --config=relaxed accepts them all.
+# See docs/clean-room/README.md#deviations.
+#
+# Icon Composer documents rendered flat (their rasters aren't Xcode's).
+build:relax_actool_icon_composer --action_env=RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER=1
+# tvOS app icons' radiosity images, whose rounding may differ from Xcode's.
+build:relax_actool_tvos_radiosity --action_env=RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY=1
+# Asset catalogs this actool can't reproduce, handed to xcbuild's actool.
+build:relax_actool_xcbuild --action_env=RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD=1
+# Interface Builder files this ibtool can't reproduce, left uncompiled.
+build:relax_ibtool --action_env=RULES_APPLECROSS_RELAX_IBTOOL=1
+# Metal shaders, compiled to an empty library (they fail at run time).
+build:relax_metal --action_env=RULES_APPLECROSS_RELAX_METAL=1
+# String Catalog entries not yet reproduced, written in their nearest form.
+build:relax_xcstrings --action_env=RULES_APPLECROSS_RELAX_XCSTRINGS=1
+# App Intents not yet reproduced, left out of the app's metadata.
+build:relax_app_intents --action_env=RULES_APPLECROSS_RELAX_APP_INTENTS=1
+# App Shortcuts Flexible Matching's trained assets, left out.
+build:relax_app_intents_flexible_matching --action_env=RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING=1
+build:relaxed --config=relax_actool_icon_composer
+build:relaxed --config=relax_actool_tvos_radiosity
+build:relaxed --config=relax_actool_xcbuild
+build:relaxed --config=relax_ibtool
+build:relaxed --config=relax_metal
+build:relaxed --config=relax_xcstrings
+build:relaxed --config=relax_app_intents
+build:relaxed --config=relax_app_intents_flexible_matching
+# Ported tools from before these configs read only this.
 build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
 
 # BuildBuddy's cache without remote execution.

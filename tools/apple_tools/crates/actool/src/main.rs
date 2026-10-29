@@ -1,8 +1,8 @@
 //! Clean-room `actool` for Linux; see docs/clean-room/actool.md. Strict by
-//! default: its output is Xcode's byte for byte, or the build fails.
-//! Relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed,
-//! `--config=relaxed`), it writes a near match or hands what it doesn't
-//! support to xcbuild's actool.
+//! default: its output is Xcode's byte for byte, or the build fails. Each
+//! deviation can be accepted on its own (see [`relaxed`]): Icon Composer
+//! documents rendered flat, tvOS radiosity images that may round apart from
+//! Xcode's, and catalogs handed to xcbuild's actool.
 
 mod bom;
 mod car;
@@ -35,8 +35,10 @@ struct Options {
     inputs: Vec<PathBuf>,
     /// `--compress-pngs`: a device build's bundle icons as CgBI PNGs.
     compress_pngs: bool,
-    /// Whether output must be Xcode's byte for byte; see [`strict`].
-    strict: bool,
+    /// Icon Composer documents rendered flat; see [`relaxed`].
+    relax_icon_composer: bool,
+    /// tvOS radiosity images whose rounding may differ; see [`relaxed`].
+    relax_tvos_radiosity: bool,
     /// `--launch-image`: the launch image set the bundle gets.
     launch_image: Option<String>,
     /// That set's `UILaunchImages`, for the partial Info.plist.
@@ -47,15 +49,22 @@ struct Options {
     alternate_icons: Vec<String>,
 }
 
-/// Strict output, the default: byte-identical to Xcode's, or the build fails.
-/// RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed (`--config=relaxed`)
-/// accepts a near match.
-fn strict() -> bool {
-    std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").map_or(true, |v| v != "relaxed")
+/// Whether a deviation from Xcode's output is accepted: strict, the default,
+/// accepts none. `RULES_APPLECROSS_RELAX_<DEVIATION>=1`
+/// (`--config=relax_actool_<deviation>`) accepts one, and
+/// RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed (`--config=relaxed`) all.
+fn relaxed(deviation: &str) -> bool {
+    std::env::var(format!("RULES_APPLECROSS_RELAX_{deviation}")).is_ok_and(|v| v == "1")
+        || std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").is_ok_and(|v| v == "relaxed")
 }
 
 fn parse(args: Vec<String>) -> Result<Options, String> {
-    let mut o = Options { output_format: "xml1".into(), strict: strict(), ..Default::default() };
+    let mut o = Options {
+        output_format: "xml1".into(),
+        relax_icon_composer: relaxed("ACTOOL_ICON_COMPOSER"),
+        relax_tvos_radiosity: relaxed("ACTOOL_TVOS_RADIOSITY"),
+        ..Default::default()
+    };
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
@@ -449,10 +458,10 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             if scan.icon_sets.iter().any(|(n, _)| n == name) {
                 return Err(format!("{name}: both an Icon Composer document and an app icon set; this actool compiles one"));
             }
-            if o.strict {
+            if !o.relax_icon_composer {
                 // Xcode's own output names renditions with a fresh UUID each
                 // run, and this one is a flat rendering: never Xcode's.
-                return Err(format!("{}: Icon Composer documents are rendered flat by this actool, not as Xcode compiles them (docs/clean-room/actool.md)", doc.display()));
+                return Err(format!("{}: Icon Composer documents are rendered flat by this actool, not as Xcode compiles them (docs/clean-room/actool.md); --config=relax_actool_icon_composer accepts the flat rendering", doc.display()));
             }
             if o.target_devices.iter().any(|d| d == "mac") {
                 return document_mac_icon(o, &out_dir, platform, name, &icon::render(doc)?, outputs, images);
@@ -606,7 +615,7 @@ fn stack_icon(o: &Options, out_dir: &Path, platform: &str, scan: &Scan, outputs:
         let size = asset["size"].as_str().unwrap_or("");
         let (w, h) = size.split_once('x').and_then(|(w, h)| Some((w.parse::<usize>().ok()?, h.parse::<usize>().ok()?))).ok_or_else(|| format!("{}: size {size:?}", dir.display()))?;
         let stack = stack::read(&dir.join(file), "imagestacklayer", "tv", "1x")?;
-        let renditions = stack::tv(&stack, w, h, o.strict)?;
+        let renditions = stack::tv(&stack, w, h, !o.relax_tvos_radiosity)?;
         (stack, renditions, true)
     } else if let Some(dir) = wanted(&scan.solid_stacks) {
         if platform != "vision" || !devices("vision") {
@@ -866,12 +875,12 @@ fn main() -> ExitCode {
     }
 }
 
-/// An input this actool can't compile as Xcode would: an error when strict,
-/// xcbuild's actool when relaxed.
+/// An input this actool can't compile as Xcode would: an error, or
+/// xcbuild's actool when that deviation is accepted.
 fn refuse(args: &[String], reason: &str) -> ExitCode {
-    if strict() {
+    if !relaxed("ACTOOL_XCBUILD") {
         eprintln!("error: {reason}");
-        eprintln!("note: strict output must be byte-identical to Xcode's; build with --config=relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to accept a near match");
+        eprintln!("note: strict output must be byte-identical to Xcode's; --config=relax_actool_xcbuild hands such input to xcbuild's actool");
         return ExitCode::FAILURE;
     }
     eprintln!("note: {reason}; compiling with xcbuild's actool instead");

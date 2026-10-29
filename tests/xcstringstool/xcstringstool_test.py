@@ -14,11 +14,13 @@ TOOL = RUNFILES.Rlocation("rules_applecross/toolchain/stubs/xcstringstool.py")
 HERE = os.path.dirname(RUNFILES.Rlocation("rules_applecross/tests/xcstringstool/BUILD"))
 
 
-def compile_catalog(path, out, relaxed=False):
+def compile_catalog(path, out, **relax):
+    """`relax`: the environment's relaxations, such as
+    RULES_APPLECROSS_RELAX_XCSTRINGS="1"; none by default."""
     env = dict(os.environ)
-    env.pop("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE", None)
-    if relaxed:
-        env["RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"] = "relaxed"
+    for name in [n for n in env if n.startswith("RULES_APPLECROSS_RELAX") or n == "RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"]:
+        del env[name]
+    env.update(relax)
     return subprocess.run([sys.executable, TOOL, "compile", path, "--output-directory", out],
                           env=env, capture_output=True, text=True)
 
@@ -59,11 +61,17 @@ class XcstringstoolTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             strict = compile_catalog(catalog, os.path.join(tmp, "strict"))
             self.assertNotEqual(strict.returncode, 0)
-            self.assertIn("--config=relaxed", strict.stderr)
-            relaxed = compile_catalog(catalog, os.path.join(tmp, "relaxed"), relaxed=True)
-            self.assertEqual(relaxed.returncode, 0, relaxed.stderr)
-            self.assertIn("relaxed", relaxed.stderr)
-            self.assertIn("de.lproj/manual_two_arguments.stringsdict", tree(os.path.join(tmp, "relaxed")))
+            self.assertIn("--config=relax_xcstrings", strict.stderr)
+            # Another tool's relaxation leaves this one strict.
+            other = compile_catalog(catalog, os.path.join(tmp, "other"), RULES_APPLECROSS_RELAX_METAL="1")
+            self.assertNotEqual(other.returncode, 0)
+            # Its own, or all of them (--config=relaxed's older form), relaxes it.
+            for name, relax in (("own", {"RULES_APPLECROSS_RELAX_XCSTRINGS": "1"}),
+                                ("all", {"RULES_APPLECROSS_RESOURCE_OUTPUT_MODE": "relaxed"})):
+                relaxed = compile_catalog(catalog, os.path.join(tmp, name), **relax)
+                self.assertEqual(relaxed.returncode, 0, relaxed.stderr)
+                self.assertIn("relaxed", relaxed.stderr)
+                self.assertIn("de.lproj/manual_two_arguments.stringsdict", tree(os.path.join(tmp, name)))
 
 
 if __name__ == "__main__":

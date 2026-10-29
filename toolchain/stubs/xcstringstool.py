@@ -7,8 +7,9 @@ Each language's plain strings go to <lang>.lproj/X.strings and its plural,
 device and substitution variations to <lang>.lproj/X.stringsdict, both XML
 property lists written as Xcode 27's xcstringstool writes them. What hasn't
 been established against it is refused, strict (the default); relaxed
-(RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, --config=relaxed), it is
-written as the nearest established form, with a warning.
+(--config=relax_xcstrings, RULES_APPLECROSS_RELAX_XCSTRINGS=1, or all of
+--config=relaxed), it is written as the nearest established form, with a
+warning.
 """
 
 import json
@@ -16,7 +17,8 @@ import os
 import re
 import sys
 
-STRICT = os.environ.get("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE") != "relaxed"
+STRICT = not (os.environ.get("RULES_APPLECROSS_RELAX_XCSTRINGS") == "1"
+              or os.environ.get("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE") == "relaxed")
 
 # A format specifier: an optional position, the flags -, + and 0, width,
 # precision, a length and a conversion. Others (space, #, ', *) are not
@@ -49,7 +51,7 @@ class Context:
         """Input whose output hasn't been compared with Xcode's."""
         message = "{} is not reproduced as Xcode compiles it".format(what)
         if STRICT:
-            self.errors.append("{}: error: {}; build with --config=relaxed (RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed) to compile it anyway {}".format(
+            self.errors.append("{}: error: {}; build with --config=relax_xcstrings to compile it anyway {}".format(
                 self.path, message, self.where(language, key, *path)))
             raise Failure()
         self.warning(message + "; relaxed: compiling it anyway", language, key, *path)

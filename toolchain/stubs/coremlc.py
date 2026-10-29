@@ -8,9 +8,8 @@ ML Programs (.mlpackage) and the other model types (.mlmodel, or in a
 files Xcode 27.0's coremlc writes, read from the model's specification
 (Apple's published Core ML protobuf schema). Neural networks, an older
 format, are refused; so is what hasn't
-been established against Xcode, strict (the default). Relaxed
-(RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed, --config=relaxed), refused
-models fail all the same: there is no near match to write.
+been established against Xcode, strict or relaxed: there is no near match
+to write, so no --config=relax_* applies.
 """
 
 import base64

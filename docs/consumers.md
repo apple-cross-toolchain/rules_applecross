@@ -244,5 +244,6 @@ swift_deps.configure_package(
 
 The clean-room tools are strict by default (README, "Byte-identical
 output"): an input whose output can't be guaranteed to be Xcode's fails the
-build, an Icon Composer app icon among them. `--config=relaxed` accepts a
-near match.
+build, an Icon Composer app icon among them. Each near match can be accepted
+on its own (`--config=relax_actool_icon_composer` and the others in the
+README's table), or all of them with `--config=relaxed`.

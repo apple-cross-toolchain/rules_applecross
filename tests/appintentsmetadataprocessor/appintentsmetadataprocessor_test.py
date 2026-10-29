@@ -24,7 +24,8 @@ def process(consts, out):
     with open(os.path.join(out, "sources.txt"), "w") as f:
         f.write("MyApp.swift\n")
     env = dict(os.environ, SWIFT_DETERMINISTIC_HASHING="1")
-    env.pop("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE", None)
+    for name in [n for n in env if n.startswith("RULES_APPLECROSS_RELAX") or n == "RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"]:
+        del env[name]
     return subprocess.run([
         sys.executable, TOOL,
         "--binary-file", "/bazel_rules_apple/fakepath",
