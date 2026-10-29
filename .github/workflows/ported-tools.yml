@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/ported-tools.yml
+      - tests/actool_catalog/**
       - tests/actool_icon/**
       - tools/xcode_equivalence.py
       - tools/apple_tools/**
@@ -15,6 +16,7 @@ on:
       - main
     paths:
       - .github/workflows/ported-tools.yml
+      - tests/actool_catalog/**
       - tests/actool_icon/**
       - tools/xcode_equivalence.py
       - tools/apple_tools/**
@@ -53,7 +55,8 @@ jobs:
           tools/build-ported-tools.sh dist &&
           cd tools/apple_tools &&
           bazel test -c opt //... &&
-          python3 ../../tests/actool_icon/actool_icon_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)"'
+          python3 ../../tests/actool_icon/actool_icon_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
+          python3 ../../tests/actool_catalog/actool_catalog_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)"'
       - uses: actions/upload-artifact@v7
         with:
           name: ported-tools-linux-${{ matrix.arch }}

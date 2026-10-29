@@ -41,6 +41,15 @@ fn component(text: &str) -> Option<f64> {
 
 /// The value of an entry's appearances: luminosity (light or dark) and
 /// contrast (high).
+/// macOS's numbers for the appearances iOS numbers 0 to 5 (Any, Dark,
+/// HighContrastAny, HighContrastDark, Light, HighContrastLight; six probes).
+pub const MAC_APPEARANCE_VALUES: [u16; 6] = [0, 1, 3, 6, 8, 9];
+
+/// An entry's appearance as the platform's catalog numbers it.
+pub fn appearance_for(entry: &serde_json::Value, mac: bool) -> Option<u16> {
+    appearance(entry).map(|v| if mac { MAC_APPEARANCE_VALUES[v as usize] } else { v })
+}
+
 pub fn appearance(entry: &serde_json::Value) -> Option<u16> {
     let mut luminosity = None;
     let mut high = false;
@@ -64,7 +73,9 @@ pub fn appearance(entry: &serde_json::Value) -> Option<u16> {
 /// Compiles colour sets, by name, for iOS: universal colours in the colour
 /// spaces above, for any appearance. Colour sets with no colours compile to
 /// nothing (the scan leaves them out).
-pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) -> u16) -> Result<(Vec<Facet>, Vec<Rendition>), String> {
+/// `mac`: for macOS, where a `mac` colour takes its appearance from a
+/// universal one, and other idioms' are left out (four probes).
+pub fn compile(sets: &[(String, std::path::PathBuf)], mac: bool, identifier: impl Fn(&str) -> u16) -> Result<(Vec<Facet>, Vec<Rendition>), String> {
     let mut facets = Vec::new();
     let mut renditions = Vec::new();
     for (name, dir) in sets {
@@ -77,17 +88,23 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], identifier: impl Fn(&str) 
         }
         let id = identifier(name);
         let mut seen = Vec::new();
-        for entry in contents["colors"].as_array().map(Vec::as_slice).unwrap_or_default() {
+        let listed = contents["colors"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let mac_appearances: Vec<Option<u16>> = if mac { listed.iter().filter(|e| e["color"].is_object() && e["idiom"] == "mac").map(|e| appearance_for(e, mac)).collect() } else { Vec::new() };
+        for entry in listed {
             let Some(color) = entry["color"].as_object() else { continue };
             for k in entry.as_object().unwrap().keys() {
                 if !["idiom", "appearances", "color"].contains(&k.as_str()) {
                     return unsupported(format!("the {k} key of a colour"));
                 }
             }
-            if entry["idiom"].as_str() != Some("universal") {
-                return unsupported("a colour for an idiom other than universal".into());
+            match entry["idiom"].as_str() {
+                Some("mac") if mac => {}
+                Some("universal") if mac && mac_appearances.contains(&appearance_for(entry, mac)) => continue,
+                Some("universal") => {}
+                _ if mac => continue,
+                _ => return unsupported("a colour for an idiom other than universal".into()),
             }
-            let Some(appearance) = appearance(entry) else {
+            let Some(appearance) = appearance_for(entry, mac) else {
                 return unsupported(format!("the appearances {}", entry["appearances"]));
             };
             if seen.contains(&appearance) {
