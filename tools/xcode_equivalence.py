@@ -594,6 +594,25 @@ def equivalent(path, xcode, ours, approximate_icon_rasters=False):
     return canonical(path, xcode) == canonical(path, ours)
 
 
+# actool's diagnostics rules_apple doesn't fail a build on (its xctoolrunner).
+_ACTOOL_ALLOWED = ["1024x1024", "is used by multiple", "Launch images are deprecated in iOS 13.0",
+                   "Launch images are deprecated in tvOS 13.0", "Failed to generate flattened icon stack for icon named "]
+
+
+def actool_diagnostics(output):
+    """actool's errors, warnings and notices (`--output-format
+    human-readable-text`) that fail rules_apple's build: every line of its
+    sections but the compilation results, the allowed warnings aside. Where
+    Xcode reports one, this repository's actool must refuse the input."""
+    lines, section = [], None
+    for line in output.splitlines():
+        if line.startswith("/* ") and line.endswith(" */"):
+            section = line[3:-3]
+        elif section and section != "com.apple.actool.compilation-results" and line.strip() and not any(a in line for a in _ACTOOL_ALLOWED):
+            lines.append(line)
+    return lines
+
+
 def tree(root):
     out = {}
     for directory, _, files in os.walk(root):

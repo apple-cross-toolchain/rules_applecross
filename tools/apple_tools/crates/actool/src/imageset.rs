@@ -13,6 +13,8 @@ pub struct Compiled {
     /// The packing groups (scale, appearance, idiom, opaque, grey) with an
     /// image small enough to pack, packed or alone.
     pub packable: Vec<(u32, u16, u16, bool, bool)>,
+    /// Whether a 3x image was left out (all but iOS).
+    pub dropped_3x: bool,
 }
 
 impl Compiled {
@@ -42,7 +44,9 @@ fn slot(dir: &std::path::Path, entry: &serde_json::Value) -> Result<(u32, u16), 
 /// a universal one, and other idioms' are left out (eight probes).
 /// `reserved`: atlases (scale, count) indexed before the catalog's, as a
 /// macOS Icon Composer document's at 2x (one of the holdout's catalogs).
-pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, mac: bool, reserved: &[(u32, usize)], identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
+/// watchOS keeps only images without an appearance (two probes).
+pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platform: &str, reserved: &[(u32, usize)], identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
+    let own = crate::colorset::own_idiom(platform);
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
     for (name, dir) in sets {
@@ -73,11 +77,27 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, mac: 
         let mut scales = Vec::new();
         let listed = contents["images"].as_array().map(Vec::as_slice).unwrap_or_default();
         let present = |e: &&serde_json::Value| e["filename"].as_str().is_some_and(|f| dir.join(f).is_file());
-        // A mac image's slot, and whether it names its scale.
-        let mac_slots = if mac {
-            listed.iter().filter(present).filter(|e| e["idiom"] == "mac").map(|e| Ok((slot(dir, e)?, e["scale"].is_string()))).collect::<Result<Vec<_>, String>>()?
-        } else {
-            Vec::new()
+        // Images without a scale (Any) beside images with one: Xcode reports
+        // an error, which fails rules_apple's build. It reports it whatever
+        // the images' idioms and appearances for iOS, macOS and tvOS (369 of
+        // 369 sets of the holdouts); for watchOS and visionOS only for some,
+        // not established: refused for every platform.
+        let bitmaps: Vec<&serde_json::Value> = listed.iter().filter(present).collect();
+        if bitmaps.iter().any(|e| !e["scale"].is_string()) && bitmaps.iter().any(|e| e["scale"].is_string()) {
+            return Err(format!("{}: error: Image set has a child with bitmap content and the \"Any\" scale. The image set also has children with specific scales and content. Please remove the content with specific scales or change the content of the \"Any\" scale to vector content.", dir.display()));
+        }
+        // Left out: images at 3x but for iOS (any idiom; five probes), what
+        // crate::colorset::own_leaves_out leaves out, and watchOS's and
+        // visionOS's own images at 1x (one without a scale is kept; eight).
+        let left_out = |e: &serde_json::Value| {
+            (own.is_some() && e["scale"] == "3x")
+                || crate::colorset::own_leaves_out(platform, e)
+                || (own.is_some_and(|(name, _)| ["watch", "vision"].contains(&name) && e["idiom"] == name) && e["scale"] == "1x")
+        };
+        // The platform's own images' slots, and whether each names its scale.
+        let own_slots = match own {
+            Some((name, _)) => listed.iter().filter(present).filter(|e| e["idiom"] == name && !left_out(e)).map(|e| Ok((slot(dir, e)?, e["scale"].is_string()))).collect::<Result<Vec<_>, String>>()?,
+            None => Vec::new(),
         };
         // No images list is as an empty one (two probes).
         for entry in listed {
@@ -92,26 +112,30 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, mac: 
                     return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
                 }
             }
-            let here = if mac { Some(slot(dir, entry)?) } else { None };
-            let idiom = match entry["idiom"].as_str() {
-                Some("mac") if mac => 0,
-                Some("universal") if mac && mac_slots.iter().any(|(s, _)| Some(*s) == here) => {
+            if left_out(entry) {
+                out.dropped_3x |= own.is_some() && entry["scale"] == "3x";
+                continue;
+            }
+            let here = if own.is_some() { Some(slot(dir, entry)?) } else { None };
+            let idiom = match (entry["idiom"].as_str(), own) {
+                (Some(n), Some((name, value))) if n == name => value,
+                (Some("universal"), Some((name, _))) if own_slots.iter().any(|(s, _)| Some(*s) == here) => {
                     // One of them with a scale and one without: Xcode takes
                     // either, from run to run (one of the holdout's catalogs).
-                    if mac_slots.iter().any(|(s, named)| Some(*s) == here && *named != entry["scale"].is_string()) {
-                        return Err(format!("{}: a mac and a universal image for one scale and appearance, one naming the scale and one not, is not supported by this actool (Xcode takes either at random)", dir.display()));
+                    if own_slots.iter().any(|(s, named)| Some(*s) == here && *named != entry["scale"].is_string()) {
+                        return Err(format!("{}: a {name} and a universal image for one scale and appearance, one naming the scale and one not, is not supported by this actool (Xcode takes either at random)", dir.display()));
                     }
                     continue;
                 }
-                Some("universal") => 0,
-                _ if mac => continue,
-                Some("iphone") => 1,
-                Some("ipad") => 2,
-                Some("car") => 4,
-                Some("watch" | "mac" | "tv") => continue,
+                (Some("universal"), _) => 0,
+                (_, Some(_)) => continue,
+                (Some("iphone"), None) => 1,
+                (Some("ipad"), None) => 2,
+                (Some("car"), None) => 4,
+                (Some("watch" | "mac" | "tv"), None) => continue,
                 _ => return Err(format!("{}: images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"])),
             };
-            if idiom != 0 && !phone_and_pad {
+            if idiom != 0 && own.is_none() && !phone_and_pad {
                 return Err(format!("{}: images for a device idiom without both --target-device iphone and ipad are not supported by this actool", dir.display()));
             }
             let lower = filename.to_ascii_lowercase();
@@ -123,8 +147,11 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, mac: 
                 None => 1,
                 Some(s) => s.strip_suffix('x').and_then(|n| n.parse::<u32>().ok()).filter(|n| (1..=3).contains(n)).ok_or_else(|| format!("{}: scale {s} is not supported by this actool", dir.display()))?,
             };
-            let appearance = crate::colorset::appearance_for(entry, mac)
+            let appearance = crate::colorset::appearance_for(entry, platform)
                 .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
+            if platform == "watch" && appearance != 0 {
+                continue;
+            }
             if scales.contains(&(scale, appearance, idiom)) {
                 return Err(format!("{}: two images at scale {scale}x for one appearance and idiom", dir.display()));
             }
@@ -644,6 +671,7 @@ pub fn sticker_icon(name: &str, dir: &std::path::Path, id: u16) -> Result<Option
         facets: vec![Facet { name: name.to_string(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] }],
         renditions: vec![standalone_rendition(&image).map_err(|e| format!("{}: {e}", path.display()))?],
         packable: Vec::new(),
+        dropped_3x: false,
     }))
 }
 

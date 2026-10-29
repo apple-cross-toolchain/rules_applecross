@@ -59,6 +59,12 @@ impl Rendition {
     pub fn is_data(&self) -> bool {
         self.csi.get(24..28) == Some(b"ATAD")
     }
+
+    /// A data set's file (layout 1000), as opposed to the other renditions
+    /// stored as data (an Icon Composer document's stacks and groups).
+    pub fn is_data_set(&self) -> bool {
+        self.csi.get(36..38) == Some(&1000u16.to_le_bytes()[..])
+    }
 }
 
 pub struct Facet {

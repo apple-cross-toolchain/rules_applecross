@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Asset catalogs through this repository's actool, against Xcode 27.0's
 output (expected/, from update_expected.py): every file the same, up to
-what Xcode itself varies (tools/xcode_equivalence.py).
+what Xcode itself varies (tools/xcode_equivalence.py), and refused where
+Xcode reports errors (expected/<case>/<platform>/refused.txt).
 
     python3 tests/actool_catalog/actool_catalog_test.py PATH/TO/actool
 """
@@ -21,12 +22,17 @@ def main(argv):
     for case, catalog, icon, platforms in cases():
         for platform in platforms:
             count += 1
+            expected = os.path.join(HERE, "expected", case, platform)
             with tempfile.TemporaryDirectory() as out:
                 status, log = compile_catalog(tool, catalog, icon, platform, out)
+                if os.path.exists(os.path.join(expected, "refused.txt")):
+                    if status == 0:
+                        failures.append("%s %s: compiled, where Xcode reports errors" % (case, platform))
+                    continue
                 if status:
                     failures.append("%s %s: refused:\n%s" % (case, platform, log))
                     continue
-                different = differences(os.path.join(HERE, "expected", case, platform), out)
+                different = differences(expected, out)
                 if different:
                     failures.append("%s %s: %s" % (case, platform, "; ".join(different)))
     for f in failures:
