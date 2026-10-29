@@ -417,7 +417,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     // A macOS Icon Composer document's smallest flattened images take the
     // first atlas at 2x.
     let reserved: &[(u32, usize)] = if mac && document.is_some() { &[(2, 1)] } else { &[] };
-    let mut images = imageset::compile(&scan.image_sets, phone && pad, mac, reserved, name_identifier)?;
+    let mut images = imageset::compile(&scan.image_sets, phone && pad, platform, reserved, name_identifier)?;
     // A sticker icon set compiles only when --app-icon names it (two
     // probes), for iOS; its name goes in the partial Info.plist.
     if let Some((name, dir)) = scan.sticker_icons.iter().find(|(n, _)| o.app_icon.as_deref() == Some(n.as_str())) {
@@ -434,14 +434,20 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             *o.sticker_icon.borrow_mut() = Some(name.clone());
         }
     }
-    let (color_facets, colors) = colorset::compile(&scan.color_sets, mac, name_identifier)?;
+    let (color_facets, colors) = colorset::compile(&scan.color_sets, platform, name_identifier)?;
     images.facets.extend(color_facets);
     images.renditions.extend(colors);
     let (data_facets, data) = dataset::compile(&scan.data_sets, name_identifier)?;
     images.facets.extend(data_facets);
     images.renditions.extend(data);
 
-    if !images.is_empty() && platform != "ios" && platform != "macosx" {
+    // A catalog whose only images are 3x ones, left out: Xcode writes an
+    // empty Assets.car of a key format of its own for watchOS, tvOS and
+    // visionOS (three probes), nothing for macOS.
+    if images.is_empty() && images.dropped_3x && ["watch", "atv", "vision"].contains(&platform) {
+        return Err("a catalog whose only images are 3x ones is not supported by this actool for watchOS, tvOS or visionOS".into());
+    }
+    if !images.is_empty() && !["ios", "macosx", "watch", "atv", "vision"].contains(&platform) {
         return Err("image, colour and data sets are supported by this actool for iOS only".into());
     }
     if !images.is_empty() && (!scan.brand_assets.is_empty() || !scan.solid_stacks.is_empty()) {
@@ -694,7 +700,7 @@ const MAC_APPEARANCES: [(&str, u16); 7] = [
 /// otherwise those used, System only when an image or colour has no
 /// appearance (data never has one; two of the holdout's catalogs), by name.
 fn mac_appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
-    let used: Vec<u16> = renditions.iter().filter(|r| !r.is_data()).map(|r| r.attrs.iter().find(|a| a.0 == car::ATTR_APPEARANCE).map_or(0, |a| a.1)).collect();
+    let used: Vec<u16> = renditions.iter().filter(|r| !r.is_data_set()).map(|r| r.attrs.iter().find(|a| a.0 == car::ATTR_APPEARANCE).map_or(0, |a| a.1)).collect();
     if used.iter().all(|&v| v == 0) {
         return Vec::new();
     }
@@ -703,15 +709,15 @@ fn mac_appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
     table
 }
 
-/// The catalog's table of appearances: Any, and those its renditions use,
-/// by name.
+/// The catalog's table of appearances: those its images, colours and icons
+/// use, Any only when one has no appearance (a dark image alone gives Dark
+/// alone; data never counts), by name.
 fn appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
-    let mut values = vec![0];
-    for r in renditions {
-        if let Some(&(_, v)) = r.attrs.iter().find(|a| a.0 == car::ATTR_APPEARANCE) {
-            if !values.contains(&v) {
-                values.push(v);
-            }
+    let mut values = Vec::new();
+    for r in renditions.iter().filter(|r| !r.is_data_set()) {
+        let v = r.attrs.iter().find(|a| a.0 == car::ATTR_APPEARANCE).map_or(0, |a| a.1);
+        if !values.contains(&v) {
+            values.push(v);
         }
     }
     let name = |v: u16| if v == TINTED { "ISAppearanceTintable".to_string() } else { colorset::APPEARANCES[v as usize].to_string() };
@@ -799,8 +805,10 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         } else {
             appearances(&renditions)
         },
-        schema_version: 2,
-        key_semantics: if mac { 1 } else { 2 },
+        // visionOS's catalogs: schema 1 and key semantics 4, as its image
+        // stacks' (one probe of each kind of set).
+        schema_version: if platform == "vision" { 1 } else { 2 },
+        key_semantics: if mac { 1 } else if platform == "vision" { 4 } else { 2 },
         renditions,
         xcode: xcode_identity(),
         deployment_target: o.minimum_deployment_target.clone(),

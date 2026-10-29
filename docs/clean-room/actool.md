@@ -969,13 +969,55 @@ any applicable content"); one without images compiles to nothing.
 Targeted catalogs (colours in every space and appearance, data, images at
 each scale, translucent, grey, template, packed, several atlases, by idiom)
 and random ones made after the rules were written, of up to six image,
-colour and data sets each: of 506 catalogs, 485 match Xcode's (byte for
-byte, or but for the appearance blocks' order) and 21 are refused for the
-reasons above or elsewhere here (dmp2 encodings, data without a type
-identifier); the last 150 random ones needed no change. Beside Visor's Icon
-Composer document, 112 catalogs: 102 Xcode's (its flattened images aside),
-10 refused as above. `tests/actool_catalog` keeps 31 of these catalogs with Xcode's
-output, and `tests/actool_icon` two beside the document.
+colour and data sets each: every one of them matches Xcode's (byte for
+byte, or but for the appearance blocks' order) or is refused, the most for
+Xcode's own error below (Errors Xcode reports), the others for the reasons
+above or elsewhere here (dmp2 encodings, data without a type identifier);
+the last 150 random ones needed no change. Beside Visor's Icon Composer
+document, 112 catalogs: 102 Xcode's (its flattened images aside), 10
+refused as above. `tests/actool_catalog` keeps a sample with Xcode's output
+(or its error), and `tests/actool_icon` two beside the document.
+
+## watchOS, tvOS and visionOS catalogs
+
+Image, colour and data sets compile for watchOS, tvOS and visionOS as for
+iOS, keys and appearance numbers alike, but for:
+- the idioms: `watch`, `tv` and `vision` images and colours take their
+  scale and appearance from universal ones, as macOS's `mac` ones do, and
+  keep their idiom in their key (5, 3 and 8); other idioms are left out;
+- the scales: 3x images are left out, whatever their idiom (macOS's too),
+  and watchOS's and visionOS's own images at 1x (universal ones at 1x, and
+  their own without a scale, are kept). A catalog whose only images were 3x
+  ones is refused: Xcode writes an empty Assets.car of a key format of its
+  own;
+- the appearances: watchOS keeps only images and colours without one;
+  visionOS leaves out its own `vision` ones for dark or light (high
+  contrast kept), universal ones keeping theirs;
+- visionOS's CARHEADER: schema version 1, key semantics 4, as for its
+  image stacks.
+
+The appearance table, for these and iOS, holds the appearances images and
+colours use, Any only when one has none (a dark image alone gives Dark
+alone; this corrects an earlier rule that always added Any).
+
+Probes of each rule, then 220 random catalogs per platform made after them
+(the last 120 per platform with 3x images among them): every one Xcode's
+or refused, none differing. `tests/actool_catalog` keeps samples for each.
+
+## Errors Xcode reports
+
+rules_apple fails a build on every error, warning or notice actool reports
+but for a few it lets through (a 1024x1024 icon for App Store, an image
+used by several sets, launch images' deprecation). So where Xcode reports
+one, this actool must refuse, or a Linux build would pass where a Mac's
+fails. The one found among every probe and random catalog here: an image
+set with an image without a scale (Any) and images with one, which Xcode
+reports for iOS, macOS and tvOS whatever their idioms and appearances, and
+for watchOS and visionOS for some sets only (by a rule not established);
+this actool refuses every such set, with Xcode's message. The comparisons
+check Xcode's diagnostics (`tools/xcode_equivalence.py`'s
+`actool_diagnostics`), and `tests/actool_catalog` keeps Xcode's error for
+the cases it reports one.
 
 ## Launch images
 

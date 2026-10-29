@@ -1,0 +1,1 @@
+{"images": [{"filename": "f0.png", "idiom": "iphone", "scale": "1x"}, {"filename": "f1.png", "idiom": "tv", "scale": "3x", "appearances": [{"appearance": "luminosity", "value": "light"}]}, {"filename": "f2.png", "idiom": "tv", "scale": "2x", "appearances": [{"appearance": "luminosity", "value": "light"}]}], "info": {"author": "xcode", "version": 1}}

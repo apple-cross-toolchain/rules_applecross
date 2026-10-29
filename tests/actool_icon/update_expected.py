@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 from common import HERE, cases, compile_icon, digests
+from xcode_equivalence import actool_diagnostics as diagnostics
 
 
 def main():
@@ -20,8 +21,8 @@ def main():
             for _ in range(2):
                 with tempfile.TemporaryDirectory() as out:
                     status, log = compile_icon(["xcrun", "actool"], icon, catalogs, platform, out)
-                    if status:
-                        sys.exit("%s %s: Xcode refused it:\n%s" % (case, platform, log))
+                    if status or diagnostics(log):
+                        sys.exit("%s %s: Xcode refused it, or reports errors that fail rules_apple's build:\n%s" % (case, platform, log))
                     runs.append(digests(out))
             if runs[0] != runs[1]:
                 sys.exit("%s %s: Xcode's two runs differ beyond what's known to vary" % (case, platform))

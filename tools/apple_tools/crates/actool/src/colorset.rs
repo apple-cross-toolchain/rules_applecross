@@ -45,9 +45,30 @@ fn component(text: &str) -> Option<f64> {
 /// HighContrastAny, HighContrastDark, Light, HighContrastLight; six probes).
 pub const MAC_APPEARANCE_VALUES: [u16; 6] = [0, 1, 3, 6, 8, 9];
 
+/// The idiom of a platform other than iOS (actool's name for it) and its
+/// value in a key: its images and colours take their slot from universal
+/// ones, and other idioms' are left out (macOS, whose keys have no idiom;
+/// watchOS 5, tvOS 3, visionOS 8; fourteen probes).
+pub fn own_idiom(platform: &str) -> Option<(&'static str, u16)> {
+    match platform {
+        "macosx" => Some(("mac", 0)),
+        "watch" => Some(("watch", 5)),
+        "atv" => Some(("tv", 3)),
+        "vision" => Some(("vision", 8)),
+        _ => None,
+    }
+}
+
+/// Whether the platform leaves out an entry of its own idiom for its
+/// appearance: visionOS's `vision` entries for dark or light, high contrast
+/// or not (Dark, HighContrastDark, Light, HighContrastLight; eight probes).
+pub fn own_leaves_out(platform: &str, entry: &serde_json::Value) -> bool {
+    platform == "vision" && entry["idiom"] == "vision" && matches!(appearance(entry), Some(1 | 3 | 4 | 5))
+}
+
 /// An entry's appearance as the platform's catalog numbers it.
-pub fn appearance_for(entry: &serde_json::Value, mac: bool) -> Option<u16> {
-    appearance(entry).map(|v| if mac { MAC_APPEARANCE_VALUES[v as usize] } else { v })
+pub fn appearance_for(entry: &serde_json::Value, platform: &str) -> Option<u16> {
+    appearance(entry).map(|v| if platform == "macosx" { MAC_APPEARANCE_VALUES[v as usize] } else { v })
 }
 
 pub fn appearance(entry: &serde_json::Value) -> Option<u16> {
@@ -73,9 +94,11 @@ pub fn appearance(entry: &serde_json::Value) -> Option<u16> {
 /// Compiles colour sets, by name, for iOS: universal colours in the colour
 /// spaces above, for any appearance. Colour sets with no colours compile to
 /// nothing (the scan leaves them out).
-/// `mac`: for macOS, where a `mac` colour takes its appearance from a
-/// universal one, and other idioms' are left out (four probes).
-pub fn compile(sets: &[(String, std::path::PathBuf)], mac: bool, identifier: impl Fn(&str) -> u16) -> Result<(Vec<Facet>, Vec<Rendition>), String> {
+/// `platform` (actool's name for it): its own idiom's colours take their
+/// appearance from universal ones ([`own_idiom`]); watchOS keeps only
+/// colours without an appearance (three probes).
+pub fn compile(sets: &[(String, std::path::PathBuf)], platform: &str, identifier: impl Fn(&str) -> u16) -> Result<(Vec<Facet>, Vec<Rendition>), String> {
+    let own = own_idiom(platform);
     let mut facets = Vec::new();
     let mut renditions = Vec::new();
     for (name, dir) in sets {
@@ -89,7 +112,10 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], mac: bool, identifier: imp
         let id = identifier(name);
         let mut seen = Vec::new();
         let listed = contents["colors"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let mac_appearances: Vec<Option<u16>> = if mac { listed.iter().filter(|e| e["color"].is_object() && e["idiom"] == "mac").map(|e| appearance_for(e, mac)).collect() } else { Vec::new() };
+        let own_appearances: Vec<Option<u16>> = match own {
+            Some((name, _)) => listed.iter().filter(|e| e["color"].is_object() && e["idiom"] == name && !own_leaves_out(platform, e)).map(|e| appearance_for(e, platform)).collect(),
+            None => Vec::new(),
+        };
         for entry in listed {
             let Some(color) = entry["color"].as_object() else { continue };
             for k in entry.as_object().unwrap().keys() {
@@ -97,16 +123,20 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], mac: bool, identifier: imp
                     return unsupported(format!("the {k} key of a colour"));
                 }
             }
-            match entry["idiom"].as_str() {
-                Some("mac") if mac => {}
-                Some("universal") if mac && mac_appearances.contains(&appearance_for(entry, mac)) => continue,
-                Some("universal") => {}
-                _ if mac => continue,
+            let idiom = match (entry["idiom"].as_str(), own) {
+                (Some(n), Some((name, _))) if n == name && own_leaves_out(platform, entry) => continue,
+                (Some(n), Some((name, value))) if n == name => value,
+                (Some("universal"), Some(_)) if own_appearances.contains(&appearance_for(entry, platform)) => continue,
+                (Some("universal"), _) => 0,
+                (_, Some(_)) => continue,
                 _ => return unsupported("a colour for an idiom other than universal".into()),
-            }
-            let Some(appearance) = appearance_for(entry, mac) else {
+            };
+            let Some(appearance) = appearance_for(entry, platform) else {
                 return unsupported(format!("the appearances {}", entry["appearances"]));
             };
+            if platform == "watch" && appearance != 0 {
+                continue;
+            }
             if seen.contains(&appearance) {
                 return unsupported("two colours for one appearance".into());
             }
@@ -114,6 +144,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], mac: bool, identifier: imp
             let mut attrs = vec![(car::ATTR_SCALE, 1), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_COLOR)];
             if appearance != 0 {
                 attrs.push((car::ATTR_APPEARANCE, appearance));
+            }
+            if idiom != 0 {
+                attrs.push((car::ATTR_IDIOM, idiom));
             }
             // A system colour, as Xcode resolves it for the appearance; one
             // for macOS too, building for iOS (Binder's accent colour).
