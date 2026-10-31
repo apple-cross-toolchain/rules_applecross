@@ -49,6 +49,10 @@ namespace {
 
 constexpr char kAddASTPathPrefix[] = "-Wl,-add_ast_path,";
 
+// Where Xcode is on a Mac by default: a Linux-built binary's run paths into
+// Xcode name it.
+constexpr char kInstalledDeveloperDir[] = "/Applications/Xcode.app/Contents/Developer";
+
 // Returns the base name of the given filepath. For example, given
 // /foo/bar/baz.txt, returns 'baz.txt'.
 const char *Basename(const char *filepath) {
@@ -394,6 +398,16 @@ void ProcessArgument(const std::string arg, const std::string developer_dir,
     return;
   }
 
+  // A run path names where the binary finds its libraries when it runs, on
+  // a Mac: off a Mac, DEVELOPER_DIR is the staged tree (a relative path), so
+  // a run path into it gets the installed Xcode's instead, as a Mac with
+  // Xcode in its usual place gives (a test's XCTest.framework). Every other
+  // use keeps the staged tree, which the build reads.
+  if (!developer_dir.empty() && developer_dir[0] != '/' &&
+      StartsWith(new_arg, "-Wl,-rpath,")) {
+    FindAndReplace("__BAZEL_XCODE_DEVELOPER_DIR__", kInstalledDeveloperDir,
+                   &new_arg);
+  }
   FindAndReplace("__BAZEL_XCODE_DEVELOPER_DIR__", developer_dir, &new_arg);
   FindAndReplace("__BAZEL_XCODE_SDKROOT__", sdk_root, &new_arg);
   FindAndReplace("__BAZEL_EXECUTION_ROOT__", cwd, &new_arg);
