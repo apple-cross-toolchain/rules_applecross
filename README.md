@@ -144,7 +144,7 @@ pinned release from a `.xip` or an SDK archive you host
 This makes that archive from a `.xip`, on any host:
 
 ```
-bazel run //tools:package_sdks -- ~/Downloads/Xcode_27.xip apple-sdks-27.0.tar.gz
+bazel run //tools:package_sdks -- ~/Downloads/Xcode_27.2.xip apple-sdks-27.2.tar.gz
 ```
 
 On a Mac, the following packages the selected Xcode instead:

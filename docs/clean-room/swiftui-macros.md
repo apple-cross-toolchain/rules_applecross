@@ -82,7 +82,7 @@ written as is, not reformatted (an empty closure default stays `{}`).
 
 Apple's private `@State` expansion needs Swift 6.4: with 6.3.2 the init
 accessor on `_name` makes a view's memberwise initializer private. The
-Linux toolchain here is 6.4.0 (`MODULE.bazel`).
+Linux toolchain here is 6.4.2 (`MODULE.bazel`), which built Xcode 27.2's SDKs.
 
 For the probe files covering these cases (`probes/`), the expansions Xcode's
 compiler prints with this plugin loaded in place of Apple's are identical to

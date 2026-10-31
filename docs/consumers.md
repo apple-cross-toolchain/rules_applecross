@@ -13,11 +13,11 @@ then come from wherever the project keeps a copy:
 ```starlark
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
-    xcode_version = "27.0",
+    xcode_version = "27.2",
     # A packaged SDK archive: under a third of the .xip's size, and nothing to unpack.
-    apple_sdk_urls = ["https://storage.example.com/apple-sdks-27.0.tar.gz"],
+    apple_sdk_urls = ["https://storage.example.com/apple-sdks-27.2.tar.gz"],
     # Or Apple's .xip itself, used when no SDK archive is configured.
-    xcode_xip_urls = ["file:///mnt/xcode/Xcode_27.xip"],
+    xcode_xip_urls = ["file:///mnt/xcode/Xcode_27.2.xip"],
     ...
 )
 ```
@@ -30,7 +30,7 @@ way any Bazel download does: `.netrc`, or `--credential_helper`.
 
 From a `.xip`, the rule extracts the SDKs, stubs their Mach-O binaries with
 this repository's LLVM and discards the rest, which takes a minute or two.
-`bazel run //tools:package_sdks -- Xcode_27.xip apple-sdks-27.0.tar.gz` makes
+`bazel run //tools:package_sdks -- Xcode_27.2.xip apple-sdks-27.2.tar.gz` makes
 the SDK archive from the same `.xip`. Its output is reproducible, so it
 matches the pinned SHA-256 whoever runs it. Both give the same tree.
 
@@ -49,10 +49,10 @@ control, and a public repository shouldn't name anyone's own machines. Name a pl
 ```starlark
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
-    xcode_version = "27.0",
+    xcode_version = "27.2",
     # A placeholder: .bazelrc.user says where the archive is, with --distdir
     # or --downloader_config (docs/consumers.md in rules_applecross).
-    apple_sdk_urls = ["https://apple-sdks.invalid/apple-sdks-27.0.tar.gz"],
+    apple_sdk_urls = ["https://apple-sdks.invalid/apple-sdks-27.2.tar.gz"],
     ...
 )
 ```
@@ -60,12 +60,12 @@ apple_cross_toolchain.configure(
 Either of Bazel's own options then supplies it:
 
 - `--distdir=<directory>` for a copy on disk. Bazel looks there first for a
-  file named as the URL ends, `apple-sdks-27.0.tar.gz`, and checks it against
+  file named as the URL ends, `apple-sdks-27.2.tar.gz`, and checks it against
   the pinned SHA-256.
 - `--downloader_config=<file>` for a copy on a server, with a line such as
 
   ```
-  rewrite apple-sdks\.invalid/.* http://sdks.internal:8080/apple-sdks-27.0.tar.gz
+  rewrite apple-sdks\.invalid/.* http://sdks.internal:8080/apple-sdks-27.2.tar.gz
   ```
 
   The pattern is matched against the whole URL without its scheme. Bazel
@@ -140,11 +140,12 @@ line of any of their `.swiftinterface` files says which, for example
 `Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks/Foundation.framework/Modules/Foundation.swiftmodule/arm64e-apple-ios.swiftinterface`:
 
 ```
-// swift-compiler-version: Apple Swift version 6.4 effective-5.10 (swiftlang-6.4.0.31.4 clang-2100.3.31.1)
+// swift-compiler-version: Apple Swift version 6.4.2 (swiftlang-6.4.2.1.9 clang-2100.4.1.1)
 ```
 
-Xcode 27.0's SDKs were built by Swift 6.4.0, which this repository's
-`MODULE.bazel` sets. For another Xcode, set `swift_version` on
+Xcode 27.2's SDKs were built by Swift 6.4.2, which this repository's
+`MODULE.bazel` sets; Xcode 27.0's by Swift 6.4.0 (toolchain/xcode_versions.bzl
+lists each release's). For another Xcode, set `swift_version` on
 `apple_cross_toolchain.swift()` to match; a mismatch fails as `this SDK is
 not supported by the compiler`.
 

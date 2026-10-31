@@ -14,4 +14,10 @@ XCODE_VERSIONS = {
         sdk_sha256 = "251c252f7f41bcd3e08655e49e182686682d705945f4a2807049b9051c606ebb",
         swift_version = "6.4.0",
     ),
+    "27.2": struct(
+        build = "27B52",
+        xip_sha256 = "c28b05526225394fa4017d7f9919c1c898822713edca68872cb4701599f01978",
+        sdk_sha256 = "b1583e60f9fd35881b5a948ce71627079877f1ced7ea231e14d3c342dd389668",
+        swift_version = "6.4.2",
+    ),
 }

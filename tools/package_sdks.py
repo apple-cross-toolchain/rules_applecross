@@ -1,6 +1,6 @@
 """Package the Apple SDKs of an Xcode .xip as the archive xcode_versions.bzl pins.
 
-    bazel run //tools:package_sdks -- ~/Downloads/Xcode_27.xip apple-sdks-27.0.tar.gz
+    bazel run //tools:package_sdks -- ~/Downloads/Xcode_27.2.xip apple-sdks-27.2.tar.gz
 
 The archive holds the tree xcode_xip_urls stages: the content extract_xip.py
 and link_local_xcode.py select, with stubs from this repository's LLVM. Its
