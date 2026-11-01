@@ -88,6 +88,18 @@ impl LibraryVersions {
     }
 }
 
+/// The library versions of the known Xcode nearest `version`: its own, or
+/// for an Xcode not known here (accepted by main only when relaxed), 27.0's
+/// for one before 27.2 and 27.2's for any later.
+pub fn nearest_library_versions(version: &str) -> LibraryVersions {
+    library_versions(version).unwrap_or_else(|| {
+        let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+        let (major, minor) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+        let nearest = if (major, minor) < (27, 2) { "27.0" } else { "27.2" };
+        library_versions(nearest).expect("27.0 and 27.2 are known")
+    })
+}
+
 /// The version in an Xcode's identity: "27.2" of "Xcode 27.2 (27B52)".
 pub fn xcode_version(xcode: &str) -> &str {
     xcode.strip_prefix("Xcode ").and_then(|v| v.split(' ').next()).unwrap_or("")
@@ -128,7 +140,8 @@ pub struct Catalog {
     pub schema_version: u32,
     pub key_semantics: u32,
     pub renditions: Vec<Rendition>,
-    /// "Xcode 27.2 (27B52)": an Xcode library_versions knows (main checks).
+    /// "Xcode 27.2 (27B52)": an Xcode library_versions knows, or (relaxed)
+    /// one recorded with the nearest known Xcode's library versions.
     pub xcode: String,
     pub deployment_target: String,
     pub platform: String,
@@ -242,7 +255,7 @@ impl Catalog {
         meta.extend(fixed("", 256));
         meta.extend(fixed(&self.deployment_target, 256));
         meta.extend(fixed(&self.platform, 256));
-        let versions = library_versions(xcode_version(&self.xcode)).expect("an Xcode whose library versions are known");
+        let versions = nearest_library_versions(xcode_version(&self.xcode));
         meta.extend(fixed(&versions.authoring_tool(&self.platform), 256));
         let extended = bom.alloc(meta);
 
@@ -1010,4 +1023,22 @@ pub fn texture_image_csi(name: &str, width: u32, height: u32, scale: u32, row_by
     tlv(&mut t, 0x3ef, &row_bytes.to_le_bytes());
     let payload = lzfse_bitmap(data, row_bytes as usize, height as usize, MlecVersions { single: 2, chunked: 1 });
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 0, layout: LAYOUT_TEXTURE_IMAGE, name }, &t, &payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An Xcode not known here takes the nearest known one's versions:
+    /// 27.0's before 27.2, 27.2's from it on.
+    #[test]
+    fn nearest_library_versions_by_xcode() {
+        assert_eq!(nearest_library_versions("27.2").coreui, 1011);
+        assert_eq!(nearest_library_versions("27.0").coreui, 1010);
+        assert_eq!(nearest_library_versions("26.6").coreui, 1010);
+        assert_eq!(nearest_library_versions("27.1").coreui, 1010);
+        assert_eq!(nearest_library_versions("27.3").coreui, 1011);
+        assert_eq!(nearest_library_versions("28.0").coreui, 1011);
+        assert!(library_versions("26.6").is_none());
+    }
 }

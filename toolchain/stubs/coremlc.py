@@ -551,7 +551,9 @@ def xcode_version():
     """The version of the Xcode whose SDK the build targets ("27.2"), from
     the version.plist beside DEVELOPER_DIR (27.0 when there is none).
     Refused for an Xcode whose coremlc this doesn't know, which it would
-    record wrongly."""
+    record wrongly, unless RULES_APPLECROSS_RELAX_XCODE_VERSION=1
+    (--config=relax_xcode_version, or --config=relaxed) accepts the nearest
+    known Xcode's: 27.0's before 27.2, 27.2's from it on."""
     developer = os.environ.get("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer")
     try:
         with open(os.path.join(developer, "..", "version.plist"), "rb") as f:
@@ -560,7 +562,15 @@ def xcode_version():
         return "27.0"
     version = info.get("CFBundleShortVersionString", "27.0")
     if version not in COREMLC_BUILD_INFO:
-        sys.exit("coremlc: Xcode %s (%s) is not supported by this coremlc: it writes the models of Xcode 27.0 and 27.2"
+        if os.environ.get("RULES_APPLECROSS_RELAX_XCODE_VERSION") == "1" or \
+                os.environ.get("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE") == "relaxed":
+            major, _, minor = version.partition(".")
+            try:
+                before = (int(major), int(minor.partition(".")[0] or 0)) < (27, 2)
+            except ValueError:
+                before = True
+            return "27.0" if before else "27.2"
+        sys.exit("coremlc: Xcode %s (%s) is not supported by this coremlc: it writes the models of Xcode 27.0 and 27.2 (--config=relax_xcode_version records the nearest one's)"
                  % (version, info.get("ProductBuildVersion", "?")))
     return version
 

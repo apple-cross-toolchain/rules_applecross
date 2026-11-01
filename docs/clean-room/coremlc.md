@@ -25,7 +25,8 @@ Provenance: black-box, as [README.md](README.md) describes. Sources:
   (the same compiler, MIL component 3605.1.1) for the same models: a
   model's `buildInfo` names the MIL component of the Xcode whose SDK the
   build targets (by its version, in its `version.plist`), and nothing else
-  differs;
+  differs. Any other Xcode is refused, unless `--config=relax_xcode_version`
+  records the nearest one's (27.0's before 27.2, 27.2's after);
 - its usage messages.
 - Apple's published Core ML model specification (the protobuf schema
   coremltools ships), for reading models, and its comments, for what to

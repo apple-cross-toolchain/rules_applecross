@@ -20,17 +20,23 @@ HERE = os.path.dirname(RUNFILES.Rlocation("rules_applecross/tests/coremlc/BUILD"
 # The Xcode the expected outputs are from: coremlc records its version in a
 # model's buildInfo, by the version.plist beside DEVELOPER_DIR, which off a
 # Mac is this stand-in.
-XCODE_ROOT = tempfile.mkdtemp(prefix="xcode-identity-")
-os.makedirs(os.path.join(XCODE_ROOT, "Contents", "Developer"))
-with open(os.path.join(XCODE_ROOT, "Contents", "version.plist"), "wb") as f:
-    plistlib.dump({"CFBundleShortVersionString": "27.2", "ProductBuildVersion": "27B52"}, f)
+def stand_in_xcode(version, build):
+    root = tempfile.mkdtemp(prefix="xcode-identity-")
+    os.makedirs(os.path.join(root, "Contents", "Developer"))
+    with open(os.path.join(root, "Contents", "version.plist"), "wb") as f:
+        plistlib.dump({"CFBundleShortVersionString": version, "ProductBuildVersion": build}, f)
+    return root
 
 
-def run(*args):
-    env = dict(os.environ, DEVELOPER_DIR=os.path.join(XCODE_ROOT, "Contents", "Developer"))
-    for name in [n for n in env if n.startswith("RULES_APPLECROSS_RELAX") or n == "RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"]:
-        del env[name]
-    return subprocess.run([sys.executable, TOOL] + list(args), env=env, capture_output=True, text=True)
+XCODE_ROOT = stand_in_xcode("27.2", "27B52")
+
+
+def run(*args, xcode_root=XCODE_ROOT, env=None):
+    full = dict(os.environ, DEVELOPER_DIR=os.path.join(xcode_root, "Contents", "Developer"))
+    for name in [n for n in full if n.startswith("RULES_APPLECROSS_RELAX") or n == "RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"]:
+        del full[name]
+    full.update(env or {})
+    return subprocess.run([sys.executable, TOOL] + list(args), env=full, capture_output=True, text=True)
 
 
 def tree(root):
@@ -109,6 +115,24 @@ class CoremlcTest(unittest.TestCase):
             result = run("compile", model, tmp)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("encoded", result.stderr)
+
+    def test_unknown_xcode_refused_unless_relaxed(self):
+        # Xcode 26.6's buildInfo isn't known: refused, or relaxed recorded
+        # with the nearest known Xcode's, 27.0's.
+        package = glob.glob(os.path.join(HERE, "cases", "cmp_A16_ret", "*.mlpackage"))[0]
+        xcode_26 = stand_in_xcode("26.6", "17F113")
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run("compile", package, tmp, xcode_root=xcode_26)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Xcode 26.6 (17F113) is not supported", result.stderr)
+            self.assertEqual(os.listdir(tmp), [])
+        for env in ({"RULES_APPLECROSS_RELAX_XCODE_VERSION": "1"}, {"RULES_APPLECROSS_RESOURCE_OUTPUT_MODE": "relaxed"}):
+            with self.subTest(env=env), tempfile.TemporaryDirectory() as tmp:
+                result = run("compile", package, tmp, xcode_root=xcode_26, env=env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                with open(glob.glob(os.path.join(tmp, "*.mlmodelc", "model.mil"))[0]) as f:
+                    mil = f.read()
+                self.assertIn('"coremlc-component-MIL", "3600.16.1"', mil)
 
     def test_refuses_neural_networks(self):
         with tempfile.TemporaryDirectory() as tmp:

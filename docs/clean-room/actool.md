@@ -131,7 +131,9 @@ build too): Xcode 27.0's CoreUI 1010, ImageIO 2851, CMPhoto 219 for iOS and
 218 for the others; Xcode 27.2's CoreUI 1011 (`CoreUI-1011.4`), ImageIO
 2851.1.8 for iOS and macOS and 2851.1.7 for watchOS, tvOS and visionOS,
 CMPhoto 222 for all. Both write storage 17 and CoreThemeDefinition 664. Any
-other Xcode is refused, whose versions would be recorded wrongly. Those
+other Xcode is refused, whose versions would be recorded wrongly, unless
+`--config=relax_xcode_version` records the nearest one's (27.0's before 27.2,
+27.2's after). Those
 versions are all that differs between the two Xcodes' catalogs: every
 golden case, recorded again from Xcode 27.2 (2026-11-01), matched once they
 were Xcode 27.2's.

@@ -100,6 +100,8 @@ jobs:
       - uses: actions/checkout@v7
       # Asking for the local Xcode explicitly turns a missing one into an error
       # rather than a silent fall back to an archive this job never downloaded.
+      # The runner's Xcode is 26.6, whose library versions the clean-room
+      # actool and coremlc don't know; relax_xcode_version records 27.0's.
       - name: Build examples and tests with remote execution
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -107,6 +109,7 @@ jobs:
           bazel
           build
           --config=remote
+          --config=relax_xcode_version
           --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
           --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
           --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"

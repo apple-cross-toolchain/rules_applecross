@@ -66,8 +66,10 @@ top-level [README.md](../../README.md#byte-identical-output):
 - `xcstringstool`: entries not yet reproduced, in their nearest form;
 - `appintentsmetadataprocessor`: intents not yet reproduced, left out, and
   Flexible Matching's assets left out.
+- `actool` and `coremlc`, for an Xcode other than 27.0 and 27.2: the
+  library versions they record, the nearest known Xcode's.
 
-`coremlc` and the other tools have no near match to write, and refuse such
+Beyond that, `coremlc` and the other tools have no near match to write, and refuse such
 inputs either way.
 
 ## Determinism

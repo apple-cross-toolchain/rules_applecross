@@ -44,6 +44,9 @@ build:relax_xcstrings --action_env=RULES_APPLECROSS_RELAX_XCSTRINGS=1
 build:relax_app_intents --action_env=RULES_APPLECROSS_RELAX_APP_INTENTS=1
 # App Shortcuts Flexible Matching's trained assets, left out.
 build:relax_app_intents_flexible_matching --action_env=RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING=1
+# An Xcode whose recorded library versions actool and coremlc don't know,
+# recorded with the nearest known Xcode's (27.0's before 27.2, 27.2's after).
+build:relax_xcode_version --action_env=RULES_APPLECROSS_RELAX_XCODE_VERSION=1
 build:relaxed --config=relax_actool_icon_composer
 build:relaxed --config=relax_actool_tvos_radiosity
 build:relaxed --config=relax_actool_xcbuild
@@ -52,6 +55,7 @@ build:relaxed --config=relax_metal
 build:relaxed --config=relax_xcstrings
 build:relaxed --config=relax_app_intents
 build:relaxed --config=relax_app_intents_flexible_matching
+build:relaxed --config=relax_xcode_version
 # Ported tools from before these configs read only this.
 build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
 
