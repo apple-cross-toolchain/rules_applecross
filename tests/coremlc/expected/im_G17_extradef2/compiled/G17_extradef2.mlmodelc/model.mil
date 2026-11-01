@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
 {
     func main<ios17>(tensor<fp16, [1, 1, ?, ?]> img, tensor<fp16, [2]> t) [FlexibleShapeInformation = tuple<tuple<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>, tuple<tensor<string, []>, dict<tensor<string, []>, dict<tensor<string, []>, tensor<int32, [?]>>>>>((("DefaultShapes", {{"img", [1, 1, 8, 8]}}), ("EnumeratedShapes", {{"img_1_1_1_4_6_t_1_1_1_1_2_", {{"img", [1, 1, 4, 6]}, {"t", [2]}}}, {"img_1_1_1_8_8_t_1_1_1_1_2_", {{"img", [1, 1, 8, 8]}, {"t", [2]}}}})))] {
             tensor<int32, [2]> reduce_mean_0_axes_0 = const()[name = tensor<string, []>("reduce_mean_0_axes_0"), val = tensor<int32, [2]>([2, 3])];

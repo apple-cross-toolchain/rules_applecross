@@ -33,7 +33,14 @@ this tool's doesn't. Swift 6.4 on Linux emits the same constant values as Xcode'
 compiler for these sources. An app built entirely on Linux
 (`//examples/ios/HelloWorldSwift`) carries metadata identical to what Xcode's
 processor writes from the same input. `tests/appintentsmetadataprocessor`
-keeps 87 of the cases with Xcode's output.
+keeps 87 of the cases with Xcode's output. Those stay Xcode 27.0's: Xcode's
+processor reads a case's Swift source too (it checks a property's
+declaration there), and only the constant values are kept. For Xcode 27.2
+(2026-11-01), a source with an enum, an entity with an `EntityStringQuery`,
+an intent with a summary, a ranged and an optional parameter, and an App
+Shortcuts provider, compiled by its `swiftc`, gave the same metadata from
+its processor and this one, `version.json` included; its `toolsVersion` is
+the Xcode build rules_apple passes either way.
 
 ## What it covers
 

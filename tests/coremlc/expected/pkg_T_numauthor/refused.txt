@@ -1,1 +1,14 @@
-*** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: '-[__NSCFNumber UTF8String]: unrecognized selector sent to instance'
+*** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: '-[__NSCFNumber UTF8String]: unrecognized selector sent to instance 0xa0945cf1dad34682'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018b9e28c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018b44060c objc_exception_throw + 88
+	2   CoreFoundation                      0x000000018baaacac -[NSObject(NSObject) __retain_OA] + 0
+	3   CoreFoundation                      0x000000018b94ff70 ___forwarding___ + 1504
+	4   CoreFoundation                      0x000000018b94f8d0 __forwarding_prep_0___ + 96
+	5   coremlcompiler                      0x000000010297b450 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	6   coremlcompiler                      0x0000000102993d28 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	7   coremlcompiler                      0x0000000102990284 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	8   coremlcompiler                      0x000000010220cdcc coremlcompiler + 298444
+	9   coremlcompiler                      0x00000001022c1334 coremlcompiler + 1037108
+	10  coremlcompiler                      0x00000001022bf050 coremlcompiler + 1028176
+	11  dyld                                0x000000018b4dbe80 start + 6688
+)
+libc++abi: terminating due to uncaught exception of type NSException

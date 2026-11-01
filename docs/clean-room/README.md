@@ -9,7 +9,9 @@ while bundling.
 
 Every tool here was developed clean-room, as a black box. Each one was
 derived from what an unmodified Xcode 27.0 tool does with inputs written for
-the purpose, and from published material. None of it comes from Apple's
+the purpose, and from published material, and checked again against Xcode
+27.2's (tests/*/update_expected.py record each suite's expected outputs
+from the Xcode on the Mac they run on). None of it comes from Apple's
 implementation.
 
 - **Ruled out, for every tool:**

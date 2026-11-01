@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
 {
     func main<ios16>(tensor<fp32, [1, 3, 4, 4]> a, tensor<fp32, [1, 2]> b, tensor<fp32, [1, 1, 5, 5]> c) {
             tensor<bool, []> reduce_sum_0_keep_dims_0 = const()[name = tensor<string, []>("reduce_sum_0_keep_dims_0"), val = tensor<bool, []>(false)];

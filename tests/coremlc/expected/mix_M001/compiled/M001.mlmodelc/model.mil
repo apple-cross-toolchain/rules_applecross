@@ -1,5 +1,5 @@
 program(1.3)
-[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+[buildInfo = dict<string, string>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
 {
     func main<ios18>(tensor<fp32, [1, 3, ?, ?]> features, state<tensor<fp16, [1, 1]>> image, tensor<fp32, [1, 1, 8, 6]> z9) [FlexibleShapeInformation = tuple<tuple<string, dict<string, tensor<int32, [?]>>>, tuple<string, dict<string, dict<string, tensor<int32, [?]>>>>>((("DefaultShapes", {{"features", [1, 3, 6, 10]}}), ("EnumeratedShapes", {{"180e303b", {{"features", [1, 3, 8, 12]}, {"image", [1, 1]}, {"z9", [1, 1, 8, 6]}}}, {"723413f5", {{"features", [1, 3, 6, 10]}, {"image", [1, 1]}, {"z9", [1, 1, 8, 6]}}}})))] {
             tensor<int32, [2]> mean_features_axes_0 = const()[name = string("mean_features_axes_0"), val = tensor<int32, [2]>([2, 3])];

@@ -16,6 +16,7 @@ import base64
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shutil
 import struct
@@ -538,8 +539,30 @@ def print_program(program, spec_version, extra_build_info, function_attributes):
 
 
 
-# Written into model.mil's buildInfo, as Xcode 27.0's coremlc writes it.
-COREMLC_BUILD_INFO = [("coremlc-component-MIL", "3600.16.1"), ("coremlc-version", "3600.25.1")]
+# Written into model.mil's buildInfo, as each Xcode's coremlc writes it, by
+# the Xcode's version.
+COREMLC_BUILD_INFO = {
+    "27.0": [("coremlc-component-MIL", "3600.16.1"), ("coremlc-version", "3600.25.1")],  # 27A266a
+    "27.2": [("coremlc-component-MIL", "3605.1.1"), ("coremlc-version", "3600.25.1")],  # 27B52
+}
+
+
+def xcode_version():
+    """The version of the Xcode whose SDK the build targets ("27.2"), from
+    the version.plist beside DEVELOPER_DIR (27.0 when there is none).
+    Refused for an Xcode whose coremlc this doesn't know, which it would
+    record wrongly."""
+    developer = os.environ.get("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer")
+    try:
+        with open(os.path.join(developer, "..", "version.plist"), "rb") as f:
+            info = plistlib.load(f)
+    except (OSError, plistlib.InvalidFileException):
+        return "27.0"
+    version = info.get("CFBundleShortVersionString", "27.0")
+    if version not in COREMLC_BUILD_INFO:
+        sys.exit("coremlc: Xcode %s (%s) is not supported by this coremlc: it writes the models of Xcode 27.0 and 27.2"
+                 % (version, info.get("ProductBuildVersion", "?")))
+    return version
 
 
 def enumerated_image_inputs(model):
@@ -557,7 +580,9 @@ def enumerated_image_inputs(model):
                 unestablished("an image with enumerated sizes whose program input fixes its height or width")
 
 
-def model_mil(model, extra_build_info=COREMLC_BUILD_INFO):
+def model_mil(model, extra_build_info=None):
+    if extra_build_info is None:
+        extra_build_info = COREMLC_BUILD_INFO[xcode_version()]
     enumerated_image_inputs(model)
     attributes = {name: function_attributes(inputs, states, model.int(1)) for name, inputs, _, states in functions(model)}
     return print_program(model.msg(502), model.int(1), extra_build_info, attributes)

@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
 {
     func main<ios16>(tensor<fp32, [1, 1, 4, 4]> x) {
             tensor<uint32, []> pixel_unshuffle_0_downscale_factor_0 = const()[name = tensor<string, []>("pixel_unshuffle_0_downscale_factor_0"), val = tensor<uint32, []>(2)];

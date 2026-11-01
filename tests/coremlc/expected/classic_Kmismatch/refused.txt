@@ -1,1 +1,1 @@
-
+coremlc: error: compiler error: Error reading protobuf spec. validator error: Unexpected number of labels "2" for the given number of examples: "3.

@@ -58,9 +58,9 @@
     ],
     "generatedClassName" : "m_rootdots",
     "userDefinedMetadata" : {
+      "k" : "v",
       "a" : "1",
-      "b" : "2",
-      "k" : "v"
+      "b" : "2"
     },
     "method" : "predict"
   }

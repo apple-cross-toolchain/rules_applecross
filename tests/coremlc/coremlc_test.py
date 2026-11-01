@@ -1,8 +1,9 @@
-"""coremlc off a Mac, against Xcode 27.0's own output for the same models (see
+"""coremlc off a Mac, against Xcode 27.2's own output for the same models (see
 docs/clean-room/coremlc.md)."""
 
 import glob
 import os
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -16,8 +17,17 @@ TOOL = RUNFILES.Rlocation("rules_applecross/toolchain/stubs/coremlc.py")
 HERE = os.path.dirname(RUNFILES.Rlocation("rules_applecross/tests/coremlc/BUILD"))
 
 
+# The Xcode the expected outputs are from: coremlc records its version in a
+# model's buildInfo, by the version.plist beside DEVELOPER_DIR, which off a
+# Mac is this stand-in.
+XCODE_ROOT = tempfile.mkdtemp(prefix="xcode-identity-")
+os.makedirs(os.path.join(XCODE_ROOT, "Contents", "Developer"))
+with open(os.path.join(XCODE_ROOT, "Contents", "version.plist"), "wb") as f:
+    plistlib.dump({"CFBundleShortVersionString": "27.2", "ProductBuildVersion": "27B52"}, f)
+
+
 def run(*args):
-    env = dict(os.environ)
+    env = dict(os.environ, DEVELOPER_DIR=os.path.join(XCODE_ROOT, "Contents", "Developer"))
     for name in [n for n in env if n.startswith("RULES_APPLECROSS_RELAX") or n == "RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"]:
         del env[name]
     return subprocess.run([sys.executable, TOOL] + list(args), env=env, capture_output=True, text=True)
