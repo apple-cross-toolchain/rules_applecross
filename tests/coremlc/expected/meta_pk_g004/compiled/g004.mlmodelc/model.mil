@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
 {
     func main<ios17>(tensor<fp32, [1, 4]> x) {
             tensor<string, []> x_to_fp16_dtype_0 = const()[name = tensor<string, []>("x_to_fp16_dtype_0"), val = tensor<string, []>("fp16")];

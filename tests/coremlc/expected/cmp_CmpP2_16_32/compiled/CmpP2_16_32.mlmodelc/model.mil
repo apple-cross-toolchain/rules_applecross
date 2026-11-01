@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}})]
 {
     func main<ios16>(tensor<fp32, [1, 32]> x) {
             tensor<fp32, [16, 32]> linear_0_weight_0_palettized = constexpr_lut_to_dense()[indices = tensor<uint8, [128]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64))), lut = tensor<fp32, [4]>([-0x1.62e452p+1, -0x1.e63908p-1, 0x1.bf1f38p-1, 0x1.591ddep+1]), name = tensor<string, []>("linear_0_weight_0_palettized"), shape = tensor<uint32, [2]>([16, 32])];

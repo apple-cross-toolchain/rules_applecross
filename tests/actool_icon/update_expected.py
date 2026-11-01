@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Writes expected/<case>.json from Xcode's own actool (on a Mac with Xcode
-27.0): each platform's output digests. Each case is compiled twice, and its
+27.2): each platform's output digests. Each case is compiled twice, and its
 digests must agree, so what's kept is what Xcode keeps from run to run."""
 
 import json

@@ -1,12 +1,36 @@
 """Shared by the asset catalog golden test and its update script."""
 
 import os
+import plistlib
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
 from xcode_equivalence import actool_diagnostics as diagnostics, differences  # noqa: E402,F401
+
+
+# The Xcode the expected outputs are from. This repository's actool records
+# that Xcode's identity and library versions, which it reads from the
+# version.plist beside DEVELOPER_DIR; off a Mac there's none, so its runs
+# are given one naming this Xcode (Xcode's own runs, `xcrun actool`, use
+# the Mac's).
+XCODE = {"CFBundleShortVersionString": "27.2", "ProductBuildVersion": "27B52"}
+_XCODE_ROOT = tempfile.mkdtemp(prefix="xcode-identity-")
+os.makedirs(os.path.join(_XCODE_ROOT, "Contents", "Developer"))
+with open(os.path.join(_XCODE_ROOT, "Contents", "version.plist"), "wb") as _f:
+    plistlib.dump(XCODE, _f)
+
+
+def tool_env(tool, env=None):
+    """The environment `tool` runs in: ours is given XCODE's identity."""
+    if tool[0] == "xcrun":
+        return env
+    env = dict(os.environ if env is None else env)
+    env["DEVELOPER_DIR"] = os.path.join(_XCODE_ROOT, "Contents", "Developer")
+    return env
+
 
 # Each platform's arguments, as rules_apple passes them.
 PLATFORMS = {
@@ -32,5 +56,5 @@ def compile_catalog(tool, catalog, icon, platform, out):
     """Runs `tool` (a command list) on `catalog`; returns (status, output)."""
     args = tool + ["--compile", out] + PLATFORMS[platform] + (["--app-icon", icon] if icon else []) + [
         "--output-format", "human-readable-text", "--output-partial-info-plist", os.path.join(out, "partial.plist"), catalog]
-    r = subprocess.run(args, capture_output=True, text=True)
+    r = subprocess.run(args, capture_output=True, text=True, env=tool_env(tool))
     return r.returncode, r.stdout + r.stderr

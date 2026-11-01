@@ -70,8 +70,8 @@
     ],
     "generatedClassName" : "B200_full",
     "userDefinedMetadata" : {
-      "kx" : "vx",
-      "b" : "overlaid"
+      "b" : "overlaid",
+      "kx" : "vx"
     },
     "method" : "predict"
   }

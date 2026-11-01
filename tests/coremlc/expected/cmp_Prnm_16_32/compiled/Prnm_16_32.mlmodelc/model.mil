@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}})]
 {
     func main<ios16>(tensor<fp32, [1, 4, 6, 6]> x) {
             tensor<fp32, [8, 4, 3, 3]> conv_0_weight_0 = const()[name = tensor<string, []>("conv_0_weight_0"), val = tensor<fp32, [8, 4, 3, 3]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64)))];

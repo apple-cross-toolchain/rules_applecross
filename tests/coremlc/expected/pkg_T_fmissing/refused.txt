@@ -1,1 +1,12 @@
 *** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: 'No input feature named: no_such_feature was found.'
+*** First throw call stack:
+(
+	0   CoreFoundation                      0x000000018b9e28c0 __exceptionPreprocess + 176
+	1   libobjc.A.dylib                     0x000000018b44060c objc_exception_throw + 88
+	2   CoreFoundation                      0x000000018b9e27b0 +[NSException exceptionWithName:reason:userInfo:] + 0
+	3   coremlcompiler                      0x0000000100c9ea94 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	4   coremlcompiler                      0x0000000100c9ec88 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	5   coremlcompiler                      0x0000000100c9fbc4 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	6   coremlcompiler                      0x0000000100cba910 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	7   coremlcompiler                      0x0000000100cb7f64 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	8   coremlcompiler                      0x0000000100cb4284 _ZN8Espresso6tracer14set_attachmentIN13EspressoLight23input_cvpixel_buffers_tEEEvNSt3__112basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEERKNS4_3mapISA_T_NS4_4lessISA_EENS8_INS4_4pairIKSA_	9   coremlcompiler                      0x0000000100530dcc coremlcompiler + 298444
+	10  coremlcompiler                      0x00000001005e5334 coremlcompiler + 1037108
+	11  coremlcompiler                      0x00000001005e3050 coremlcompiler + 1028176
+	12  dyld                                0x000000018b4dbe80 start + 6688
+)
+libc++abi: terminating due to uncaught exception of type NSException

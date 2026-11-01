@@ -4,7 +4,8 @@ Reproduced: `xcstringstool compile X.xcstrings --output-directory DIR`, as
 rules_apple runs it, for String Catalogs: each language's plain strings
 become `<lang>.lproj/X.strings`, and its plural, device and substitution
 variations become `<lang>.lproj/X.stringsdict`. Both are XML property lists,
-byte-identical to Xcode 27.0's. `toolchain/stubs/xcstringstool.py` is the
+byte-identical to Xcode 27.0's and 27.2's (which compiles every case
+the same). `toolchain/stubs/xcstringstool.py` is the
 implementation. It's pure Python, run by the ported tools' Python, so it
 behaves the same on any host.
 

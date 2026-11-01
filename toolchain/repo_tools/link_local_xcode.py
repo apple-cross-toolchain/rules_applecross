@@ -25,6 +25,7 @@ import fnmatch
 import json
 import os
 import subprocess
+import tempfile
 import sys
 
 PLATFORMS = [
@@ -294,7 +295,7 @@ class Linker(object):
                 os.path.join(self.destination, _TOOLCHAIN, "ToolchainInfo.plist"),
             )
         _copy_plists(self.source, self.xcode_app)
-        _stubify(stub_targets, self.destination, self.readtapi)
+        _stubify(stub_targets, self.destination, self.readtapi, self.source)
         self._retarget_stub_aliases()
         return len(stub_targets)
 
@@ -349,7 +350,7 @@ def _copy_plists(source, xcode_app):
             f.write(data)
 
 
-def _stubify(targets, destination, readtapi):
+def _stubify(targets, destination, readtapi, source=None):
     """Generate the .tbd stubs that no Xcode ships."""
     for source_binary, rel_tbd in targets:
         out = os.path.join(destination, rel_tbd)
@@ -364,7 +365,7 @@ def _stubify(targets, destination, readtapi):
             command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
         if _is_developer_framework(rel_tbd):
-            _strip_reexports(out)
+            _flatten_reexports(out, source_binary, readtapi, source, destination)
 
 
 def _is_developer_framework(rel):
@@ -372,29 +373,88 @@ def _is_developer_framework(rel):
         ".framework" + os.sep in rel
 
 
-def _strip_reexports(path):
-    """Drop a stub's re-export chain.
+def _flatten_reexports(path, binary, readtapi, source=None, destination=None):
+    """Fold a developer framework stub's re-exports into the stub itself.
 
-    tapi records that, say, XCTest re-exports XCTestCore, but ld64.lld cannot
-    resolve the @rpath reference into PrivateFrameworks. Cross-compilation only
-    needs the stub to exist, not the chain.
+    tapi records that, say, XCTest re-exports XCTestCore, where XCTestCase and
+    the rest of XCTest's classes live, but ld64.lld cannot resolve the @rpath
+    reference into PrivateFrameworks. So each re-exported library is stubified
+    too, from its binary beside this one, and its exported symbols become this
+    stub's: a macOS test (rules_swift's swift_test) links against XCTest's
+    classes. A re-export whose binary isn't found is dropped, as before.
     """
     try:
         with open(path) as f:
             tbd = json.load(f)
     except (OSError, ValueError):
         return
+    developer = _platform_developer_dir(binary)
+    # The re-exported binary is where the install has it, or where moving
+    # the install put it already.
+    developers = [developer] if developer else []
+    if developer and source and destination and developer.startswith(source + os.sep):
+        developers.append(os.path.join(destination, os.path.relpath(developer, source)))
     changed = False
     for key in ("main_library", "libraries"):
         obj = tbd.get(key)
         items = [obj] if isinstance(obj, dict) else (obj if isinstance(obj, list) else [])
         for item in items:
-            if "reexported_libraries" in item:
-                del item["reexported_libraries"]
-                changed = True
+            reexports = item.pop("reexported_libraries", None)
+            if reexports is None:
+                continue
+            changed = True
+            for entry in reexports:
+                for name in entry.get("names", []):
+                    item.setdefault("exported_symbols", []).extend(
+                        _reexported_symbols(name, developers, readtapi, set()))
     if changed:
         with open(path, "w") as f:
             json.dump(tbd, f)
+
+
+def _platform_developer_dir(binary):
+    """The platform's Developer directory a developer framework is in."""
+    marker = os.sep + "Developer" + os.sep + "Library" + os.sep
+    index = binary.rfind(marker)
+    return binary[: index + len(os.sep + "Developer")] if index >= 0 else None
+
+
+def _reexported_symbols(install_name, developers, readtapi, seen):
+    """The exported symbols of a re-exported library, with its own re-exports."""
+    if install_name in seen or not install_name.startswith("@rpath/"):
+        return []
+    seen.add(install_name)
+    rel = install_name[len("@rpath/"):]
+    binary = None
+    for developer in developers:
+        for library in ("Frameworks", "PrivateFrameworks"):
+            candidate = os.path.join(developer, "Library", library, rel)
+            if os.path.isfile(candidate):
+                binary = candidate
+                break
+        if binary:
+            break
+    if binary is None:
+        return []
+    with tempfile.TemporaryDirectory() as work:
+        out = os.path.join(work, "reexport.tbd")
+        if readtapi:
+            command = [readtapi, "--stubify", "--filetype=tbd-v5", binary, "-o", out]
+        else:
+            command = ["xcrun", "tapi", "stubify", "--filetype=tbd-v5", binary, "-o", out]
+        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        try:
+            with open(out) as f:
+                tbd = json.load(f)
+        except (OSError, ValueError):
+            return []
+    symbols = []
+    main = tbd.get("main_library", {})
+    symbols.extend(main.get("exported_symbols", []))
+    for entry in main.get("reexported_libraries", []):
+        for name in entry.get("names", []):
+            symbols.extend(_reexported_symbols(name, developers, readtapi, seen))
+    return symbols
 
 
 def main() -> int:

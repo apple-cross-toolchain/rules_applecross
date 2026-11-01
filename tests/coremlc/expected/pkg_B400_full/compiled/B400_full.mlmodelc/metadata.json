@@ -58,8 +58,8 @@
     ],
     "generatedClassName" : "B400_full",
     "userDefinedMetadata" : {
-      "b" : "overlaid",
-      "kx" : "vx"
+      "kx" : "vx",
+      "b" : "overlaid"
     },
     "method" : "predict"
   }

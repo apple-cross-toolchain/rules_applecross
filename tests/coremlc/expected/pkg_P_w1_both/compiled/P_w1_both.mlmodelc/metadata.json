@@ -55,8 +55,8 @@
       }
     ],
     "userDefinedMetadata" : {
-      "b" : "overlaid",
-      "kx" : "vx"
+      "kx" : "vx",
+      "b" : "overlaid"
     },
     "generatedClassName" : "P_w1_both",
     "method" : "predict"

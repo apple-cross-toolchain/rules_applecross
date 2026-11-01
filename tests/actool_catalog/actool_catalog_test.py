@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Asset catalogs through this repository's actool, against Xcode 27.0's
+"""Asset catalogs through this repository's actool, against Xcode 27.2's
 output (expected/, from update_expected.py): every file the same, up to
 what Xcode itself varies (tools/xcode_equivalence.py), and refused where
 Xcode reports errors (expected/<case>/<platform>/refused.txt).

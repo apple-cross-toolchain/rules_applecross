@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Icon Composer documents through this repository's actool, against Xcode
-27.0's output (expected/, from update_expected.py): every file and every
+27.2's output (expected/, from update_expected.py): every file and every
 rendition the same, the flattened images' pixels aside, with
 --config=relax_actool_icon_composer; refused without it.
 

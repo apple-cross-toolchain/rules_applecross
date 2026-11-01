@@ -97,17 +97,17 @@ apple_cross_toolchain = use_extension(
     "apple_cross_toolchain",
 )
 
-# Must match the Swift that built the Apple SDKs: Xcode 27.0's SDKs were built
-# by Swift 6.4.
+# Must match the Swift that built the Apple SDKs: Xcode 27.2's SDKs were built
+# by Swift 6.4.2 (toolchain/xcode_versions.bzl).
 apple_cross_toolchain.swift(
     name = "applecross_swift",
     platform_sha256 = {
-        "ubuntu24.04": "69f7b2b4dbce6090b6c92194b71149a057e16269093b5a9dded38afc4a05094e",
-        "ubuntu24.04-aarch64": "21eacfe571194717d269cc1e0030533bbee6131dfde82cd4f9cfbc2512e354a9",
+        "ubuntu24.04": "2e9ebec040ad459dd89a6d093a02d8314939135104850fae4d5c0f174fb3ba8c",
+        "ubuntu24.04-aarch64": "307772afcc0b9501faa4797eb4197076facf5768593a0d8d2b83615c95b0040e",
         # Only fetched for Swift compiles on a macOS execution platform.
-        "xcode": "8fd03185b98fe27f54a54631c2449decf75d5b466ce8e34abbd414141063c6aa",
+        "xcode": "0a7d8489900d21dbf5f0187cb570e646a4c0226d0ddef2cbde8c7f54dfe79736",
     },
-    swift_version = "6.4.0",
+    swift_version = "6.4.2",
 )
 
 apple_cross_toolchain.configure(

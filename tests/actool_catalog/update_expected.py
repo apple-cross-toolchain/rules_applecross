@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Writes expected/<case>/<platform>/ from Xcode's own actool (on a Mac with
-Xcode 27.0). Each case is compiled twice, and the runs must agree up to what
+Xcode 27.2). Each case is compiled twice, and the runs must agree up to what
 Xcode is known to vary (tools/xcode_equivalence.py). A case Xcode reports
 errors for (which fail rules_apple's build) keeps them, in refused.txt, for
 this actool to refuse."""

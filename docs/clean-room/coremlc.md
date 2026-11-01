@@ -21,7 +21,12 @@ operation table in `coremlc_ops.json`.
 
 Provenance: black-box, as [README.md](README.md) describes. Sources:
 - the outputs of Xcode 27.0's `coremlc` (Core ML compiler 3600.25.1, MIL
-  component 3600.16.1) for models made for the purpose;
+  component 3600.16.1) for models made for the purpose, and Xcode 27.2's
+  (the same compiler, MIL component 3605.1.1) for the same models: a
+  model's `buildInfo` names the MIL component of the Xcode whose SDK the
+  build targets (by its version, in its `version.plist`), and nothing else
+  differs. Any other Xcode is refused, unless `--config=relax_xcode_version`
+  records the nearest one's (27.0's before 27.2, 27.2's after);
 - its usage messages.
 - Apple's published Core ML model specification (the protobuf schema
   coremltools ships), for reading models, and its comments, for what to

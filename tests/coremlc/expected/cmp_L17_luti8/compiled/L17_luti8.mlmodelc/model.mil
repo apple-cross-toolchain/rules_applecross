@@ -1,5 +1,5 @@
 program(1.0)
-[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3600.16.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
+[buildInfo = dict<tensor<string, []>, tensor<string, []>>({{"coremlc-component-MIL", "3605.1.1"}, {"coremlc-version", "3600.25.1"}, {"coremltools-component-milinternal", ""}, {"coremltools-version", "9.0"}})]
 {
     func main<ios17>(tensor<fp32, [8, 8]> x) {
             tensor<int8, [8, 8]> constexpr_lut_to_dense_0 = constexpr_lut_to_dense()[indices = tensor<uint8, [32]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(64))), lut = tensor<int8, [16]>(BLOBFILE(path = tensor<string, []>("@model_path/weights/weight.bin"), offset = tensor<uint64, []>(192))), name = tensor<string, []>("constexpr_lut_to_dense_0"), shape = tensor<uint32, [2]>([8, 8])];

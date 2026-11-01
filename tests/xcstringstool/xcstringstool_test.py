@@ -1,4 +1,4 @@
-"""xcstringstool compile off a Mac, against Xcode 27.0's own output for the
+"""xcstringstool compile off a Mac, against Xcode 27.2's own output for the
 same String Catalogs (see docs/clean-room/xcstringstool.md)."""
 
 import os

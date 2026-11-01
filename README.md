@@ -144,7 +144,7 @@ pinned release from a `.xip` or an SDK archive you host
 This makes that archive from a `.xip`, on any host:
 
 ```
-bazel run //tools:package_sdks -- ~/Downloads/Xcode_27.xip apple-sdks-27.0.tar.gz
+bazel run //tools:package_sdks -- ~/Downloads/Xcode_27.2.xip apple-sdks-27.2.tar.gz
 ```
 
 On a Mac, the following packages the selected Xcode instead:
@@ -267,6 +267,7 @@ draw the icon from its layers:
 | `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |
 | `relax_app_intents` | `RULES_APPLECROSS_RELAX_APP_INTENTS` | App Intents not yet reproduced, left out |
 | `relax_app_intents_flexible_matching` | `RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING` | App Shortcuts Flexible Matching's assets, left out |
+| `relax_xcode_version` | `RULES_APPLECROSS_RELAX_XCODE_VERSION` | an Xcode other than 27.0 and 27.2: actool and coremlc record the library versions of the nearest one (27.0's before 27.2, 27.2's after) |
 
 `--config=relaxed` accepts all of them, and so does
 `RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`, which it also sets for

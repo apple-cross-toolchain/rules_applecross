@@ -246,14 +246,20 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
     Ok(())
 }
 
-fn xcode_identity() -> String {
-    // "Xcode 27.0 (27A266a)", from the Xcode whose SDK the build targets.
+/// "Xcode 27.2 (27B52)", from the Xcode whose SDK the build targets; refused
+/// for an Xcode whose library versions (car::library_versions) aren't
+/// known, which this actool would record wrongly, unless
+/// `--config=relax_xcode_version` accepts the nearest known Xcode's.
+fn xcode_identity() -> Result<String, String> {
     let developer = std::env::var("DEVELOPER_DIR").unwrap_or_else(|_| "/Applications/Xcode.app/Contents/Developer".into());
     let plist = Path::new(&developer).join("../version.plist");
     let v = std::fs::read(&plist).ok().and_then(|b| Value::parse(&b).ok());
     let short = v.as_ref().and_then(|v| v.get("CFBundleShortVersionString")).and_then(|x| x.as_str()).unwrap_or("27.0").to_string();
     let build = v.as_ref().and_then(|v| v.get("ProductBuildVersion")).and_then(|x| x.as_str()).unwrap_or("27A266a").to_string();
-    format!("Xcode {short} ({build})")
+    if car::library_versions(&short).is_none() && !relaxed("XCODE_VERSION") {
+        return Err(format!("Xcode {short} ({build}) is not supported by this actool: it writes the catalogs of Xcode 27.0 and 27.2 (--config=relax_xcode_version records the nearest one's library versions)"));
+    }
+    Ok(format!("Xcode {short} ({build})"))
 }
 
 fn platform_name(platform: &str) -> Result<&'static str, String> {
@@ -671,7 +677,7 @@ fn stack_icon(o: &Options, out_dir: &Path, platform: &str, scan: &Scan, outputs:
         schema_version: if tv { 2 } else { 1 },
         key_semantics: if tv { 2 } else { 4 },
         renditions,
-        xcode: xcode_identity(),
+        xcode: xcode_identity()?,
         deployment_target: o.minimum_deployment_target.clone(),
         platform: platform.into(),
     };
@@ -810,7 +816,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         schema_version: if platform == "vision" { 1 } else { 2 },
         key_semantics: if mac { 1 } else if platform == "vision" { 4 } else { 2 },
         renditions,
-        xcode: xcode_identity(),
+        xcode: xcode_identity()?,
         deployment_target: o.minimum_deployment_target.clone(),
         platform: platform.into(),
     };
