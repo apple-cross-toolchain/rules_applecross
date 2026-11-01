@@ -248,10 +248,15 @@ def _test_linking_context(sdk_platform, toolchain_label):
     platform_developer_framework_dir = platform_developer_dir + "/Library/Frameworks"
     platform_developer_lib_dir = platform_developer_dir + "/usr/lib"
 
+    # Both run paths, as rules_swift's Xcode toolchain gives a test:
+    # XCTest.framework is in Library/Frameworks, libXCTestSwiftSupport (the
+    # Swift assertions) in usr/lib. Both are weak-linked, so a library not
+    # found loads nothing and its functions are null at the first call.
     linkopts = [
         "-Wl,-weak_framework,XCTest",
         "-Wl,-weak-lXCTestSwiftSupport",
         "-Wl,-rpath," + platform_developer_framework_dir,
+        "-Wl,-rpath," + platform_developer_lib_dir,
         "-F" + platform_developer_framework_dir,
         "-L" + platform_developer_lib_dir,
     ]
