@@ -31,6 +31,10 @@ load(
     "features_for_build_modes",
 )
 load(
+    "@rules_swift//swift/internal:providers.bzl",
+    "SwiftModuleAliasesInfo",
+)
+load(
     "@rules_swift//swift/toolchains/config:action_config.bzl",
     "ActionConfigInfo",
     "add_arg",
@@ -567,7 +571,10 @@ def _swift_toolchain_impl(ctx):
             cc_infos = [swift_linkopts],
             swift_infos = [],
         ),
-        module_aliases = {},
+        # --@rules_swift//swift:module_mapping's aliases, as rules_swift's own
+        # toolchains take them: a module compiled under another name gets its
+        # `-module-alias` (Isomer's SwiftUI as IsomerCompiledSwiftUI).
+        module_aliases = ctx.attr._module_mapping[SwiftModuleAliasesInfo].aliases,
         package_configurations = [],
         requested_features = requested_features,
         root_dir = toolchain_root,
@@ -637,6 +644,10 @@ swift_toolchain = rule(
         ),
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
+        ),
+        "_module_mapping": attr.label(
+            default = Label("@rules_swift//swift:module_mapping"),
+            providers = [[SwiftModuleAliasesInfo]],
         ),
         "_worker": attr.label(
             cfg = "exec",
