@@ -17,6 +17,7 @@
 Adapted for rules_swift 3.x.
 """
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
     "@rules_swift//swift:providers.bzl",
@@ -29,6 +30,18 @@ load(
 load(
     "@rules_swift//swift/internal:features.bzl",
     "features_for_build_modes",
+)
+load(
+    "@rules_swift//swift/internal:providers.bzl",
+    "SwiftModuleAliasesInfo",
+)
+load(
+    "@rules_swift//swift/internal:utils.bzl",
+    "is_exec_config",
+)
+load(
+    "@rules_swift//swift/internal:wmo.bzl",
+    "features_from_swiftcopts",
 )
 load(
     "@rules_swift//swift/toolchains/config:action_config.bzl",
@@ -463,6 +476,11 @@ def _swift_toolchain_impl(ctx):
         configurators = [add_arg("-Xfrontend", "-enable-cross-import-overlays")],
     ))
 
+    # --@rules_swift//swift:copt (and its exec twin, for an exec build), as
+    # rules_swift's Xcode toolchain takes them: Swift flags for every compile,
+    # and the features they imply (whole-module optimization).
+    swiftcopts = list(ctx.attr._exec_copts[BuildSettingInfo].value if is_exec_config(ctx) else ctx.attr._copts[BuildSettingInfo].value)
+
     # Add all the standard rules_swift action configs.
     action_configs.extend(all_actions_action_configs())
     # As in rules_swift's Xcode toolchain: --objccopt and the compilation
@@ -474,6 +492,7 @@ def _swift_toolchain_impl(ctx):
             ctx.fragments.cpp,
             ctx.fragments.objc,
         ),
+        additional_swiftc_copts = swiftcopts,
     ))
     action_configs.extend(modulewrap_action_configs())
     action_configs.extend(symbol_graph_action_configs())
@@ -484,6 +503,7 @@ def _swift_toolchain_impl(ctx):
     # Like rules_swift's Xcode toolchain: swift.dbg and friends, which carry
     # -DDEBUG, -Onone and the debug info settings for the compilation mode.
     requested_features = features_for_build_modes(ctx, cpp_fragment = ctx.fragments.cpp)
+    requested_features.extend(features_from_swiftcopts(swiftcopts = swiftcopts))
     requested_features.extend(ctx.features)
     requested_features.extend([
         "swift.bundled_xctests",
@@ -567,7 +587,10 @@ def _swift_toolchain_impl(ctx):
             cc_infos = [swift_linkopts],
             swift_infos = [],
         ),
-        module_aliases = {},
+        # --@rules_swift//swift:module_mapping's aliases, as rules_swift's own
+        # toolchains take them: a module compiled under another name gets its
+        # `-module-alias` (Isomer's SwiftUI as IsomerCompiledSwiftUI).
+        module_aliases = ctx.attr._module_mapping[SwiftModuleAliasesInfo].aliases,
         package_configurations = [],
         requested_features = requested_features,
         root_dir = toolchain_root,
@@ -637,6 +660,18 @@ swift_toolchain = rule(
         ),
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
+        ),
+        "_copts": attr.label(
+            default = Label("@rules_swift//swift:copt"),
+            doc = "--@rules_swift//swift:copt: Swift flags for every compile.",
+        ),
+        "_exec_copts": attr.label(
+            default = Label("@rules_swift//swift:exec_copt"),
+            doc = "--@rules_swift//swift:exec_copt: the same, for an exec build.",
+        ),
+        "_module_mapping": attr.label(
+            default = Label("@rules_swift//swift:module_mapping"),
+            providers = [[SwiftModuleAliasesInfo]],
         ),
         "_worker": attr.label(
             cfg = "exec",
