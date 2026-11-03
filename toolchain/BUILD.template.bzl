@@ -420,11 +420,20 @@ filegroup(
     ],
 )
 
+# The toolchain's usr/lib file by file, without clang's resource directory:
+# the C toolchain takes that as a directory (clang_resource_files) and other
+# files under usr/lib one by one, and a sandbox can't stage a directory beside
+# files or directories inside it. Swift reaches clang's headers through
+# usr/lib/swift/clang, a link to them.
+_XCODE_TOOLCHAIN_LIB_FILES = glob(
+    [_XCODE_TOOLCHAIN_LIB + "/**"],
+    exclude = [_XCODE_TOOLCHAIN_LIB + "/clang/**"],
+)
+
 _SWIFT_COMMON_TOOLCHAIN_INPUTS = [
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/ToolchainInfo.plist",
     "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include",
-    "Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib",
-]
+] + _XCODE_TOOLCHAIN_LIB_FILES
 
 # Listed by part, not the whole platform directory: Bazel 8's darwin sandbox
 # can't stage the C toolchain's SDK directory nested inside it.
@@ -867,11 +876,7 @@ filegroup(
             _MACOS_BIN + "/strip",
         ],
         allow_empty = True,
-    ) + [
-        # The whole directory, as the Swift toolchains take it: Bazel 8's darwin
-        # sandbox can't stage files from inside it alongside it.
-        _XCODE_TOOLCHAIN_LIB,
-    ],
+    ) + _XCODE_TOOLCHAIN_LIB_FILES,
 )
 
 filegroup(

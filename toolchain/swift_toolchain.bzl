@@ -414,13 +414,17 @@ def _swift_toolchain_impl(ctx):
         _SWIFT_ACTION_SYNTHESIZE_INTERFACE,
     ]
 
-    # Actions that need -sdk (includes module interface compilation).
+    # Actions that need -sdk: those that take -target, as in rules_swift's
+    # Xcode toolchain. Symbol graph extraction and interface synthesis load
+    # the module's imports, the SDK's among them.
     sdk_actions = [
         _SWIFT_ACTION_COMPILE,
         _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
         _SWIFT_ACTION_DERIVE_FILES,
         _SWIFT_ACTION_DUMP_AST,
         _SWIFT_ACTION_PRECOMPILE_C_MODULE,
+        _SWIFT_ACTION_SYMBOL_GRAPH_EXTRACT,
+        _SWIFT_ACTION_SYNTHESIZE_INTERFACE,
     ]
 
     # Platform developer paths (needed for XCTest and other developer frameworks)
@@ -609,7 +613,9 @@ def _swift_toolchain_impl(ctx):
 
     def _entry_point_linkopts_provider(*, entry_point_name):
         return struct(
-            linkopts = ["-Wl,-alias,_{},_main".format(entry_point_name)],
+            # As rules_swift's Xcode toolchain gives it: the entry point
+            # itself, rather than an alias named _main.
+            linkopts = ["-Wl,-e,_{}".format(entry_point_name)],
         )
 
     swift_toolchain_info = SwiftToolchainInfo(
