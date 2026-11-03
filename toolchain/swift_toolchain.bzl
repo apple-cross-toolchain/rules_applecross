@@ -32,18 +32,14 @@ load(
     "SWIFT_FEATURE_ADD_DEFAULT_PRECOMPILED_MODULES",
     "SWIFT_FEATURE_COVERAGE",
     "SWIFT_FEATURE_COVERAGE_PREFIX_MAP",
-    "SWIFT_FEATURE_DEBUG_MODULE_PATH",
     "SWIFT_FEATURE_DEBUG_PREFIX_MAP",
     "SWIFT_FEATURE_DISABLE_SWIFT_SANDBOX",
     "SWIFT_FEATURE_FILE_PREFIX_MAP",
-    "SWIFT_FEATURE_INCREMENTAL_FILE_HASHING",
-    "SWIFT_FEATURE_INDEX_STORE_COMPRESS",
     "SWIFT_FEATURE_MODULE_HOME_IS_CWD",
     "SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD",
     "SWIFT_FEATURE_MODULE_MAP_NO_PRIVATE_HEADERS",
     "SWIFT_FEATURE_REMAP_XCODE_PATH",
     "SWIFT_FEATURE_STATIC_STDLIB",
-    "SWIFT_FEATURE__SUPPORTS_CONST_GATHER_PROTOCOLS_LIST",
     "SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR",
     "SWIFT_FEATURE__SUPPORTS_HERMETIC_SWIFTMODULE",
 )
@@ -104,6 +100,15 @@ load(
 )
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+
+# Features rules_swift 4.2 added for Xcode 27, by name rather than loaded
+# from its feature_names.bzl, so the toolchain still loads with rules_swift
+# 4.1, which a project may pin (isomer's fork does). Earlier rules_swift
+# doesn't know them, and so does nothing for them.
+SWIFT_FEATURE_DEBUG_MODULE_PATH = "swift.debug_module_path"
+SWIFT_FEATURE_INCREMENTAL_FILE_HASHING = "swift.incremental_file_hashing"
+SWIFT_FEATURE_INDEX_STORE_COMPRESS = "swift.index_store_compress"
+SWIFT_FEATURE__SUPPORTS_CONST_GATHER_PROTOCOLS_LIST = "swift._supports_const_gather_protocols_list"
 
 # Swift action names (matching rules_swift constants).
 _SWIFT_ACTION_COMPILE = "SwiftCompile"
