@@ -2,6 +2,29 @@
 
 load("@rules_swift//swift/internal/extensions:standalone_toolchain.bzl", "standalone_toolchain")
 load("//toolchain:apple_cross_toolchain.bzl", _apple_cross_toolchain_rule = "apple_cross_toolchain")
+load("//toolchain:xcode_versions.bzl", "SWIFT_ARCHIVES", "XCODE_VERSIONS")
+
+def _xcode_swift(config):
+    """The swift_tools and swift_tools_macos of the Swift that built
+    xcode_version's SDKs, and the repositories that hold them."""
+    if not config.xcode_version:
+        fail("apple_cross_toolchain.configure(name = \"{}\") needs swift_tools, or an xcode_version whose Swift to use".format(config.name))
+    release = XCODE_VERSIONS.get(config.xcode_version)
+    if not release:
+        fail("xcode_version \"{}\" is not in toolchain/xcode_versions.bzl: {}".format(config.xcode_version, ", ".join(sorted(XCODE_VERSIONS))))
+    name = config.name + "_swift"
+    repositories = {
+        "{}_{}".format(name, platform): struct(platform = platform, sha256 = sha256, swift_version = release.swift_version)
+        for platform, sha256 in SWIFT_ARCHIVES[release.swift_version].items()
+    }
+    return struct(
+        repositories = repositories,
+        swift_tools = {
+            "aarch64": "@{}_ubuntu24.04-aarch64//:tools".format(name),
+            "x86_64": "@{}_ubuntu24.04//:tools".format(name),
+        },
+        swift_tools_macos = "@{}_xcode//:tools".format(name),
+    )
 
 def _apple_cross_toolchain_impl(module_ctx):
     # swift.org's toolchains, one repository per platform (<name>_<platform>),
@@ -28,6 +51,23 @@ def _apple_cross_toolchain_impl(module_ctx):
             if config.name in created:
                 continue
             created[config.name] = True
+            swift_tools = config.swift_tools
+            swift_tools_macos = config.swift_tools_macos
+            if not swift_tools:
+                # The Swift that built the SDKs, from swift.org.
+                xcode_swift = _xcode_swift(config)
+                for name, repository in xcode_swift.repositories.items():
+                    if name in swift_repos:
+                        continue
+                    swift_repos[name] = True
+                    standalone_toolchain(
+                        name = name,
+                        platform = repository.platform,
+                        sha256 = repository.sha256,
+                        swift_version = repository.swift_version,
+                    )
+                swift_tools = xcode_swift.swift_tools
+                swift_tools_macos = swift_tools_macos or xcode_swift.swift_tools_macos
             kwargs = {
                 "name": config.name,
                 "apple_sdk_path": config.apple_sdk_path,
@@ -41,8 +81,8 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "ported_tools_archives": config.ported_tools_archives,
                 "ported_tools_manifest": config.ported_tools_manifest,
                 "ported_tools_urls": config.ported_tools_urls,
-                "swift_tools": config.swift_tools,
-                "swift_tools_macos": config.swift_tools_macos,
+                "swift_tools": swift_tools,
+                "swift_tools_macos": swift_tools_macos,
             }
 
             _apple_cross_toolchain_rule(**kwargs)
@@ -87,9 +127,12 @@ _configure_tag = tag_class(
                   "{name} and {sha256}. Defaults to this repository's release.",
         ),
         "swift_tools": attr.string_dict(
-            mandatory = True,
             doc = "Labels of rules_swift swift_tools targets keyed by Linux " +
-                  "CPU (\"x86_64\", \"aarch64\").",
+                  "CPU (\"x86_64\", \"aarch64\"). Without them, the " +
+                  "toolchain uses swift.org's build of the Swift that built " +
+                  "xcode_version's SDKs (toolchain/xcode_versions.bzl), in " +
+                  "repositories <name>_swift_<platform>, and its macOS build " +
+                  "as swift_tools_macos.",
         ),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's " +
