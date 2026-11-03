@@ -88,12 +88,9 @@ deviation has its own config, and `--config=relaxed` accepts them all
     )
     apple_cross_toolchain.configure(
         name = "apple_cross_toolchain",
+        xcode_version = "27.2",
         apple_sdk_urls = ["<url-to-apple-sdk-archive>"],
         apple_sdk_archive_type = "tar.xz",  # if not inferrable from URL
-        swift_tools = {
-            "aarch64": "@applecross_swift_ubuntu24.04-aarch64//:tools",
-            "x86_64": "@applecross_swift_ubuntu24.04//:tools",
-        },
     )
     use_repo(apple_cross_toolchain, "apple_cross_toolchain")
 
@@ -112,6 +109,13 @@ deviation has its own config, and `--config=relaxed` accepts them all
         "@rules_applecross//toolchain:apple_bundling_on_macos",
     )
     ```
+
+    Swift is swift.org's build of the Swift that built `xcode_version`'s
+    SDKs ([toolchain/xcode_versions.bzl](toolchain/xcode_versions.bzl)), for
+    Linux and, for Swift compiles on a macOS execution platform, for macOS.
+    To use another, declare it with `apple_cross_toolchain.swift()` and name
+    its targets in `swift_tools` and `swift_tools_macos`, as this
+    repository's `MODULE.bazel` does.
 
 3. Add the following to your `.bazelrc`:
 
@@ -158,9 +162,9 @@ tools/package-sdks.sh
 ```starlark
 apple_cross_toolchain.configure(
     name = "apple_cross_toolchain",
+    xcode_version = "27.2",
     apple_sdk_urls = ["<url-to-apple-sdk-archive>"],
     local_xcode = True,  # this skips staging the SDKs
-    swift_tools = {"x86_64": "..."},
 )
 ```
 
@@ -168,7 +172,8 @@ The Swift toolchain must match the Swift that built those SDKs, which is the
 Swift of the Xcode *one release behind* the SDKs' own: Xcode 26.6 ships the 26.5
 SDKs, and those were built by Swift 6.3.2. A mismatch shows up as `this SDK is
 not supported by the compiler` when compiling any Swift that imports a system
-framework. Set `swift_version` (and the archives' `platform_sha256`) on
+framework. `xcode_version` picks the matching Swift; with your own
+`swift_tools`, set `swift_version` (and the archives' `platform_sha256`) on
 `apple_cross_toolchain.swift()` accordingly.
 
 ## Remote Build Execution Setup (for BuildBuddy)

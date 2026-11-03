@@ -143,11 +143,11 @@ line of any of their `.swiftinterface` files says which, for example
 // swift-compiler-version: Apple Swift version 6.4.2 (swiftlang-6.4.2.1.9 clang-2100.4.1.1)
 ```
 
-Xcode 27.2's SDKs were built by Swift 6.4.2, which this repository's
-`MODULE.bazel` sets; Xcode 27.0's by Swift 6.4.0 (toolchain/xcode_versions.bzl
-lists each release's). For another Xcode, set `swift_version` on
-`apple_cross_toolchain.swift()` to match; a mismatch fails as `this SDK is
-not supported by the compiler`.
+Xcode 27.2's SDKs were built by Swift 6.4.2, Xcode 27.0's by Swift 6.4.0
+(toolchain/xcode_versions.bzl lists each release's), and `xcode_version`
+uses that Swift unless `swift_tools` names another. With your own, set
+`swift_version` on `apple_cross_toolchain.swift()` to match; a mismatch
+fails as `this SDK is not supported by the compiler`.
 
 
 ## Signing with an identity on Linux
