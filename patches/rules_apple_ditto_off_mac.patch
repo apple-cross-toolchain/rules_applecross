@@ -1,0 +1,76 @@
+ditto off a Mac.
+
+The imported dynamic framework processor archives each processed framework
+with /usr/bin/ditto (-c -k --keepParent --norsrc --noextattr), which only a
+Mac has. Where there is no ditto, it writes the same archive with zipfile:
+the framework directory's name first, each directory before its contents,
+files deflated with their permissions, symbolic links as links. bundletool
+reads only the entries' names, data, executable bits and links, which match
+ditto's for flat and versioned frameworks; the order is name order, where
+ditto's is the Mac's file system order. A Mac still uses ditto.
+
+--- a/tools/imported_dynamic_framework_processor/imported_dynamic_framework_processor.py
++++ b/tools/imported_dynamic_framework_processor/imported_dynamic_framework_processor.py
+@@ -37,6 +37,7 @@
+ import sys
+ import textwrap
+ import time
++import zipfile
+ from typing import List, Optional
+ 
+ from tools.bitcode_strip import bitcode_strip
+@@ -383,6 +384,11 @@
+ 
+   # Update modified timestamps and create archive using ditto.
+   _update_modified_timestamps(args.temp_path)
++
++  # Off a Mac there is no ditto: the same archive written with zipfile.
++  if not os.path.exists("/usr/bin/ditto"):
++    _zip_keeping_parent(args.temp_path, args.output_zip)
++    return
+ 
+   # Previous implementation of creating the processed framework archive
+   # using shutil/zip already stripped the extended attributes of the bundle.
+@@ -400,5 +406,42 @@
+       raise_on_failure=True)
+ 
+ 
++def _zip_keeping_parent(source: str, output_zip: str) -> None:
++  """Writes `source` into `output_zip` as `ditto -c -k --keepParent` does.
++
++  Entries are under the directory's own name: each directory before its
++  contents, in name order, with its permissions; files deflated with theirs;
++  symbolic links as links, their targets as their data. bundletool reads the
++  entries' names, data, executable bits and links.
++  """
++  parent = os.path.dirname(os.path.abspath(source))
++
++  def info(path: str, name: str) -> zipfile.ZipInfo:
++    st = os.lstat(path)
++    zinfo = zipfile.ZipInfo(name, time.localtime(st.st_mtime)[:6])
++    zinfo.external_attr = (st.st_mode & 0xFFFF) << 16
++    zinfo.create_system = 3  # Unix, as ditto records it.
++    return zinfo
++
++  with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as out:
++    def add(path: str) -> None:
++      name = os.path.relpath(path, parent)
++      if os.path.islink(path):
++        out.writestr(info(path, name), os.readlink(path))
++      elif os.path.isdir(path):
++        directory = info(path, name + "/")
++        directory.external_attr |= 0x10  # MS-DOS directory.
++        out.writestr(directory, b"")
++        for entry in sorted(os.listdir(path)):
++          add(os.path.join(path, entry))
++      else:
++        zinfo = info(path, name)
++        zinfo.compress_type = zipfile.ZIP_DEFLATED
++        with open(path, "rb") as f:
++          out.writestr(zinfo, f.read())
++
++    add(os.path.abspath(source))
++
++
+ if __name__ == "__main__":
+   sys.exit(main())
