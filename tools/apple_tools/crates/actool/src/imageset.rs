@@ -246,9 +246,12 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
                 // cap, the next taking the following index at this scale.
                 // When the next image would fit in the closed atlas without
                 // growing it, Xcode sometimes keeps adding a few more, in a
-                // way not established (23 probes of equal shapes: 54 x 60
-                // takes three more, 60 x 54 none): refused. Where it would
-                // grow the atlas, Xcode closes it as next-fit does.
+                // way not established: refused. Next-fit gives Xcode's atlases
+                // in 296 of 300 catalogs of equal images, 1x to 3x, the four
+                // others tall ones at 1x, and 158 of 200 of mixed sizes at
+                // 1x. Where it would grow the atlas, Xcode closes it as
+                // next-fit does. An atlas with bitmaps drawn from vector
+                // images, which aren't Xcode's anyway, is packed next-fit.
                 let mut total = 0;
                 for i in packable {
                     if planned.last().is_none_or(|a| (a.0, a.1, a.2) != (gamut, opaque, gray)) || total >= cap {
@@ -256,7 +259,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
                             let mut blocks: Vec<(u32, u32)> = last.3.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
                             let closed = crate::iconset::pack::pack(&blocks).1;
                             blocks.push((i.image.width as u32, i.image.height as u32));
-                            if crate::iconset::pack::pack(&blocks).1 == closed {
+                            if crate::iconset::pack::pack(&blocks).1 == closed && !drawn(i) && !last.3.iter().any(|j| drawn(j)) {
                                 return Err(format!("{scale}x images filling more than one atlas, where the next image fits in the one before, are not supported by this actool"));
                             }
                         }
