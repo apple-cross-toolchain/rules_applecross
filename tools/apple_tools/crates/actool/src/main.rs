@@ -18,6 +18,7 @@ mod imageset;
 mod launchimage;
 mod qsort;
 mod stack;
+mod vector;
 
 use cf::Value;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,8 @@ struct Options {
     relax_icon_composer: bool,
     /// tvOS radiosity images whose rounding may differ; see [`relaxed`].
     relax_tvos_radiosity: bool,
+    /// Vector images' bitmaps drawn by this actool; see [`relaxed`].
+    relax_vector: bool,
     /// `--launch-image`: the launch image set the bundle gets.
     launch_image: Option<String>,
     /// That set's `UILaunchImages`, for the partial Info.plist.
@@ -63,6 +66,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         output_format: "xml1".into(),
         relax_icon_composer: relaxed("ACTOOL_ICON_COMPOSER"),
         relax_tvos_radiosity: relaxed("ACTOOL_TVOS_RADIOSITY"),
+        relax_vector: relaxed("ACTOOL_VECTOR"),
         ..Default::default()
     };
     let mut it = args.into_iter();
@@ -423,7 +427,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     // A macOS Icon Composer document's smallest flattened images take the
     // first atlas at 2x.
     let reserved: &[(u32, usize)] = if mac && document.is_some() { &[(2, 1)] } else { &[] };
-    let mut images = imageset::compile(&scan.image_sets, phone && pad, platform, reserved, name_identifier)?;
+    let mut images = imageset::compile(&scan.image_sets, phone && pad, platform, reserved, o.relax_vector, name_identifier)?;
     // A sticker icon set compiles only when --app-icon names it (two
     // probes), for iOS; its name goes in the partial Info.plist.
     if let Some((name, dir)) = scan.sticker_icons.iter().find(|(n, _)| o.app_icon.as_deref() == Some(n.as_str())) {

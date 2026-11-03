@@ -17,6 +17,7 @@ rust_binary(
         "//crates/cf",
         "//crates/lzfse",
         "//xcbuild/crates/xcbuild-acdriver",
+        "@crates//:hayro",
         "@crates//:libz-sys",
         "@crates//:png",
         "@crates//:resvg",

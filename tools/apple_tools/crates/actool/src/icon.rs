@@ -17,7 +17,7 @@ pub const CANVAS: u32 = 1024;
 pub const PART_ICON_STACK: u16 = 245;
 pub const PART_ICON_GROUP: u16 = 246;
 pub const PART_GRADIENT: u16 = 247;
-const LAYOUT_VECTOR: u16 = 9;
+pub(crate) const LAYOUT_VECTOR: u16 = 9;
 const LAYOUT_ICON_STACK: u16 = 1019;
 const LAYOUT_ICON_GROUP: u16 = 1020;
 const LAYOUT_GRADIENT: u16 = 1021;
@@ -829,7 +829,7 @@ fn svg_length(v: &str) -> Result<f64, String> {
 }
 
 /// An SVG's size: its width and height, or its view box's.
-fn svg_size(data: &[u8]) -> Result<(f64, f64), String> {
+pub(crate) fn svg_size(data: &[u8]) -> Result<(f64, f64), String> {
     let doc = parse_svg(data)?;
     let root = doc.root_element();
     if root.tag_name().name() != "svg" {
@@ -961,18 +961,6 @@ fn paint_colors(doc: &roxmltree::Document, value: &str) -> Result<Vec<Color>, St
     }
 }
 
-/// A Vector rendition's payload: `RAWD`, 1 and the SVG as LZFSE compresses
-/// it when that is smaller, else 0 and the SVG itself.
-fn vector_payload(svg: &[u8]) -> Vec<u8> {
-    let compressed = lzfse::encode(svg);
-    let (flag, data) = if compressed.len() < svg.len() { (1u32, compressed) } else { (0, svg.to_vec()) };
-    let mut out = b"DWAR".to_vec();
-    out.extend_from_slice(&flag.to_le_bytes());
-    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    out.extend_from_slice(&data);
-    out
-}
-
 // --- Colours and gradients, as the catalog names them ---------------------------
 
 /// The document's colours and gradients, named in the order they are first
@@ -1047,7 +1035,7 @@ fn le32(out: &mut Vec<u8>, v: u32) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
-fn tlv(out: &mut Vec<u8>, kind: u32, data: &[u8]) {
+pub(crate) fn tlv(out: &mut Vec<u8>, kind: u32, data: &[u8]) {
     le32(out, kind);
     le32(out, data.len() as u32);
     out.extend_from_slice(data);
@@ -1055,7 +1043,7 @@ fn tlv(out: &mut Vec<u8>, kind: u32, data: &[u8]) {
 
 /// A rendition of a document's (no size, scale or pixel format): `layout`,
 /// `name`, its TLVs and its payload.
-fn data_csi(name: &str, layout: u16, flags: u32, size: u32, scale: u32, pixel_format: &[u8; 4], tlvs: &[u8], payload: &[u8]) -> Vec<u8> {
+pub(crate) fn data_csi(name: &str, layout: u16, flags: u32, size: u32, scale: u32, pixel_format: &[u8; 4], tlvs: &[u8], payload: &[u8]) -> Vec<u8> {
     let mut out = b"ISTC".to_vec();
     for v in [1, flags, size, size, scale] {
         le32(&mut out, v);
@@ -1288,10 +1276,7 @@ impl Document {
             facets.push(facet(&image.facet, car::PART_IMAGE));
             let id = name_identifier(&image.facet);
             let csi = if image.svg {
-                let mut t = Vec::new();
-                composition(&mut t, 1.0);
-                tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
-                data_csi("image.svg", LAYOUT_VECTOR, 4, 0, 0, b" GVS", &t, &vector_payload(&image.data))
+                crate::vector::csi("image.svg", crate::vector::Kind::Svg, &image.data)
             } else {
                 // As a tvOS stack's layers: opaque when its PNG has no
                 // alpha. Grey ones as GA8, opaque when every pixel is, as

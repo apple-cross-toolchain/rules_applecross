@@ -438,21 +438,27 @@ def icon_car_digest(data, approximate_rasters):
         facet = blocks[value]
         if len(facet) == 18 and struct.unpack_from("<6H", facet, 0)[2:] == (3, 1, 85, 2) and struct.unpack_from("<H", facet, 12)[0] in (_ICON_IMAGE, _ICON_STACK):
             signature[value] = ("facet", _digest(facet[:12] + facet[14:]))
-    # The appearances: their entries in order, their blocks in any order, and
-    # the leaf but for its entries' block numbers.
-    appearances = None
-    if b"APPEARANCEKEYS" in names:
-        entries = _tree_entries(blocks, names[b"APPEARANCEKEYS"])
-        leaf = struct.unpack_from(">I", blocks[names[b"APPEARANCEKEYS"]], 8)[0]
-        n = len(entries)
-        appearances = ([(_digest(blocks[k]), _digest(blocks[v])) for v, k in entries],
-                       sorted(_digest(blocks[i]) for v, k in entries for i in (v, k)),
-                       _digest(blocks[leaf][:12] + blocks[leaf][12 + 8 * n:]))
-        for v, k in entries:
-            signature[v] = signature[k] = ("appearance",)
-        signature[leaf] = ("appearance leaf",)
+    appearances = _appearances(blocks, names, signature)
     return (capacity, [(name.decode(), index) for name, index in variables], appearances,
             [signature.get(i) or _digest(blocks[i]) for i in range(1, len(blocks))])
+
+
+def _appearances(blocks, names, signature):
+    """The APPEARANCEKEYS tree, which actool writes in a random order when a
+    catalog has more than one appearance: its entries in order, their blocks
+    in any order, and the leaf but for its entries' block numbers. Those
+    blocks' places in `signature` say only what they are."""
+    if b"APPEARANCEKEYS" not in names:
+        return None
+    entries = _tree_entries(blocks, names[b"APPEARANCEKEYS"])
+    leaf = struct.unpack_from(">I", blocks[names[b"APPEARANCEKEYS"]], 8)[0]
+    n = len(entries)
+    for v, k in entries:
+        signature[v] = signature[k] = ("appearance",)
+    signature[leaf] = ("appearance leaf",)
+    return ([(_digest(blocks[k]), _digest(blocks[v])) for v, k in entries],
+            sorted(_digest(blocks[i]) for v, k in entries for i in (v, k)),
+            _digest(blocks[leaf][:12] + blocks[leaf][12 + 8 * n:]))
 
 
 def _icon_car_equivalent(xcode, ours, approximate_rasters):
@@ -460,6 +466,63 @@ def _icon_car_equivalent(xcode, ours, approximate_rasters):
         return icon_car_digest(xcode, approximate_rasters) == icon_car_digest(ours, approximate_rasters)
     except (ValueError, struct.error):
         return False
+
+
+# --- Vector images ---------------------------------------------------------------
+
+def _drawn_signature(block):
+    """A bitmap drawn from a vector image (or an atlas packing some) but for
+    its pixels: the CSI header, name and TLVs, and how its bitmap is
+    stored (MLEC, its version and method), its compressed bytes aside."""
+    tlvs = struct.unpack_from("<I", block, 168)[0]
+    payload = block[184 + tlvs:]
+    if payload[:4] != b"MLEC":
+        raise ValueError("not an MLEC bitmap")
+    return ("drawn~", block[:168], block[168:180], block[184:184 + tlvs], payload[:12])
+
+
+def vector_car_digest(data):
+    """A catalog with vector images (PDF, SVG): what an equivalent one must
+    share when the relaxed actool draws their bitmaps itself
+    (--config=relax_actool_vector) and stores a PDF as it is, where Xcode
+    draws them with CoreGraphics and writes the PDF again. Laid out as actool
+    lays out its stores, the same variables and block count, and block by
+    block the same bytes but for the drawn bitmaps' and their atlases'
+    pixels (_drawn_signature) and a PDF's bytes, the appearances as
+    _appearances allows."""
+    blocks, variables, capacity = _store(data)
+    names = dict(variables)
+    signature, drawn = {}, False
+    for value, key in _tree_entries(blocks, names[b"RENDITIONS"]):
+        block = blocks[value]
+        if len(block) < 184:
+            continue
+        flags = struct.unpack_from("<I", block, 8)[0]
+        layout = struct.unpack_from("<H", block, 36)[0]
+        if layout == 9 and block[24:28] == b" FDP":
+            tlvs = struct.unpack_from("<I", block, 168)[0]
+            signature[value] = ("pdf~", block[:180], block[184:184 + tlvs], block[184 + tlvs:184 + tlvs + 8])
+            drawn = True
+        elif layout == 12 and flags & 4:
+            signature[value] = _drawn_signature(block)
+            drawn = True
+    if not drawn:
+        raise ValueError("no vector images")
+    for value, key in _tree_entries(blocks, names[b"RENDITIONS"]):
+        block = blocks[value]
+        if len(block) >= 40 and struct.unpack_from("<H", block, 36)[0] == 1004:
+            signature[value] = _drawn_signature(block)
+    appearances = _appearances(blocks, names, signature)
+    return (capacity, [(name.decode(), index) for name, index in variables], appearances,
+            [signature.get(i) or _digest(blocks[i]) for i in range(1, len(blocks))])
+
+
+def vector_output_digest(path, data):
+    """What a vector image catalog's output at `path` must share with
+    Xcode's (vector_car_digest), comparable as JSON."""
+    if os.path.basename(path) == "Assets.car":
+        return _jsonable(vector_car_digest(data))
+    return _digest(data)
 
 
 # --- PNG and icon family files ------------------------------------------------------

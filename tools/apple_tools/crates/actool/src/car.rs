@@ -32,7 +32,7 @@ pub const PART_PACKED: u16 = 181;
 pub const PART_MULTISIZED_IMAGE: u16 = 218;
 pub const PART_ICON_IMAGE: u16 = 220;
 
-const LAYOUT_ICON_IMAGE: u16 = 12;
+pub const LAYOUT_ICON_IMAGE: u16 = 12;
 const LAYOUT_INTERNAL_LINK: u16 = 1003;
 const LAYOUT_PACKED_IMAGE: u16 = 1004;
 const LAYOUT_MULTISIZED_IMAGE: u16 = 1010;
@@ -909,6 +909,8 @@ fn color_payload_csi(name: &str, space: u32, components: &[f64], reference: Opti
 
 /// An image set's images (part 181, as image stacks').
 pub const PART_IMAGE: u16 = 181;
+/// A preserved vector image's Vector rendition (keyed by scale).
+pub const PART_VECTOR_IMAGE: u16 = 42;
 
 /// An image stack's flattened or radiosity image (layout 0), its payload
 /// given.

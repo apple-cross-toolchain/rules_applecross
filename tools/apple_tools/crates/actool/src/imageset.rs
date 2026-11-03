@@ -45,7 +45,9 @@ fn slot(dir: &std::path::Path, entry: &serde_json::Value) -> Result<(u32, u16), 
 /// `reserved`: atlases (scale, count) indexed before the catalog's, as a
 /// macOS Icon Composer document's at 2x (one of the holdout's catalogs).
 /// watchOS keeps only images without an appearance (two probes).
-pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platform: &str, reserved: &[(u32, usize)], identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
+/// `relax_vector`: vector images (PDF, SVG) drawn by this actool rather
+/// than refused (crate::vector).
+pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platform: &str, reserved: &[(u32, usize)], relax_vector: bool, identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
     let own = crate::colorset::own_idiom(platform);
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
@@ -64,11 +66,13 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
             Some("original") => 0,
             Some(v) => return Err(format!("{}: the image set info template-rendering-intent = {v} is not supported by this actool", dir.display())),
         };
+        let mut preserves = false;
         if let Some(props) = contents["properties"].as_object() {
             for (k, v) in props {
                 match (k.as_str(), v.as_str()) {
                     ("template-rendering-intent", Some("template")) => flags = 8,
                     ("template-rendering-intent", Some("original")) => flags = 0,
+                    ("preserves-vector-representation", None) if v.is_boolean() => preserves = v.as_bool() == Some(true),
                     _ => return Err(format!("{}: the image set property {k} = {v} is not supported by this actool", dir.display())),
                 }
             }
@@ -76,6 +80,18 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
         let id = identifier(name);
         let mut scales = Vec::new();
         let listed = contents["images"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let vector = |e: &serde_json::Value| e["filename"].as_str().is_some_and(|f| crate::vector::Kind::of(f).is_some() && dir.join(f).is_file());
+        if listed.iter().any(vector) {
+            if !relax_vector {
+                return Err(format!("{}: vector images (PDF, SVG) are compiled only relaxed: Xcode also draws them into bitmaps with CoreGraphics, which this actool doesn't reproduce; --config=relax_actool_vector accepts its own drawing", dir.display()));
+            }
+            vector_set(dir, listed, platform, flags, preserves, id, &mut out, &mut images)?;
+            out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
+            continue;
+        }
+        if preserves {
+            return Err(format!("{}: preserves-vector-representation without vector images is not supported by this actool", dir.display()));
+        }
         let present = |e: &&serde_json::Value| e["filename"].as_str().is_some_and(|f| dir.join(f).is_file());
         // Images without a scale (Any) beside images with one: Xcode reports
         // an error, which fails rules_apple's build. It reports it whatever
@@ -252,7 +268,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
                 }
             }
             for i in standalone {
-                out.renditions.push(if gamut == 0 { standalone_rendition(i)? } else { standalone16(i)? });
+                // A bitmap drawn from a vector image (flag 4) isn't Xcode's:
+                // the encoder may choose where Xcode's choice isn't known.
+                out.renditions.push(if gamut == 0 { crate::dmp2::tolerant(drawn(i), || standalone_rendition(i))? } else { standalone16(i)? });
             }
         }
         // A scale's atlases (per gamut) take their dimension1 in the order
@@ -266,7 +284,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
             for (k, (_, opaque, gray, atlas)) in atlases.into_iter().enumerate() {
                 let index = names.iter().position(|n| *n == (before + k).to_string()).unwrap() as u16;
                 if gamut == 0 {
-                    pack(scale, (appearance, idiom), *opaque, *gray, index, atlas, &mut out.renditions)?;
+                    crate::dmp2::tolerant(atlas.iter().any(|i| drawn(i)), || pack(scale, (appearance, idiom), *opaque, *gray, index, atlas, &mut out.renditions))?;
                 } else {
                     pack16(scale, (appearance, idiom), *opaque, index, atlas, &mut out.renditions)?;
                 }
@@ -675,6 +693,75 @@ pub fn sticker_icon(name: &str, dir: &std::path::Path, id: u16) -> Result<Option
     }))
 }
 
+/// An image set of vector images (crate::vector), for iOS or macOS: each
+/// one file, universal (or the Mac's), without a scale or at 1x, for an
+/// appearance. Xcode stores the file (a Vector rendition, part 42 at scale 1 when the set
+/// preserves its vector representation, else part 181 without a scale) and
+/// draws it at each of the platform's scales (1x to 3x on iOS, 1x and 2x on
+/// macOS), its size in points times the scale (crate::vector::pixels), into
+/// bitmaps compiled and packed as a PNG's, flagged 4 (and 256 when
+/// preserved) beside the rendering intent's flags (twenty-two probes).
+/// Images one per scale, beside bitmaps, or for an idiom are refused.
+#[allow(clippy::too_many_arguments)]
+fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &str, flags: u32, preserves: bool, id: u16, out: &mut Compiled, images: &mut Vec<SetImage>) -> Result<(), String> {
+    let scales: &[u32] = match platform {
+        "ios" => &[1, 2, 3],
+        "macosx" => &[1, 2],
+        _ => return Err(format!("{}: vector images for this platform are not supported by this actool", dir.display())),
+    };
+    let mut appearances = Vec::new();
+    for entry in listed {
+        let Some(filename) = entry["filename"].as_str() else { continue };
+        let path = dir.join(filename);
+        if !path.is_file() {
+            continue;
+        }
+        let Some(kind) = crate::vector::Kind::of(filename) else {
+            return Err(format!("{}: vector and bitmap images in one image set are not supported by this actool", dir.display()));
+        };
+        for k in entry.as_object().unwrap().keys() {
+            if !["filename", "idiom", "scale", "appearances"].contains(&k.as_str()) {
+                return Err(format!("{}: the {k} key of a vector image is not supported by this actool", dir.display()));
+            }
+        }
+        // Universal, or the Mac's own idiom on macOS (keyed as universal).
+        if !(entry["idiom"] == "universal" || (platform == "macosx" && entry["idiom"] == "mac")) {
+            return Err(format!("{}: vector images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"]));
+        }
+        if !(entry["scale"].is_null() || entry["scale"] == "1x") {
+            return Err(format!("{}: vector images at {} (one per scale) are not supported by this actool", dir.display(), entry["scale"]));
+        }
+        let appearance = crate::colorset::appearance_for(entry, platform)
+            .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
+        if appearances.contains(&appearance) {
+            return Err(format!("{}: two vector images for one appearance are not supported by this actool", dir.display()));
+        }
+        appearances.push(appearance);
+        let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let points = crate::vector::size(kind, &data).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut attrs = vec![(car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON)];
+        if preserves {
+            attrs.extend([(car::ATTR_PART, car::PART_VECTOR_IMAGE), (car::ATTR_SCALE, 1)]);
+        } else {
+            attrs.push((car::ATTR_PART, car::PART_IMAGE));
+        }
+        if appearance != 0 {
+            attrs.push((car::ATTR_APPEARANCE, appearance));
+        }
+        out.renditions.push(Rendition { attrs, csi: crate::vector::csi(filename, kind, &data) });
+        for &scale in scales {
+            let pixels = (crate::vector::pixels(kind, points.0, scale), crate::vector::pixels(kind, points.1, scale));
+            let image = crate::vector::render(kind, &data, points, scale, pixels).map_err(|e| format!("{}: {e}", path.display()))?;
+            // The slice, where it is short of the bitmap: from its top-left
+            // corner (y counting from the bottom).
+            let slice = (crate::vector::slice_pixels(points.0, scale), crate::vector::slice_pixels(points.1, scale));
+            let slicing = (slice != pixels).then(|| car::Slicing { layout: car::LAYOUT_ICON_IMAGE, slices: vec![[0, pixels.1 - slice.1, slice.0, slice.1]] });
+            images.push(SetImage { scale, appearance, idiom: 0, identifier: id, flags: flags | 4 | if preserves { 256 } else { 0 }, filename: filename.to_string(), image, extended: None, slicing });
+        }
+    }
+    Ok(())
+}
+
 fn image_attrs(i: &SetImage) -> Vec<(u16, u16)> {
     let mut attrs = vec![(car::ATTR_SCALE, i.scale as u16), (car::ATTR_IDENTIFIER, i.identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
     if i.appearance != 0 {
@@ -724,6 +811,11 @@ fn standalone_rendition(i: &SetImage) -> Result<Rendition, String> {
     }
     let data = payload(w, h, &i.image.premultiplied_bgra(), &i.filename)?;
     Ok(Rendition { attrs: image_attrs(i), csi: car::dmp2_pixels_csi(&i.filename, w as u32, h as u32, i.scale, i.flags, car::Pixels::Bgra, true, &data, i.slicing.as_ref()) })
+}
+
+/// Whether the image is a bitmap drawn from a vector image (vector_set).
+fn drawn(i: &SetImage) -> bool {
+    i.flags & 4 != 0
 }
 
 /// One atlas of a scale's packable images, as `dmp2`, and a link to it per
