@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 cf.workspace = true
+hayro = { version = "0.9", default-features = false }
 libz-sys = { version = "1", features = ["static"] }
 lzfse.workspace = true
 png = "0.17"

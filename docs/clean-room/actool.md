@@ -864,8 +864,9 @@ without a word, an image or icon whose file is missing (five probes:
 an icon set of only missing files compiles to nothing; one whose 1024 px
 image is missing but whose dark and tinted ones aren't is refused).
 
-Refused: vector images (SVG, PDF) and other properties,
-and image sets on other platforms. 90 random catalogs of one to four image sets (opaque,
+Refused: vector images (SVG, PDF) unless relaxed ([Vector
+images](#vector-images)), other properties, and image sets on other
+platforms. 90 random catalogs of one to four image sets (opaque,
 translucent, single-colour, tiled and noisy images, 20 to 420 px, with and
 without an app icon, simulator and device, deployment targets 13 to 18,
 with and without `--compress-pngs`) and six images of over 4 MiB were
@@ -935,13 +936,61 @@ properties: they become Exif and IPTC (an XMP orientation becomes Exif's;
 a title and byline, IPTC's). JPEGs with Adobe RGB or other profiles, which
 were re-encoded, are refused too.
 
-### PDF images
+### Vector images
 
-Xcode stores a PDF as it is (layout 9, pixel format `PDF `, `RAWD`) and
-also rasterizes it at 1x, 2x and 3x into `dmp2` renditions (grey and alpha
-for a black drawing). Matching those needs CoreGraphics' rasterizer and
-antialiasing, which this actool doesn't reproduce: PDF image sets are
-refused, with or without `preserves-vector-representation`.
+Xcode 27.2, 58 probes of PDF and SVG image sets on iOS and macOS, plus 15
+of packing, appearances and rendering intents beside PNG images:
+
+- **No case keeps only the vector.** Each image is stored as a Vector
+  rendition (layout 9, flags 4, no size or scale, named after the file,
+  pixel format `PDF ` or `SVG `, the composition and 0x3ee TLVs, `DWAR`, a
+  flag and the length). It is also drawn into a bitmap at each of the
+  platform's scales (1x to 3x on iOS, 1x and 2x on macOS), its size in
+  points times the scale:
+  - a PDF's sides rounded to the nearest, halves up;
+  - an SVG's rounded up, with the bitmap's slice (its 0x3e9 TLV) rounded to
+    the nearest, from its top-left corner, so 10.05 points makes an
+    11-pixel bitmap with a 10-pixel slice;
+  - an SVG under a point wide is drawn as wide as its content, which isn't
+    reproduced (fourteen probes, 0.6 to 170.05 points).
+- **The bitmaps are a PNG's in all but their flags.** They are packed
+  into atlases by the same rules, stored as GA8 for a grey drawing, and
+  stored opaque when every pixel is. Their flags are the rendering
+  intent's plus 4, and plus 256 when the set preserves the vector
+  representation.
+- **The Vector rendition's key:** part 181 without a scale; with
+  `preserves-vector-representation`, part 42 at scale 1. It takes the
+  image's appearance, as the bitmaps do.
+- **An SVG** is stored as it is, LZFSE-compressed (flag 1) when that is
+  smaller, as an Icon Composer document's SVG layers are.
+- **A PDF** is written again through CoreGraphics (flag 0): PDF 1.3, its
+  colours in an ICC-based sRGB space, its drawing re-serialized and
+  compressed, and a zero document ID and empty info, so it is deterministic.
+- **A single image without a scale, or at 1x,** is drawn at every scale.
+  Images one per scale are drawn otherwise:
+  - a PDF at its own size;
+  - an SVG at its size times the scale again, its slice covering its
+    size;
+  - with only the highest scale's file kept as the vector.
+
+Matching the bitmaps needs CoreGraphics' and CoreSVG's drawing, pixel for
+pixel, which this actool doesn't reproduce. So vector images are refused
+strictly. With `--config=relax_actool_vector` they compile:
+
+- **The bitmaps:** resvg draws SVGs and hayro draws PDFs.
+- **The PDF:** stored as it is rather than as CoreGraphics writes it, which
+  CoreUI reads all the same.
+- **The bitmaps' encoding:** where Xcode's choice between valid dmp2
+  streams isn't established (tied modes, compressed or not, a palette in
+  strips), the encoder takes one rather than refusing, for these bitmaps
+  and the atlases holding them alone.
+- **Every other byte is Xcode's:** each rendition's key, name, flags, size,
+  TLVs and storage, and the atlases' layout (tests/actool_vector, ten
+  catalogs for the simulator and macOS).
+- **Supported:** one file per appearance, universal (or the Mac's on
+  macOS), without a scale or at 1x, on iOS and macOS. Images one per scale,
+  beside bitmaps in one set, or for an idiom are refused, as are PDFs of
+  more than one page and images under a point.
 
 ## Data sets
 

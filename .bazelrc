@@ -32,6 +32,9 @@ build:remote --action_env=PATH=external/+apple_cross_toolchain+apple_cross_toolc
 build:relax_actool_icon_composer --action_env=RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER=1
 # tvOS app icons' radiosity images, whose rounding may differ from Xcode's.
 build:relax_actool_tvos_radiosity --action_env=RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY=1
+# Vector images (PDF, SVG): their bitmaps this actool's drawing, a PDF stored
+# as it is (Xcode draws them with CoreGraphics and writes the PDF again).
+build:relax_actool_vector --action_env=RULES_APPLECROSS_RELAX_ACTOOL_VECTOR=1
 # Asset catalogs this actool can't reproduce, handed to xcbuild's actool.
 build:relax_actool_xcbuild --action_env=RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD=1
 # Interface Builder files this ibtool can't reproduce, left uncompiled.
@@ -49,6 +52,7 @@ build:relax_app_intents_flexible_matching --action_env=RULES_APPLECROSS_RELAX_AP
 build:relax_xcode_version --action_env=RULES_APPLECROSS_RELAX_XCODE_VERSION=1
 build:relaxed --config=relax_actool_icon_composer
 build:relaxed --config=relax_actool_tvos_radiosity
+build:relaxed --config=relax_actool_vector
 build:relaxed --config=relax_actool_xcbuild
 build:relaxed --config=relax_ibtool
 build:relaxed --config=relax_metal

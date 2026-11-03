@@ -54,6 +54,11 @@ one fails:
   26 and later draw) are Xcode's but whose flattened images aren't
   (`--config=relax_actool_icon_composer` accepts them;
   [docs/clean-room/actool.md](docs/clean-room/actool.md)).
+- Vector images (PDF, SVG) in image sets: Xcode keeps the file and draws it
+  into a bitmap at each scale with CoreGraphics, which this actool doesn't
+  reproduce. `--config=relax_actool_vector` accepts its own drawing
+  (resvg, hayro) for one file per appearance on iOS and macOS
+  ([docs/clean-room/actool.md](docs/clean-room/actool.md#vector-images)).
 
 `--config=relax_metal` lets Metal through as an empty Metal library. String
 Catalogs compile as Xcode compiles them; the few it can't yet reproduce, it
@@ -266,6 +271,7 @@ draw the icon from its layers:
 | --- | --- | --- |
 | `relax_actool_icon_composer` | `RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER` | Icon Composer documents whose flattened images are this actool's (their layers are Xcode's) |
 | `relax_actool_tvos_radiosity` | `RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY` | tvOS radiosity images that may round apart from Xcode's |
+| `relax_actool_vector` | `RULES_APPLECROSS_RELAX_ACTOOL_VECTOR` | vector images (PDF, SVG) whose bitmaps are this actool's drawing and whose PDFs are stored as they are |
 | `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
 | `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library |

@@ -33,6 +33,26 @@ fn raw(width: usize, height: usize, data: &[u8], bpp: u8) -> Vec<u8> {
     s
 }
 
+thread_local! {
+    static TOLERANT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with the encoder tolerant when `on`: where Xcode's choice
+/// between valid streams isn't established (tied modes, compressed or not,
+/// a palette in strips), it takes one rather than refusing. For bitmaps
+/// this actool draws itself (crate::vector), whose pixels aren't Xcode's
+/// anyway.
+pub fn tolerant<T>(on: bool, f: impl FnOnce() -> T) -> T {
+    let before = TOLERANT.with(|t| t.replace(on));
+    let out = f();
+    TOLERANT.with(|t| t.set(before));
+    out
+}
+
+fn is_tolerant() -> bool {
+    TOLERANT.with(|t| t.get())
+}
+
 /// The stream to store: the smallest compressed one, or mode 1 when Xcode's
 /// compressor runs out of room. It compresses into a buffer 4 bytes smaller
 /// than the raw pixels, and LZVN's encoder gives up 9 or 10 bytes short of
@@ -45,12 +65,16 @@ fn smallest_or_raw(width: usize, height: usize, data: &[u8], bpp: u8, chosen: Ve
         Some(input) if input.len() < 4096 => lzfse::encode_lzvn(&input, data.len() - 4).is_some(),
         _ if chosen.len() + 32 <= raw_len => true,
         _ if chosen.len() >= raw_len => false,
+        _ if is_tolerant() => true,
         _ => return Err("whether this image's dmp2 stream is stored compressed is not established for this actool".into()),
     };
     if keep {
         return Ok(chosen);
     }
     if strip_rows(data.len() / height, height) < height {
+        if is_tolerant() {
+            return Ok(chosen);
+        }
         return Err("this image would be stored uncompressed in strips, which is not established for this actool".into());
     }
     Ok(raw(width, height, data, bpp))
@@ -281,13 +305,14 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
     let mut candidates = vec![lzfse_only];
     for p in [palette(width, height, bgra), palette_alpha(width, height, bgra)] {
         match p {
+            Some(p) if p.is_empty() && is_tolerant() => {}
             Some(p) if p.is_empty() => return Err("this image's dmp2 palette would be in strips, which is not established for this actool".into()),
             p => candidates.extend(p),
         }
     }
     candidates.push(striped(2, width, height, 7 * width + 1, |y, h| transform(width, h, &bgra[y * row..(y + h) * row])));
     let min = candidates.iter().map(Vec::len).min().unwrap();
-    if candidates.iter().filter(|c| c.len() == min).count() > 1 && 12 + bgra.len() > min {
+    if candidates.iter().filter(|c| c.len() == min).count() > 1 && 12 + bgra.len() > min && !is_tolerant() {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
     let chosen = candidates.into_iter().find(|c| c.len() == min).unwrap();
@@ -316,7 +341,7 @@ fn stream_gray(width: usize, height: usize, ga: &[u8]) -> Result<Vec<u8>, String
         let v: Vec<[i32; 3]> = rows.chunks_exact(2).map(|p| [p[0] as i32, 0, 0]).collect();
         transform_values(width, h, rows.chunks_exact(2).map(|p| p[1]).collect(), v, 1)
     });
-    if predictive.len() == lzfse_only.len() {
+    if predictive.len() == lzfse_only.len() && !is_tolerant() {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
     let (chosen, lzvn_input) = if predictive.len() < lzfse_only.len() {

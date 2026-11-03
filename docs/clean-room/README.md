@@ -57,7 +57,8 @@ on its own, by a `--config=relax_*` in `.bazelrc` (an `--action_env` of
 it can live with; `--config=relaxed` accepts them all. The table is in the
 top-level [README.md](../../README.md#byte-identical-output):
 - `actool`: Icon Composer documents' flattened images (their layers are
-  Xcode's); tvOS radiosity images
+  Xcode's); vector images' bitmaps, drawn by resvg and hayro, and PDFs
+  stored as they are; tvOS radiosity images
   that may round apart from Xcode's; catalogs it can't reproduce handed to
   xcbuild's actool (`tools/apple_tools/xcbuild`);
 - `ibtool`: files it can't compile left uncompiled, as the stub it replaced
