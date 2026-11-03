@@ -28,12 +28,37 @@ load(
     "SwiftToolchainInfo",
 )
 load(
+    "@rules_swift//swift/internal:feature_names.bzl",
+    "SWIFT_FEATURE_ADD_DEFAULT_PRECOMPILED_MODULES",
+    "SWIFT_FEATURE_COVERAGE",
+    "SWIFT_FEATURE_COVERAGE_PREFIX_MAP",
+    "SWIFT_FEATURE_DEBUG_MODULE_PATH",
+    "SWIFT_FEATURE_DEBUG_PREFIX_MAP",
+    "SWIFT_FEATURE_DISABLE_SWIFT_SANDBOX",
+    "SWIFT_FEATURE_FILE_PREFIX_MAP",
+    "SWIFT_FEATURE_INCREMENTAL_FILE_HASHING",
+    "SWIFT_FEATURE_INDEX_STORE_COMPRESS",
+    "SWIFT_FEATURE_MODULE_HOME_IS_CWD",
+    "SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD",
+    "SWIFT_FEATURE_MODULE_MAP_NO_PRIVATE_HEADERS",
+    "SWIFT_FEATURE_REMAP_XCODE_PATH",
+    "SWIFT_FEATURE_STATIC_STDLIB",
+    "SWIFT_FEATURE__SUPPORTS_CONST_GATHER_PROTOCOLS_LIST",
+    "SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR",
+    "SWIFT_FEATURE__SUPPORTS_HERMETIC_SWIFTMODULE",
+)
+load(
     "@rules_swift//swift/internal:features.bzl",
+    "default_features_for_toolchain",
     "features_for_build_modes",
 )
 load(
     "@rules_swift//swift/internal:providers.bzl",
     "SwiftModuleAliasesInfo",
+)
+load(
+    "@rules_swift//swift/internal:target_triples.bzl",
+    "target_triples",
 )
 load(
     "@rules_swift//swift/internal:utils.bzl",
@@ -283,6 +308,53 @@ def _test_linking_context(sdk_platform, toolchain_label):
         ]),
     )
 
+def _developer_dir_prefix_maps(developer_dir):
+    """The Developer directory's prefix maps, as rules_swift's Xcode toolchain
+    gives them: in debug info, coverage mappings and the rest, each with the
+    features that ask for it."""
+    actions = [
+        _SWIFT_ACTION_COMPILE,
+        _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
+        _SWIFT_ACTION_DERIVE_FILES,
+        _SWIFT_ACTION_DUMP_AST,
+        _SWIFT_ACTION_PRECOMPILE_C_MODULE,
+    ]
+    mapping = developer_dir + "=/PLACEHOLDER_DEVELOPER_DIR"
+    return [
+        ActionConfigInfo(
+            actions = actions,
+            configurators = [add_arg("-debug-prefix-map", mapping)],
+            features = [[SWIFT_FEATURE_REMAP_XCODE_PATH, SWIFT_FEATURE_DEBUG_PREFIX_MAP, SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR]],
+        ),
+        ActionConfigInfo(
+            actions = actions,
+            configurators = [add_arg("-coverage-prefix-map", mapping)],
+            features = [[
+                SWIFT_FEATURE_REMAP_XCODE_PATH,
+                SWIFT_FEATURE_COVERAGE_PREFIX_MAP,
+                SWIFT_FEATURE_COVERAGE,
+                SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR,
+            ]],
+        ),
+        ActionConfigInfo(
+            actions = actions,
+            configurators = [add_arg("-file-prefix-map", mapping)],
+            features = [
+                SWIFT_FEATURE_FILE_PREFIX_MAP,
+                SWIFT_FEATURE_REMAP_XCODE_PATH,
+                SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR,
+            ],
+        ),
+    ]
+
+def _is_xcode_at_least_version(xcode_config, version):
+    """Whether the build's Xcode is at least `version`, as rules_swift's Xcode
+    toolchain decides it (a path for a version counts as the newest)."""
+    current = xcode_config.xcode_version()
+    if str(current).startswith("/"):
+        return True
+    return current >= apple_common.dotted_version(version)
+
 def _swift_toolchain_impl(ctx):
     developer_dir = ctx.attr.toolchain_path_prefix + "Xcode.app/Contents/Developer"
     toolchain_path = developer_dir + "/Toolchains/XcodeDefault.xctoolchain"
@@ -400,23 +472,7 @@ def _swift_toolchain_impl(ctx):
                 _make_resource_directory_configurator(developer_dir),
             ],
         ),
-        # Debug prefix map for reproducible debug info
-        ActionConfigInfo(
-            actions = [
-                _SWIFT_ACTION_COMPILE,
-                _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
-                _SWIFT_ACTION_DERIVE_FILES,
-                _SWIFT_ACTION_DUMP_AST,
-                _SWIFT_ACTION_PRECOMPILE_C_MODULE,
-            ],
-            configurators = [
-                add_arg(
-                    "-debug-prefix-map",
-                    "__BAZEL_XCODE_DEVELOPER_DIR__=/PLACEHOLDER_DEVELOPER_DIR",
-                ),
-            ],
-        ),
-    ]
+    ] + _developer_dir_prefix_maps("__BAZEL_XCODE_DEVELOPER_DIR__")
 
     if ctx.attr.exec_os == "macos":
         # Apple's macro plugins (SwiftUI's @State, for one) ship as macOS
@@ -427,16 +483,7 @@ def _swift_toolchain_impl(ctx):
         plugin_platform_dir = "{}/Platforms/{}.platform/Developer".format(xcode_link, info.sdk_platform_device)
         # There __BAZEL_XCODE_DEVELOPER_DIR__ is the installed Xcode, not the
         # staged tree the SDKs come from.
-        action_configs.append(ActionConfigInfo(
-            actions = [
-                _SWIFT_ACTION_COMPILE,
-                _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
-                _SWIFT_ACTION_DERIVE_FILES,
-                _SWIFT_ACTION_DUMP_AST,
-                _SWIFT_ACTION_PRECOMPILE_C_MODULE,
-            ],
-            configurators = [add_arg("-debug-prefix-map", developer_dir + "=/PLACEHOLDER_DEVELOPER_DIR")],
-        ))
+        action_configs.extend(_developer_dir_prefix_maps(developer_dir))
         action_configs.append(ActionConfigInfo(
             actions = [
                 _SWIFT_ACTION_COMPILE,
@@ -499,34 +546,36 @@ def _swift_toolchain_impl(ctx):
     action_configs.extend(compile_module_interface_action_configs())
     action_configs.extend(synthesize_interface_action_configs())
 
-    # Requested features for Swift compilation
-    # Like rules_swift's Xcode toolchain: swift.dbg and friends, which carry
-    # -DDEBUG, -Onone and the debug info settings for the compilation mode.
+    # Requested features, as rules_swift's Xcode toolchain requests them: the
+    # compilation mode's (swift.dbg and friends, with -enable-testing only
+    # outside opt), the defaults its toolchains share (whole-module
+    # optimization in opt, among others), and those it adds for Xcode.
     requested_features = features_for_build_modes(ctx, cpp_fragment = ctx.fragments.cpp)
     requested_features.extend(features_from_swiftcopts(swiftcopts = swiftcopts))
     requested_features.extend(ctx.features)
+    requested_features.extend(default_features_for_toolchain(
+        target_triple = target_triples.parse(target_triple),
+    ))
     requested_features.extend([
-        "swift.bundled_xctests",
-        "swift.enable_testing",
-        "swift.module_map_no_private_headers",
-        # As rules_swift's own toolchains do. Without it the .swiftdoc is not a
-        # declared output, yet the worker still copies one beside the module
-        # on every incremental compile; on macOS, where copyfile(3) will not
-        # replace a file, the second compile fails with "File exists".
-        "swift.emit_swiftdoc",
-        "swift.enable_batch_mode",
-        "swift.use_response_files",
-        "swift.debug_prefix_map",
-        "swift.supports_library_evolution",
-        "swift.supports_private_deps",
-        "swift.enable_skip_function_bodies",
-        "swift.experimental.AccessLevelOnImport",
-        "swift.remap_xcode_path",
+        SWIFT_FEATURE_MODULE_MAP_NO_PRIVATE_HEADERS,
+        # Hermetic PCM files (no absolute workspace paths).
+        SWIFT_FEATURE_MODULE_HOME_IS_CWD,
+        SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR,
+        SWIFT_FEATURE_ADD_DEFAULT_PRECOMPILED_MODULES,
     ])
+    if _is_xcode_at_least_version(xcode_config, "26.4"):
+        requested_features.append(SWIFT_FEATURE__SUPPORTS_HERMETIC_SWIFTMODULE)
+    if _is_xcode_at_least_version(xcode_config, "27.0"):
+        requested_features.extend([
+            SWIFT_FEATURE_DEBUG_MODULE_PATH,
+            SWIFT_FEATURE_INCREMENTAL_FILE_HASHING,
+            SWIFT_FEATURE_INDEX_STORE_COMPRESS,
+            SWIFT_FEATURE__SUPPORTS_CONST_GATHER_PROTOCOLS_LIST,
+        ])
     if ctx.attr.exec_os == "macos":
         # As in rules_swift's Xcode toolchain: the compiler cannot run macro
         # plugins in its own sandbox from inside Bazel's.
-        requested_features.append("swift.disable_swift_sandbox")
+        requested_features.append(SWIFT_FEATURE_DISABLE_SWIFT_SANDBOX)
 
     # Collect toolchain files as additional tools for sandbox access.
     swift_tools = ctx.attr.swift_tools[SwiftToolsInfo]
@@ -613,7 +662,8 @@ def _swift_toolchain_impl(ctx):
         ),
         tool_configs = tool_configs,
         unsupported_features = ctx.disabled_features + [
-            "swift.module_map_home_is_cwd",
+            SWIFT_FEATURE_STATIC_STDLIB,
+            SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD,
         ],
     )
 
