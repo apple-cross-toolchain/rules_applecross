@@ -151,7 +151,10 @@ fn palette(width: usize, height: usize, bgra: &[u8]) -> Option<Vec<u8>> {
 /// of three channels (each entry's fourth byte 0), then the alpha and index
 /// planes compressed together (the WebRTC incognito banner: 152 colours
 /// where its colours with alpha number 204).
-fn palette_alpha(width: usize, height: usize, bgra: &[u8]) -> Option<Vec<u8>> {
+/// Also whether its planes would need strips (more than 2 MiB together),
+/// where the stream given is unsplit: how such a stream is split isn't
+/// established.
+fn palette_alpha(width: usize, height: usize, bgra: &[u8]) -> Option<(Vec<u8>, bool)> {
     let pixels: Vec<u32> = bgra.chunks_exact(4).map(|p| u32::from_le_bytes([p[0], p[1], p[2], 0])).collect();
     let mut colours = pixels.clone();
     colours.sort_unstable();
@@ -159,9 +162,7 @@ fn palette_alpha(width: usize, height: usize, bgra: &[u8]) -> Option<Vec<u8>> {
     if colours.len() > 256 {
         return None;
     }
-    if strip_rows(2 * width, height) < height {
-        return Some(Vec::new());
-    }
+    let striped = strip_rows(2 * width, height) < height;
     let xor = |c: &u32| c.to_le_bytes().iter().fold(0u8, |a, b| a ^ b);
     qsort(&mut colours, |a, b| xor(a).cmp(&xor(b)));
     let mut index = std::collections::HashMap::new();
@@ -177,7 +178,7 @@ fn palette_alpha(width: usize, height: usize, bgra: &[u8]) -> Option<Vec<u8>> {
     let mut data: Vec<u8> = bgra.chunks_exact(4).map(|p| p[3]).collect();
     data.extend(pixels.iter().map(|p| index[p]));
     compressed(&mut s, &data);
-    Some(s)
+    Some((s, striped))
 }
 
 /// C's truncating division by 2.
@@ -303,14 +304,25 @@ fn stream(width: usize, height: usize, bgra: &[u8]) -> Result<Vec<u8>, String> {
     let rows3 = std::cmp::min(height, (1 << 21) / row);
     let lzfse_only = striped_rows(3, width, height, rows3, 4, |y, h| bgra[y * row..(y + h) * row].to_vec());
     let mut candidates = vec![lzfse_only];
-    for p in [palette(width, height, bgra), palette_alpha(width, height, bgra)] {
-        match p {
-            Some(p) if p.is_empty() && is_tolerant() => {}
-            Some(p) if p.is_empty() => return Err("this image's dmp2 palette would be in strips, which is not established for this actool".into()),
-            p => candidates.extend(p),
-        }
+    match palette(width, height, bgra) {
+        Some(p) if p.is_empty() && is_tolerant() => {}
+        Some(p) if p.is_empty() => return Err("this image's dmp2 palette would be in strips, which is not established for this actool".into()),
+        p => candidates.extend(p),
     }
-    candidates.push(striped(2, width, height, 7 * width + 1, |y, h| transform(width, h, &bgra[y * row..(y + h) * row])));
+    let predictive = striped(2, width, height, 7 * width + 1, |y, h| transform(width, h, &bgra[y * row..(y + h) * row]));
+    // A palette with alpha apart whose planes need strips: splitting only
+    // adds to it (a length, and less for the compressor to share), so where
+    // even unsplit it is no smaller than another stream it can't be chosen,
+    // as Xcode doesn't choose it (a launch screen's two 1125 x 932 chunks);
+    // where it might be, how Xcode splits it isn't established.
+    match palette_alpha(width, height, bgra) {
+        Some((p, false)) => candidates.push(p),
+        Some((p, true)) if p.len() < candidates.iter().map(Vec::len).chain([predictive.len()]).min().unwrap() && !is_tolerant() => {
+            return Err("this image's dmp2 palette with alpha apart might be chosen in strips, which is not established for this actool".into());
+        }
+        _ => {}
+    }
+    candidates.push(predictive);
     let min = candidates.iter().map(Vec::len).min().unwrap();
     if candidates.iter().filter(|c| c.len() == min).count() > 1 && 12 + bgra.len() > min && !is_tolerant() {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());

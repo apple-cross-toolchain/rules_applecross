@@ -517,7 +517,15 @@ the examined streams have it).
 
 Pixels are premultiplied as `(c * a + 127) / 255`, after any colour
 conversion (below). A palette that would
-need strips (over 2 MiB of indices) is not established and is refused. Every layer in the
+need strips (over 2 MiB of indices) is not established and is refused.
+A palette with alpha apart needs strips sooner, its alpha and index planes
+being 2 bytes a pixel: in a full 4 MiB chunk whenever twice the width
+isn't a multiple of 16. Splitting can only make a stream larger (a length
+more, and less for the compressor to share). So where it is no smaller
+unsplit than another stream it can't be chosen, and isn't: a launch
+screen's two 1125 x 932 chunks, which Xcode stores as plain palettes, and
+14 probes of chunked images, byte-identical. Where it might be smaller,
+how Xcode splits it isn't established, and the image is refused. Every layer in the
 examples uses mode 4. Where a row's predictor isn't established and mode 2
 could be the smallest, the image is refused; so are ties between modes.
 Mode 1 stores the pixels as they are after the header, with no length
