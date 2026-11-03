@@ -506,6 +506,8 @@ def vector_car_digest(data):
         elif layout == 12 and flags & 4:
             signature[value] = _drawn_signature(block)
             drawn = True
+        elif layout == 9 and block[24:28] == b" GVS":
+            drawn = True
     if not drawn:
         raise ValueError("no vector images")
     for value, key in _tree_entries(blocks, names[b"RENDITIONS"]):

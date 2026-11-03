@@ -984,8 +984,15 @@ strictly. With `--config=relax_actool_vector` they compile:
   streams isn't established (tied modes, compressed or not, a palette in
   strips), the encoder takes one rather than refusing, for these bitmaps
   and the atlases holding them alone.
+- **Their atlases:** packed next-fit, closed once their area reaches the
+  cap, where the next image would fit in the closed atlas. Image sets of
+  bitmaps refuse that case, as Xcode sometimes keeps adding a few more
+  there. Next-fit gives Xcode's atlases in 296 of 300 catalogs of equal
+  images (1x to 3x; the four others tall ones at 1x) and in 158 of 200 of
+  mixed sizes at 1x. An app's 23 equal SVG icons, and its whole catalog,
+  compile with Xcode's atlases.
 - **Every other byte is Xcode's:** each rendition's key, name, flags, size,
-  TLVs and storage, and the atlases' layout (tests/actool_vector, ten
+  TLVs and storage, and the atlases' layout (tests/actool_vector, eleven
   catalogs for the simulator and macOS).
 - **Supported:** one file per appearance, universal (or the Mac's on
   macOS), without a scale or at 1x, on iOS and macOS. Images one per scale,
