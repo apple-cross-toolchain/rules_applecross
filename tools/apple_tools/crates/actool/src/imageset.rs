@@ -715,7 +715,10 @@ pub fn sticker_icon(name: &str, dir: &std::path::Path, id: u16) -> Result<Option
 ///   times `t`; an SVG at its size times `t` (Xcode doesn't divide), its
 ///   slice its size over `f` times `t`.
 ///
-/// Vector images beside bitmaps are refused.
+/// A PNG at 2x or 3x beside one universal 1x vector image takes its scale's
+/// place, as a bitmap of its own (three probes, on iOS, macOS and tvOS);
+/// beside one without a scale Xcode reports an error; other mixes are
+/// refused.
 #[allow(clippy::too_many_arguments)]
 fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &str, phone_and_pad: bool, flags: u32, preserves: bool, id: u16, out: &mut Compiled, images: &mut Vec<SetImage>) -> Result<(), String> {
     let scales: &[u32] = match platform {
@@ -726,6 +729,7 @@ fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &st
     };
     // Per (appearance, idiom): its files, (scale or 0 without one, file).
     type Files = Vec<(u32, String)>;
+    let mut bitmaps: Files = Vec::new();
     /// A file's kind, bytes and size in points.
     type Read = (crate::vector::Kind, Vec<u8>, (f64, f64));
     let mut groups: Vec<((u16, u16), Files)> = Vec::new();
@@ -734,8 +738,17 @@ fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &st
         if !dir.join(filename).is_file() {
             continue;
         }
+        // A PNG at a scale beside a 1x vector image takes that scale's place;
+        // checked below, once the set's files are known.
         if crate::vector::Kind::of(filename).is_none() {
-            return Err(format!("{}: vector and bitmap images in one image set are not supported by this actool", dir.display()));
+            let png = filename.to_ascii_lowercase().ends_with(".png");
+            let scale = entry["scale"].as_str().and_then(|s| s.strip_suffix('x')).and_then(|n| n.parse::<u32>().ok());
+            let plain = entry.as_object().unwrap().keys().all(|k| ["filename", "idiom", "scale"].contains(&k.as_str()));
+            if !png || scale.is_none_or(|s| s < 2 || s > 3) || !plain || entry["idiom"] != "universal" || preserves {
+                return Err(format!("{}: vector and bitmap images in one image set are not supported by this actool but for PNGs at 2x or 3x beside a universal 1x vector image", dir.display()));
+            }
+            bitmaps.push((scale.expect("checked"), filename.to_string()));
+            continue;
         }
         for k in entry.as_object().unwrap().keys() {
             if !["filename", "idiom", "scale", "appearances"].contains(&k.as_str()) {
@@ -768,6 +781,26 @@ fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &st
             return Err(format!("{}: two vector images for one scale, or one without a scale beside others, for one appearance and idiom are not supported by this actool", dir.display()));
         }
         files.push((scale, filename.to_string()));
+    }
+    // Beside one without a scale, Xcode reports the error it reports for a
+    // bitmap without one (a probe), which fails rules_apple's build.
+    if !bitmaps.is_empty() && groups.iter().any(|g| g.1.iter().any(|f| f.0 == 0)) {
+        return Err(format!("{}: error: Image set has a child with bitmap content and the \"Any\" scale. The image set also has children with specific scales and content. Please remove the content with specific scales or change the content of the \"Any\" scale to vector content.", dir.display()));
+    }
+    if !bitmaps.is_empty() && (groups.len() != 1 || groups[0].0 != (0, 0) || groups[0].1.iter().any(|f| f.0 != 1)) {
+        return Err(format!("{}: PNGs beside vector images other than one universal 1x one are not supported by this actool", dir.display()));
+    }
+    for (scale, name) in &bitmaps {
+        if !scales.contains(scale) {
+            continue;
+        }
+        let path = dir.join(name);
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let (image, extended) = image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        if extended.is_some() {
+            return Err(format!("{}: a PNG with colours outside sRGB beside vector images is not supported by this actool", path.display()));
+        }
+        images.push(SetImage { scale: *scale, appearance: 0, idiom: 0, identifier: id, flags, filename: name.clone(), image, extended: None, slicing: None });
     }
     for ((appearance, idiom), files) in groups {
         // The platform's: a file without a scale is its 1x.
@@ -805,6 +838,9 @@ fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &st
         }
         let one = files.iter().find(|f| f.0 == 1);
         for &scale in scales {
+            if bitmaps.iter().any(|b| b.0 == scale) {
+                continue;
+            }
             let (from_scale, name) = match used.iter().find(|f| f.0 == scale) {
                 Some(f) => (f.0, &f.1),
                 None => one.or(Some(highest)).map(|f| (f.0, &f.1)).expect("a file"),
