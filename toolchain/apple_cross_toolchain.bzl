@@ -688,8 +688,10 @@ def _apple_cross_toolchain_impl(rctx):
     result = rctx.execute([
         _python3(rctx),
         str(_toolchain_path(rctx, "repo_tools/layering_check_modulemap.py")),
-        developer_dir,
         "layering_check.modulemap",
+        developer_dir,
+        # A macOS host's own LLVM (_stage_macos_llvm): its clang headers.
+        "macos_toolchain",
     ])
     if result.return_code != 0:
         fail("Failed to write the layering check's module map: " + result.stderr)
