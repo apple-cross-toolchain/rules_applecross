@@ -57,7 +57,8 @@ one fails:
   Xcode's model editor saves there
   ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
 - Reality Composer content (`realitytool`);
-- `.xib` files other than an iOS one holding a view or a table view cell
+- `.xib` files other than an iOS one holding a view, a table view cell or a
+  collection view cell
   ([docs/clean-room/ibtool.md](docs/clean-room/ibtool.md#xibs));
 - tvOS app icons, and Icon Composer icons, whose layers (all iOS and macOS
   26 and later draw) are Xcode's but whose flattened images aren't

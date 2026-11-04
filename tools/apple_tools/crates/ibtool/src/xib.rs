@@ -42,22 +42,27 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
                 responder = Some(o.attribute("id").ok_or("a first responder without an id")?);
             }
-            ("view" | "tableViewCell", _) if view.is_none() => view = Some(o),
+            ("view" | "tableViewCell" | "collectionViewCell", _) if view.is_none() => view = Some(o),
             (tag, _) => return fail(format!("a xib's top-level {tag} beside its one view is not supported by this ibtool")),
         }
     }
     let owner = owner.ok_or("a xib without a File's Owner is not supported by this ibtool")?;
     let view = view.ok_or("a xib without a top-level view is not supported by this ibtool")?;
 
-    // A table view cell is a prototype cell's nib, with its safe-area guide.
-    if view.has_tag_name("tableViewCell") {
+    // A cell is a prototype cell's nib, with its safe-area guide.
+    if view.has_tag_name("tableViewCell") || view.has_tag_name("collectionViewCell") {
         if elements(owner).next().is_some() {
-            return fail("a File's Owner's connections beside a table view cell are not supported by this ibtool");
+            return fail("a File's Owner's connections beside a cell are not supported by this ibtool");
         }
         let safe_area = |c: &Node| c.has_tag_name("viewLayoutGuide") && c.attribute("key") == Some("safeArea");
         let cell = without(xml, view, |c| canvas(c) || safe_area(c));
         let document = format!("{}{cell}{}", &xml[..view.range().start], &xml[view.range().end..]);
-        return crate::storyboard::compile_xib_cell(&document, module, localizable, elements(view).any(|c| safe_area(&c)));
+        let guide = elements(view).any(|c| safe_area(&c));
+        return if view.has_tag_name("tableViewCell") {
+            crate::storyboard::compile_xib_cell(&document, module, localizable, guide)
+        } else {
+            crate::storyboard::compile_xib_collection_cell(&document, module, localizable, guide)
+        };
     }
     let owner_id = owner.attribute("id").ok_or("a File's Owner without an id")?;
     if view.attribute("key").is_some() {

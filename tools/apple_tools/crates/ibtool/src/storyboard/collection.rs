@@ -221,7 +221,7 @@ fn collection_values(
     if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
-            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, module, *c, placeholder.is_some())?;
+            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, module, *c, placeholder.is_some(), None)?;
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -393,12 +393,15 @@ fn custom_layout(nib: &mut Nib, module: Option<&str>, layout: Node) -> Result<Ob
 
 /// A prototype cell's nib: the cell, its content view and the content
 /// view's subviews.
-fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool) -> Result<Vec<u8>, String> {
+/// A xib's cell (`xib`: whether it has a safe-area guide) keeps its colours
+/// exact and lists its guide after its content view.
+pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
     only_attributes(cell, &[
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
+        ("insetsLayoutMarginsFromSafeArea", Some("NO")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections", "constraints"])?;
+    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections", "constraints", "userDefinedRuntimeAttributes"])?;
     if let Some(c) = children(cell, "color").find(|c| c.attribute("key") != Some("backgroundColor")) {
         return fail(format!("a collection view cell's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
     }
@@ -454,6 +457,7 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     };
 
     let mut nib = Nib::new(platform, color_matched, localizable);
+    nib.exact_colors = xib.is_some();
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     // A cell's segue is its placeholder's.
@@ -466,7 +470,8 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let mut scene = Scene::new(cell_id, module, if old { cell } else { content }, Some(content_name.clone()));
     // A content view holding constraints is pinned to its cell's edges by
     // constraints Xcode makes, which the objects leave out.
-    let pinned = held || children(content, "constraints").any(|c| c.has_children());
+    // A xib's is pinned whatever it holds (five probes).
+    let pinned = held || children(content, "constraints").any(|c| c.has_children()) || xib.is_some();
     let cf = frame(content)?;
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
@@ -502,6 +507,12 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         }
         if let Some(own) = held_constraints(&mut nib, &mut scene, cell, content, &content_name)? {
             cv.push(("UIViewAutolayoutConstraints", own));
+        }
+        // A xib's cell with a safe-area guide and constraints of its own
+        // archives its content view's guide (four probes).
+        if xib == Some(true) && held {
+            let guide = super::named_safe_area_guide(&mut nib, &content_name, &format!("{content_name} safe area guide"));
+            cv.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![guide])));
         }
     } else {
         cv.push(("UIMultipleTouchEnabled", Value::Bool(true)));
@@ -560,6 +571,10 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
         }
         values.push(("UIViewAutolayoutConstraints", nib.array("NSMutableArray", pins)));
     }
+    // After the constraints (one probe).
+    if cell.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+        values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+    }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIReuseIdentifier", nib.string(attr(cell, "reuseIdentifier")?)));
@@ -587,6 +602,9 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     objects.push(reference(cell_name.clone()));
     if !old {
         objects.push(reference(content_name.clone()));
+    }
+    if xib == Some(true) {
+        objects.push(super::table::cell_safe_area(&mut nib));
     }
     // The old format's content view lists its subviews before its
     // constraints (two probes).
@@ -638,6 +656,9 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
             ("UIEventMask", Value::Int(*mask)),
         ])));
     }
+    // The cell's own runtime attributes, as its views' are.
+    let own = super::runtime_attributes(&mut nib, cell, &cell_name)?;
+    scene.pairs.extend(own.into_iter().map(|p| (cell_name.clone(), p)));
     // Pairs of several views by their places, as decimal strings.
     let listed = |name: &String| objects.iter().position(|o| matches!(o, Value::Ref(r) if r == name)).map(|i| (i + 1).to_string());
     if scene.pairs.iter().any(|p| listed(&p.0).is_none()) {

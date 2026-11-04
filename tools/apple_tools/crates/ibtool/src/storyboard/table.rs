@@ -735,7 +735,7 @@ struct CellParts<'a> {
 /// prototype's nib, the controller in a static table's.
 fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, target: &'a str) -> Result<(Value, CellParts<'a>), String> {
     only_attributes(cell, &[
-        ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
+        ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
         ("accessoryType", None), ("reuseIdentifier", None), ("rowHeight", None), ("customClass", None), ("customModule", None),
         ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("restorationIdentifier", None),
@@ -916,7 +916,12 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         values.push(("UIBackgroundColor", nib.system_color("tableCellPlainBackgroundColor", &SystemColor::Gray([1.0, 1.0]))));
         values.push(("UIDidEncodeCompatibilityBackgroundColor", Value::Bool(true)));
     }
-    values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIOpaque", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+    values.push(("UIDeepDrawRect", Value::Bool(true)));
+    // Left out for a transparent cell (one probe).
+    if cell.attribute("opaque").is_none() {
+        values.push(("UIOpaque", Value::Bool(true)));
+    }
+    values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     if mask != 0 {
         values.push(("UIAutoresizingMask", Value::Int(mask)));
     }
