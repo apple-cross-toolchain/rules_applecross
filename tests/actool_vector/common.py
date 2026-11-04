@@ -20,13 +20,26 @@ tool_env = _icon.tool_env
 PLATFORMS = {
     "sim": ["--platform", "iphonesimulator", "--target-device", "iphone", "--target-device", "ipad"],
     "mac": ["--platform", "macosx", "--target-device", "mac"],
+    "tv": ["--platform", "appletvsimulator", "--target-device", "tv"],
+    "watch": ["--platform", "watchsimulator", "--target-device", "watch"],
+    "vision": ["--platform", "xrsimulator", "--target-device", "vision"],
 }
 
 
 def cases():
-    """(case, its catalog) of each case, for every platform."""
+    """(case, its catalog) of each case."""
     for case in sorted(os.listdir(os.path.join(HERE, "cases"))):
         yield case, os.path.join(HERE, "cases", case, "Assets.xcassets")
+
+
+def platforms(case):
+    """The platforms a case is compiled for: those its platforms.txt names,
+    else the simulator and macOS."""
+    path = os.path.join(HERE, "cases", case, "platforms.txt")
+    if os.path.exists(path):
+        with open(path) as f:
+            return f.read().split()
+    return ["sim", "mac"]
 
 
 def compile_catalog(tool, catalog, platform, out, env=None):

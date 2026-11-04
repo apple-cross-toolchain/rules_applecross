@@ -85,7 +85,7 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
             if !relax_vector {
                 return Err(format!("{}: vector images (PDF, SVG) are compiled only relaxed: Xcode also draws them into bitmaps with CoreGraphics, which this actool doesn't reproduce; --config=relax_actool_vector accepts its own drawing", dir.display()));
             }
-            vector_set(dir, listed, platform, flags, preserves, id, &mut out, &mut images)?;
+            vector_set(dir, listed, platform, phone_and_pad, flags, preserves, id, &mut out, &mut images)?;
             out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
             continue;
         }
@@ -696,70 +696,134 @@ pub fn sticker_icon(name: &str, dir: &std::path::Path, id: u16) -> Result<Option
     }))
 }
 
-/// An image set of vector images (crate::vector), for iOS or macOS: each
-/// one file, universal (or the Mac's), without a scale or at 1x, for an
-/// appearance. Xcode stores the file (a Vector rendition, part 42 at scale 1 when the set
-/// preserves its vector representation, else part 181 without a scale) and
-/// draws it at each of the platform's scales (1x to 3x on iOS, 1x and 2x on
-/// macOS), its size in points times the scale (crate::vector::pixels), into
-/// bitmaps compiled and packed as a PNG's, flagged 4 (and 256 when
-/// preserved) beside the rendering intent's flags (twenty-two probes).
-/// Images one per scale, beside bitmaps, or for an idiom are refused.
+/// An image set of vector images (crate::vector): per appearance and idiom
+/// (universal, or the Mac's on macOS, or iPhone's and iPad's on iOS for both
+/// devices), one file without a scale, or one per scale. Xcode stores a
+/// file (a Vector rendition) and draws bitmaps at each of the platform's
+/// scales (1x to 3x on iOS, 1x and 2x on macOS and tvOS, 2x on watchOS and
+/// visionOS), compiled and packed as a PNG's, flagged 4 (and 256 when the
+/// set preserves its vector representation) beside the rendering intent's
+/// flags (twenty-two probes, and eighteen of these rules):
+/// - the file stored is the one at the highest of the platform's scales
+///   (part 181, no scale); preserved, each file at its own scale (part 42),
+///   one without a scale at 1x, and the 1x file even where the platform
+///   draws no 1x (watchOS, visionOS);
+/// - each scale is drawn from its own file, else from the 1x file, else
+///   from the highest scale's; files at scales the platform doesn't use are
+///   ignored;
+/// - a file at scale `f` drawn at scale `t`: a PDF at its size over `f`
+///   times `t`; an SVG at its size times `t` (Xcode doesn't divide), its
+///   slice its size over `f` times `t`.
+///
+/// Vector images beside bitmaps are refused.
 #[allow(clippy::too_many_arguments)]
-fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &str, flags: u32, preserves: bool, id: u16, out: &mut Compiled, images: &mut Vec<SetImage>) -> Result<(), String> {
+fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &str, phone_and_pad: bool, flags: u32, preserves: bool, id: u16, out: &mut Compiled, images: &mut Vec<SetImage>) -> Result<(), String> {
     let scales: &[u32] = match platform {
         "ios" => &[1, 2, 3],
-        "macosx" => &[1, 2],
+        "macosx" | "atv" => &[1, 2],
+        "watch" | "vision" => &[2],
         _ => return Err(format!("{}: vector images for this platform are not supported by this actool", dir.display())),
     };
-    let mut appearances = Vec::new();
+    // Per (appearance, idiom): its files, (scale or 0 without one, file).
+    type Files = Vec<(u32, String)>;
+    /// A file's kind, bytes and size in points.
+    type Read = (crate::vector::Kind, Vec<u8>, (f64, f64));
+    let mut groups: Vec<((u16, u16), Files)> = Vec::new();
     for entry in listed {
         let Some(filename) = entry["filename"].as_str() else { continue };
-        let path = dir.join(filename);
-        if !path.is_file() {
+        if !dir.join(filename).is_file() {
             continue;
         }
-        let Some(kind) = crate::vector::Kind::of(filename) else {
+        if crate::vector::Kind::of(filename).is_none() {
             return Err(format!("{}: vector and bitmap images in one image set are not supported by this actool", dir.display()));
-        };
+        }
         for k in entry.as_object().unwrap().keys() {
             if !["filename", "idiom", "scale", "appearances"].contains(&k.as_str()) {
                 return Err(format!("{}: the {k} key of a vector image is not supported by this actool", dir.display()));
             }
         }
         // Universal, or the Mac's own idiom on macOS (keyed as universal).
-        if !(entry["idiom"] == "universal" || (platform == "macosx" && entry["idiom"] == "mac")) {
-            return Err(format!("{}: vector images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"]));
-        }
-        if !(entry["scale"].is_null() || entry["scale"] == "1x") {
-            return Err(format!("{}: vector images at {} (one per scale) are not supported by this actool", dir.display(), entry["scale"]));
-        }
+        let idiom = match (entry["idiom"].as_str(), platform) {
+            (Some("universal"), _) | (Some("mac"), "macosx") => 0,
+            (Some("iphone"), "ios") if phone_and_pad => 1,
+            (Some("ipad"), "ios") if phone_and_pad => 2,
+            _ => return Err(format!("{}: vector images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"])),
+        };
+        let scale = match entry["scale"].as_str() {
+            None => 0,
+            Some(s) => s.strip_suffix('x').and_then(|n| n.parse::<u32>().ok()).filter(|n| (1..=3).contains(n)).ok_or_else(|| format!("{}: scale {s} is not supported by this actool", dir.display()))?,
+        };
         let appearance = crate::colorset::appearance_for(entry, platform)
             .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
-        if appearances.contains(&appearance) {
-            return Err(format!("{}: two vector images for one appearance are not supported by this actool", dir.display()));
+        let key = (appearance, idiom);
+        let at = match groups.iter().position(|g| g.0 == key) {
+            Some(at) => at,
+            None => {
+                groups.push((key, Vec::new()));
+                groups.len() - 1
+            }
+        };
+        let files = &mut groups[at].1;
+        if files.iter().any(|f| f.0 == scale || (f.0 == 0) != (scale == 0)) {
+            return Err(format!("{}: two vector images for one scale, or one without a scale beside others, for one appearance and idiom are not supported by this actool", dir.display()));
         }
-        appearances.push(appearance);
-        let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let points = crate::vector::size(kind, &data).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut attrs = vec![(car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON)];
+        files.push((scale, filename.to_string()));
+    }
+    for ((appearance, idiom), files) in groups {
+        // The platform's: a file without a scale is its 1x.
+        let files: Vec<(u32, String)> = files.into_iter().map(|(s, f)| (s.max(1), f)).filter(|(s, _)| scales.contains(s) || *s == 1).collect();
+        let used: Vec<&(u32, String)> = files.iter().filter(|(s, _)| scales.contains(s)).collect();
+        let Some(highest) = used.iter().max_by_key(|f| f.0).copied().or_else(|| files.iter().find(|f| f.0 == 1)) else {
+            continue;
+        };
+        let read = |name: &str| -> Result<Read, String> {
+            let path = dir.join(name);
+            let kind = crate::vector::Kind::of(name).expect("a vector image");
+            let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let points = crate::vector::size(kind, &data).map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok((kind, data, points))
+        };
+        let attrs_of = |part: u16, scale: Option<u16>| {
+            let mut attrs = vec![(car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, part)];
+            attrs.extend(scale.map(|s| (car::ATTR_SCALE, s)));
+            if appearance != 0 {
+                attrs.push((car::ATTR_APPEARANCE, appearance));
+            }
+            if idiom != 0 {
+                attrs.push((car::ATTR_IDIOM, idiom));
+            }
+            attrs
+        };
         if preserves {
-            attrs.extend([(car::ATTR_PART, car::PART_VECTOR_IMAGE), (car::ATTR_SCALE, 1)]);
+            for (scale, name) in &files {
+                let (kind, data, _) = read(name)?;
+                out.renditions.push(Rendition { attrs: attrs_of(car::PART_VECTOR_IMAGE, Some(*scale as u16)), csi: crate::vector::csi(name, kind, &data) });
+            }
         } else {
-            attrs.push((car::ATTR_PART, car::PART_IMAGE));
+            let (kind, data, _) = read(&highest.1)?;
+            out.renditions.push(Rendition { attrs: attrs_of(car::PART_IMAGE, None), csi: crate::vector::csi(&highest.1, kind, &data) });
         }
-        if appearance != 0 {
-            attrs.push((car::ATTR_APPEARANCE, appearance));
-        }
-        out.renditions.push(Rendition { attrs, csi: crate::vector::csi(filename, kind, &data) });
+        let one = files.iter().find(|f| f.0 == 1);
         for &scale in scales {
-            let pixels = (crate::vector::pixels(kind, points.0, scale), crate::vector::pixels(kind, points.1, scale));
-            let image = crate::vector::render(kind, &data, points, scale, pixels).map_err(|e| format!("{}: {e}", path.display()))?;
+            let (from_scale, name) = match used.iter().find(|f| f.0 == scale) {
+                Some(f) => (f.0, &f.1),
+                None => one.or(Some(highest)).map(|f| (f.0, &f.1)).expect("a file"),
+            };
+            let (kind, data, points) = read(name)?;
+            let path = dir.join(name);
+            let size = (points.0 / from_scale as f64, points.1 / from_scale as f64);
+            // An SVG is drawn at its own size times the scale.
+            let drawn = match kind {
+                crate::vector::Kind::Pdf => size,
+                crate::vector::Kind::Svg => points,
+            };
+            let pixels = (crate::vector::pixels(kind, drawn.0, scale as f64), crate::vector::pixels(kind, drawn.1, scale as f64));
+            let image = crate::vector::render(kind, &data, points, scale as f64 * drawn.0 / points.0, pixels).map_err(|e| format!("{}: {e}", path.display()))?;
             // The slice, where it is short of the bitmap: from its top-left
             // corner (y counting from the bottom).
-            let slice = (crate::vector::slice_pixels(points.0, scale), crate::vector::slice_pixels(points.1, scale));
+            let slice = (crate::vector::slice_pixels(size.0, scale as f64), crate::vector::slice_pixels(size.1, scale as f64));
             let slicing = (slice != pixels).then(|| car::Slicing { layout: car::LAYOUT_ICON_IMAGE, slices: vec![[0, pixels.1 - slice.1, slice.0, slice.1]] });
-            images.push(SetImage { scale, appearance, idiom: 0, identifier: id, flags: flags | 4 | if preserves { 256 } else { 0 }, filename: filename.to_string(), image, extended: None, slicing });
+            images.push(SetImage { scale, appearance, idiom, identifier: id, flags: flags | 4 | if preserves { 256 } else { 0 }, filename: name.to_string(), image, extended: None, slicing });
         }
     }
     Ok(())

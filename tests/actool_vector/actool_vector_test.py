@@ -13,7 +13,7 @@ import os
 import sys
 import tempfile
 
-from common import HERE, PLATFORMS, cases, compile_catalog, digests
+from common import HERE, cases, compile_catalog, digests, platforms
 
 
 def main(argv):
@@ -30,7 +30,7 @@ def main(argv):
                 key, digest = line.split(": ", 1)
                 platform, path = json.loads(key)
                 expected.setdefault(platform, {})[path] = json.loads(digest)
-        for platform in PLATFORMS:
+        for platform in platforms(case):
             count += 1
             with tempfile.TemporaryDirectory() as out:
                 status, log = compile_catalog(tool, catalog, platform, out, relaxed)
@@ -43,7 +43,7 @@ def main(argv):
             if different:
                 failures.append("%s %s: different from Xcode's: %s" % (case, platform, ", ".join(different)))
         with tempfile.TemporaryDirectory() as out:
-            status, _ = compile_catalog(tool, catalog, "sim", out, strict)
+            status, _ = compile_catalog(tool, catalog, platforms(case)[0], out, strict)
             if status == 0:
                 failures.append("%s: compiled strict, where its bitmaps can't be Xcode's" % case)
     for f in failures:
