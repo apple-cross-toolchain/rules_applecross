@@ -981,12 +981,44 @@ of packing, appearances and rendering intents beside PNG images:
     size;
   - with only the highest scale's file kept as the vector.
 
+### Exact PDFs
+
+Xcode doesn't store a vector set's PDF: it draws the page into a new one
+with CoreGraphics. `src/pdf.rs` replays a page of paths (`m l c v y h re`),
+fills, strokes, clips (`W W*`), colours (`g rg k`, their stroking forms
+and `cs sc` in Device spaces), line state (`w J j M d`), transforms
+(`cm q Q`) and constant alpha (`gs` with `ca` and `CA`), and writes what
+CoreGraphics writes for them; its doc comment lists the rules. Against
+Xcode 27.2, 495 pages compiled byte-identical: 180 random mixtures of all
+of these, 119 written for single rules, and 196 more (numbers near
+rounding thresholds, alpha changes, operand wrapping). The other 4 were
+values at a formatting threshold, which it refuses.
+
+- Numbers (961 probes): 0 under 1e-6; within 1e-6 of an integer, that
+  integer; from 1 up, 7 significant digits without trailing zeros; under
+  1, the fewest decimals, from the first significant digit's up to 8, at
+  which the value is within 1e-5 of a multiple of their unit, zeros kept
+  (`0.0999999999` is `0.10`), else 7 significant digits, zeros kept
+  (`0.6939910`). Values within 1% of a threshold are refused, as are
+  rounding ties.
+- RGB and grey are written in ICC spaces, the Mac's sRGB and Generic Gray
+  Gamma 2.2 profiles, which the SDK archive carries
+  (`usr/share/colorsync`, from `tools/package-sdks.sh` on the Mac that
+  packages it); without them the PDF is stored as it is. CMYK stays
+  DeviceCMYK.
+- Streams are zlib at level 1 (memLevel 8), as this actool's PNGs are.
+- Refused (stored as it is): text, images, shadings, patterns, other
+  colour spaces (ICC-based ones included), soft masks and blend modes, a
+  page not at the origin or with a crop box, rotation or user unit of its
+  own, and more than one page.
+
 Matching the bitmaps needs CoreGraphics' and CoreSVG's drawing, pixel for
 pixel, which this actool doesn't reproduce. So vector images are refused
 strictly. With `--config=relax_actool_vector` they compile:
 
 - **The bitmaps:** resvg draws SVGs and hayro draws PDFs.
-- **The PDF:** stored as it is rather than as CoreGraphics writes it, which
+- **The PDF:** as CoreGraphics writes it (below, "Exact PDFs") where the
+  page is within what this actool replays, else stored as it is, which
   CoreUI reads all the same.
 - **The bitmaps' encoding:** where Xcode's choice between valid dmp2
   streams isn't established (tied modes, compressed or not, a palette in

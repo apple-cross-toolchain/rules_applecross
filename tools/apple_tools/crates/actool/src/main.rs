@@ -16,6 +16,7 @@ mod iconset;
 mod image;
 mod imageset;
 mod launchimage;
+mod pdf;
 mod qsort;
 mod stack;
 mod vector;
