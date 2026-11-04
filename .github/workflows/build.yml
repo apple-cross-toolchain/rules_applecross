@@ -122,10 +122,9 @@ jobs:
           //examples/...
           -//examples/tvos/...
       # The clean-room tools are strict: Xcode's output byte for byte, or the
-      # build fails. The tvOS example's radiosity image can't be guaranteed
-      # yet (docs/clean-room/actool.md), so it is built relaxed: all of it
-      # until the ported tools' actool reads --config=relax_actool_tvos_radiosity,
-      # which accepts only that.
+      # build fails. The tvOS example's radiosity image and its Core Data
+      # model's version hashes can't be guaranteed yet (docs/clean-room/actool.md
+      # and momc.md), so this build accepts both as well.
       - name: Build the tvOS example with remote execution
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -133,7 +132,9 @@ jobs:
           bazel
           build
           --config=remote
-          --config=relaxed
+          --config=relax_xcode_version
+          --config=relax_actool_tvos_radiosity
+          --config=relax_momc
           --remote_header=x-buildbuddy-api-key="$BUILDBUDDY_API_KEY"
           --repo_env=RULES_APPLECROSS_LOCAL_XCODE=1
           --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
