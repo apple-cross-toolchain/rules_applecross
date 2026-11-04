@@ -114,8 +114,14 @@ pub fn render(kind: Kind, data: &[u8], points: (f64, f64), scale: u32, pixels: (
 /// A Vector rendition (layout 9): flags 4, no size or scale, pixel format
 /// `PDF ` or `SVG ` (stored backwards), the composition and 0x3ee TLVs, and
 /// the file as `DWAR`, a flag and its length: an SVG LZFSE-compressed (flag
-/// 1) when that is smaller, a PDF always as it is (flag 0).
+/// 1) when that is smaller, a PDF uncompressed (flag 0) as CoreGraphics
+/// writes it again (crate::pdf), or as it is where this actool can't.
 pub fn csi(name: &str, kind: Kind, data: &[u8]) -> Vec<u8> {
+    let rewritten = match kind {
+        Kind::Pdf => crate::pdf::rewrite(data).inspect_err(|e| eprintln!("note: {name}: stored as it is, not as Xcode writes it again: {e}")).ok(),
+        Kind::Svg => None,
+    };
+    let data = rewritten.as_deref().unwrap_or(data);
     let (format, compressed) = match kind {
         Kind::Pdf => (b" FDP", None),
         Kind::Svg => (b" GVS", Some(lzfse::encode(data)).filter(|c| c.len() < data.len())),

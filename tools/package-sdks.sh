@@ -79,6 +79,13 @@ if [[ -d "Toolchains/XcodeDefault.xctoolchain/usr/lib/arc" ]]; then
   rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/" "$NEW_DEVELOPER_DIR"
 fi
 rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/" "$NEW_DEVELOPER_DIR"
+# The Mac's sRGB and Generic Gray Gamma 2.2 profiles, which CoreGraphics
+# embeds in the PDFs actool writes again for vector images
+# (docs/clean-room/actool.md, "Exact PDFs").
+colorsync="$NEW_DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/share/colorsync"
+mkdir -p "$colorsync"
+cp "/System/Library/ColorSync/Profiles/sRGB Profile.icc" "$colorsync/srgb.icc"
+cp "/System/Library/ColorSync/Profiles/Generic Gray Gamma 2.2 Profile.icc" "$colorsync/generic_gray_gamma_2_2.icc"
 # DocC's render template: Xcode's docc-render, which docc copies into every
 # archive (toolchain/stubs/docc.sh).
 if [[ -d "Toolchains/XcodeDefault.xctoolchain/usr/share/docc" ]]; then

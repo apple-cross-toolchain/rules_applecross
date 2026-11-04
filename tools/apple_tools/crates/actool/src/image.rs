@@ -275,6 +275,12 @@ fn deflate_split(zlib: Zlib, parts: &[&[u8]]) -> Vec<Vec<u8>> {
     res
 }
 
+/// A zlib stream of `data` at level 1 (memLevel 8), as CoreGraphics writes a
+/// PDF's streams.
+pub fn zlib_level_1(data: &[u8]) -> Vec<u8> {
+    deflate_split(PLAIN_ZLIB, &[data]).remove(0)
+}
+
 fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(&(data.len() as u32).to_be_bytes());
     let start = out.len();
@@ -282,6 +288,11 @@ fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(data);
     let crc = crc32(&out[start..]);
     out.extend_from_slice(&crc.to_be_bytes());
+}
+
+#[cfg(test)]
+pub fn crc32_of(data: &[u8]) -> u32 {
+    crc32(data)
 }
 
 fn crc32(data: &[u8]) -> u32 {

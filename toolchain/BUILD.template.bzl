@@ -331,6 +331,8 @@ filegroup(
             # docc (stubs/docc.sh): swift.org's, and Xcode's render template.
             _XCODE_TOOLCHAIN_DIR + "/usr/libexec/docc/**",
             _XCODE_TOOLCHAIN_DIR + "/usr/share/docc/**",
+            # The colour profiles actool's PDFs embed (tools/package-sdks.sh).
+            _XCODE_TOOLCHAIN_DIR + "/usr/share/colorsync/*.icc",
             # Back-deployment runtimes for swift-stdlib-tool.
             _XCODE_TOOLCHAIN_LIB + "/swift-*/*/*.dylib",
             # xcrun refuses to run without a toolchain descriptor.
