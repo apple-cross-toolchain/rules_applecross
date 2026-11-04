@@ -595,6 +595,11 @@ def _apple_cross_toolchain_impl(rctx):
         "%{linux_exec_cpu}": cpu,
         "%{swift_tools}": swift_tools,
         "%{swift_tools_macos}": rctx.attr.swift_tools_macos,
+        "%{swift_copts}": repr(rctx.attr.swift_copts),
+        "%{swift_default_enabled_features}": repr(rctx.attr.swift_default_enabled_features),
+        "%{swift_default_unsupported_features}": repr(rctx.attr.swift_default_unsupported_features),
+        "%{swift_feature_allowlists}": repr(rctx.attr.swift_feature_allowlists),
+        "%{swift_package_configurations}": repr(rctx.attr.swift_package_configurations),
         "%{toolchain_path_prefix}": toolchain_path_prefix,
     }
 
@@ -871,6 +876,11 @@ repository's release. A content-addressed server takes
             doc = "Labels of rules_swift swift_tools targets used as the Linux-host Swift compiler payload, keyed by Linux CPU (\"x86_64\", \"aarch64\").",
             mandatory = True,
         ),
+        "swift_copts": attr.string_list(doc = "configure()'s swift_copts."),
+        "swift_default_enabled_features": attr.string_list(doc = "configure()'s swift_default_enabled_features."),
+        "swift_default_unsupported_features": attr.string_list(doc = "configure()'s swift_default_unsupported_features."),
+        "swift_feature_allowlists": attr.string_list(doc = "configure()'s swift_feature_allowlists, as canonical labels."),
+        "swift_package_configurations": attr.string_list(doc = "configure()'s swift_package_configurations, as canonical labels."),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's macOS Swift, used by Swift toolchains for macOS execution platforms.",
         ),

@@ -21,6 +21,8 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
     "@rules_swift//swift:providers.bzl",
+    "SwiftFeatureAllowlistInfo",
+    "SwiftPackageConfigurationInfo",
     "SwiftToolsInfo",
 )
 load(
@@ -535,7 +537,8 @@ def _swift_toolchain_impl(ctx):
     # --@rules_swift//swift:copt (and its exec twin, for an exec build), as
     # rules_swift's Xcode toolchain takes them: Swift flags for every compile,
     # and the features they imply (whole-module optimization).
-    swiftcopts = list(ctx.attr._exec_copts[BuildSettingInfo].value if is_exec_config(ctx) else ctx.attr._copts[BuildSettingInfo].value)
+    # The toolchain's own copts (configure()'s swift_copts) come first.
+    swiftcopts = ctx.attr.copts + list(ctx.attr._exec_copts[BuildSettingInfo].value if is_exec_config(ctx) else ctx.attr._copts[BuildSettingInfo].value)
 
     # Add all the standard rules_swift action configs.
     action_configs.extend(all_actions_action_configs())
@@ -581,6 +584,7 @@ def _swift_toolchain_impl(ctx):
             SWIFT_FEATURE_INDEX_STORE_COMPRESS,
             SWIFT_FEATURE__SUPPORTS_CONST_GATHER_PROTOCOLS_LIST,
         ])
+    requested_features.extend(ctx.attr.default_enabled_features)
     if ctx.attr.exec_os == "macos":
         # As in rules_swift's Xcode toolchain: the compiler cannot run macro
         # plugins in its own sandbox from inside Bazel's.
@@ -638,7 +642,7 @@ def _swift_toolchain_impl(ctx):
         # Like rules_swift's Xcode toolchain, the runtime comes from the SDK.
         dynamic_runtime_cc_info = None,
         entry_point_linkopts_provider = _entry_point_linkopts_provider,
-        feature_allowlists = [],
+        feature_allowlists = [t[SwiftFeatureAllowlistInfo] for t in ctx.attr.feature_allowlists],
         generated_header_module_implicit_deps_providers = struct(
             cc_infos = [],
             swift_infos = [],
@@ -651,7 +655,7 @@ def _swift_toolchain_impl(ctx):
         # toolchains take them: a module compiled under another name gets its
         # `-module-alias` (Isomer's SwiftUI as IsomerCompiledSwiftUI).
         module_aliases = ctx.attr._module_mapping[SwiftModuleAliasesInfo].aliases,
-        package_configurations = [],
+        package_configurations = [t[SwiftPackageConfigurationInfo] for t in ctx.attr.package_configurations],
         requested_features = requested_features,
         root_dir = toolchain_root,
         static_runtime_cc_info = None,
@@ -675,7 +679,7 @@ def _swift_toolchain_impl(ctx):
         unsupported_features = ctx.disabled_features + [
             SWIFT_FEATURE_STATIC_STDLIB,
             SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD,
-        ],
+        ] + ctx.attr.default_unsupported_features,
     )
 
     return [
@@ -687,9 +691,26 @@ def _swift_toolchain_impl(ctx):
 
 swift_toolchain = rule(
     attrs = {
+        "copts": attr.string_list(
+            doc = "Swift flags for every compile with this toolchain, before --@rules_swift//swift:copt's.",
+        ),
         "cpu": attr.string(
             mandatory = True,
             doc = "The target CPU (e.g. ios_arm64, darwin_arm64).",
+        ),
+        "default_enabled_features": attr.string_list(
+            doc = "Features enabled for every target, as rules_swift's toolchains take them.",
+        ),
+        "default_unsupported_features": attr.string_list(
+            doc = "Features no target may enable, as rules_swift's toolchains take them.",
+        ),
+        "feature_allowlists": attr.label_list(
+            providers = [[SwiftFeatureAllowlistInfo]],
+            doc = "swift_feature_allowlist targets: the packages that may enable or disable their features.",
+        ),
+        "package_configurations": attr.label_list(
+            providers = [[SwiftPackageConfigurationInfo]],
+            doc = "swift_package_configuration targets: features and flags for the packages they name.",
         ),
         "exec_os": attr.string(
             default = "linux",
