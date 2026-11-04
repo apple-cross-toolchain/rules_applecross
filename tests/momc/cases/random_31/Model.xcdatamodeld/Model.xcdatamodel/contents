@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Ka" representedClassName="Ka" syncable="YES" codeGenerationType="class">
+        <relationship name="alzeal12" destinationEntity="Ka" optional="YES" maxCount="1" deletionRule="Cascade"/>
+        <relationship name="qube" destinationEntity="Ka" maxCount="1" deletionRule="Deny"/>
+        <relationship name="ka" destinationEntity="Ka" optional="YES" maxCount="1" deletionRule="No Action"/>
+        <relationship name="bealpi" destinationEntity="Ka" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="kaxo7xo" attributeType="Integer 64" optional="YES" transient="YES" spotlightIndexingEnabled="YES" usesScalarValueType="YES"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <configuration name="Cloud">
+        <memberEntity name="Ka"/>
+    </configuration>
+</model>

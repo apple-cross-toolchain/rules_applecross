@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Zedoxo" representedClassName="Zedoxo" syncable="YES" codeGenerationType="class">
+        <attribute name="do" attributeType="UUID" optional="YES" transient="YES" elementID="mu12ze"/>
+        <attribute name="alte" attributeType="Binary" optional="YES" allowsCloudEncryption="YES" versionHashModifier="al3"/>
+        <attribute name="zezexodo" attributeType="Binary" spotlightIndexingEnabled="YES" preserveAfterDeletion="YES"/>
+        <attribute name="teQu3" attributeType="UUID" optional="YES" spotlightIndexingEnabled="YES"/>
+        <relationship name="bepiKa7" destinationEntity="Zedoxo" optional="YES" maxCount="1" deletionRule="Cascade"/>
+        <attribute name="dori312al" attributeType="UUID" optional="YES"/>
+        <relationship name="xo312" destinationEntity="Zedoxo" optional="YES" toMany="YES" ordered="YES" deletionRule="Deny"/>
+        <relationship name="riMu" destinationEntity="Zedoxo" optional="YES" toMany="YES" minCount="1" maxCount="47" deletionRule="Deny">
+            <userInfo>
+                <entry key="teKadoze" value="v"/>
+                <entry key="al" value="x1"/>
+            </userInfo>
+        </relationship>
+        <attribute name="ze7be" attributeType="Boolean" optional="YES" preserveAfterDeletion="YES" elementID="rite" usesScalarValueType="NO" defaultValueString="NO">
+            <userInfo>
+                <entry key="tepize" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="xoQu77Qu" attributeType="Double" optional="YES" transient="YES" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="ze712Mu" value="longer value text"/>
+            </userInfo>
+        </attribute>
+    </entity>
+    <fetchRequest name="Ri" entity="Zedoxo"/>
+</model>

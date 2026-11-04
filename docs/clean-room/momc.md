@@ -1,40 +1,144 @@
-# momc and mapc (not reproduced)
+# momc and mapc
 
-Core Data models (`.xcdatamodeld`, `.xcdatamodel`) and mapping models
-(`.xcmappingmodel`) have no Linux version yet: building a target with one
-fails off a Mac. These notes record what black-box probing of Xcode 27.2
-found, for whoever takes it further.
+Core Data models (`.xcdatamodeld`, `.xcdatamodel`) compile off a Mac with
+`--config=relax_momc`: each model version to the `.mom` Xcode 27.2's
+`momc` writes, byte for byte, with a `VersionInfo.plist` that leaves out what
+isn't established (below). `toolchain/stubs/momc.py` is the implementation,
+pure Python; `tests/momc` compares it with Xcode's own output for 77 models,
+and refuses 8 more. Mapping models (`mapc`) and generated classes
+(`momc --action generate`) aren't reproduced.
 
 ## What momc writes
 
-`momc` compiles a model to `<Model>.momd/` holding `<Model>.mom` and
-`VersionInfo.plist`, both binary property lists.
+`momc` compiles a model bundle to `<Model>.momd/`: a `.mom` for each
+version, `VersionInfo.plist` and, beside a versioned model's current version,
+an `.omo` (a `momv2` binary of its own, which Core Data reads instead of
+the `.mom` when it's there). A single `.xcdatamodel` compiles to one `.mom`.
+The deployment target, platform and `--module` don't change any of them.
 
-- `<Model>.mom` is an `NSKeyedArchiver` archive of the model: an
-  `NSManagedObjectModel` (`NSEntities`, `NSFetchRequestTemplates`,
-  `NSVersionIdentifiers`, `CDMCompilerToolVersion`,
-  `CDMCompilerXcodeVersion`), its `NSEntityDescription`s (class and entity
-  names, properties, subentities, superentity, user info, renaming
-  identifier, version hash modifier) and their `NSAttributeDescription`s
-  and `NSRelationshipDescription`s. Its dictionaries are
-  `NSMutableDictionary`s, whose order is CoreFoundation's hash-table
-  order, as `crates/cf` reproduces for other plists.
-- `VersionInfo.plist` holds each entity's version hash
-  (`NSManagedObjectModel_VersionHashes`, 32 bytes) and a checksum of the
-  model (`NSManagedObjectModel_VersionChecksums`, a base64 SHA-256).
+A `.mom` is an `NSKeyedArchiver` archive of an `NSManagedObjectModel`, its
+`NSEntityDescription`s, their `NSAttributeDescription`s and
+`NSRelationshipDescription`s, and the fetch requests, configurations,
+dictionaries, sets, arrays, dates and decimal numbers they hold.
 
-## Why it stops there
+### The archive
 
-The version hashes are SHA-256 digests whose input isn't established.
-Probing `NSAttributeDescription.versionHash` through Core Data's public
-API shows that an attribute's hash depends on its name, type, optionality,
-transience and version hash modifier (an empty modifier counts as none),
-and on one more input that `allowsExternalBinaryDataStorage` and
-`preservesValueInHistoryOnDeletion` set identically. It doesn't depend on
-the default value, renaming identifier, user info, Spotlight indexing,
-value class name, value transformer name or cloud encryption.
+- **Object numbers.** Objects are numbered as they're first encoded, depth
+  first. An object encoded conditionally (an entity's superentity and model, a
+  property's entity, a relationship's destination and inverse) is numbered
+  where it's first mentioned and written where it's encoded outright. An
+  object's class description is numbered after its fields.
+- **Field order.** An object's fields are a CoreFoundation dictionary: they
+  enumerate in [hash-table order](foundation-hashing.md) for the order they
+  went in. That order is fixed for each class (`KEY_ORDER`), fitted to every
+  combination of fields seen.
+- **Identity.** The archiver finds objects again by identity, and the
+  property-list writer shares a string or number only when the object
+  written is the same one:
+  - Every ASCII string the model's XML holds is one string for its value.
+  - Any other string is one for each attribute in the XML it comes from.
+  - Integers are one object for each value and CoreFoundation type. The
+    archive's keys, counts and flags are 32-bit; default values, Xcode's
+    version and a fetch request's flags and types are 64-bit.
+  - A floating-point number is one object for its value and type when it's
+    a whole number of magnitude below 2^55. Otherwise it's an object of its
+    own.
+  - Equal dates are one object.
+  - Booleans and UIDs are written each time they occur, referring to the
+    first.
+  - A decimal's mantissa is written each time.
+- **Class names.** These are one string shared with equal values, except
+  Core Data's own classes, `NSDecimalNumber` and its placeholder, and
+  `NSValue`, whose names are a new string each time (as the value class
+  name of a Decimal attribute is).
 
-These inputs were tried, all without a match:
+### The model
+
+- **Entities.** An entity records its name, class name (`$null` without one),
+  superentity, subentities, properties, user info (one empty dictionary
+  shared by those without), version hash modifier, renaming identifier (its
+  name without one), uniqueness constraints and abstractness.
+- **Property fields.** Properties record their entity, name, renaming
+  identifier, user info and version hash modifier, then their own fields,
+  each Boolean only when true.
+- **`_P` flags.** 1, plus 2 if optional, 8 if transient, 16 and 32 without
+  validation predicates and warnings, 64 without user info, 128 without a
+  version hash modifier, 256 if indexed by Spotlight (not when transient),
+  1024 if an ordered relationship, 2048 if cloud encrypted.
+- **`NSFlagsKey`.** 4 for external binary storage, 16 to preserve the value
+  after deletion.
+- **Attribute types.** Integer 16, 32 and 64 are 100, 200 and 300; Decimal
+  400; Double 500; Float 600; String 700; Boolean 800; Date 900; Binary
+  1000; UUID 1100; URI 1200; Transformable 1800.
+- **Delete rules.** No Action 0, Nullify 1, Cascade 2, Deny 3.
+- **Default values.**
+  - Integers are 64-bit numbers.
+  - Floats are 32-bit, doubles 64-bit.
+  - A date is whole minutes since the reference date, rounded down.
+  - A decimal is compact: no trailing zeros in its mantissa, and not
+    compact when it's zero.
+- **Dictionary orders.**
+  - Properties go in as attributes, then relationships, each in name order
+    (case-insensitive, runs of digits as numbers).
+  - User info goes in name order.
+  - Entities, fetch requests and subentities go into a dictionary in name
+    order, and the archived dictionary is filled from that one.
+  - A configuration's entities are a set created whole, in the model's
+    order.
+
+### Checked against Xcode
+
+During the work, 200 random models were also checked. Each had up to 9
+entities, with every supported attribute type, flag, default, relationship
+rule, inheritance, constraint, configuration and fetch request. Of the 111
+with ASCII names that Xcode compiles:
+- 108 compiled the same;
+- two were refused for a userInfo key given twice;
+- one differed in its subentities' order.
+
+Xcode refuses an entity with uniqueness constraints and a mandatory to-one
+inverse relationship, and a property that conflicts with an inherited one;
+so does this. The subentity order can differ only when the names collide in
+the dictionary: 71 of the 74 such dictionaries examined are in Xcode's
+order, and the other three have two subentities swapped.
+
+### Refused
+
+Compiling refuses these, relaxed or not:
+
+- predicates: fetch requests with them, validation rules;
+- fetched properties, derived and composite attributes, fetch indexes;
+- fetch request options other than a limit and a batch size;
+- a userInfo key given twice;
+- names other than ASCII, which Xcode orders by a collation of its own;
+- an Xcode other than 27.2 unless `--config=relax_xcode_version`, since
+  every model records momc's version (27.2's is 25436) and Xcode's.
+
+## VersionInfo.plist
+
+`VersionInfo.plist` holds the current version's name (for a versioned
+model), each entity's version hash (`NSManagedObjectModel_VersionHashes`,
+32 bytes) and a checksum of each version (`NSManagedObjectModel_VersionChecksums`,
+a base64 SHA-256). The hashes are SHA-256 digests whose input isn't
+established, so without `--config=relax_momc` compiling is refused.
+Relaxed, `VersionInfo.plist` holds only the current version's name, and no
+`.omo` is written.
+
+Core Data computes the hashes from the model itself. On a Mac, a store
+created with either side's version 1 opened, migrated lightweight and read
+with either side's `.momd` (this one's `VersionInfo.plist`, no `.omo`)
+exactly as with Xcode's.
+
+Probing `NSAttributeDescription.versionHash` through Core Data's public API
+shows that an attribute's hash depends on:
+- its name, type, optionality and transience;
+- its version hash modifier (an empty modifier counts as none);
+- one more input, which `allowsExternalBinaryDataStorage` and
+  `preservesValueInHistoryOnDeletion` set identically.
+
+It doesn't depend on the default value, renaming identifier, user info,
+Spotlight indexing, value class name, value transformer name or cloud
+encryption. These inputs were tried, all without a match:
 
 - the UTF-8, UTF-8 with a NUL, and UTF-16 name, followed or preceded by
   the type and flags as 1-, 2-, 4- and 8-byte integers in either byte
@@ -48,9 +152,8 @@ These inputs were tried, all without a match:
   descriptions and joined strings of arrays and dictionaries of those
   fields.
 
-Without the hashes `VersionInfo.plist` can't be written, and a mapping
-model (`mapc`) records its models' hashes too. The input could still be
-found by more probing, or, in the private fork, by reading the
+A mapping model (`mapc`) records its models' hashes too. The input could
+still be found by more probing, or, in the private fork, by reading the
 implementation.
 
 ## Generated classes
@@ -59,4 +162,4 @@ implementation.
 `apple_core_data_model`, writes Swift classes that don't depend on the
 hashes, but whose header names the user building them and the date
 (`Created by <full name> on 11/4/26.`), so Xcode's own output varies
-between machines and days.
+between machines and days. It's refused.

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="N" representedClassName="N" syncable="YES" codeGenerationType="class">
+        <attribute name="integer16_100" attributeType="Integer 16" optional="YES" defaultValueString="100" usesScalarValueType="YES"/>
+        <attribute name="integer16_200" attributeType="Integer 16" optional="YES" defaultValueString="200" usesScalarValueType="YES"/>
+        <attribute name="integer16_300" attributeType="Integer 16" optional="YES" defaultValueString="300" usesScalarValueType="YES"/>
+        <attribute name="integer16_500" attributeType="Integer 16" optional="YES" defaultValueString="500" usesScalarValueType="YES"/>
+        <attribute name="integer16_600" attributeType="Integer 16" optional="YES" defaultValueString="600" usesScalarValueType="YES"/>
+        <attribute name="integer16_243" attributeType="Integer 16" optional="YES" defaultValueString="243" usesScalarValueType="YES"/>
+        <attribute name="integer16_1" attributeType="Integer 16" optional="YES" defaultValueString="1" usesScalarValueType="YES"/>
+        <attribute name="integer16_0" attributeType="Integer 16" optional="YES" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="integer16_30" attributeType="Integer 16" optional="YES" defaultValueString="30" usesScalarValueType="YES"/>
+        <attribute name="integer32_100" attributeType="Integer 32" optional="YES" defaultValueString="100" usesScalarValueType="YES"/>
+        <attribute name="integer32_200" attributeType="Integer 32" optional="YES" defaultValueString="200" usesScalarValueType="YES"/>
+        <attribute name="integer32_300" attributeType="Integer 32" optional="YES" defaultValueString="300" usesScalarValueType="YES"/>
+        <attribute name="integer32_500" attributeType="Integer 32" optional="YES" defaultValueString="500" usesScalarValueType="YES"/>
+        <attribute name="integer32_600" attributeType="Integer 32" optional="YES" defaultValueString="600" usesScalarValueType="YES"/>
+        <attribute name="integer32_243" attributeType="Integer 32" optional="YES" defaultValueString="243" usesScalarValueType="YES"/>
+        <attribute name="integer32_1" attributeType="Integer 32" optional="YES" defaultValueString="1" usesScalarValueType="YES"/>
+        <attribute name="integer32_0" attributeType="Integer 32" optional="YES" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="integer32_30" attributeType="Integer 32" optional="YES" defaultValueString="30" usesScalarValueType="YES"/>
+        <attribute name="integer32_270200" attributeType="Integer 32" optional="YES" defaultValueString="270200" usesScalarValueType="YES"/>
+        <attribute name="integer64_100" attributeType="Integer 64" optional="YES" defaultValueString="100" usesScalarValueType="YES"/>
+        <attribute name="integer64_200" attributeType="Integer 64" optional="YES" defaultValueString="200" usesScalarValueType="YES"/>
+        <attribute name="integer64_300" attributeType="Integer 64" optional="YES" defaultValueString="300" usesScalarValueType="YES"/>
+        <attribute name="integer64_500" attributeType="Integer 64" optional="YES" defaultValueString="500" usesScalarValueType="YES"/>
+        <attribute name="integer64_600" attributeType="Integer 64" optional="YES" defaultValueString="600" usesScalarValueType="YES"/>
+        <attribute name="integer64_243" attributeType="Integer 64" optional="YES" defaultValueString="243" usesScalarValueType="YES"/>
+        <attribute name="integer64_1" attributeType="Integer 64" optional="YES" defaultValueString="1" usesScalarValueType="YES"/>
+        <attribute name="integer64_0" attributeType="Integer 64" optional="YES" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="integer64_30" attributeType="Integer 64" optional="YES" defaultValueString="30" usesScalarValueType="YES"/>
+        <attribute name="integer64_270200" attributeType="Integer 64" optional="YES" defaultValueString="270200" usesScalarValueType="YES"/>
+        <attribute name="double_100" attributeType="Double" optional="YES" defaultValueString="100" usesScalarValueType="YES"/>
+        <attribute name="double_200" attributeType="Double" optional="YES" defaultValueString="200" usesScalarValueType="YES"/>
+        <attribute name="double_300" attributeType="Double" optional="YES" defaultValueString="300" usesScalarValueType="YES"/>
+        <attribute name="double_500" attributeType="Double" optional="YES" defaultValueString="500" usesScalarValueType="YES"/>
+        <attribute name="double_600" attributeType="Double" optional="YES" defaultValueString="600" usesScalarValueType="YES"/>
+        <attribute name="double_243" attributeType="Double" optional="YES" defaultValueString="243" usesScalarValueType="YES"/>
+        <attribute name="double_1" attributeType="Double" optional="YES" defaultValueString="1" usesScalarValueType="YES"/>
+        <attribute name="double_0" attributeType="Double" optional="YES" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="double_30" attributeType="Double" optional="YES" defaultValueString="30" usesScalarValueType="YES"/>
+        <attribute name="double_270200" attributeType="Double" optional="YES" defaultValueString="270200" usesScalarValueType="YES"/>
+        <attribute name="float_100" attributeType="Float" optional="YES" defaultValueString="100" usesScalarValueType="YES"/>
+        <attribute name="float_200" attributeType="Float" optional="YES" defaultValueString="200" usesScalarValueType="YES"/>
+        <attribute name="float_300" attributeType="Float" optional="YES" defaultValueString="300" usesScalarValueType="YES"/>
+        <attribute name="float_500" attributeType="Float" optional="YES" defaultValueString="500" usesScalarValueType="YES"/>
+        <attribute name="float_600" attributeType="Float" optional="YES" defaultValueString="600" usesScalarValueType="YES"/>
+        <attribute name="float_243" attributeType="Float" optional="YES" defaultValueString="243" usesScalarValueType="YES"/>
+        <attribute name="float_1" attributeType="Float" optional="YES" defaultValueString="1" usesScalarValueType="YES"/>
+        <attribute name="float_0" attributeType="Float" optional="YES" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="float_30" attributeType="Float" optional="YES" defaultValueString="30" usesScalarValueType="YES"/>
+        <attribute name="float_270200" attributeType="Float" optional="YES" defaultValueString="270200" usesScalarValueType="YES"/>
+        <attribute name="b1" attributeType="Boolean" optional="YES" defaultValueString="YES" usesScalarValueType="YES"/>
+        <attribute name="dec" attributeType="Decimal" optional="YES" defaultValueString="243"/>
+        <relationship name="r" destinationEntity="O" optional="YES" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+    <entity name="O" representedClassName="O" syncable="YES" codeGenerationType="class">
+        <attribute name="o" attributeType="String" optional="YES"/>
+    </entity>
+    <fetchRequest name="All" entity="N"/>
+</model>

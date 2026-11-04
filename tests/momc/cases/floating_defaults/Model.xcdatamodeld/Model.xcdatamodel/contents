@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="F" representedClassName="F" syncable="YES" codeGenerationType="class">
+        <attribute name="da_0" attributeType="Double" optional="YES" defaultValueString="0"/>
+        <attribute name="db_0" attributeType="Double" optional="YES" defaultValueString="0"/>
+        <attribute name="da_100" attributeType="Double" optional="YES" defaultValueString="100"/>
+        <attribute name="db_100" attributeType="Double" optional="YES" defaultValueString="100"/>
+        <attribute name="da_m7" attributeType="Double" optional="YES" defaultValueString="-7"/>
+        <attribute name="db_m7" attributeType="Double" optional="YES" defaultValueString="-7"/>
+        <attribute name="da_1p5" attributeType="Double" optional="YES" defaultValueString="1.5"/>
+        <attribute name="db_1p5" attributeType="Double" optional="YES" defaultValueString="1.5"/>
+        <attribute name="da_0p5" attributeType="Double" optional="YES" defaultValueString="0.5"/>
+        <attribute name="db_0p5" attributeType="Double" optional="YES" defaultValueString="0.5"/>
+        <attribute name="da_1E20" attributeType="Double" optional="YES" defaultValueString="1e20"/>
+        <attribute name="db_1E20" attributeType="Double" optional="YES" defaultValueString="1e20"/>
+        <attribute name="da_123456789" attributeType="Double" optional="YES" defaultValueString="123456789"/>
+        <attribute name="db_123456789" attributeType="Double" optional="YES" defaultValueString="123456789"/>
+        <attribute name="da_4294967296" attributeType="Double" optional="YES" defaultValueString="4294967296"/>
+        <attribute name="db_4294967296" attributeType="Double" optional="YES" defaultValueString="4294967296"/>
+        <attribute name="da_m0p25" attributeType="Double" optional="YES" defaultValueString="-0.25"/>
+        <attribute name="db_m0p25" attributeType="Double" optional="YES" defaultValueString="-0.25"/>
+        <attribute name="da_2" attributeType="Double" optional="YES" defaultValueString="2"/>
+        <attribute name="db_2" attributeType="Double" optional="YES" defaultValueString="2"/>
+        <attribute name="fa_0" attributeType="Float" optional="YES" defaultValueString="0"/>
+        <attribute name="fb_0" attributeType="Float" optional="YES" defaultValueString="0"/>
+        <attribute name="fa_100" attributeType="Float" optional="YES" defaultValueString="100"/>
+        <attribute name="fb_100" attributeType="Float" optional="YES" defaultValueString="100"/>
+        <attribute name="fa_m7" attributeType="Float" optional="YES" defaultValueString="-7"/>
+        <attribute name="fb_m7" attributeType="Float" optional="YES" defaultValueString="-7"/>
+        <attribute name="fa_1p5" attributeType="Float" optional="YES" defaultValueString="1.5"/>
+        <attribute name="fb_1p5" attributeType="Float" optional="YES" defaultValueString="1.5"/>
+        <attribute name="fa_0p5" attributeType="Float" optional="YES" defaultValueString="0.5"/>
+        <attribute name="fb_0p5" attributeType="Float" optional="YES" defaultValueString="0.5"/>
+        <attribute name="fa_1E20" attributeType="Float" optional="YES" defaultValueString="1e20"/>
+        <attribute name="fb_1E20" attributeType="Float" optional="YES" defaultValueString="1e20"/>
+        <attribute name="fa_123456789" attributeType="Float" optional="YES" defaultValueString="123456789"/>
+        <attribute name="fb_123456789" attributeType="Float" optional="YES" defaultValueString="123456789"/>
+        <attribute name="fa_4294967296" attributeType="Float" optional="YES" defaultValueString="4294967296"/>
+        <attribute name="fb_4294967296" attributeType="Float" optional="YES" defaultValueString="4294967296"/>
+        <attribute name="fa_m0p25" attributeType="Float" optional="YES" defaultValueString="-0.25"/>
+        <attribute name="fb_m0p25" attributeType="Float" optional="YES" defaultValueString="-0.25"/>
+        <attribute name="fa_2" attributeType="Float" optional="YES" defaultValueString="2"/>
+        <attribute name="fb_2" attributeType="Float" optional="YES" defaultValueString="2"/>
+    </entity>
+</model>

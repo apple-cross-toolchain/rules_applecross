@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Tete7dori" representedClassName="Tete7dori" syncable="YES" codeGenerationType="class">
+        <attribute name="nate" attributeType="Boolean" allowsCloudEncryption="YES" versionHashModifier="do7Muze" usesScalarValueType="YES"/>
+        <attribute name="xo3" attributeType="URI" optional="YES" transient="YES"/>
+        <attribute name="qu123" attributeType="Date" optional="YES" spotlightIndexingEnabled="YES" allowsCloudEncryption="YES" versionHashModifier="murina12"/>
+        <attribute name="muKaxo" attributeType="Binary" optional="YES" allowsCloudEncryption="YES"/>
+        <attribute name="mudoxo" attributeType="Date" optional="YES" versionHashModifier="qute" defaultDateTimeInterval="0"/>
+        <attribute name="teKabeKa" attributeType="UUID" transient="YES"/>
+    </entity>
+    <configuration name="Cloud">
+        <memberEntity name="Tete7dori"/>
+    </configuration>
+</model>

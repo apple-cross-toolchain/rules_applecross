@@ -8,6 +8,7 @@ py_test(
     name = "coremlc_test",
     srcs = ["coremlc_test.py"],
     data = [
+        "//toolchain:stubs/corefoundation.py",
         "//toolchain:stubs/coremlc.py",
         "//toolchain:stubs/coremlc_ops.json",
     ] + glob([

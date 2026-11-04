@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Ka3Mu" representedClassName="Ka3Mu" syncable="YES" codeGenerationType="class">
+        <attribute name="albe3be" attributeType="UUID" optional="YES" versionHashModifier="qu"/>
+        <attribute name="ri712zexo" attributeType="Float" optional="YES" usesScalarValueType="NO" defaultValueString="0.1"/>
+        <relationship name="xona" destinationEntity="Na" maxCount="1" deletionRule="No Action" inverseName="dotedopibe" inverseEntity="Na"/>
+        <attribute name="naalMudo" attributeType="Boolean" optional="YES" allowsCloudEncryption="YES" usesScalarValueType="YES" defaultValueString="YES"/>
+        <attribute name="nate" attributeType="Float" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="xoxote" attributeType="Binary" optional="YES" spotlightIndexingEnabled="YES" allowsExternalBinaryDataStorage="YES"/>
+        <relationship name="quxo" destinationEntity="Al3" maxCount="1" deletionRule="Deny"/>
+        <attribute name="nado" attributeType="URI" optional="YES" transient="YES" elementID="xozepi"/>
+    </entity>
+    <entity name="Be" representedClassName="Be" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="dotena" attributeType="Decimal" optional="YES" defaultValueString="100"/>
+        <attribute name="rinate" attributeType="Binary" optional="YES"/>
+        <attribute name="te" attributeType="String" optional="YES">
+            <userInfo>
+                <entry key="xoQu" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="naxo" attributeType="Transformable" optional="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="NSArray"/>
+        <attribute name="pixo" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Mudo" representedClassName="Mudo" syncable="YES" codeGenerationType="class">
+        <attribute name="qualMual" attributeType="Double" optional="YES" elementID="pizerido" usesScalarValueType="YES" defaultValueString="0"/>
+        <attribute name="mube73" attributeType="Transformable" optional="YES" spotlightIndexingEnabled="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="NSArray"/>
+        <attribute name="tenapina" attributeType="Transformable" optional="YES" transient="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="pi" attributeType="Date" defaultDateTimeInterval="-12.5"/>
+        <attribute name="bexoMu" attributeType="Date" optional="YES" versionHashModifier="xopiKa3">
+            <userInfo>
+                <entry key="xo" value="longer value text"/>
+                <entry key="xoKa" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="naalal12" attributeType="UUID" optional="YES"/>
+        <attribute name="muzezepi" attributeType="Integer 32" optional="YES" usesScalarValueType="NO" defaultValueString="-7"/>
+        <relationship name="teKa" destinationEntity="Zetexo3" optional="YES" maxCount="1" deletionRule="Deny" inverseName="na37ze" inverseEntity="Zetexo3"/>
+        <relationship name="zedoal" destinationEntity="Al3" toMany="YES" deletionRule="Deny" elementID="ripina"/>
+    </entity>
+    <entity name="Zetexo3" representedClassName="Zetexo3" syncable="YES" codeGenerationType="class">
+        <attribute name="kateKa" attributeType="Transformable" optional="YES" customClassName="[String]"/>
+        <attribute name="kaal3" attributeType="Float" optional="YES" transient="YES" usesScalarValueType="YES"/>
+        <relationship name="na37ze" destinationEntity="Mudo" optional="YES" maxCount="1" deletionRule="Nullify" inverseName="teKa" inverseEntity="Mudo"/>
+        <attribute name="quzexoKa" attributeType="URI" optional="YES" spotlightIndexingEnabled="YES" versionHashModifier="xo"/>
+        <attribute name="xoribe" attributeType="Decimal" optional="YES" elementID="ritedo7"/>
+    </entity>
+    <entity name="MuQuKa" representedClassName="MuQuKa" syncable="YES" codeGenerationType="class">
+        <attribute name="nanazeMuxo" attributeType="Transformable" preserveAfterDeletion="YES" elementID="zebeze3" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="qunaalQu3" attributeType="String" defaultValueString="hi"/>
+        <attribute name="ze" attributeType="UUID" spotlightIndexingEnabled="YES" elementID="muxo"/>
+        <attribute name="do77Ka" attributeType="Decimal" defaultValueString="100"/>
+        <attribute name="tezena" attributeType="Integer 32" usesScalarValueType="NO" defaultValueString="30"/>
+        <attribute name="teMupi" attributeType="Float" usesScalarValueType="YES" defaultValueString="0"/>
+        <attribute name="xo" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES">
+            <userInfo>
+                <entry key="al" value="v"/>
+                <entry key="rize" value="x1"/>
+                <entry key="be12" value="v"/>
+            </userInfo>
+        </attribute>
+        <relationship name="te1212127" destinationEntity="Be" maxCount="1" deletionRule="Cascade" elementID="pixona">
+            <userInfo>
+                <entry key="ze7dopi" value="x1"/>
+            </userInfo>
+        </relationship>
+    </entity>
+    <entity name="Na" representedClassName="Na" syncable="YES" codeGenerationType="class" parentEntity="Be" versionHashModifier="zeMu33">
+        <attribute name="betena" attributeType="Float" optional="YES" preserveAfterDeletion="YES" elementID="qube" usesScalarValueType="YES" defaultValueString="0">
+            <userInfo>
+                <entry key="ri" value="x1"/>
+                <entry key="riberi" value="v"/>
+            </userInfo>
+        </attribute>
+        <relationship name="dotedopibe" destinationEntity="Ka3Mu" optional="YES" toMany="YES" ordered="YES" minCount="1" maxCount="113" deletionRule="Deny" inverseName="xona" inverseEntity="Ka3Mu"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="betena"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Al3" representedClassName="Al3MO" syncable="YES" codeGenerationType="class">
+        <attribute name="naQu" attributeType="URI" optional="YES"/>
+        <attribute name="zeKa" attributeType="Decimal" optional="YES" elementID="alna3" defaultValueString="100">
+            <userInfo>
+                <entry key="kadodoQute" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="al" attributeType="Binary" optional="YES" elementID="te">
+            <userInfo>
+                <entry key="doxoMu12na" value="longer value text"/>
+                <entry key="do" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="be" attributeType="String" spotlightIndexingEnabled="YES" allowsCloudEncryption="YES" elementID="xonanabe"/>
+    </entity>
+    <configuration name="Local">
+        <memberEntity name="Be"/>
+        <memberEntity name="Na"/>
+        <memberEntity name="Zetexo3"/>
+        <memberEntity name="Mudo"/>
+        <memberEntity name="Al3"/>
+    </configuration>
+    <fetchRequest name="Na" entity="Na"/>
+    <fetchRequest name="DozeriKaQu" entity="Mudo"/>
+</model>

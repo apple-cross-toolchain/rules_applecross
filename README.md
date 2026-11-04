@@ -36,8 +36,14 @@ one fails:
   default; set it to `False`). App Intents' intents, parameters, enums,
   entities, queries and App Shortcuts compile as Xcode compiles them
   ([docs/clean-room/appintentsmetadataprocessor.md](docs/clean-room/appintentsmetadataprocessor.md));
-- Core Data models (`momc`, `mapc`;
-  [docs/clean-room/momc.md](docs/clean-room/momc.md) says why);
+- Core Data mapping models (`mapc`), and Core Data models' generated
+  classes (`momc --action generate`). Models compile, each version to the
+  `.mom` Xcode writes, with `--config=relax_momc`: their `VersionInfo.plist`
+  leaves out the entity version hashes, which Core Data computes itself, so
+  stores load, save and migrate as with Xcode's. Predicates, fetched and
+  derived properties, composite attributes, fetch indexes and names other
+  than ASCII are refused
+  ([docs/clean-room/momc.md](docs/clean-room/momc.md));
 - Core ML's older neural networks. ML Programs (`.mlpackage`, states,
   several functions, flexible shapes, optional inputs and compressed weights
   included) and the other `.mlmodel` types compile, and get their generated
@@ -278,11 +284,12 @@ draw the icon from its layers:
 | `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
 | `relax_docc` | `RULES_APPLECROSS_RELAX_DOCC` | DocC archives with swift.org's render template, where the SDK archive lacks Xcode's |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
+| `relax_momc` | `RULES_APPLECROSS_RELAX_MOMC` | Core Data models whose `VersionInfo.plist` has no entity version hashes or checksums, without the `.omo` Xcode writes beside a versioned model's current version |
 | `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library |
 | `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |
 | `relax_app_intents` | `RULES_APPLECROSS_RELAX_APP_INTENTS` | App Intents not yet reproduced, left out |
 | `relax_app_intents_flexible_matching` | `RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING` | App Shortcuts Flexible Matching's assets, left out |
-| `relax_xcode_version` | `RULES_APPLECROSS_RELAX_XCODE_VERSION` | an Xcode other than 27.0 and 27.2: actool and coremlc record the library versions of the nearest one (27.0's before 27.2, 27.2's after) |
+| `relax_xcode_version` | `RULES_APPLECROSS_RELAX_XCODE_VERSION` | an Xcode other than 27.0 and 27.2: actool and coremlc record the library versions of the nearest one (27.0's before 27.2, 27.2's after), momc 27.2's |
 
 `--config=relaxed` accepts all of them, and so does
 `RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`, which it also sets for

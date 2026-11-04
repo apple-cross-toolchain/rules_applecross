@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Qu7" representedClassName="Qu7" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="ze" attributeType="Integer 16" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="muQu" attributeType="Float" optional="YES" spotlightIndexingEnabled="YES" versionHashModifier="alMual12" usesScalarValueType="NO" defaultValueString="2.5"/>
+        <attribute name="qutexo3" attributeType="Integer 32" optional="YES" usesScalarValueType="YES" defaultValueString="100000"/>
+        <attribute name="xoxoMube" attributeType="Boolean" usesScalarValueType="NO" defaultValueString="NO"/>
+        <attribute name="pipiKa" attributeType="Float" optional="YES" versionHashModifier="quQuQunaxo" usesScalarValueType="NO"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Tebe" representedClassName="Tebe" syncable="YES" codeGenerationType="class" elementID="Alnaalze">
+        <attribute name="pi12" attributeType="Date" optional="YES"/>
+    </entity>
+    <entity name="NaMu" representedClassName="NaMu" syncable="YES" codeGenerationType="class" versionHashModifier="muzepiQuna">
+        <attribute name="zedoQuberi" attributeType="Binary" optional="YES" transient="YES" elementID="kanado7"/>
+        <attribute name="dodona" attributeType="Boolean" optional="YES" usesScalarValueType="NO" defaultValueString="YES"/>
+        <attribute name="xodo" attributeType="Double" optional="YES" spotlightIndexingEnabled="YES" preserveAfterDeletion="YES" elementID="xote12be" usesScalarValueType="NO" defaultValueString="100"/>
+        <attribute name="texodo" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="piKaKa" attributeType="URI" optional="YES">
+            <userInfo>
+                <entry key="pi3ri" value="longer value text"/>
+                <entry key="quKabexo" value="longer value text"/>
+                <entry key="nateMu" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="qunana" attributeType="Integer 64" optional="YES" spotlightIndexingEnabled="YES" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="Mu" representedClassName="Mu" syncable="YES" codeGenerationType="class" versionHashModifier="mupiQu">
+        <attribute name="ka" attributeType="Decimal" optional="YES" transient="YES" defaultValueString="100"/>
+        <attribute name="na12aldote" attributeType="Integer 64" spotlightIndexingEnabled="YES" usesScalarValueType="YES"/>
+        <attribute name="al" attributeType="Decimal" optional="YES" defaultValueString="-2.25"/>
+        <attribute name="aldonaxote" attributeType="Transformable" optional="YES" customClassName="NSArray"/>
+        <attribute name="teze" attributeType="Integer 16" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="teQu" attributeType="Double" optional="YES" preserveAfterDeletion="YES" usesScalarValueType="YES" defaultValueString="100"/>
+        <attribute name="tepi" attributeType="Float" elementID="pi12rido" usesScalarValueType="YES"/>
+    </entity>
+    <configuration name="Other">
+        <memberEntity name="NaMu"/>
+        <memberEntity name="Tebe"/>
+        <memberEntity name="Mu"/>
+        <memberEntity name="Qu7"/>
+    </configuration>
+    <configuration name="Local">
+        <memberEntity name="Mu"/>
+        <memberEntity name="NaMu"/>
+        <memberEntity name="Tebe"/>
+    </configuration>
+</model>

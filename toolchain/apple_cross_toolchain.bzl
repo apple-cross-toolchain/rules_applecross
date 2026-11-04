@@ -414,9 +414,12 @@ _RULE_INPUT_FILES = [
     "stubs/appintentsmetadataprocessor.py",
     "stubs/appintentsmetadataprocessor.sh",
     "stubs/appintentsnltrainingprocessor.sh",
+    "stubs/corefoundation.py",
     "stubs/coremlc.py",
     "stubs/coremlc.sh",
     "stubs/coremlc_ops.json",
+    "stubs/momc.py",
+    "stubs/momc.sh",
     "stubs/docc.sh",
 ]
 
@@ -755,6 +758,15 @@ def _apple_cross_toolchain_impl(rctx):
         _install_executable(rctx, "stubs/coremlc.sh", _coremlc_path)
         _install_executable(rctx, "stubs/coremlc.py", _coremlc_path + ".py")
         _install_executable(rctx, "stubs/coremlc_ops.json", xcode_toolchain_bindir + "coremlc_ops.json")
+        _install_executable(rctx, "stubs/corefoundation.py", xcode_toolchain_bindir + "corefoundation.py")
+
+    # Core Data models: compiled with --config=relax_momc.
+    _momc_path = xcode_toolchain_bindir + "momc"
+    result = rctx.execute(["test", "-e", _momc_path])
+    if result.return_code != 0:
+        _install_executable(rctx, "stubs/momc.sh", _momc_path)
+        _install_executable(rctx, "stubs/momc.py", _momc_path + ".py")
+        _install_executable(rctx, "stubs/corefoundation.py", xcode_toolchain_bindir + "corefoundation.py")
 
     _install_docc(rctx, cpu, xcode_toolchain_dir)
 

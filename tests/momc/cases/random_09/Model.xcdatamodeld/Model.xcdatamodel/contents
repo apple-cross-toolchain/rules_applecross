@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="teze">
+    <entity name="Te" representedClassName="Te" syncable="YES" codeGenerationType="class" parentEntity="Ka121212Mu" versionHashModifier="mu">
+        <attribute name="al" attributeType="URI" optional="YES" transient="YES"/>
+        <relationship name="xoMu" destinationEntity="Ri7" optional="YES" maxCount="1" deletionRule="Deny" inverseName="nado" inverseEntity="Ri7"/>
+        <attribute name="doalalKa" attributeType="Date" optional="YES"/>
+        <attribute name="zenarinaKa" attributeType="UUID" optional="YES" spotlightIndexingEnabled="YES">
+            <userInfo>
+                <entry key="tebeQudo" value="x1"/>
+                <entry key="mu" value="x1"/>
+            </userInfo>
+        </attribute>
+        <relationship name="beze12xoMu" destinationEntity="TeKaalQuri" optional="YES" toMany="YES" deletionRule="Cascade" inverseName="riKa" inverseEntity="TeKaalQuri">
+            <userInfo>
+                <entry key="pibe" value="x1"/>
+                <entry key="kaQuxo" value="v"/>
+            </userInfo>
+        </relationship>
+    </entity>
+    <entity name="TeKaalQuri" representedClassName="TeKaalQuri" syncable="YES" codeGenerationType="class">
+        <attribute name="muteKa" attributeType="Float" optional="YES" transient="YES" spotlightIndexingEnabled="YES" allowsCloudEncryption="YES" usesScalarValueType="YES" defaultValueString="0"/>
+        <attribute name="natexozete" attributeType="Integer 64" optional="YES" spotlightIndexingEnabled="YES" usesScalarValueType="NO"/>
+        <relationship name="riKa" destinationEntity="Te" toMany="YES" ordered="YES" deletionRule="Cascade" inverseName="beze12xoMu" inverseEntity="Te"/>
+        <attribute name="rizeQuzepi" attributeType="Binary" optional="YES" spotlightIndexingEnabled="YES" elementID="muQu"/>
+        <attribute name="tealKapi" attributeType="Transformable" transient="YES" preserveAfterDeletion="YES" elementID="al" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="alxo" attributeType="Date" versionHashModifier="zepi" defaultDateTimeInterval="-12.5"/>
+        <attribute name="quxoKaal" attributeType="URI" spotlightIndexingEnabled="YES" versionHashModifier="ka">
+            <userInfo>
+                <entry key="bebebe37" value="longer value text"/>
+                <entry key="kado" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="naQutexoQu" attributeType="Integer 16" usesScalarValueType="YES"/>
+        <relationship name="naQu" destinationEntity="Ka121212Mu" optional="YES" toMany="YES" deletionRule="Deny" inverseName="ribe" inverseEntity="Ka121212Mu"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="tealKapi"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Ri7" representedClassName="Ri7" syncable="YES" codeGenerationType="class">
+        <attribute name="doMuKanaKa" attributeType="Boolean" usesScalarValueType="NO"/>
+        <attribute name="qu37ri7" attributeType="URI"/>
+        <relationship name="te" destinationEntity="Ka121212Mu" optional="YES" maxCount="1" deletionRule="No Action" inverseName="mudo" inverseEntity="Ka121212Mu">
+            <userInfo>
+                <entry key="mudoQuze" value="v"/>
+                <entry key="berido" value="x1"/>
+            </userInfo>
+        </relationship>
+        <relationship name="pi" destinationEntity="Ri7" toMany="YES" minCount="1" maxCount="197" deletionRule="Deny" versionHashModifier="riKa"/>
+        <attribute name="tedoriQu" attributeType="Boolean" optional="YES" usesScalarValueType="NO" defaultValueString="NO"/>
+        <attribute name="zeal" attributeType="Integer 64" optional="YES" usesScalarValueType="YES" defaultValueString="5"/>
+        <relationship name="nado" destinationEntity="Te" maxCount="1" deletionRule="Nullify" inverseName="xoMu" inverseEntity="Te"/>
+    </entity>
+    <entity name="Ka121212Mu" representedClassName="Ka121212Mu" syncable="YES" codeGenerationType="class">
+        <relationship name="mudo" destinationEntity="Ri7" optional="YES" toMany="YES" deletionRule="No Action" inverseName="te" inverseEntity="Ri7"/>
+        <relationship name="ribe" destinationEntity="TeKaalQuri" optional="YES" toMany="YES" deletionRule="Nullify" inverseName="naQu" inverseEntity="TeKaalQuri"/>
+    </entity>
+</model>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="AlnaKa" representedClassName="AlnaKa" syncable="YES" codeGenerationType="class">
+        <attribute name="beKa7" attributeType="Double" optional="YES" transient="YES" usesScalarValueType="YES"/>
+        <attribute name="quKa" attributeType="Binary" optional="YES" spotlightIndexingEnabled="YES" allowsExternalBinaryDataStorage="YES" allowsCloudEncryption="YES"/>
+        <attribute name="napixonabe" attributeType="Integer 16" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="na3" attributeType="UUID" optional="YES"/>
+        <relationship name="rina12ze" destinationEntity="Pi" optional="YES" maxCount="1" deletionRule="Deny" inverseName="pina" inverseEntity="Pi">
+            <userInfo>
+                <entry key="qudo" value="x1"/>
+                <entry key="ka" value="longer value text"/>
+                <entry key="be" value="v"/>
+            </userInfo>
+        </relationship>
+        <attribute name="kate" attributeType="Date" transient="YES"/>
+        <attribute name="rial3albe" attributeType="Float" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="Pi" representedClassName="Pi" syncable="YES" codeGenerationType="class">
+        <attribute name="do3do" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="te12ze" attributeType="Float" elementID="qu7" usesScalarValueType="NO" defaultValueString="2.5"/>
+        <attribute name="qupi" attributeType="Double" optional="YES" spotlightIndexingEnabled="YES" usesScalarValueType="YES"/>
+        <attribute name="doxo" attributeType="UUID" optional="YES" preserveAfterDeletion="YES"/>
+        <attribute name="muKaQu" attributeType="Float" optional="YES" usesScalarValueType="YES" defaultValueString="0"/>
+        <attribute name="qu12nari" attributeType="UUID" optional="YES">
+            <userInfo>
+                <entry key="piKana" value="x1"/>
+            </userInfo>
+        </attribute>
+        <relationship name="pina" destinationEntity="AlnaKa" optional="YES" toMany="YES" ordered="YES" deletionRule="Deny" inverseName="rina12ze" inverseEntity="AlnaKa"/>
+    </entity>
+    <entity name="Zepi" representedClassName="ZepiMO" syncable="YES" codeGenerationType="class" elementID="Ri3Qu">
+        <attribute name="alQuri12" attributeType="Transformable" optional="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="alQuri12"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Nabexo7" representedClassName="Nabexo7" syncable="YES" codeGenerationType="class" parentEntity="AlnaKa">
+        <attribute name="na" attributeType="Integer 64" optional="YES" usesScalarValueType="YES" defaultValueString="270200"/>
+        <attribute name="bepiQuxobe" attributeType="Boolean" optional="YES" preserveAfterDeletion="YES" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="muQuQuxo" value="longer value text"/>
+                <entry key="alri7na" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="ze3Qual" attributeType="Integer 16" optional="YES" versionHashModifier="alnadoze" elementID="naMu7" usesScalarValueType="YES" defaultValueString="-33">
+            <userInfo>
+                <entry key="tealpi" value="longer value text"/>
+                <entry key="mupiKa" value="v"/>
+                <entry key="quMuna12te" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="ze12" attributeType="UUID"/>
+    </entity>
+    <entity name="Bena" representedClassName="Bena" syncable="YES" codeGenerationType="class">
+        <attribute name="zeteKa" attributeType="UUID" optional="YES" transient="YES" preserveAfterDeletion="YES"/>
+        <attribute name="ri12" attributeType="Binary" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="qudo7na" attributeType="Integer 32" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="piKari7" value="v"/>
+                <entry key="rina7" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Ripi712" representedClassName="Ripi712" syncable="YES" codeGenerationType="class">
+        <attribute name="zenanaxoal" attributeType="Transformable" optional="YES">
+            <userInfo>
+                <entry key="ridoalri" value="v"/>
+                <entry key="muri" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="qu7ze" attributeType="UUID" optional="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="ka" attributeType="Integer 16" optional="YES" transient="YES" usesScalarValueType="NO"/>
+        <attribute name="quQudoxo" attributeType="UUID" optional="YES">
+            <userInfo>
+                <entry key="mu" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="pi" attributeType="Decimal" optional="YES" allowsCloudEncryption="YES" defaultValueString="243"/>
+        <attribute name="xoKa7" attributeType="UUID" optional="YES"/>
+    </entity>
+    <entity name="Alri" representedClassName="Alri" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="be12" attributeType="URI" optional="YES" transient="YES" preserveAfterDeletion="YES"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="be12"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Texo333" representedClassName="Texo333" syncable="YES" codeGenerationType="class">
+    </entity>
+    <configuration name="Cloud">
+        <memberEntity name="AlnaKa"/>
+        <memberEntity name="Nabexo7"/>
+    </configuration>
+</model>

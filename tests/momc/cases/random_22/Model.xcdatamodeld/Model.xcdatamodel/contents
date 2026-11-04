@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="TeriQuKa" representedClassName="TeriQuKa" syncable="YES" codeGenerationType="class" parentEntity="Texo">
+        <attribute name="nazeteri" attributeType="String" optional="YES"/>
+        <attribute name="altepialdo" attributeType="String" optional="YES" spotlightIndexingEnabled="YES" elementID="do">
+            <userInfo>
+                <entry key="qualxoteMu" value="longer value text"/>
+                <entry key="nadoMupi" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="naQupi" attributeType="Decimal" defaultValueString="0"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="altepialdo"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Be" representedClassName="Be" syncable="YES" codeGenerationType="class">
+        <relationship name="be" destinationEntity="Be" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <attribute name="al" attributeType="Binary" optional="YES" transient="YES"/>
+    </entity>
+    <entity name="Texo" representedClassName="Texo" syncable="YES" codeGenerationType="class">
+    </entity>
+    <entity name="Na" representedClassName="Na" syncable="YES" codeGenerationType="class" elementID="Bebe">
+        <attribute name="kaxobe" attributeType="Double" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="pial" attributeType="Integer 16" usesScalarValueType="YES"/>
+    </entity>
+</model>

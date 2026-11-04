@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="D" representedClassName="D" syncable="YES" codeGenerationType="class">
+        <attribute name="i" attributeType="Integer 32" defaultValueString="7" usesScalarValueType="YES"/>
+        <attribute name="s" attributeType="String" defaultValueString="hi"/>
+        <attribute name="b" attributeType="Boolean" defaultValueString="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" defaultValueString="1.5" usesScalarValueType="YES"/>
+        <attribute name="dt" attributeType="Date" defaultDateTimeInterval="0"/>
+    </entity>
+</model>

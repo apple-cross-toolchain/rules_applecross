@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Xoze" representedClassName="Xoze" syncable="YES" codeGenerationType="class">
+        <attribute name="ri" attributeType="Binary" optional="YES" spotlightIndexingEnabled="YES" versionHashModifier="qupize"/>
+        <attribute name="kabeze12" attributeType="Boolean" optional="YES" elementID="quzebe7" usesScalarValueType="NO"/>
+        <attribute name="al12Quna3" attributeType="Integer 64" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="bebebe" attributeType="Integer 32" spotlightIndexingEnabled="YES" usesScalarValueType="NO" defaultValueString="0"/>
+        <relationship name="teMu" destinationEntity="Kabeze" optional="YES" toMany="YES" deletionRule="No Action" inverseName="zeQu3" inverseEntity="Kabeze"/>
+        <attribute name="naKaal" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="NSArray"/>
+        <attribute name="alriKaKaxo" attributeType="Decimal" optional="YES" allowsCloudEncryption="YES" versionHashModifier="ri" defaultValueString="243">
+            <userInfo>
+                <entry key="qualbedoMu" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="napi" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES" elementID="qute"/>
+    </entity>
+    <entity name="Ka" representedClassName="Ka" syncable="YES" codeGenerationType="class">
+        <attribute name="teri12te" attributeType="Transformable" optional="YES" spotlightIndexingEnabled="YES" elementID="qurize" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="zena" attributeType="String" optional="YES" allowsCloudEncryption="YES"/>
+        <attribute name="pi" attributeType="String" optional="YES"/>
+        <relationship name="bebepi" destinationEntity="Ka" optional="YES" toMany="YES" deletionRule="No Action"/>
+        <attribute name="teri3Qu" attributeType="Integer 16" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="xoalzepi" attributeType="Float" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="do" attributeType="Boolean" optional="YES" preserveAfterDeletion="YES" usesScalarValueType="NO" defaultValueString="YES"/>
+    </entity>
+    <entity name="Kabeze" representedClassName="Kabeze" syncable="YES" codeGenerationType="class" parentEntity="Xoze">
+        <relationship name="zeQu3" destinationEntity="Xoze" toMany="YES" deletionRule="Deny" inverseName="teMu" inverseEntity="Xoze"/>
+    </entity>
+</model>

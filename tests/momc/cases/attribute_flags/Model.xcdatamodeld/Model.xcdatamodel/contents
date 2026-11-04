@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="F" representedClassName="F" syncable="YES" codeGenerationType="class">
+        <attribute name="req" attributeType="String" optional="YES"/>
+        <attribute name="trans" attributeType="String" transient="YES"/>
+        <attribute name="both" attributeType="String" optional="YES" transient="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="ext" attributeType="Binary" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="hist" attributeType="String" optional="YES" preserveAfterDeletion="YES"/>
+        <attribute name="enc" attributeType="String" optional="YES" allowsCloudEncryption="YES"/>
+        <attribute name="scalar" attributeType="Integer 16" usesScalarValueType="YES"/>
+        <attribute name="obj" attributeType="Integer 16" usesScalarValueType="NO"/>
+    </entity>
+</model>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="C1" representedClassName="C1" syncable="YES" codeGenerationType="class">
+        <attribute name="a" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="C2" representedClassName="C2" syncable="YES" codeGenerationType="class">
+        <attribute name="b" attributeType="String" optional="YES"/>
+    </entity>
+    <configuration name="Cloud" usedWithCloudKit="YES">
+        <memberEntity name="C1"/>
+    </configuration>
+</model>

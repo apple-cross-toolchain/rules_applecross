@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <attribute name="a20" attributeType="String" optional="YES"/>
+        <attribute name="_x" attributeType="String" optional="YES"/>
+        <attribute name="a10" attributeType="String" optional="YES"/>
+        <attribute name="zed" attributeType="String" optional="YES"/>
+        <attribute name="X2" attributeType="String" optional="YES"/>
+        <relationship name="T" destinationEntity="Q" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <relationship name="r10" destinationEntity="Q" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="k" attributeType="String" optional="YES"/>
+        <relationship name="R1" destinationEntity="Q" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="q1" attributeType="String" optional="YES"/>
+        <attribute name="m" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Q" representedClassName="Q" syncable="YES" codeGenerationType="class">
+        <attribute name="q" attributeType="String" optional="YES"/>
+    </entity>
+</model>

@@ -14,6 +14,7 @@ objc_library(
     ],
     data = [
         "Resources/Main.storyboard",
+        "//examples/resources:Shelf.xcdatamodeld",
     ],
     tags = ["manual"],
 )

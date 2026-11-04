@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Qualdo" representedClassName="Qualdo" syncable="YES" codeGenerationType="class">
+        <attribute name="pi" attributeType="String" optional="YES" elementID="mu" defaultValueString="hi">
+            <userInfo>
+                <entry key="ka" value="v"/>
+                <entry key="na" value="x1"/>
+            </userInfo>
+        </attribute>
+        <relationship name="tenaQu" destinationEntity="Qualdo" optional="YES" maxCount="1" deletionRule="No Action" versionHashModifier="mu"/>
+    </entity>
+    <entity name="Qube" representedClassName="Qube" syncable="YES" codeGenerationType="class" parentEntity="Qualdo">
+        <attribute name="mupi" attributeType="Transformable" optional="YES"/>
+        <relationship name="ze" destinationEntity="Qualdo" optional="YES" maxCount="1" deletionRule="Deny"/>
+        <attribute name="alriKa" attributeType="Float" optional="YES" usesScalarValueType="YES" defaultValueString="2.5"/>
+    </entity>
+    <fetchRequest name="Be12do" entity="Qube"/>
+    <fetchRequest name="Be" entity="Qube"/>
+</model>

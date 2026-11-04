@@ -19,7 +19,9 @@ catalogs). The compiled storyboard's Info.plist and WatchKit interface
 follow it. A dictionary
 created whole (as reading a binary property list creates them) starts at
 the size its entries need and is filled in order without rehashing; a
-linked WatchKit interface follows that.
+linked WatchKit interface follows that. A Core Data model's keyed archive
+follows both: its objects' fields grow a dictionary each, its sets are
+created whole ([momc.md](momc.md#the-archive)).
 
 ## Foundation's NSMutableSet (NIB key tables)
 
