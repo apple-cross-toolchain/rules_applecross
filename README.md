@@ -49,7 +49,9 @@ one fails:
   these in a `.mlpackage` too, with the metadata and feature descriptions
   Xcode's model editor saves there
   ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
-- Reality Composer content (`realitytool`), DocC, and `.xib` files;
+- Reality Composer content (`realitytool`) and DocC;
+- `.xib` files other than an iOS one holding a view or a table view cell
+  ([docs/clean-room/ibtool.md](docs/clean-room/ibtool.md#xibs));
 - tvOS app icons, and Icon Composer icons, whose layers (all iOS and macOS
   26 and later draw) are Xcode's but whose flattened images aren't
   (`--config=relax_actool_icon_composer` accepts them;
@@ -250,7 +252,7 @@ not import the libraries compiled on Linux. Configure it with
 
 `@rules_applecross//toolchain:apple_bundling_on_linux` registers the same type
 for the Linux platform, which is what an all-remote build uses. It is
-incomplete: the ported `ibtool` compiles only the storyboards
+incomplete: the ported `ibtool` compiles only the storyboards and xibs
 `docs/clean-room/ibtool.md` describes, and a signing identity's key must be
 on the machine that signs, which a remote executor is not (docs/consumers.md,
 "Signing with an identity on Linux"). Register it only if you are building

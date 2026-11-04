@@ -7,6 +7,7 @@ on:
       - tests/actool_catalog/**
       - tests/actool_icon/**
       - tests/actool_vector/**
+      - tests/ibtool_xib/**
       - tools/xcode_equivalence.py
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
@@ -20,6 +21,7 @@ on:
       - tests/actool_catalog/**
       - tests/actool_icon/**
       - tests/actool_vector/**
+      - tests/ibtool_xib/**
       - tools/xcode_equivalence.py
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
@@ -59,7 +61,8 @@ jobs:
           bazel test -c opt //... &&
           python3 ../../tests/actool_icon/actool_icon_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
           python3 ../../tests/actool_catalog/actool_catalog_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
-          python3 ../../tests/actool_vector/actool_vector_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)"'
+          python3 ../../tests/actool_vector/actool_vector_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
+          python3 ../../tests/ibtool_xib/ibtool_xib_test.py "$(bazel cquery -c opt --output=files //crates/ibtool 2>/dev/null)"'
       - uses: actions/upload-artifact@v7
         with:
           name: ported-tools-linux-${{ matrix.arch }}

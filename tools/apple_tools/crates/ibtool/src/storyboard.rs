@@ -251,6 +251,10 @@ struct Nib {
     varied: Vec<String>,
     /// Excluded constraints, encoded where the objects list them.
     withheld: Vec<Object>,
+    /// A xib's colours keep their components as the document gives them;
+    /// a storyboard's are rounded to 10 significant digits (one probe of
+    /// each).
+    exact_colors: bool,
 }
 
 /// A view's constraints, some of which its default variation excludes.
@@ -264,7 +268,12 @@ struct Variation {
 
 impl Nib {
     fn new(platform: Platform, color_matched: bool, localizable: bool) -> Nib {
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), withheld: Vec::new() }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), withheld: Vec::new(), exact_colors: false }
+    }
+
+    /// A colour's component as this nib keeps it.
+    fn component(&self, x: f64) -> f64 {
+        if self.exact_colors { x } else { significant_10(x) }
     }
 
     fn fresh(&mut self) -> String {
@@ -502,7 +511,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     if calibrated {
         only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", Some("calibratedWhite"))])?;
         let white = number(attr(n, "white")?)?;
-        let alpha = significant_10(number(attr(n, "alpha")?)?);
+        let alpha = nib.component(number(attr(n, "alpha")?)?);
         if white != 0.0 && white != 1.0 {
             return fail(format!("calibrated white {white} is converted by Xcode in a way not established for this ibtool"));
         }
@@ -511,7 +520,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
             if let Some(v) = nib.existing(&key) {
                 return Ok(v);
             }
-            let (alpha_keys, alpha_text) = color_components(&GRAY_KEYS[1..], &[alpha]);
+            let (alpha_keys, alpha_text) = exact_color_components(&GRAY_KEYS[1..], &[alpha]);
             let mut keys = vec![("UIColorComponentCount", Value::Int(2)), ("UIWhite", Value::Float(1.0000001))];
             keys.extend(alpha_keys);
             let mut text = b"1 ".to_vec();
@@ -525,7 +534,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         if !calibrated {
             only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
         }
-        let c = [number(attr(n, "white")?)?, number(attr(n, "alpha")?)?].map(significant_10);
+        let c = [number(attr(n, "white")?)?, number(attr(n, "alpha")?)?].map(|x| nib.component(x));
         let name = match c {
             [0.0, 1.0] => Some("blackColor"),
             [1.0, 1.0] => Some("whiteColor"),
@@ -538,7 +547,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         if let Some(v) = nib.existing(&format!("color:gray:{c:?}")) {
             return Ok(v);
         }
-        let (components, text) = color_components(&GRAY_KEYS, &c);
+        let (components, text) = exact_color_components(&GRAY_KEYS, &c);
         let mut keys = vec![("UIColorComponentCount", Value::Int(2))];
         keys.extend(components);
         keys.push(("NSWhite", Value::Data(text)));
@@ -546,12 +555,12 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         return Ok(nib.shared(format!("color:gray:{c:?}"), || Object::new("UIColor", keys).with_fallback("NSColor")));
     }
     only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", Some("sRGB"))])?;
-    let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?].map(significant_10);
+    let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?].map(|x| nib.component(x));
     let key = format!("color:rgb:{c:?}");
     if let Some(v) = nib.existing(&key) {
         return Ok(v);
     }
-    let (components, text) = color_components(&RGB_KEYS, &c);
+    let (components, text) = exact_color_components(&RGB_KEYS, &c);
     let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
     keys.extend(components);
     keys.push(("NSRGB", Value::Data(text)));
@@ -586,12 +595,12 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     if !calibrated && !(c[0] == c[1] && c[1] == c[2] && (c[0] == 0.0 || c[0] == 1.0)) {
         return fail(format!("{space} colours other than black and white are converted without colorMatched, which is not supported by this ibtool"));
     }
-    let c = c.map(significant_10);
+    let c = c.map(|x| nib.component(x));
     let key = format!("color:rgb:{c:?}");
     if let Some(v) = nib.existing(&key) {
         return Ok(v);
     }
-    let (components, text) = color_components(&RGB_KEYS, &c);
+    let (components, text) = exact_color_components(&RGB_KEYS, &c);
     let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
     keys.extend(components);
     keys.push(("NSRGB", Value::Data(text)));
@@ -2752,6 +2761,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 (None, _) => None,
                 _ => return fail("a text field needs one text colour or nil"),
             };
+            if let Some(c) = children(n, "color").find(|c| !matches!(c.attribute("key"), Some("textColor" | "backgroundColor"))) {
+                return fail(format!("a text field's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
+            }
+            // Its background colour after its frame (one of the xib
+            // corpus's).
+            if let Some(c) = child(n, "color", "backgroundColor") {
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
@@ -4831,6 +4848,17 @@ fn proxy(nib: &mut Nib, id: &str, name: &str) -> Value {
     Value::New(Object::new("UIProxyObject", vec![("UIProxiedObjectIdentifier", identifier)]).named(name))
 }
 
+/// `object`'s references to `from`, and its objects', made to `to`.
+fn rename_references(object: &mut Object, from: &str, to: &str) {
+    for (_, v) in &mut object.values {
+        match v {
+            Value::Ref(name) if name == from => *name = to.to_string(),
+            Value::New(o) => rename_references(o, from, to),
+            _ => {}
+        }
+    }
+}
+
 fn outlet(nib: &mut Nib, label: &str, source: &str, destination: &str) -> Value {
     let label = nib.string(label);
     Value::New(Object::new("UIRuntimeOutletConnection", vec![("UILabel", label), ("UISource", reference(source)), ("UIDestination", reference(destination))]))
@@ -5735,6 +5763,28 @@ fn navigation_controller_nib(
 }
 
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
+    compile_document(xml, minimum_deployment_target, module, localizable, false)
+}
+
+/// A xib rewritten as a one-scene storyboard (xib.rs): its view nib has the
+/// nib's own File's Owner where a scene's has its controller's placeholder,
+/// and the owner's `view` outlet only when the xib has it (as the
+/// controller's outlet).
+pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
+    compile_document(xml, minimum_deployment_target, module, localizable, true)
+}
+
+/// A xib's top-level table view cell (xib.rs), its canvas location and
+/// safe-area guide taken out (`safe_area`: whether it had one): its nib is
+/// the one Xcode compiles for a prototype cell, the guide listed.
+pub fn compile_xib_cell(xml: &str, module: Option<&str>, localizable: bool, safe_area: bool) -> Result<Vec<u8>, String> {
+    let doc = Document::parse(xml).map_err(|e| e.to_string())?;
+    let root = doc.root_element();
+    let cell = children(root, "objects").flat_map(|o| children(o, "tableViewCell")).next().ok_or("a xib without a cell")?;
+    table::cell_nib(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable, module, cell, false, Some(safe_area))
+}
+
+fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, xib: bool) -> Result<Compiled, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let platform = match root.attribute("type") {
@@ -6140,7 +6190,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         let safe_area = children(view, "viewLayoutGuide").find(|g| g.attribute("key") == Some("safeArea"));
         // A document using safe areas gives every root view a safe-area
         // guide, the same whether or not its view lists one (three probes).
-        let uses_safe_areas = view.document().root_element().attribute("useSafeAreas") == Some("YES");
+        // A xib's view has one only when it lists it (two of the corpus's).
+        let uses_safe_areas = !xib && view.document().root_element().attribute("useSafeAreas") == Some("YES");
         // So does one with legacy guides, beside them, listed or not (three
         // probes: a launch screen with both, and with each alone).
         let has_safe_area = safe_area.is_some() || uses_safe_areas;
@@ -6148,7 +6199,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // listed them, when it uses Auto Layout (two probes, one of the
         // corpus's), and none without (one of the corpus's).
         let autolayout = view.document().root_element().attribute("useAutolayout") == Some("YES");
-        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout {
+        // A xib's view gets none (36 of the corpus's).
+        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout && !xib {
             scene.guides = vec![("implicit top guide", "top"), ("implicit bottom guide", "bottom")];
         }
         // Without Auto Layout a subview's default mask isn't the usual one
@@ -6244,6 +6296,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         }
 
         let mut nib = Nib::new(platform, color_matched, localizable);
+        nib.exact_colors = xib;
         // A controller's freeform size (`<size key="freeformSize">`, the
         // simulated metrics' own size) replaces the device's or the generic
         // canvas's, but not the frame a device-less view from iOS 17 keeps,
@@ -6257,6 +6310,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
         // default device's 393x852.
         let traits = root.attribute("useTraitCollections") == Some("YES");
         let f = match (generic_canvas, has_device, device_size, freeform) {
+            // A xib's view keeps its frame, whatever the device (nine of
+            // the corpus's).
+            _ if xib && child(view, "rect", "frame").is_some() => frame(view)?,
             (true, _, _, None) | (false, true, Some(_), None) if embedded.contains_key(vc_id) => {
                 let (w, h) = embedded[vc_id];
                 Frame { x: 0.0, y: 0.0, w, h }
@@ -6342,7 +6398,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 || view.descendants().any(|d| (d.has_tag_name("action") || d.has_tag_name("outlet")) && d.attribute("destination") == Some(vc_id));
             let mut top = vec![owner, responder];
             let mut objects = vec![reference("owner"), reference("responder")];
-            if upstream_used {
+            if upstream_used && !xib {
                 top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{controller_placeholder}"), "upstream"));
                 objects.push(reference("upstream"));
             }
@@ -6783,7 +6839,10 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             // their names.
             let mut connections = Vec::new();
             let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
-            outlets.push(("view", "owner", &root_name));
+            // A xib's `view` outlet is the owner's own, among the others.
+            if !xib {
+                outlets.push(("view", "owner", &root_name));
+            }
             outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
             outlets.extend(scene.control_outlets.iter().map(|(l, v, d)| (l.as_str(), v.as_str(), d.as_str())));
             for (label, source, destination) in &scene.view_outlets {
@@ -6891,6 +6950,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             preorder.extend(view.descendants().filter(|d| d.is_element() && d.parent().is_some_and(|p| p.has_tag_name("subviews"))).filter_map(|d| d.attribute("id")).map(view_name));
             let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks)?;
             let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
+            if xib {
+                rename_references(&mut root, "upstream", "owner");
+            }
             if let Some(list) = traits {
                 let lists = nib.array("NSArray", vec![list]);
                 root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;

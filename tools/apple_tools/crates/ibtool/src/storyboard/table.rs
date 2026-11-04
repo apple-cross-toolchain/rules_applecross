@@ -289,7 +289,7 @@ fn table_values(
     if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
-            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, scene.module, *c, placeholder.is_some())?;
+            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, scene.module, *c, placeholder.is_some(), None)?;
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -979,9 +979,13 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
 }
 
 /// A prototype cell's nib: the cell, its content view and the separator
-/// Xcode lays out at its foot, and the content view's subviews.
-fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool) -> Result<Vec<u8>, String> {
+/// Xcode lays out at its foot, and the content view's subviews. A xib's
+/// cell (`xib`: whether it has a safe-area guide) lists its guide after
+/// its content view, and keeps its colours exact.
+pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
     let mut nib = Nib::new(platform, color_matched, localizable);
+    nib.exact_colors = xib.is_some();
+    let safe_area = xib == Some(true);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     // A cell's segue is its placeholder's.
@@ -1002,7 +1006,19 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     }
     objects.extend([reference(cell_name.clone()), reference(content_name.clone())]);
     let content_parent = Some(content_name.clone());
-    objects.extend(scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| reference(s.1.clone())));
+    let content: Vec<&String> = scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| &s.1).collect();
+    // A xib's safe-area guide follows the content view and its style's
+    // detail label, which is listed first (five probes).
+    let at = match cell.attribute("detailTextLabel").map(view_name) {
+        Some(detail) if content.first() == Some(&&detail) => 1,
+        Some(_) if safe_area => return fail("a xib's cell whose detail label isn't its content's first is not supported by this ibtool"),
+        _ => 0,
+    };
+    let mut listed: Vec<Value> = content.iter().map(|v| reference((*v).clone())).collect();
+    if safe_area {
+        listed.insert(at, cell_safe_area(&mut nib));
+    }
+    objects.extend(listed);
     let mut queue: std::collections::VecDeque<&String> = [&content_name].into();
     while let Some(v) = queue.pop_front() {
         objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
@@ -1055,6 +1071,18 @@ fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: 
     let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
     let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
     nib::archive(root_object_full(&mut nib, top, objects, connections, accessibility, pairs))
+}
+
+/// A xib's cell's safe-area guide: unowned and not archived.
+pub(super) fn cell_safe_area(nib: &mut Nib) -> Value {
+    let identifier = nib.string("");
+    Value::New(Object::new("UILayoutGuide", vec![
+        ("UILayoutGuideOwningView", Value::Nil),
+        ("UILayoutGuideIdentifier", identifier),
+        ("UILayoutGuideOwningViewIsLocked", Value::Bool(false)),
+        ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
+        ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
+    ]))
 }
 
 /// A cell's own connections: its selection segue's id, if it has one, and
