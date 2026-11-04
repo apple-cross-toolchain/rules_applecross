@@ -56,6 +56,7 @@ _ROOTS = tuple(
         "usr/lib/clang/",
         "usr/lib/swift/",
         "usr/lib/swift-",
+        "usr/share/docc/",
     )]
 )
 

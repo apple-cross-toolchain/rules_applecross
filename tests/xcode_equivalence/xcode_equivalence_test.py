@@ -73,5 +73,27 @@ class CoremldataTest(unittest.TestCase):
                 self.assertFalse(equivalent("M.mlmodelc/coremldata.bin", first, bytes(changed)), (name, at))
 
 
+class DoccJsonTest(unittest.TestCase):
+    """docc writes a DocC archive's JSON objects' keys in a random order
+    (a page of Xcode 27.2's archive of a small module, twice)."""
+
+    PATH = "G.doccarchive/data/documentation/greeter/greeter.json"
+
+    def test_two_xcode_runs_are_equivalent(self):
+        first, second = read("greeter.1.json"), read("greeter.2.json")
+        self.assertNotEqual(first, second)
+        self.assertTrue(equivalent(self.PATH, first, second))
+
+    def test_a_changed_value_is_not(self):
+        first, second = read("greeter.1.json"), read("greeter.2.json")
+        changed = second.replace(b"Greets people by name.", b"Greets people by mane.")
+        self.assertNotEqual(changed, second)
+        self.assertFalse(equivalent(self.PATH, first, changed))
+
+    def test_outside_an_archive_order_counts(self):
+        first, second = read("greeter.1.json"), read("greeter.2.json")
+        self.assertFalse(equivalent("data/greeter.json", first, second))
+
+
 if __name__ == "__main__":
     unittest.main()

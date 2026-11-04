@@ -64,6 +64,8 @@ top-level [README.md](../../README.md#byte-identical-output):
 - `ibtool`: files it can't compile left uncompiled, as the stub it replaced
   did;
 - Metal: an empty library;
+- `docc`: archives with swift.org's render template, where the SDK archive
+  lacks Xcode's ([docc.md](docc.md));
 - `xcstringstool`: entries not yet reproduced, in their nearest form;
 - `appintentsmetadataprocessor`: intents not yet reproduced, left out, and
   Flexible Matching's assets left out.
@@ -98,6 +100,9 @@ Known variations:
   time, and gives the icon's facet part 220 or 245 at random; the
   comparison allows those too (and, accepting
   `--config=relax_actool_icon_composer`, those images' pixels).
+- `docc` writes each JSON object of a DocC archive with its keys in a
+  random order; ours sets `SWIFT_DETERMINISTIC_HASHING=1`, and the
+  comparison sorts them ([docc.md](docc.md)).
 - `appintentsmetadataprocessor` varies the order of some arrays unless
   `SWIFT_DETERMINISTIC_HASHING=1` is set, as rules_apple sets it
   ([appintentsmetadataprocessor.md](appintentsmetadataprocessor.md)).
@@ -120,6 +125,7 @@ fails on.)
 | [xcstringstool.md](xcstringstool.md) | `xcstringstool`: String Catalogs to `.strings` and `.stringsdict` |
 | [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |
 | [swiftui-macros.md](swiftui-macros.md) | `SwiftUIMacros`: SwiftUI's `@State` macro for the Swift compiler on Linux |
+| [docc.md](docc.md) | `docc`: swift.org's, with Xcode's render template |
 | [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |
 | [foundation-hashing.md](foundation-hashing.md) | Hash-table orders NIB and property-list writers follow |
 

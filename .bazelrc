@@ -37,6 +37,9 @@ build:relax_actool_tvos_radiosity --action_env=RULES_APPLECROSS_RELAX_ACTOOL_TVO
 build:relax_actool_vector --action_env=RULES_APPLECROSS_RELAX_ACTOOL_VECTOR=1
 # Asset catalogs this actool can't reproduce, handed to xcbuild's actool.
 build:relax_actool_xcbuild --action_env=RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD=1
+# DocC archives without Xcode's render template (an SDK archive packaged
+# before it was kept), with swift.org's.
+build:relax_docc --action_env=RULES_APPLECROSS_RELAX_DOCC=1
 # Interface Builder files this ibtool can't reproduce, left uncompiled.
 build:relax_ibtool --action_env=RULES_APPLECROSS_RELAX_IBTOOL=1
 # Metal shaders, compiled to an empty library (they fail at run time).
@@ -54,6 +57,7 @@ build:relaxed --config=relax_actool_icon_composer
 build:relaxed --config=relax_actool_tvos_radiosity
 build:relaxed --config=relax_actool_vector
 build:relaxed --config=relax_actool_xcbuild
+build:relaxed --config=relax_docc
 build:relaxed --config=relax_ibtool
 build:relaxed --config=relax_metal
 build:relaxed --config=relax_xcstrings
