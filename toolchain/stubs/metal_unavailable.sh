@@ -7,7 +7,7 @@
 
 tool="${0##*/}"
 if [[ "${RULES_APPLECROSS_RELAX_METAL:-}" != "1" && "${RULES_APPLECROSS_RESOURCE_OUTPUT_MODE:-}" != "relaxed" ]]; then
-  echo "error: $tool: Apple's Metal compiler has no Linux version, so Metal shaders can't be compiled off a Mac; build them on a Mac, or with --config=relax_metal to write an empty $tool output" >&2
+  echo "error: $tool: Apple's Metal compiler has no Linux version, so Metal shaders can't be compiled off a Mac; bundle on a macOS execution platform (--@rules_applecross//toolchain:apple_bundling=macos), where Xcode's metal compiles them, or build with --config=relax_metal to write an empty $tool output that fails at run time" >&2
   exit 1
 fi
 

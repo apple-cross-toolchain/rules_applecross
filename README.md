@@ -69,7 +69,11 @@ one fails:
   (resvg, hayro) for one file per appearance on iOS and macOS
   ([docs/clean-room/actool.md](docs/clean-room/actool.md#vector-images)).
 
-`--config=relax_metal` lets Metal through as an empty Metal library. String
+A target with Metal shaders builds correctly with its bundling on a macOS
+execution platform (`--@rules_applecross//toolchain:apple_bundling=macos`:
+compiles stay on Linux, and Xcode's `metal` compiles the shaders);
+`--config=relax_metal` instead lets Metal through as an empty Metal
+library, whose shaders fail at run time. String
 Catalogs compile as Xcode compiles them; the few it can't yet reproduce, it
 refuses unless `--config=relax_xcstrings`
 ([docs/clean-room/xcstringstool.md](docs/clean-room/xcstringstool.md)). Each
@@ -286,7 +290,7 @@ draw the icon from its layers:
 | `relax_docc` | `RULES_APPLECROSS_RELAX_DOCC` | DocC archives with swift.org's render template, where the SDK archive lacks Xcode's |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
 | `relax_momc` | `RULES_APPLECROSS_RELAX_MOMC` | Core Data models whose `VersionInfo.plist` has no entity version hashes or checksums, without the `.omo` Xcode writes beside a versioned model's current version |
-| `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library |
+| `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library (they fail at run time; bundling on a Mac compiles them) |
 | `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |
 | `relax_app_intents` | `RULES_APPLECROSS_RELAX_APP_INTENTS` | App Intents not yet reproduced, left out |
 | `relax_app_intents_flexible_matching` | `RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING` | App Shortcuts Flexible Matching's assets, left out |
