@@ -25,6 +25,9 @@ import struct
 import sys
 import xml.etree.ElementTree as ET
 
+# corefoundation.py is installed beside this script; its directory isn't on
+# the path when Python runs with PYTHONSAFEPATH (as rules_python's tests do).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from corefoundation import cf_created_order, cf_dictionary_order
 
 RELAXED = os.environ.get("RULES_APPLECROSS_RELAX_MOMC") == "1" or \

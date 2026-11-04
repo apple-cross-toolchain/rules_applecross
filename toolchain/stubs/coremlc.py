@@ -22,6 +22,9 @@ import shutil
 import struct
 import sys
 
+# corefoundation.py is installed beside this script; its directory isn't on
+# the path when Python runs with PYTHONSAFEPATH (as rules_python's tests do).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from corefoundation import cf_dictionary_order
 
 
