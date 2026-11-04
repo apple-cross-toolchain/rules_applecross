@@ -689,13 +689,35 @@ def swift_release():
     return version.group(1), sha256.group(1)
 
 
-def verify(path, sha256):
+def has_sha256(path, sha256):
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             digest.update(chunk)
-    if digest.hexdigest() != sha256:
+    return digest.hexdigest() == sha256
+
+
+def verify(path, sha256):
+    if not has_sha256(path, sha256):
         sys.exit("{} does not have MODULE.bazel's sha256 {}".format(path, sha256))
+
+
+def download(url, path, sha256, attempts=3):
+    """`url` to `path`, checked against `sha256`, asked again when a
+    download fails or comes back otherwise (a CI runner once got a 1.5 GB
+    package that didn't match, which the same URL gave whole a moment
+    later)."""
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url) as response, open(path, "wb") as out:
+                shutil.copyfileobj(response, out, 1 << 20)
+            if has_sha256(path, sha256):
+                return
+            problem = "it doesn't have MODULE.bazel's sha256 {}".format(sha256)
+        except OSError as e:
+            problem = str(e)
+        print("download {} of {}: {}".format(attempt, url, problem), file=sys.stderr)
+    sys.exit("{} failed {} times".format(url, attempts))
 
 
 def normalize(info):
@@ -724,9 +746,9 @@ def main():
     with tempfile.TemporaryDirectory() as work:
         pkg = sys.argv[1] if len(sys.argv) == 2 else os.path.join(work, "swift.pkg")
         if len(sys.argv) == 1:
-            with urllib.request.urlopen(SWIFT_URL.format(version)) as response, open(pkg, "wb") as out:
-                shutil.copyfileobj(response, out, 1 << 20)
-        verify(pkg, sha256)
+            download(SWIFT_URL.format(version), pkg, sha256)
+        else:
+            verify(pkg, sha256)
         extracted = os.path.join(work, "swift")
         extract_payload(pkg, extracted)
         assemble(extracted, os.path.join(work, "Xcode.app"))
