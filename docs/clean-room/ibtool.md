@@ -7,7 +7,53 @@ HelloWorldObjC's `Main` (iOS), tvOS's `Main`, the watchOS host's `Main` and
 the watch app's WatchKit `Interface`. Compiled and linked, every file is
 byte-identical to Xcode 27.0's (toolchain compiler mode, the default).
 Linking copies an iOS or tvOS storyboard; a WatchKit one is rewritten
-(below).
+(below). `ibtool --compile X.nib ... X.xib`, as rules_apple's compile_xib
+runs it, is reproduced for iOS xibs holding one view or one table view
+cell (below, "Xibs").
+
+## Xibs
+
+Xcode compiles an iOS xib to one nib file, whatever the deployment target
+(iOS 12 to 26, one probe each). Of 359 iOS xibs found on one machine (old
+projects, examples and libraries, Interface Builder 3 to 27), 143 compile
+byte-identical to Xcode 27.0's and the rest are refused; none compile
+differently. `tests/ibtool_xib` holds twelve cases written for this, checked
+against Xcode's digests.
+
+- **A view.** The xib's File's Owner, first responder and one top-level
+  `<view>`: its nib is the view nib Xcode compiles for a storyboard scene
+  whose controller is the owner (its class, its outlets and the actions
+  aimed at it, and the actions sent to the first responder), with two
+  differences. The owner is the nib's own
+  `IBFilesOwner` proxy, where a scene's controller is an
+  `UpstreamPlaceholder` added after the first responder, so every outlet
+  and action comes from or goes to the owner; and the owner's `view` outlet
+  is there only when the xib has it, sorted among the others by name. So
+  this ibtool rewrites the xib as that one-scene storyboard and compiles
+  it, leaving the placeholder out.
+- Unlike a scene's view, the view keeps its own frame whatever the device
+  (nine of the corpus's), gets no legacy top and bottom layout guides when
+  it has no safe area (36), and has a safe-area guide only when it lists
+  one, not whenever the document uses safe areas (two).
+- Colour components are kept as the document writes them, where a
+  storyboard's are rounded to 10 significant digits:
+  `0.66666666666666663` is `UIRed-Double` 0.6666666666666666 in a xib's nib
+  and 0.6666666667 in a storyboard's (one probe of each; nine of the
+  corpus's).
+- Where the view sits on the canvas (`canvasLocation`) and the simulated
+  bars and screen (`simulated…Metrics`) are the editor's and aren't
+  compiled.
+- **A table view cell.** With an owner without connections, a top-level
+  `<tableViewCell>` compiles to the nib of a storyboard's prototype cell
+  (Table view controllers, below), but for the cell's safe-area guide, an
+  unowned `UILayoutGuide` (no owning view, an empty identifier, none of it
+  archived) listed after the content view, and after the style's detail
+  label when it has one (five probes: plain, default, subtitle and right
+  detail cells, with and without the guide).
+- Refused: other top-level objects (collection view cells and reusable
+  views, several views, custom objects, gesture recognizers), an owner's
+  connections beside a cell, macOS xibs, and xibs in the archive format of
+  Interface Builder before Xcode 5.
 
 ## The compiled storyboard
 

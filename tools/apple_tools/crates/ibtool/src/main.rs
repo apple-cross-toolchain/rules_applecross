@@ -1,10 +1,11 @@
-//! Clean-room `ibtool` for Linux: `--compilation-directory` and `--link`; see
-//! docs/clean-room/ibtool.md.
+//! Clean-room `ibtool` for Linux: `--compilation-directory`, `--link` and
+//! `--compile`; see docs/clean-room/ibtool.md.
 
 mod fonts;
 mod nib;
 mod storyboard;
 mod watch;
+mod xib;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -33,6 +34,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 
 fn run(args: Vec<String>) -> Result<(), String> {
     let mut compilation_dir: Option<PathBuf> = None;
+    let mut compile_to: Option<PathBuf> = None;
     let mut link_dir: Option<PathBuf> = None;
     let mut inputs = Vec::new();
     let mut minimum_deployment_target: Option<String> = None;
@@ -42,6 +44,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
         match a.as_str() {
             "--compilation-directory" => compilation_dir = Some(PathBuf::from(value(&a)?)),
+            "--compile" => compile_to = Some(PathBuf::from(value(&a)?)),
             "--link" => link_dir = Some(PathBuf::from(value(&a)?)),
             "--minimum-deployment-target" => minimum_deployment_target = Some(value(&a)?),
             "--module" => module = Some(value(&a)?),
@@ -77,7 +80,22 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         return Ok(());
     }
-    let dir = compilation_dir.ok_or("--compilation-directory or --link is required")?;
+    // A xib to its nib.
+    if let Some(out) = compile_to {
+        let [input] = inputs.as_slice() else {
+            return Err("--compile takes one input".into());
+        };
+        if input.extension().and_then(|e| e.to_str()) != Some("xib") {
+            return skip(format!("{}: only xibs are compiled with --compile by this ibtool", input.display()));
+        }
+        let xml = std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
+        let localizable = input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"));
+        return match xib::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable) {
+            Ok(nib) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
+            Err(e) => skip(format!("{}: {e}", input.display())),
+        };
+    }
+    let dir = compilation_dir.ok_or("--compilation-directory, --compile or --link is required")?;
     for input in &inputs {
         if input.extension().and_then(|e| e.to_str()) != Some("storyboard") {
             skip(format!("{}: only storyboards are supported by this ibtool", input.display()))?;
