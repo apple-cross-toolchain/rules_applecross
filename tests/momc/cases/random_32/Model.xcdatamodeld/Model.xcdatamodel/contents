@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Pi" representedClassName="Pi" syncable="YES" codeGenerationType="class" parentEntity="Be">
+        <attribute name="kaxori" attributeType="Integer 16" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="teal3" attributeType="Integer 32" usesScalarValueType="NO"/>
+        <attribute name="xo" attributeType="Decimal" optional="YES">
+            <userInfo>
+                <entry key="alri" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="tealMupi" attributeType="Integer 16" elementID="qu12xo12te" usesScalarValueType="YES"/>
+        <attribute name="mu3" attributeType="Integer 64" optional="YES" usesScalarValueType="NO" defaultValueString="270200">
+            <userInfo>
+                <entry key="do" value="longer value text"/>
+                <entry key="kabeKadori" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="al7beze" attributeType="Decimal" optional="YES" defaultValueString="243"/>
+        <attribute name="na3Quxoze" attributeType="Integer 16" optional="YES" elementID="riripialri" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="Be" representedClassName="Be" syncable="YES" codeGenerationType="class" parentEntity="PiMu" elementID="Muxo">
+        <attribute name="qu" attributeType="Decimal" elementID="xo3beal">
+            <userInfo>
+                <entry key="pi" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="qu"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Na" representedClassName="Na" syncable="YES" codeGenerationType="class">
+        <attribute name="alribealQu" attributeType="Integer 64" transient="YES" usesScalarValueType="NO" defaultValueString="0"/>
+        <attribute name="xodoriKaQu" attributeType="Date"/>
+        <attribute name="pina3beri" attributeType="Integer 16" optional="YES" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="te" value="longer value text"/>
+                <entry key="qu712" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="alxoxobe" attributeType="Boolean" optional="YES" usesScalarValueType="YES">
+            <userInfo>
+                <entry key="ka" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="mu12" attributeType="Transformable" optional="YES" allowsCloudEncryption="YES" elementID="kaQuri" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="kateri" attributeType="Boolean" optional="YES" usesScalarValueType="NO" defaultValueString="YES"/>
+        <relationship name="qu7Ka" destinationEntity="Xo7piMu" optional="YES" maxCount="1" deletionRule="Deny" versionHashModifier="bealpi" inverseName="be" inverseEntity="Xo7piMu"/>
+    </entity>
+    <entity name="Qualzealri" representedClassName="Qualzealri" syncable="YES" codeGenerationType="class" parentEntity="Be">
+        <attribute name="ka7" attributeType="Integer 64" optional="YES" transient="YES" usesScalarValueType="YES"/>
+        <attribute name="muxo" attributeType="Float" optional="YES" allowsCloudEncryption="YES" usesScalarValueType="YES" defaultValueString="2.5"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="PiMu" representedClassName="PiMu" syncable="YES" codeGenerationType="class">
+        <relationship name="alzena7te" destinationEntity="Xo7piMu" optional="YES" maxCount="1" deletionRule="No Action" inverseName="xododo" inverseEntity="Xo7piMu"/>
+    </entity>
+    <entity name="Alxopixo" representedClassName="Alxopixo" syncable="YES" codeGenerationType="class">
+        <attribute name="do33dodo" attributeType="Decimal"/>
+        <relationship name="rixoQu" destinationEntity="QunaxoMu" toMany="YES" deletionRule="Deny" inverseName="quMuMuze" inverseEntity="QunaxoMu"/>
+    </entity>
+    <entity name="QunaxoMu" representedClassName="QunaxoMu" syncable="YES" codeGenerationType="class" parentEntity="PiMu">
+        <relationship name="quMuMuze" destinationEntity="Alxopixo" maxCount="1" deletionRule="Cascade" versionHashModifier="doal" inverseName="rixoQu" inverseEntity="Alxopixo"/>
+        <attribute name="quKa" attributeType="UUID"/>
+        <attribute name="bezena" attributeType="Integer 64" versionHashModifier="te7xo" usesScalarValueType="YES" defaultValueString="270200"/>
+        <attribute name="alxodo3be" attributeType="Double" usesScalarValueType="YES" defaultValueString="-3.25"/>
+        <attribute name="teKaxo7Qu" attributeType="Decimal" optional="YES" elementID="zena3" defaultValueString="-2.25"/>
+        <attribute name="kanaMu" attributeType="UUID" optional="YES" versionHashModifier="doMu">
+            <userInfo>
+                <entry key="dopido" value="longer value text"/>
+                <entry key="dopina7" value="v"/>
+                <entry key="pinaKaxori" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="muMual" attributeType="URI" preserveAfterDeletion="YES">
+            <userInfo>
+                <entry key="te3be12" value="longer value text"/>
+            </userInfo>
+        </attribute>
+    </entity>
+    <entity name="Xo7piMu" representedClassName="Xo7piMu" syncable="YES" codeGenerationType="class" versionHashModifier="quri123">
+        <attribute name="zepi" attributeType="Date" optional="YES" spotlightIndexingEnabled="YES"/>
+        <relationship name="xododo" destinationEntity="PiMu" optional="YES" toMany="YES" deletionRule="No Action" inverseName="alzena7te" inverseEntity="PiMu"/>
+        <relationship name="be" destinationEntity="Na" optional="YES" maxCount="1" deletionRule="No Action" inverseName="qu7Ka" inverseEntity="Na"/>
+        <attribute name="kaKaQu7" attributeType="Decimal" optional="YES" spotlightIndexingEnabled="YES" allowsCloudEncryption="YES">
+            <userInfo>
+                <entry key="natepi" value="v"/>
+            </userInfo>
+        </attribute>
+    </entity>
+</model>

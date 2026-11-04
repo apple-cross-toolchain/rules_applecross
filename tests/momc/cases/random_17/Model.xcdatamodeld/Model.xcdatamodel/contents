@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="MuQuMupi" representedClassName="MuQuMupi" syncable="YES" codeGenerationType="class">
+        <attribute name="te" attributeType="UUID" optional="YES" transient="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="alpirize" attributeType="Float" transient="YES" preserveAfterDeletion="YES" allowsCloudEncryption="YES" usesScalarValueType="YES" defaultValueString="0.1">
+            <userInfo>
+                <entry key="be" value="x1"/>
+                <entry key="xo12Qu" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="betebena3" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="na" attributeType="Decimal" spotlightIndexingEnabled="YES" versionHashModifier="pi12"/>
+        <attribute name="dotebe" attributeType="String" defaultValueString="x1">
+            <userInfo>
+                <entry key="tete" value="longer value text"/>
+                <entry key="mu" value="x1"/>
+                <entry key="mudoal" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="ri" attributeType="String" preserveAfterDeletion="YES" elementID="muna"/>
+        <relationship name="be" destinationEntity="Be3ribe" optional="YES" maxCount="1" deletionRule="Cascade"/>
+        <relationship name="mu" destinationEntity="Be3ribe" toMany="YES" deletionRule="Nullify" inverseName="rixoQudo" inverseEntity="Be3ribe"/>
+        <attribute name="bealnado" attributeType="Integer 16" usesScalarValueType="YES" defaultValueString="142"/>
+    </entity>
+    <entity name="Be3ribe" representedClassName="Be3ribe" syncable="YES" codeGenerationType="class">
+        <attribute name="nateQupibe" attributeType="String" transient="YES" elementID="do"/>
+        <relationship name="rixoQudo" destinationEntity="MuQuMupi" maxCount="1" deletionRule="Nullify" inverseName="mu" inverseEntity="MuQuMupi"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="nateQupibe"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+</model>

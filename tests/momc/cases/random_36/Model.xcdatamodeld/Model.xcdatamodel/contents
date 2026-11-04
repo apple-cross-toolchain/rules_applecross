@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Dobe" representedClassName="Dobe" syncable="YES" codeGenerationType="class" versionHashModifier="naxori12">
+        <attribute name="pido12dona" attributeType="Boolean" optional="YES" versionHashModifier="kazedo" usesScalarValueType="YES"/>
+        <attribute name="nate712" attributeType="Integer 16" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="kana" attributeType="Float" optional="YES" transient="YES" spotlightIndexingEnabled="YES" usesScalarValueType="YES"/>
+        <attribute name="piQu3" attributeType="Boolean" optional="YES" elementID="beKado" usesScalarValueType="YES" defaultValueString="NO">
+            <userInfo>
+                <entry key="pi" value="x1"/>
+                <entry key="muteMube" value="x1"/>
+                <entry key="zeKabeKa" value="x1"/>
+            </userInfo>
+        </attribute>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="piQu3"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Mual" representedClassName="MualMO" syncable="YES" codeGenerationType="class">
+        <attribute name="teQuKa" attributeType="Float" usesScalarValueType="YES"/>
+        <attribute name="zebe" attributeType="Integer 32" spotlightIndexingEnabled="YES" versionHashModifier="riQu312" usesScalarValueType="YES" defaultValueString="0"/>
+        <attribute name="xoMu" attributeType="Binary" optional="YES" preserveAfterDeletion="YES"/>
+        <attribute name="alxoteQu" attributeType="Transformable" transient="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+    </entity>
+    <entity name="Bedo" representedClassName="Bedo" syncable="YES" codeGenerationType="class">
+    </entity>
+    <configuration name="Other">
+        <memberEntity name="Mual"/>
+    </configuration>
+</model>

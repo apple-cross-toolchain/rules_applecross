@@ -69,8 +69,10 @@ top-level [README.md](../../README.md#byte-identical-output):
 - `xcstringstool`: entries not yet reproduced, in their nearest form;
 - `appintentsmetadataprocessor`: intents not yet reproduced, left out, and
   Flexible Matching's assets left out.
-- `actool` and `coremlc`, for an Xcode other than 27.0 and 27.2: the
-  library versions they record, the nearest known Xcode's.
+- `momc`: `VersionInfo.plist` without the entity version hashes and
+  checksums, and no `.omo` ([momc.md](momc.md#versioninfoplist)).
+- `actool`, `coremlc` and `momc`, for an Xcode other than 27.0 and 27.2:
+  the versions they record, the nearest known Xcode's.
 
 Beyond that, `coremlc` and the other tools have no near match to write, and refuse such
 inputs either way.
@@ -126,7 +128,7 @@ fails on.)
 | [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |
 | [swiftui-macros.md](swiftui-macros.md) | `SwiftUIMacros`: SwiftUI's `@State` macro for the Swift compiler on Linux |
 | [docc.md](docc.md) | `docc`: swift.org's, with Xcode's render template |
-| [momc.md](momc.md) | `momc` and `mapc`: not reproduced; what probing found |
+| [momc.md](momc.md) | `momc`: Core Data models' `.mom`s; `mapc` and the version hashes not reproduced |
 | [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |
 | [foundation-hashing.md](foundation-hashing.md) | Hash-table orders NIB and property-list writers follow |
 

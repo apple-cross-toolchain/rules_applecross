@@ -21,6 +21,12 @@ filegroup(
     srcs = glob(["PhoneAppIcon.xcassets/**"]),
 )
 
+# A versioned Core Data model (off a Mac, compiled with --config=relax_momc).
+filegroup(
+    name = "Shelf.xcdatamodeld",
+    srcs = glob(["Shelf.xcdatamodeld/**"]),
+)
+
 filegroup(
     name = "TVBrandAssets.xcassets",
     srcs = glob(["TVBrandAssets.xcassets/**"]),

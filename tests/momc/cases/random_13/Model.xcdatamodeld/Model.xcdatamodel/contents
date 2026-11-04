@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="TeMuKate" representedClassName="TeMuKate" syncable="YES" codeGenerationType="class">
+        <attribute name="al7xoxo" attributeType="Boolean" optional="YES" transient="YES" usesScalarValueType="YES" defaultValueString="YES"/>
+        <relationship name="alMu712" destinationEntity="TeQuxo" optional="YES" maxCount="1" deletionRule="Nullify" inverseName="zeze3zebe" inverseEntity="TeQuxo">
+            <userInfo>
+                <entry key="dobeQuxoal" value="x1"/>
+                <entry key="dote" value="longer value text"/>
+                <entry key="beal" value="v"/>
+            </userInfo>
+        </relationship>
+        <attribute name="be3" attributeType="Integer 64" optional="YES" elementID="mubeze" usesScalarValueType="NO" defaultValueString="270200"/>
+        <attribute name="kaxobe7do" attributeType="String" optional="YES" versionHashModifier="kate" defaultValueString="hi"/>
+        <attribute name="kaze3xo" attributeType="Transformable" optional="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="[String]"/>
+        <attribute name="texoalal" attributeType="UUID"/>
+        <relationship name="do" destinationEntity="Tepial3Mu" maxCount="1" deletionRule="No Action" inverseName="alMu" inverseEntity="Tepial3Mu"/>
+    </entity>
+    <entity name="TeQuxo" representedClassName="TeQuxo" syncable="YES" codeGenerationType="class">
+        <relationship name="zeze3zebe" destinationEntity="TeMuKate" optional="YES" maxCount="1" deletionRule="No Action" inverseName="alMu712" inverseEntity="TeMuKate"/>
+        <relationship name="zedopi7do" destinationEntity="Natete" optional="YES" maxCount="1" deletionRule="Deny" inverseName="muxoze" inverseEntity="Natete"/>
+        <attribute name="mu" attributeType="Integer 64" usesScalarValueType="YES" defaultValueString="270200">
+            <userInfo>
+                <entry key="alzepi" value="x1"/>
+                <entry key="pipi" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="pi7Mudo" attributeType="Boolean" optional="YES" preserveAfterDeletion="YES" versionHashModifier="ze" usesScalarValueType="YES"/>
+        <attribute name="zedorido" attributeType="Integer 64" optional="YES" usesScalarValueType="NO" defaultValueString="1099511627776"/>
+        <attribute name="xoteKa" attributeType="Double" optional="YES" elementID="xo73" usesScalarValueType="NO"/>
+        <relationship name="terinatete" destinationEntity="MuMudopi" toMany="YES" deletionRule="Deny" inverseName="bedoQutepi" inverseEntity="MuMudopi">
+            <userInfo>
+                <entry key="kaxo7Qu" value="longer value text"/>
+                <entry key="teze" value="longer value text"/>
+            </userInfo>
+        </relationship>
+    </entity>
+    <entity name="Tepial3Mu" representedClassName="Tepial3Mu" syncable="YES" codeGenerationType="class" parentEntity="MuMudopi">
+        <attribute name="xo" attributeType="Integer 32" optional="YES" transient="YES" spotlightIndexingEnabled="YES" usesScalarValueType="YES" defaultValueString="1"/>
+        <attribute name="ze7xo12Ka" attributeType="Boolean" optional="YES" allowsCloudEncryption="YES" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="kapi3Qu" value="longer value text"/>
+                <entry key="muna3" value="v"/>
+                <entry key="kari" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="be" attributeType="Integer 16" optional="YES" usesScalarValueType="YES" defaultValueString="193">
+            <userInfo>
+                <entry key="mualtebedo" value="v"/>
+                <entry key="be312" value="longer value text"/>
+                <entry key="albe" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="riQualrina" attributeType="Boolean" optional="YES" spotlightIndexingEnabled="YES" usesScalarValueType="YES" defaultValueString="NO"/>
+        <relationship name="alMu" destinationEntity="TeMuKate" optional="YES" toMany="YES" deletionRule="Deny" inverseName="do" inverseEntity="TeMuKate"/>
+        <attribute name="ri" attributeType="Float" usesScalarValueType="YES"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="MuMudopi" representedClassName="MuMudopi" syncable="YES" codeGenerationType="class" elementID="Munado">
+        <attribute name="doteze" attributeType="Integer 32" optional="YES" usesScalarValueType="NO" defaultValueString="1"/>
+        <attribute name="pibedobe" attributeType="UUID" optional="YES"/>
+        <attribute name="kate12Kaxo" attributeType="Integer 16" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="kabexoKa" attributeType="Double" optional="YES" spotlightIndexingEnabled="YES" elementID="rixo7xo" usesScalarValueType="YES" defaultValueString="0"/>
+        <attribute name="qupiMu" attributeType="Double" optional="YES" versionHashModifier="qu7" usesScalarValueType="YES" defaultValueString="0"/>
+        <relationship name="na" destinationEntity="MuMudopi" optional="YES" toMany="YES" deletionRule="Cascade"/>
+        <attribute name="aldozena7" attributeType="Integer 16" optional="YES" usesScalarValueType="YES" defaultValueString="-26"/>
+        <attribute name="al" attributeType="URI" optional="YES" versionHashModifier="do" elementID="qu"/>
+        <relationship name="bedoQutepi" destinationEntity="TeQuxo" optional="YES" toMany="YES" minCount="1" maxCount="44" deletionRule="Nullify" inverseName="terinatete" inverseEntity="TeQuxo"/>
+    </entity>
+    <entity name="Be37" representedClassName="Be37" syncable="YES" codeGenerationType="class" parentEntity="TeMuKate" versionHashModifier="quri3albe">
+        <relationship name="qudoxo" destinationEntity="TeMuKate" optional="YES" maxCount="1" deletionRule="Nullify" elementID="be"/>
+    </entity>
+    <entity name="Natete" representedClassName="Natete" syncable="YES" codeGenerationType="class">
+        <relationship name="muxoze" destinationEntity="TeQuxo" maxCount="1" deletionRule="Nullify" inverseName="zedopi7do" inverseEntity="TeQuxo"/>
+        <attribute name="be12zeMual" attributeType="String" optional="YES"/>
+        <attribute name="xoalKa" attributeType="Binary" optional="YES"/>
+    </entity>
+</model>

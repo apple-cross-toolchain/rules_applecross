@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="QuKa7" representedClassName="QuKa7" syncable="YES" codeGenerationType="class">
+        <attribute name="bexopi" attributeType="Transformable" preserveAfterDeletion="YES"/>
+    </entity>
+    <entity name="RibetebeKa" representedClassName="RibetebeKa" syncable="YES" codeGenerationType="class">
+        <attribute name="te" attributeType="Integer 64" optional="YES" transient="YES" usesScalarValueType="YES">
+            <userInfo>
+                <entry key="be" value="x1"/>
+                <entry key="xori" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="tebeKa7" attributeType="Date" optional="YES" defaultDateTimeInterval="-12.5"/>
+        <attribute name="xopi12Mu" attributeType="Integer 64" usesScalarValueType="NO"/>
+        <attribute name="kate7be" attributeType="Transformable" optional="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="kaalna" attributeType="Double" optional="YES" preserveAfterDeletion="YES" usesScalarValueType="NO" defaultValueString="0"/>
+    </entity>
+    <entity name="NaxoQuQu" representedClassName="NaxoQuQu" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="dori3Ka" attributeType="Integer 32" transient="YES" spotlightIndexingEnabled="YES" usesScalarValueType="NO" defaultValueString="30"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Xoxo" representedClassName="Xoxo" syncable="YES" codeGenerationType="class">
+        <attribute name="do" attributeType="Binary"/>
+        <attribute name="zexo7bepi" attributeType="Double" usesScalarValueType="YES"/>
+        <attribute name="be7na" attributeType="Binary" allowsExternalBinaryDataStorage="YES"/>
+    </entity>
+    <entity name="Na" representedClassName="Na" syncable="YES" codeGenerationType="class" elementID="Do12">
+    </entity>
+    <entity name="Muxo3" representedClassName="Muxo3" syncable="YES" codeGenerationType="class" versionHashModifier="xobe7">
+        <attribute name="ze" attributeType="Date" optional="YES" allowsCloudEncryption="YES"/>
+        <attribute name="ri" attributeType="Decimal" defaultValueString="1.5"/>
+        <attribute name="narixozete" attributeType="UUID" spotlightIndexingEnabled="YES">
+            <userInfo>
+                <entry key="ze12" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="kateze" attributeType="Boolean" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="ripiri" attributeType="Transformable" optional="YES" elementID="qu3"/>
+        <attribute name="dote" attributeType="Boolean" optional="YES" versionHashModifier="te" usesScalarValueType="NO"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="ripiri"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <configuration name="Local">
+        <memberEntity name="RibetebeKa"/>
+        <memberEntity name="Xoxo"/>
+    </configuration>
+    <configuration name="Other">
+        <memberEntity name="Xoxo"/>
+        <memberEntity name="QuKa7"/>
+        <memberEntity name="RibetebeKa"/>
+        <memberEntity name="Muxo3"/>
+    </configuration>
+</model>

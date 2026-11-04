@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Pi7pixo" representedClassName="Pi7pixo" syncable="YES" codeGenerationType="class">
+        <relationship name="xodotezeri" destinationEntity="Pi7pixo" optional="YES" toMany="YES" ordered="YES" minCount="1" maxCount="111" deletionRule="Deny" elementID="riMual"/>
+        <relationship name="pi" destinationEntity="Pi7pixo" maxCount="1" deletionRule="Deny"/>
+        <relationship name="ri3dodo" destinationEntity="Pi7pixo" optional="YES" maxCount="1" deletionRule="No Action"/>
+        <relationship name="bexodona" destinationEntity="Pi7pixo" optional="YES" toMany="YES" deletionRule="Cascade"/>
+        <relationship name="zetexo" destinationEntity="Pi7pixo" optional="YES" maxCount="1" deletionRule="Nullify" elementID="alalnapi">
+            <userInfo>
+                <entry key="mu" value="v"/>
+                <entry key="do" value="longer value text"/>
+            </userInfo>
+        </relationship>
+        <attribute name="ze7na" attributeType="String" optional="YES" defaultValueString="hi">
+            <userInfo>
+                <entry key="be" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="nadodo3" attributeType="UUID" optional="YES"/>
+        <attribute name="muKateri" attributeType="Transformable" optional="YES" preserveAfterDeletion="YES" elementID="nazealrite" customClassName="NSArray">
+            <userInfo>
+                <entry key="naKariQuze" value="v"/>
+                <entry key="texoxo" value="x1"/>
+                <entry key="qu" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="piQunabete" attributeType="Decimal" optional="YES" transient="YES"/>
+        <attribute name="mutete" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="na" attributeType="Decimal" optional="YES">
+            <userInfo>
+                <entry key="te3xo" value="longer value text"/>
+                <entry key="piriQual" value="v"/>
+            </userInfo>
+        </attribute>
+    </entity>
+</model>

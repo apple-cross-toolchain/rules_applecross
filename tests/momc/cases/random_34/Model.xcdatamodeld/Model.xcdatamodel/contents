@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Dobeal" representedClassName="Dobeal" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <relationship name="xo3" destinationEntity="Dobeal" optional="YES" toMany="YES" deletionRule="Deny" versionHashModifier="pialKa"/>
+        <relationship name="beribe" destinationEntity="Dobeal" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <relationship name="kaxori" destinationEntity="Quxori" toMany="YES" deletionRule="Cascade" inverseName="nanaalpi" inverseEntity="Quxori">
+            <userInfo>
+                <entry key="mupido" value="longer value text"/>
+            </userInfo>
+        </relationship>
+    </entity>
+    <entity name="Quxori" representedClassName="QuxoriMO" syncable="YES" codeGenerationType="class">
+        <attribute name="beKana" attributeType="String" preserveAfterDeletion="YES"/>
+        <relationship name="nanaalpi" destinationEntity="Dobeal" toMany="YES" deletionRule="Nullify" versionHashModifier="pi12nana" inverseName="kaxori" inverseEntity="Dobeal"/>
+        <attribute name="munaMu" attributeType="Decimal" optional="YES"/>
+    </entity>
+</model>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="X" representedClassName="X" syncable="YES" codeGenerationType="class" versionHashModifier="em" elementID="eold">
+        <attribute name="a" attributeType="String" optional="YES" versionHashModifier="m" elementID="old">
+            <userInfo>
+                <entry key="k" value="v"/>
+            </userInfo>
+        </attribute>
+        <relationship name="r" destinationEntity="Y" optional="YES" maxCount="1" deletionRule="Nullify" versionHashModifier="rm" elementID="rold">
+            <userInfo>
+                <entry key="k" value="v"/>
+            </userInfo>
+        </relationship>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="a"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Y" representedClassName="Y" syncable="YES" codeGenerationType="class">
+        <attribute name="y" attributeType="String" optional="YES"/>
+    </entity>
+</model>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Tedodori" representedClassName="Tedodori" syncable="YES" codeGenerationType="class">
+        <relationship name="muQuxoal" destinationEntity="Texo" optional="YES" maxCount="1" deletionRule="Cascade" inverseName="quri" inverseEntity="Texo">
+            <userInfo>
+                <entry key="zerial" value="longer value text"/>
+            </userInfo>
+        </relationship>
+    </entity>
+    <entity name="Xori" representedClassName="Xori" syncable="YES" codeGenerationType="class">
+        <attribute name="tebe312" attributeType="Double" optional="YES" spotlightIndexingEnabled="YES" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="Do3" representedClassName="Do3MO" syncable="YES" codeGenerationType="class" elementID="BeMuze">
+        <attribute name="tenazeMu" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="ri" attributeType="URI" optional="YES"/>
+    </entity>
+    <entity name="Qunari3" representedClassName="Qunari3" syncable="YES" codeGenerationType="class">
+        <attribute name="xoKarina7" attributeType="Binary" optional="YES" spotlightIndexingEnabled="YES" allowsExternalBinaryDataStorage="YES" allowsCloudEncryption="YES"/>
+    </entity>
+    <entity name="Texo" representedClassName="Texo" syncable="YES" codeGenerationType="class" elementID="Bexo3ze">
+        <attribute name="kaMu" attributeType="String" optional="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="do7doQu" attributeType="Integer 64" optional="YES" spotlightIndexingEnabled="YES" usesScalarValueType="YES" defaultValueString="270200"/>
+        <relationship name="ze" destinationEntity="Bezeridoxo" optional="YES" toMany="YES" deletionRule="Deny" inverseName="pi" inverseEntity="Bezeridoxo">
+            <userInfo>
+                <entry key="pi" value="x1"/>
+                <entry key="qu7ri" value="v"/>
+            </userInfo>
+        </relationship>
+        <attribute name="be7dona" attributeType="Date" defaultDateTimeInterval="0"/>
+        <attribute name="kazebe" attributeType="URI" transient="YES" versionHashModifier="al" elementID="pi"/>
+        <attribute name="bepi" attributeType="Integer 16" optional="YES" usesScalarValueType="YES"/>
+        <relationship name="quri" destinationEntity="Tedodori" optional="YES" maxCount="1" deletionRule="Nullify" inverseName="muQuxoal" inverseEntity="Tedodori"/>
+    </entity>
+    <entity name="Bezeridoxo" representedClassName="Bezeridoxo" syncable="YES" codeGenerationType="class">
+        <relationship name="pi" destinationEntity="Texo" optional="YES" toMany="YES" deletionRule="Deny" elementID="zetebenate" versionHashModifier="beQuridodo" inverseName="ze" inverseEntity="Texo"/>
+    </entity>
+    <entity name="Na" representedClassName="Na" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <relationship name="beal" destinationEntity="Texo" optional="YES" toMany="YES" ordered="YES" deletionRule="Nullify"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Dote" representedClassName="Dote" syncable="YES" codeGenerationType="class">
+        <attribute name="qudoMuMuna" attributeType="Decimal" optional="YES" transient="YES" versionHashModifier="zerina12" defaultValueString="243"/>
+        <attribute name="riQubexo" attributeType="Boolean" optional="YES" elementID="do" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="mu12texo" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="xopi" attributeType="Integer 64" optional="YES" spotlightIndexingEnabled="YES" allowsCloudEncryption="YES" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="NaKadobe" representedClassName="NaKadobe" syncable="YES" codeGenerationType="class">
+    </entity>
+</model>

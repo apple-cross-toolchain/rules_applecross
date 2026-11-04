@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Q" representedClassName="Q" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="N" representedClassName="N" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Q10" representedClassName="Q10" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="b" representedClassName="b" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E10" representedClassName="E10" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Ba" representedClassName="Ba" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E9" representedClassName="E9" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="a9" representedClassName="a9" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="m" representedClassName="m" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+</model>

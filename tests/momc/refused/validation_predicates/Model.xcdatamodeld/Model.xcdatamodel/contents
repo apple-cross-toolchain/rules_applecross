@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="V" representedClassName="V" syncable="YES" codeGenerationType="class">
+        <attribute name="s" attributeType="String" optional="YES" minValueString="1" maxValueString="5" regularExpressionString="[a-z]+"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" minValueString="0" maxValueString="10" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Date" optional="YES" minDateTimeInterval="0" maxDateTimeInterval="100"/>
+    </entity>
+</model>

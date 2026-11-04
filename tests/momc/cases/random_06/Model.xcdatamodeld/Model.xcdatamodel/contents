@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="MuQuMuxobe" representedClassName="MuQuMuxobe" syncable="YES" codeGenerationType="class">
+        <attribute name="qudopibexo" attributeType="Integer 64" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="be3Qubebe" attributeType="String" preserveAfterDeletion="YES" elementID="alna">
+            <userInfo>
+                <entry key="qu12pibe" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="muzedo" attributeType="Decimal" optional="YES" spotlightIndexingEnabled="YES"/>
+        <relationship name="zealpi3" destinationEntity="MuQuMuxobe" maxCount="1" deletionRule="No Action">
+            <userInfo>
+                <entry key="qudo" value="x1"/>
+                <entry key="pibe" value="longer value text"/>
+                <entry key="qu12riMu" value="x1"/>
+            </userInfo>
+        </relationship>
+        <relationship name="dodo" destinationEntity="MuQuMuxobe" optional="YES" toMany="YES" deletionRule="Cascade"/>
+        <relationship name="xonabe" destinationEntity="MuQuMuxobe" toMany="YES" minCount="1" maxCount="125" deletionRule="Nullify"/>
+        <relationship name="ze" destinationEntity="MuQuMuxobe" maxCount="1" deletionRule="Deny"/>
+    </entity>
+</model>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="VeryLongEntityName" representedClassName="VeryLongEntityName" syncable="YES" codeGenerationType="class" elementID="longEntityRenamingIdentifier">
+        <attribute name="veryLongAttributeName" attributeType="String" optional="YES" versionHashModifier="longVersionHashModifier" elementID="longRenamingIdentifier">
+            <userInfo>
+                <entry key="longUserInfoKeyName" value="longUserInfoValueText"/>
+            </userInfo>
+        </attribute>
+        <attribute name="secondLongAttributeName" attributeType="String" optional="YES">
+            <userInfo>
+                <entry key="longUserInfoKeyName" value="longUserInfoValueText"/>
+            </userInfo>
+        </attribute>
+        <relationship name="veryLongRelationshipName" destinationEntity="AnotherLongEntityName" optional="YES" maxCount="1" deletionRule="Nullify" inverseName="inverseLongRelationship" inverseEntity="AnotherLongEntityName"/>
+    </entity>
+    <entity name="AnotherLongEntityName" representedClassName="DifferentLongClassName" syncable="YES" codeGenerationType="class">
+        <relationship name="inverseLongRelationship" destinationEntity="VeryLongEntityName" optional="YES" toMany="YES" deletionRule="Nullify" inverseName="veryLongRelationshipName" inverseEntity="VeryLongEntityName"/>
+    </entity>
+</model>

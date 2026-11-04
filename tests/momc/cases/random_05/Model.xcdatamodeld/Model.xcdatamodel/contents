@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Ka7alQual" representedClassName="Ka7alQual" syncable="YES" codeGenerationType="class">
+        <attribute name="naMu12xobe" attributeType="Date" optional="YES" transient="YES" allowsCloudEncryption="YES" defaultDateTimeInterval="60"/>
+        <attribute name="xoalbeKa" attributeType="String"/>
+        <attribute name="xote" attributeType="Date" defaultDateTimeInterval="-12.5"/>
+        <attribute name="mudoze" attributeType="URI" optional="YES"/>
+        <relationship name="kapiKana" destinationEntity="Quri" optional="YES" toMany="YES" deletionRule="No Action" inverseName="ribexo7te" inverseEntity="Quri"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Xo" representedClassName="Xo" syncable="YES" codeGenerationType="class">
+        <attribute name="riQupiMu" attributeType="Integer 32" optional="YES" transient="YES" allowsCloudEncryption="YES" elementID="ri" usesScalarValueType="NO" defaultValueString="100000"/>
+        <attribute name="tena7" attributeType="Integer 32" optional="YES" usesScalarValueType="NO" defaultValueString="100000"/>
+        <attribute name="bepite" attributeType="Double" optional="YES" transient="YES" usesScalarValueType="YES" defaultValueString="100"/>
+        <attribute name="kana7be" attributeType="Decimal" preserveAfterDeletion="YES" defaultValueString="243"/>
+        <attribute name="ka" attributeType="Date" optional="YES"/>
+        <attribute name="xoal" attributeType="Transformable" transient="YES" versionHashModifier="na" customClassName="[String]"/>
+        <attribute name="be37Qu" attributeType="Integer 64" optional="YES" usesScalarValueType="NO" defaultValueString="0">
+            <userInfo>
+                <entry key="ri" value="x1"/>
+                <entry key="ze" value="x1"/>
+            </userInfo>
+        </attribute>
+    </entity>
+    <entity name="Alzenaal" representedClassName="Alzenaal" syncable="YES" codeGenerationType="class" versionHashModifier="pipi">
+        <relationship name="be37ze" destinationEntity="Pi" optional="YES" maxCount="1" deletionRule="Cascade" inverseName="naze3te" inverseEntity="Pi"/>
+        <attribute name="quzeQuKa" attributeType="Decimal" transient="YES" preserveAfterDeletion="YES"/>
+        <attribute name="ze7" attributeType="String" preserveAfterDeletion="YES"/>
+        <attribute name="alKaMu" attributeType="Date" optional="YES" versionHashModifier="te777Mu"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="BeQual" representedClassName="BeQual" syncable="YES" codeGenerationType="class" parentEntity="Ka7alQual">
+        <attribute name="zenanabe12" attributeType="URI" optional="YES" versionHashModifier="bedo12" elementID="rixo"/>
+        <attribute name="bexona" attributeType="Date" versionHashModifier="pido3" defaultDateTimeInterval="-12.5"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="bexona"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Quri" representedClassName="Quri" syncable="YES" codeGenerationType="class">
+        <relationship name="ribexo7te" destinationEntity="Ka7alQual" optional="YES" maxCount="1" deletionRule="Deny" inverseName="kapiKana" inverseEntity="Ka7alQual"/>
+        <attribute name="al3" attributeType="Decimal" optional="YES"/>
+        <relationship name="dodoQupi3" destinationEntity="Pi" toMany="YES" minCount="1" maxCount="72" deletionRule="No Action" inverseName="zedoMu12" inverseEntity="Pi"/>
+    </entity>
+    <entity name="Pi" representedClassName="Pi" syncable="YES" codeGenerationType="class">
+        <relationship name="zedoMu12" destinationEntity="Quri" optional="YES" toMany="YES" deletionRule="No Action" inverseName="dodoQupi3" inverseEntity="Quri"/>
+        <relationship name="naze3te" destinationEntity="Alzenaal" optional="YES" maxCount="1" deletionRule="Deny" inverseName="be37ze" inverseEntity="Alzenaal">
+            <userInfo>
+                <entry key="al712" value="longer value text"/>
+            </userInfo>
+        </relationship>
+        <relationship name="nate3" destinationEntity="Alzenaal" maxCount="1" deletionRule="No Action"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+</model>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Ri7" representedClassName="Ri7" syncable="YES" codeGenerationType="class">
+        <attribute name="mute" attributeType="Float" usesScalarValueType="NO" defaultValueString="2.5">
+            <userInfo>
+                <entry key="do" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="naal7Kado" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES"/>
+        <relationship name="kaxo7Qu" destinationEntity="Be" optional="YES" toMany="YES" deletionRule="No Action" elementID="beQuteze3" inverseName="ri37" inverseEntity="Be">
+            <userInfo>
+                <entry key="nadoMuna" value="longer value text"/>
+                <entry key="do" value="longer value text"/>
+                <entry key="ze" value="x1"/>
+            </userInfo>
+        </relationship>
+        <relationship name="dori" destinationEntity="Pi" toMany="YES" minCount="1" maxCount="106" deletionRule="No Action" inverseName="do" inverseEntity="Pi"/>
+        <attribute name="na7doteri" attributeType="Float" spotlightIndexingEnabled="YES" usesScalarValueType="YES"/>
+        <relationship name="teMu" destinationEntity="Alte" maxCount="1" deletionRule="Cascade" inverseName="xo" inverseEntity="Alte"/>
+    </entity>
+    <entity name="Pi" representedClassName="Pi" syncable="YES" codeGenerationType="class">
+        <attribute name="naalnado" attributeType="Date" optional="YES"/>
+        <relationship name="aldote" destinationEntity="Ri7" optional="YES" toMany="YES" ordered="YES" deletionRule="Cascade"/>
+        <attribute name="qu12" attributeType="String" defaultValueString="longer default string"/>
+        <relationship name="do" destinationEntity="Ri7" toMany="YES" deletionRule="Cascade" inverseName="dori" inverseEntity="Ri7"/>
+        <attribute name="al7Kateal" attributeType="URI" optional="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="nazeQual" attributeType="Integer 64" spotlightIndexingEnabled="YES" elementID="kaxo" usesScalarValueType="YES"/>
+        <attribute name="quxopi12" attributeType="Integer 32" optional="YES" allowsCloudEncryption="YES" usesScalarValueType="YES" defaultValueString="243"/>
+        <relationship name="bezexote" destinationEntity="Pi" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="al" attributeType="Transformable" optional="YES" spotlightIndexingEnabled="YES" elementID="muxoQualbe" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="MyType"/>
+    </entity>
+    <entity name="Be" representedClassName="Be" syncable="YES" codeGenerationType="class" versionHashModifier="tealalQudo">
+        <attribute name="na7" attributeType="String" optional="YES"/>
+        <attribute name="zedoze" attributeType="Transformable" optional="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <attribute name="nanaKa" attributeType="Integer 32" optional="YES" usesScalarValueType="NO" defaultValueString="0"/>
+        <attribute name="ze12do" attributeType="UUID"/>
+        <attribute name="mu" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <relationship name="ri37" destinationEntity="Ri7" optional="YES" toMany="YES" ordered="YES" deletionRule="No Action" elementID="munana" inverseName="kaxo7Qu" inverseEntity="Ri7"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="QuxodoMu" representedClassName="QuxodoMu" syncable="YES" codeGenerationType="class" parentEntity="Ri7">
+        <attribute name="kana" attributeType="URI" optional="YES" elementID="rialQuri"/>
+        <attribute name="quKa3zeal" attributeType="URI" optional="YES" versionHashModifier="beteMudoQu" elementID="qutedoal">
+            <userInfo>
+                <entry key="quQu12" value="v"/>
+                <entry key="na7QunaKa" value="v"/>
+            </userInfo>
+        </attribute>
+        <attribute name="be7do" attributeType="String" optional="YES" defaultValueString="x1"/>
+        <attribute name="qu" attributeType="Double" optional="YES" usesScalarValueType="NO" defaultValueString="100"/>
+        <relationship name="kari" destinationEntity="Xo7teMu" optional="YES" toMany="YES" deletionRule="Nullify" inverseName="te312" inverseEntity="Xo7teMu"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="quKa3zeal"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Xo7teMu" representedClassName="Xo7teMu" syncable="YES" codeGenerationType="class">
+        <attribute name="alMuriQu7" attributeType="Integer 32" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="dopiQuKa" attributeType="Integer 64" versionHashModifier="zeberi" usesScalarValueType="NO"/>
+        <attribute name="qudoMuKari" attributeType="String" optional="YES" elementID="quze" defaultValueString="hi">
+            <userInfo>
+                <entry key="zezebe" value="v"/>
+                <entry key="mute" value="longer value text"/>
+                <entry key="zealna" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <relationship name="te312" destinationEntity="QuxodoMu" optional="YES" toMany="YES" deletionRule="Nullify" inverseName="kari" inverseEntity="QuxodoMu"/>
+        <attribute name="pina" attributeType="Decimal" optional="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="ri" attributeType="Integer 32" optional="YES" spotlightIndexingEnabled="YES" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="Alte" representedClassName="Alte" syncable="YES" codeGenerationType="class" parentEntity="Ri7">
+        <attribute name="kaKari" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="pi" attributeType="Boolean" allowsCloudEncryption="YES" versionHashModifier="ze12naMu" usesScalarValueType="NO"/>
+        <attribute name="te7tezebe" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <relationship name="xo" destinationEntity="Ri7" optional="YES" maxCount="1" deletionRule="Nullify" inverseName="teMu" inverseEntity="Ri7"/>
+        <attribute name="pixoxobe3" attributeType="String" transient="YES" defaultValueString="hi"/>
+    </entity>
+</model>

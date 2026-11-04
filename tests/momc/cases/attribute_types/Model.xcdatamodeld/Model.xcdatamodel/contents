@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="T" representedClassName="T" syncable="YES" codeGenerationType="class">
+        <attribute name="a0" attributeType="Integer 16" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="a1" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="a2" attributeType="Integer 64" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="a3" attributeType="Decimal" optional="YES"/>
+        <attribute name="a4" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="a5" attributeType="Float" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="a6" attributeType="String" optional="YES"/>
+        <attribute name="a7" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="a8" attributeType="Date" optional="YES"/>
+        <attribute name="a9" attributeType="Binary" optional="YES"/>
+        <attribute name="a10" attributeType="UUID" optional="YES"/>
+        <attribute name="a11" attributeType="URI" optional="YES"/>
+        <attribute name="a12" attributeType="Transformable" optional="YES"/>
+    </entity>
+</model>

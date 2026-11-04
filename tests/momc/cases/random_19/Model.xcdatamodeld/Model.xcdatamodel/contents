@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="qudopi7be">
+    <entity name="TeKa7Ka" representedClassName="TeKa7Ka" syncable="YES" codeGenerationType="class">
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Pi7" representedClassName="Pi7" syncable="YES" codeGenerationType="class" parentEntity="Xo12be">
+        <attribute name="kana" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES" preserveAfterDeletion="YES" allowsCloudEncryption="YES" versionHashModifier="quzeal"/>
+        <attribute name="albe" attributeType="Transformable" optional="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer">
+            <userInfo>
+                <entry key="na" value="v"/>
+                <entry key="dozeQu" value="x1"/>
+            </userInfo>
+        </attribute>
+        <attribute name="piQu" attributeType="Double" usesScalarValueType="YES" defaultValueString="100"/>
+        <attribute name="qudo" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Xo12be" representedClassName="Xo12be" syncable="YES" codeGenerationType="class" elementID="Ze12">
+        <attribute name="rize12doKa" attributeType="URI" optional="YES"/>
+        <attribute name="mubenanari" attributeType="URI"/>
+    </entity>
+</model>

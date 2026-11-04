@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Ka" representedClassName="Ka" syncable="YES" codeGenerationType="class" versionHashModifier="be12te">
+        <attribute name="bepiri" attributeType="URI" optional="YES" elementID="bebeMuMu"/>
+        <attribute name="terial12" attributeType="Date" optional="YES" preserveAfterDeletion="YES" defaultDateTimeInterval="0"/>
+        <attribute name="alri733" attributeType="Float" usesScalarValueType="YES">
+            <userInfo>
+                <entry key="dodo" value="longer value text"/>
+                <entry key="xobedobe" value="x1"/>
+                <entry key="al" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="ri" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <relationship name="ka" destinationEntity="Ka" maxCount="1" deletionRule="Cascade">
+            <userInfo>
+                <entry key="riri" value="v"/>
+                <entry key="kabexoQu" value="v"/>
+            </userInfo>
+        </relationship>
+        <relationship name="zepiKaxo7" destinationEntity="Ka" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="beKado" attributeType="Transformable" optional="YES" preserveAfterDeletion="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="[String]">
+            <userInfo>
+                <entry key="ka" value="v"/>
+                <entry key="quxotete" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <relationship name="ka7Mu" destinationEntity="Ka" maxCount="1" deletionRule="Deny" versionHashModifier="dodoKaxo"/>
+        <relationship name="ze312na3" destinationEntity="Ka" optional="YES" maxCount="1" deletionRule="Cascade"/>
+        <attribute name="al12" attributeType="UUID" optional="YES" transient="YES" preserveAfterDeletion="YES">
+            <userInfo>
+                <entry key="pi" value="x1"/>
+                <entry key="qual3te7" value="longer value text"/>
+                <entry key="bedoririQu" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="te7Ka" attributeType="Decimal" transient="YES"/>
+        <relationship name="teze" destinationEntity="Ka" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+</model>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="E00" representedClassName="E00" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E01" representedClassName="E01" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E02" representedClassName="E02" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+        <attribute name="f2" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E03" representedClassName="E03" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+        <attribute name="f2" attributeType="String" optional="YES"/>
+        <attribute name="f3" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E04" representedClassName="E04" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E05" representedClassName="E05" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E06" representedClassName="E06" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+        <attribute name="f2" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E07" representedClassName="E07" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+        <attribute name="f2" attributeType="String" optional="YES"/>
+        <attribute name="f3" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E08" representedClassName="E08" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E09" representedClassName="E09" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E10" representedClassName="E10" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+        <attribute name="f2" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E11" representedClassName="E11" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+        <attribute name="f2" attributeType="String" optional="YES"/>
+        <attribute name="f3" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E12" representedClassName="E12" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E13" representedClassName="E13" syncable="YES" codeGenerationType="class">
+        <attribute name="f0" attributeType="String" optional="YES"/>
+        <attribute name="f1" attributeType="String" optional="YES"/>
+    </entity>
+</model>

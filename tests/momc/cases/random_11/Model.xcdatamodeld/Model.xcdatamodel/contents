@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Pial" representedClassName="Pial" syncable="YES" codeGenerationType="class" versionHashModifier="ri" elementID="Pipina">
+    </entity>
+    <entity name="QuMu7" representedClassName="QuMu7" syncable="YES" codeGenerationType="class">
+        <attribute name="te" attributeType="Integer 64" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="tedoxote" attributeType="Integer 64" optional="YES" transient="YES" spotlightIndexingEnabled="YES" versionHashModifier="ze" elementID="te123doze" usesScalarValueType="YES"/>
+        <attribute name="pi" attributeType="URI" transient="YES" allowsCloudEncryption="YES"/>
+    </entity>
+    <entity name="Nazedo" representedClassName="Nazedo" syncable="YES" codeGenerationType="class">
+        <attribute name="ka" attributeType="Double" versionHashModifier="pibepite12" usesScalarValueType="YES">
+            <userInfo>
+                <entry key="do3" value="x1"/>
+            </userInfo>
+        </attribute>
+    </entity>
+    <entity name="Do7Mu" representedClassName="Do7Mu" syncable="YES" codeGenerationType="class">
+        <attribute name="kaxo" attributeType="Integer 16" optional="YES" usesScalarValueType="NO" defaultValueString="283"/>
+        <attribute name="ze3zeMu" attributeType="Float" spotlightIndexingEnabled="YES" usesScalarValueType="NO"/>
+        <attribute name="quna" attributeType="Integer 32" optional="YES" transient="YES" usesScalarValueType="NO" defaultValueString="243"/>
+        <attribute name="qu" attributeType="UUID" optional="YES" allowsCloudEncryption="YES" versionHashModifier="quQu"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="ze3zeMu"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Ze" representedClassName="Ze" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="xopi" attributeType="Double" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="beri3" attributeType="Decimal" spotlightIndexingEnabled="YES" defaultValueString="-2.25"/>
+        <attribute name="zeriQualte" attributeType="Integer 64" optional="YES" transient="YES" preserveAfterDeletion="YES" versionHashModifier="terialpi" usesScalarValueType="NO" defaultValueString="1099511627776"/>
+        <attribute name="riQu" attributeType="Boolean" usesScalarValueType="YES" defaultValueString="YES"/>
+        <attribute name="alKa3" attributeType="Integer 64" optional="YES" allowsCloudEncryption="YES" usesScalarValueType="NO"/>
+        <attribute name="dori712" attributeType="URI" optional="YES" transient="YES" versionHashModifier="al77" elementID="texoxona">
+            <userInfo>
+                <entry key="mupialpi" value="x1"/>
+            </userInfo>
+        </attribute>
+    </entity>
+    <entity name="Ka3na" representedClassName="Ka3naMO" syncable="YES" codeGenerationType="class">
+        <attribute name="na" attributeType="Double" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="quQu" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES" elementID="quQuxo"/>
+        <attribute name="mu127ri" attributeType="Integer 64" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="ri" attributeType="URI" optional="YES"/>
+        <attribute name="beze" attributeType="Decimal" optional="YES" preserveAfterDeletion="YES" defaultValueString="0"/>
+        <attribute name="alri" attributeType="Integer 32" optional="YES" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="ka3" value="x1"/>
+            </userInfo>
+        </attribute>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="na"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Mual7" representedClassName="Mual7" syncable="YES" codeGenerationType="class">
+        <attribute name="ripiQuna" attributeType="Double" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="kanapipi12" attributeType="Boolean" versionHashModifier="alxo12" elementID="kaMunaQuKa" usesScalarValueType="NO" defaultValueString="NO"/>
+        <attribute name="riMuQuKa" attributeType="Binary" optional="YES">
+            <userInfo>
+                <entry key="doteal" value="longer value text"/>
+                <entry key="rize" value="longer value text"/>
+                <entry key="qu" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="xo12" attributeType="Boolean" optional="YES" versionHashModifier="pi" usesScalarValueType="YES"/>
+        <attribute name="kapibe3" attributeType="Integer 64" spotlightIndexingEnabled="YES" usesScalarValueType="YES"/>
+        <attribute name="xoMu" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES"/>
+        <attribute name="zeKabe" attributeType="Decimal" optional="YES" preserveAfterDeletion="YES" versionHashModifier="alpibe"/>
+    </entity>
+    <entity name="Qu" representedClassName="Qu" syncable="YES" codeGenerationType="class">
+        <attribute name="pitebe" attributeType="Double" transient="YES" preserveAfterDeletion="YES" allowsCloudEncryption="YES" usesScalarValueType="YES">
+            <userInfo>
+                <entry key="doal7be" value="v"/>
+                <entry key="xote" value="x1"/>
+                <entry key="zedoal37" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="zebeal" attributeType="UUID" optional="YES" preserveAfterDeletion="YES" elementID="doal"/>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <fetchRequest name="PiQudoQu" entity="Nazedo"/>
+    <fetchRequest name="Ri3al12" entity="Ze"/>
+</model>

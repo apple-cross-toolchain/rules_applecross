@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Ka7" representedClassName="Ka7" syncable="YES" codeGenerationType="class">
+        <attribute name="te7zebe" attributeType="Integer 16" usesScalarValueType="YES"/>
+        <relationship name="ka" destinationEntity="Ka7" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <relationship name="tedoKanana" destinationEntity="Ka7" toMany="YES" ordered="YES" deletionRule="Deny"/>
+        <relationship name="qu" destinationEntity="Ka7" optional="YES" toMany="YES" deletionRule="Deny"/>
+        <relationship name="ri" destinationEntity="Ka7" toMany="YES" deletionRule="Deny" versionHashModifier="xo"/>
+        <attribute name="ridopi12" attributeType="Binary" allowsExternalBinaryDataStorage="YES" versionHashModifier="ze" elementID="nazeri3ze">
+            <userInfo>
+                <entry key="dote" value="x1"/>
+                <entry key="beKa" value="v"/>
+            </userInfo>
+        </attribute>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+</model>

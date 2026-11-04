@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="F" representedClassName="F" syncable="YES" codeGenerationType="class">
+        <attribute name="n" attributeType="String" optional="YES"/>
+    </entity>
+    <fetchRequest name="All" entity="F"/>
+    <fetchRequest name="Named" entity="F" predicateString="n == &quot;x&quot;"/>
+</model>

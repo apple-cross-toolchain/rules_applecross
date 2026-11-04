@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Alpha" representedClassName="Alpha" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Beta" representedClassName="Beta" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Gamma" representedClassName="Gamma" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Delta" representedClassName="Delta" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Epsilon" representedClassName="Epsilon" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Zeta" representedClassName="Zeta" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Eta" representedClassName="Eta" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <configuration name="Two">
+        <memberEntity name="Gamma"/>
+        <memberEntity name="Alpha"/>
+        <memberEntity name="Zeta"/>
+        <memberEntity name="Eta"/>
+        <memberEntity name="Beta"/>
+    </configuration>
+    <configuration name="One">
+        <memberEntity name="Delta"/>
+    </configuration>
+</model>

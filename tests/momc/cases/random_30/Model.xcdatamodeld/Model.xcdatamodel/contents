@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Al7" representedClassName="Al7" syncable="YES" codeGenerationType="class">
+        <attribute name="ka7Mu12xo" attributeType="Date" defaultDateTimeInterval="-12.5"/>
+        <attribute name="dodo" attributeType="Double" transient="YES" spotlightIndexingEnabled="YES" versionHashModifier="alMuberi" usesScalarValueType="YES"/>
+        <attribute name="rinabe" attributeType="Date" optional="YES" preserveAfterDeletion="YES" defaultDateTimeInterval="0"/>
+        <attribute name="ka" attributeType="Integer 16" optional="YES" elementID="beKate" usesScalarValueType="NO" defaultValueString="214">
+            <userInfo>
+                <entry key="tepi" value="v"/>
+                <entry key="rialri" value="longer value text"/>
+            </userInfo>
+        </attribute>
+    </entity>
+    <entity name="Na" representedClassName="NaMO" syncable="YES" codeGenerationType="class" parentEntity="BeMu7" elementID="Kari">
+        <attribute name="xo" attributeType="Date" optional="YES" defaultDateTimeInterval="-12.5"/>
+        <attribute name="na7Kadodo" attributeType="Integer 64" optional="YES" usesScalarValueType="NO" defaultValueString="270200"/>
+        <attribute name="doQu" attributeType="Float" optional="YES" usesScalarValueType="NO" defaultValueString="0.1"/>
+        <relationship name="nadobe" destinationEntity="RiMudoMu" optional="YES" toMany="YES" minCount="1" maxCount="294" deletionRule="Deny" inverseName="kaberi" inverseEntity="RiMudoMu">
+            <userInfo>
+                <entry key="alal" value="x1"/>
+            </userInfo>
+        </relationship>
+        <attribute name="bepi" attributeType="Boolean" optional="YES" preserveAfterDeletion="YES" usesScalarValueType="NO" defaultValueString="YES"/>
+    </entity>
+    <entity name="RiMudoMu" representedClassName="RiMudoMu" syncable="YES" codeGenerationType="class">
+        <attribute name="al" attributeType="Integer 16" allowsCloudEncryption="YES" elementID="teKadodori" usesScalarValueType="NO"/>
+        <attribute name="xodoMuQu" attributeType="Double" optional="YES" transient="YES" spotlightIndexingEnabled="YES" usesScalarValueType="YES"/>
+        <relationship name="kaberi" destinationEntity="Na" optional="YES" toMany="YES" deletionRule="Cascade" inverseName="nadobe" inverseEntity="Na"/>
+        <attribute name="te" attributeType="String" allowsCloudEncryption="YES"/>
+        <attribute name="quMuQuMu" attributeType="URI" versionHashModifier="riMute"/>
+        <attribute name="alna3ze" attributeType="Integer 32" optional="YES" usesScalarValueType="NO" defaultValueString="243"/>
+        <attribute name="quberiKa7" attributeType="Binary" optional="YES" allowsExternalBinaryDataStorage="YES"/>
+    </entity>
+    <entity name="BeMu7" representedClassName="BeMu7" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="zeri" attributeType="Integer 64" optional="YES" usesScalarValueType="NO" defaultValueString="270200"/>
+        <attribute name="qu" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="piMuze" attributeType="String" optional="YES" versionHashModifier="ze123Mudo"/>
+        <attribute name="do" attributeType="UUID"/>
+        <attribute name="alMute" attributeType="URI" optional="YES" versionHashModifier="xo"/>
+        <attribute name="bete" attributeType="Integer 32" optional="YES" spotlightIndexingEnabled="YES" elementID="berialdodo" usesScalarValueType="NO">
+            <userInfo>
+                <entry key="ka1212" value="longer value text"/>
+                <entry key="ka" value="longer value text"/>
+                <entry key="piQu" value="v"/>
+            </userInfo>
+        </attribute>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="do"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <configuration name="Other">
+        <memberEntity name="Na"/>
+    </configuration>
+    <fetchRequest name="TeQual" entity="Al7"/>
+</model>

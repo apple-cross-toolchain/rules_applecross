@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Pi" representedClassName="Pi" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="xo3" attributeType="URI" transient="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="mu7do" attributeType="Integer 16" optional="YES" usesScalarValueType="YES" defaultValueString="20"/>
+        <attribute name="xoalpi" attributeType="String" optional="YES" allowsCloudEncryption="YES"/>
+        <attribute name="ribebeQu" attributeType="Double" usesScalarValueType="NO" defaultValueString="0"/>
+        <relationship name="do7ripi3" destinationEntity="Pi" optional="YES" toMany="YES" minCount="1" maxCount="224" deletionRule="Nullify"/>
+        <attribute name="te" attributeType="Integer 16" optional="YES" versionHashModifier="al" usesScalarValueType="NO" defaultValueString="-4"/>
+        <attribute name="be" attributeType="Integer 64" optional="YES" usesScalarValueType="YES" defaultValueString="270200"/>
+        <attribute name="nabedo" attributeType="Integer 32" optional="YES" transient="YES" spotlightIndexingEnabled="YES" allowsCloudEncryption="YES" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="Dote" representedClassName="DoteMO" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="xori" attributeType="Integer 64" usesScalarValueType="NO" defaultValueString="1099511627776"/>
+        <attribute name="pidote" attributeType="Binary" optional="YES" transient="YES" versionHashModifier="pi12Qu12" elementID="pi"/>
+        <attribute name="na" attributeType="Date" optional="YES" spotlightIndexingEnabled="YES"/>
+        <attribute name="xoMual" attributeType="String" optional="YES" versionHashModifier="al"/>
+        <attribute name="ze12do" attributeType="URI" allowsCloudEncryption="YES"/>
+        <attribute name="xozenapi" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <relationship name="mu12zeMual" destinationEntity="Dote" optional="YES" maxCount="1" deletionRule="Cascade" elementID="piQudonaxo"/>
+    </entity>
+</model>

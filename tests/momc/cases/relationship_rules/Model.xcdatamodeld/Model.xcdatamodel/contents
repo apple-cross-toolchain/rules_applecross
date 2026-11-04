@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <relationship name="a" destinationEntity="C" optional="YES" toMany="YES" deletionRule="Deny"/>
+        <relationship name="b" destinationEntity="C" toMany="YES" ordered="YES" minCount="2" maxCount="9" deletionRule="Cascade"/>
+        <relationship name="c" destinationEntity="C" optional="YES" maxCount="1" deletionRule="No Action"/>
+    </entity>
+    <entity name="C" representedClassName="C" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+</model>

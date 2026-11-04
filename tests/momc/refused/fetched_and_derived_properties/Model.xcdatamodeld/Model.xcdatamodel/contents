@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="F" representedClassName="F" syncable="YES" codeGenerationType="class">
+        <attribute name="n" attributeType="String" optional="YES"/>
+        <attribute name="count" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="now()" usesScalarValueType="YES"/>
+        <fetchedProperty name="same" optional="YES">
+            <fetchRequest name="fetchedPropertyFetchRequest" entity="F" predicateString="n == $FETCH_SOURCE.n"/>
+        </fetchedProperty>
+    </entity>
+</model>

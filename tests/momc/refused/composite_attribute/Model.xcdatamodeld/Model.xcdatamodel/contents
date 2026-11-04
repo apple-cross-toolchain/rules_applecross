@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="C" representedClassName="C" syncable="YES" codeGenerationType="class">
+        <attribute name="addr" attributeType="Composite" optional="YES" composite="Address"/>
+    </entity>
+    <composite name="Address">
+        <attribute name="street" attributeType="String"/>
+        <attribute name="zip" attributeType="String"/>
+    </composite>
+</model>

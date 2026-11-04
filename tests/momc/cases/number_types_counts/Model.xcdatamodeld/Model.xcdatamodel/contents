@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="N" representedClassName="N" syncable="YES" codeGenerationType="class">
+        <attribute name="s" attributeType="String" optional="YES"/>
+        <attribute name="t" attributeType="String" transient="YES"/>
+        <attribute name="i" attributeType="Integer 16" usesScalarValueType="YES"/>
+        <attribute name="big" attributeType="Integer 64" optional="YES" defaultValueString="100000" usesScalarValueType="YES"/>
+        <relationship name="m243" destinationEntity="O" optional="YES" toMany="YES" maxCount="243" deletionRule="Nullify"/>
+        <relationship name="m100" destinationEntity="O" optional="YES" toMany="YES" maxCount="100" deletionRule="Nullify"/>
+        <relationship name="m200" destinationEntity="O" optional="YES" toMany="YES" maxCount="200" deletionRule="Nullify"/>
+        <relationship name="m700" destinationEntity="O" optional="YES" toMany="YES" maxCount="700" deletionRule="Nullify"/>
+        <relationship name="m100000" destinationEntity="O" optional="YES" toMany="YES" maxCount="100000" deletionRule="Nullify"/>
+        <relationship name="m195" destinationEntity="O" optional="YES" toMany="YES" maxCount="195" deletionRule="Nullify"/>
+    </entity>
+    <entity name="O" representedClassName="O" syncable="YES" codeGenerationType="class">
+        <attribute name="o" attributeType="String" optional="YES"/>
+    </entity>
+</model>

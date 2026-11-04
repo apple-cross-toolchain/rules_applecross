@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="benaKana">
+    <entity name="PiriMube" representedClassName="PiriMube" syncable="YES" codeGenerationType="class">
+        <relationship name="qupiri" destinationEntity="KaKadonabe" optional="YES" toMany="YES" deletionRule="Nullify">
+            <userInfo>
+                <entry key="do" value="v"/>
+                <entry key="zeKa" value="x1"/>
+                <entry key="muze" value="x1"/>
+            </userInfo>
+        </relationship>
+        <attribute name="mu7be" attributeType="Integer 64" versionHashModifier="doMuxoKa" usesScalarValueType="NO" defaultValueString="0"/>
+        <attribute name="tebe7" attributeType="URI"/>
+        <relationship name="napibexoal" destinationEntity="KaKadonabe" optional="YES" maxCount="1" deletionRule="Cascade" inverseName="riri" inverseEntity="KaKadonabe">
+            <userInfo>
+                <entry key="beteMuriMu" value="longer value text"/>
+            </userInfo>
+        </relationship>
+        <attribute name="do7beKa" attributeType="String" optional="YES" versionHashModifier="piMu" defaultValueString="longer default string"/>
+        <attribute name="tedoKa" attributeType="Binary" optional="YES" preserveAfterDeletion="YES"/>
+        <attribute name="be12" attributeType="Boolean" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="qualal" attributeType="Binary" optional="YES" spotlightIndexingEnabled="YES" elementID="mupiKa7"/>
+    </entity>
+    <entity name="Ze" representedClassName="Ze" syncable="YES" codeGenerationType="class">
+        <attribute name="xo" attributeType="Decimal" transient="YES" elementID="kanadobe" defaultValueString="-2.25"/>
+        <attribute name="na" attributeType="Integer 64" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="xona" attributeType="Decimal"/>
+    </entity>
+    <entity name="RiQu" representedClassName="RiQu" syncable="YES" codeGenerationType="class">
+        <attribute name="pi" attributeType="URI" optional="YES" allowsCloudEncryption="YES" versionHashModifier="xo12"/>
+        <attribute name="mu" attributeType="Integer 64" optional="YES" transient="YES" usesScalarValueType="NO" defaultValueString="270200"/>
+        <attribute name="muQupi3" attributeType="Integer 32" optional="YES" elementID="xoxo" usesScalarValueType="YES" defaultValueString="-7"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="mu"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="Ka12ri" representedClassName="Ka12ri" syncable="YES" codeGenerationType="class">
+        <relationship name="bexote12pi" destinationEntity="Te12" toMany="YES" deletionRule="Nullify" elementID="ka7tedo" inverseName="qupixo" inverseEntity="Te12"/>
+        <attribute name="ri" attributeType="Binary" optional="YES"/>
+        <attribute name="napina3te" attributeType="Float" usesScalarValueType="YES"/>
+        <attribute name="do" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromDataTransformer"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="napina3te"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+        <userInfo>
+            <entry key="ek" value="ev"/>
+        </userInfo>
+    </entity>
+    <entity name="Na" representedClassName="Na" syncable="YES" codeGenerationType="class" parentEntity="RiQu">
+        <attribute name="zepi" attributeType="Integer 32" optional="YES" transient="YES" usesScalarValueType="NO" defaultValueString="0"/>
+        <relationship name="teze12alxo" destinationEntity="PiriMube" optional="YES" toMany="YES" ordered="YES" deletionRule="Cascade"/>
+        <attribute name="xopi" attributeType="Transformable" spotlightIndexingEnabled="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="[String]"/>
+        <attribute name="zebe" attributeType="Integer 16" optional="YES" transient="YES" allowsCloudEncryption="YES" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="Te12" representedClassName="Te12" syncable="YES" codeGenerationType="class">
+        <relationship name="qupixo" destinationEntity="Ka12ri" optional="YES" maxCount="1" deletionRule="Deny" inverseName="bexote12pi" inverseEntity="Ka12ri"/>
+    </entity>
+    <entity name="DoMu3be" representedClassName="DoMu3beMO" syncable="YES" codeGenerationType="class" parentEntity="Te12">
+    </entity>
+    <entity name="KaKadonabe" representedClassName="KaKadonabeMO" syncable="YES" codeGenerationType="class">
+        <attribute name="benabeze" attributeType="Decimal" optional="YES">
+            <userInfo>
+                <entry key="ridoKa" value="longer value text"/>
+            </userInfo>
+        </attribute>
+        <attribute name="ze" attributeType="Transformable" transient="YES" allowsCloudEncryption="YES" elementID="mu" customClassName="[String]"/>
+        <relationship name="riri" destinationEntity="PiriMube" optional="YES" maxCount="1" deletionRule="Cascade" inverseName="napibexoal" inverseEntity="PiriMube"/>
+        <attribute name="aldopi" attributeType="Integer 16" optional="YES" elementID="qu" usesScalarValueType="YES"/>
+        <attribute name="doalte12" attributeType="Integer 64" optional="YES" versionHashModifier="quMupinaQu" usesScalarValueType="NO" defaultValueString="5"/>
+    </entity>
+</model>

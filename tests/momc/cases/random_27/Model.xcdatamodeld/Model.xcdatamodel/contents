@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Muze37" representedClassName="Muze37" syncable="YES" codeGenerationType="class">
+        <attribute name="rizealri" attributeType="Integer 64" optional="YES" usesScalarValueType="NO"/>
+        <relationship name="mu" destinationEntity="Muze37" optional="YES" maxCount="1" deletionRule="Deny" elementID="mubenaal"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="rizealri"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <configuration name="Other">
+        <memberEntity name="Muze37"/>
+    </configuration>
+    <configuration name="Cloud">
+        <memberEntity name="Muze37"/>
+    </configuration>
+</model>
