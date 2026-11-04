@@ -110,9 +110,27 @@ Refused strict, compiled as the nearest established form relaxed:
 - manual strings beyond the case above;
 - unknown keys in the catalog, a string or a localization;
 - variations other than `plural` and `device`, and a substitution varied
-  other than by plural;
-- variations together with substitutions, and positioned substitution
-  references (`%1$#@name@`) in the value.
+  other than by plural or device;
+- variations together with substitutions, but for the shapes Xcode
+  refuses (below).
+
+## Substitutions
+
+A reference written with a position (`%2$#@folders@`) keeps it in the
+format key, whatever the substitution's `argNum`; one without takes its
+`argNum`'s, as before. Each substitution's `%arg` becomes its `argNum`'s
+position and specifier (`%2$lld`), or the bare specifier without one (six
+probes).
+
+Xcode refuses, and so does this tool, strict or relaxed (three probes):
+
+- a plural variation whose forms reference a substitution: `Cannot
+  reference substitution 'total' from here because it is not a plain
+  string`, for each form;
+- a device variation whose fallback (`other`) references one: `Fallback
+  value cannot be further varied`;
+- a substitution varied by device: `Cannot reference substitution 'items'
+  from here because it is not a plain string or plural variation`.
 
 Other subcommands (`sync`, `extract`, `generate-symbols`, ...) and options
 (`--format`, `--language`, `--serialization-format binary`) aren't

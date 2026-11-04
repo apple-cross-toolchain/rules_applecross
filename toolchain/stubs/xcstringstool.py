@@ -196,8 +196,6 @@ def substituted(ctx, localization, language, key):
         if m.group(2) not in substitutions:
             ctx.error("Referencing undefined substitution '{}'".format(m.group(2)), language, key)
             raise Failure()
-        if m.group(1):
-            ctx.unestablished("A positioned substitution reference", language, key)
         referenced.append(m.group(2))
     unused = [name for name in substitutions if name not in referenced]
     for name in unused:
@@ -210,6 +208,10 @@ def substituted(ctx, localization, language, key):
     for name in referenced:
         sub = substitutions[name]
         extra = set(sub) - {"argNum", "formatSpecifier", "variations"}
+        # Xcode refuses one varied by device (a probe).
+        if not extra and set(sub.get("variations", {})) == {"device"}:
+            ctx.error("Cannot reference substitution '{}' from here because it is not a plain string or plural variation".format(name), language, key)
+            raise Failure()
         if extra or set(sub.get("variations", {})) != {"plural"}:
             ctx.unestablished("A substitution other than a plural one", language, key, "substitutions." + name)
         spec = sub["formatSpecifier"]
@@ -223,12 +225,35 @@ def substituted(ctx, localization, language, key):
         entry[name] = rule
     numbered = {name: substitutions[name].get("argNum") for name in referenced}
 
+    # A reference keeps the position it's written with, whatever the
+    # substitution's argNum; one without takes its argNum's (five probes).
     def reference(m):
         n = numbered[m.group(2)]
-        return "%{}$#@{}@".format(n, m.group(2)) if n is not None else m.group(0)
+        return "%{}$#@{}@".format(n, m.group(2)) if n is not None and not m.group(1) else m.group(0)
 
     entry["NSStringLocalizedFormatKey"] = SUBSTITUTION.sub(reference, value)
     return entry
+
+
+def varied_substitutions(ctx, localization, language, key):
+    """Xcode's errors for substitutions beside variations: a plural's forms
+    can't reference them, nor a device's fallback (three probes); other
+    shapes aren't established."""
+    variations = localization["variations"]
+    if set(variations) == {"plural"}:
+        failed = False
+        for category, form in variations["plural"].items():
+            for m in SUBSTITUTION.finditer(form.get("stringUnit", {}).get("value", "")):
+                ctx.error("Cannot reference substitution '{}' from here because it is not a plain string".format(m.group(2)), language, key, "plural." + category)
+                failed = True
+        if failed:
+            raise Failure()
+    if set(variations) == {"device"}:
+        other = variations["device"].get("other", {})
+        if SUBSTITUTION.search(other.get("stringUnit", {}).get("value", "")):
+            ctx.error("Fallback value cannot be further varied", language, key, "device.other")
+            raise Failure()
+    ctx.unestablished("Variations with substitutions", language, key)
 
 
 def device_rule(ctx, devices, language, key, source_position=None):
@@ -377,7 +402,7 @@ def compile_catalog(ctx, catalog):
                 strings, stringsdict = out.get(language, ({}, {}))
                 if "variations" in localization:
                     if "substitutions" in localization:
-                        ctx.unestablished("Variations with substitutions", language, key)
+                        varied_substitutions(ctx, localization, language, key)
                     variations = localization["variations"]
                     if set(variations) == {"plural"}:
                         if not variations["plural"]:
