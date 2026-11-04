@@ -36,7 +36,8 @@ one fails:
   default; set it to `False`). App Intents' intents, parameters, enums,
   entities, queries and App Shortcuts compile as Xcode compiles them
   ([docs/clean-room/appintentsmetadataprocessor.md](docs/clean-room/appintentsmetadataprocessor.md));
-- Core Data models (`momc`, `mapc`);
+- Core Data models (`momc`, `mapc`;
+  [docs/clean-room/momc.md](docs/clean-room/momc.md) says why);
 - Core ML's older neural networks. ML Programs (`.mlpackage`, states,
   several functions, flexible shapes, optional inputs and compressed weights
   included) and the other `.mlmodel` types compile, and get their generated
