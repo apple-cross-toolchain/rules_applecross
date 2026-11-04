@@ -88,6 +88,8 @@ _MULTIARCH = {
     "x86_64": "x86_64-linux-gnu",
 }
 
+_HOST_DEBS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/host-debs-20260829/"
+
 _PORTED_TOOLS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/ported-tools-0.0.26/"
 
 def _linux_exec_cpu(rctx):
@@ -128,6 +130,10 @@ def _install_swift_host_deps(rctx, toolchain_dir, cpu):
             url = [
                 "https://snapshot.ubuntu.com/ubuntu/20260829T000000Z/pool/main/" + path,
                 "https://launchpad.net/ubuntu/+archive/primary/+files/" + path.rpartition("/")[2],
+                # This repository's copy, for when both are down (both were,
+                # snapshot answering 503 and launchpad timing out, on
+                # 2026-11-04). The live archive no longer has these versions.
+                _HOST_DEBS_URL + path.rpartition("/")[2],
             ],
             output = "_debs/" + name,
             sha256 = sha256[arch],
