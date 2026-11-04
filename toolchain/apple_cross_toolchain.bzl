@@ -594,6 +594,9 @@ def _apple_cross_toolchain_impl(rctx):
     substitutions = {
         "%{linux_exec_cpu}": cpu,
         "%{swift_tools}": swift_tools,
+        # The same repository's files (rules_swift's standalone toolchains
+        # have them as `:files`).
+        "%{swift_files}": swift_tools.rpartition(":")[0] + ":files",
         "%{swift_tools_macos}": rctx.attr.swift_tools_macos,
         "%{swift_copts}": repr(rctx.attr.swift_copts),
         "%{swift_default_enabled_features}": repr(rctx.attr.swift_default_enabled_features),

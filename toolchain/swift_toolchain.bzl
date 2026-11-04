@@ -192,7 +192,7 @@ def _make_resource_directory_configurator(developer_dir):
 
     return _resource_directory_configurator
 
-def _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path, xcode_env):
+def _make_tool_configs(additional_tools, swift_tools, synthesize_interface, developer_dir, toolchain_path, xcode_env):
     """Creates tool configurations for Swift actions."""
 
     # Use rules_swift's hermetic Swift distribution as explicit action tools,
@@ -235,7 +235,7 @@ def _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_p
         worker_mode = "wrap",
     )
 
-    return {
+    tool_configs = {
         _SWIFT_ACTION_COMPILE: persistent_tool_config,
         _SWIFT_ACTION_DERIVE_FILES: persistent_tool_config,
         _SWIFT_ACTION_DUMP_AST: persistent_tool_config,
@@ -249,6 +249,18 @@ def _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_p
             worker_mode = "wrap",
         ),
     }
+    if synthesize_interface:
+        tool_configs[_SWIFT_ACTION_SYNTHESIZE_INTERFACE] = ToolConfigInfo(
+            additional_tools = additional_tools,
+            env = env,
+            executable = synthesize_interface,
+            use_param_file = True,
+            worker_mode = "wrap",
+        )
+    return tool_configs
+
+def _synthesis_module_cache_configurator(prerequisites, args):
+    args.add("-module-cache-path", prerequisites.output_file.dirname + "/_swift_module_cache")
 
 def _swift_linkopts_cc_info(swift_platform_name, sdk_platform, toolchain_label):
     """Returns a CcInfo with linker flags for Swift standard library linking."""
@@ -476,6 +488,13 @@ def _swift_toolchain_impl(ctx):
                 _make_resource_directory_configurator(developer_dir),
             ],
         ),
+        # rules_swift gives interface synthesis no module cache, so the
+        # compiler would build the SDK's modules into ~/.cache, which the
+        # sandbox doesn't let it write: beside the synthesized interface.
+        ActionConfigInfo(
+            actions = [_SWIFT_ACTION_SYNTHESIZE_INTERFACE],
+            configurators = [_synthesis_module_cache_configurator],
+        ),
         # Resource directory for module interface compilation (always needed)
         ActionConfigInfo(
             actions = [_SWIFT_ACTION_COMPILE_MODULE_INTERFACE],
@@ -601,7 +620,14 @@ def _swift_toolchain_impl(ctx):
         )
         xcode_env = dict(apple_common.apple_host_system_env(xcode_config))
         xcode_env.update(apple_common.target_apple_env(xcode_config, apple_platform))
-    tool_configs = _make_tool_configs(additional_tools, swift_tools, developer_dir, toolchain_path, xcode_env)
+    # swift-synthesize-interface, which swift-frontend is when named so, from
+    # the same Swift as swift_tools (SwiftToolsInfo doesn't carry it).
+    synthesize_interface = None
+    for f in ctx.files.swift_files:
+        if f.path.endswith("/usr/bin/swift-synthesize-interface"):
+            synthesize_interface = f
+            break
+    tool_configs = _make_tool_configs(additional_tools, swift_tools, synthesize_interface, developer_dir, toolchain_path, xcode_env)
 
     # Build Swift linker opts provider
     swift_platform_name = info.swift_platform_name
@@ -728,6 +754,10 @@ swift_toolchain = rule(
         "toolchain_files": attr.label(
             mandatory = True,
             doc = "Filegroup of SDK/toolchain files needed for sandbox access.",
+        ),
+        "swift_files": attr.label(
+            allow_files = True,
+            doc = "The files of swift_tools' Swift distribution, for swift-synthesize-interface.",
         ),
         "swift_tools": attr.label(
             mandatory = True,
