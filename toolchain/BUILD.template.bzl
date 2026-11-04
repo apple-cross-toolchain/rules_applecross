@@ -226,8 +226,9 @@ APPLE_SUPPORT_ENABLED_FEATURES = APPLE_SUPPORT_ENABLED_MARKERS + [
     "@apple_support//toolchain:suppress_warnings_wrapper",
     "@apple_support//toolchain:treat_warnings_as_errors_wrapper",
     "@apple_support//toolchain:external_include_paths_wrapper",
-    # no_warn_duplicate_libraries and reproducible_linker_flag are intentionally
-    # absent because the Linux-ported Apple linker does not support their flags.
+    # LLVM's Mach-O linker takes both (and is reproducible without the flag).
+    "@apple_support//toolchain:no_warn_duplicate_libraries",
+    "@apple_support//toolchain:reproducible_linker_flag",
     # NOTE: @apple_support_toolchain_env//:off_by_default_layering_check_enabled_features
     # is intentionally absent: it depends on @apple_support//crosstool:generate_layering_check_modulemap,
     # an apple_genrule that can only execute on a macOS host, which this
