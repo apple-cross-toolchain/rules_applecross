@@ -66,6 +66,10 @@ OUTPUT_FLAGS = {
 PLATFORMS = {
     "iOS": "LNPlatformNameIOS",
     "macOS": "LNPlatformNameMACOS",
+    "tvOS": "LNPlatformNameTVOS",
+    "watchOS": "LNPlatformNameWATCHOS",
+    "visionOS": "LNPlatformNameVISIONOS",
+    "*": "LNPlatformNameWildcard",
 }
 
 AUTHENTICATION = {
@@ -194,12 +198,26 @@ def _lookup(table, name, what):
 # --- Types --------------------------------------------------------------------
 
 def availability(entry):
-    out = {"LNPlatformNameWildcard": {"introducedVersion": "*"}}
+    """Each platform's versions, from every attribute naming it (merged):
+    introduced, deprecated and obsoleted as written, `deprecated` without a
+    version as "*", `unavailable` as obsoleted "*"; macCatalyst's left out,
+    messages too. Every type has the wildcard, introduced "*" unless an
+    attribute for `*` gives it its own (15 probes)."""
+    out = {}
     for attribute in entry.get("availabilityAttributes", []):
-        if attribute.get("isUnavailable") or attribute.get("isDeprecated") or set(attribute) - {
-                "platform", "introducedVersion", "isUnavailable", "isDeprecated"}:
-            unestablished("availability other than an introduced version")
-        out[_lookup(PLATFORMS, attribute["platform"], "availability on")] = {"introducedVersion": attribute["introducedVersion"]}
+        if set(attribute) - {"platform", "introducedVersion", "deprecatedVersion", "obsoletedVersion", "message", "isUnavailable", "isDeprecated"}:
+            unestablished("availability with {}".format(", ".join(sorted(set(attribute) - {"platform"}))))
+        if attribute["platform"] == "macCatalyst":
+            continue
+        versions = out.setdefault(_lookup(PLATFORMS, attribute["platform"], "availability on"), {})
+        for key in ("introducedVersion", "deprecatedVersion", "obsoletedVersion"):
+            if key in attribute:
+                versions[key] = attribute[key]
+        if attribute.get("isDeprecated"):
+            versions["deprecatedVersion"] = "*"
+        if attribute.get("isUnavailable"):
+            versions["obsoletedVersion"] = "*"
+    out.setdefault("LNPlatformNameWildcard", {"introducedVersion": "*"})
     return out
 
 
