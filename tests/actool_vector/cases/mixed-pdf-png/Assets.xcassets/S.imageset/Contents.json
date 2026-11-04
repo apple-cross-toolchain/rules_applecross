@@ -1,0 +1,18 @@
+{
+  "images": [
+    {
+      "filename": "a.pdf",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "b.png",
+      "idiom": "universal",
+      "scale": "2x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

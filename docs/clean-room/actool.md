@@ -1038,8 +1038,11 @@ strictly. With `--config=relax_actool_vector` they compile:
 - **Supported:** per appearance and idiom (universal, the Mac's on macOS,
   or iPhone's and iPad's on iOS for both devices), one file without a
   scale or one per scale, on iOS, macOS, tvOS, watchOS and visionOS.
-  Vector images beside bitmaps in one set are refused, as are PDFs of more
-  than one page and images under a point.
+  PNGs at 2x or 3x beside one universal 1x vector image take their scales'
+  places as bitmaps of their own; beside one without a scale, Xcode
+  reports its error for bitmaps beside an image without a scale, and so
+  does this actool. Other mixes of vector and bitmap images are refused,
+  as are PDFs of more than one page and images under a point.
 
 #### Images one per scale and other platforms
 
