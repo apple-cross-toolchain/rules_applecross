@@ -84,13 +84,33 @@ the Xcode build rules_apple passes either way.
   - capitalization: none 0, words 1, sentences 2, allCharacters 3;
   - tile colors: red 0 through grayBrown 14 (the default).
 
+## Availability
+
+`availabilityAnnotations` has an entry per platform an `@available`
+attribute names (`LNPlatformNameIOS`, `…MACOS`, `…TVOS`, `…WATCHOS`,
+`…VISIONOS`), the attributes for one platform merged (14 probes, each
+processed for iOS, macOS, tvOS, watchOS and visionOS, identical):
+
+- `introducedVersion`, `deprecatedVersion` and `obsoletedVersion` as
+  written (`17.0.1` included);
+- `deprecated` without a version is `deprecatedVersion` `*`, and
+  `unavailable` is `obsoletedVersion` `*`;
+- macCatalyst's attributes and messages are left out;
+- every type has `LNPlatformNameWildcard`, introduced `*`, unless an
+  attribute for `*` gives it its own (`deprecatedVersion` or
+  `obsoletedVersion` `*` alone).
+
+The output doesn't depend on the platform family processed for: the
+suite's other 66 cases gave the same metadata for tvOS, watchOS and
+visionOS as for iOS.
+
 ## Not reproduced
 
 Refused strict; relaxed, the type is left out with a warning:
 
 - `TransientAppEntity`, queries other than `EntityQuery` and `EntityStringQuery` (`EnumerableEntityQuery`, `EntityPropertyQuery`, ...), entity properties of entity or enum type, and the other App Intents protocols;
 - parameters of other types, dynamic options, other summary or `When` forms;
-- availability other than an introduced version, and platforms other than iOS and macOS;
+- availability attributes with keys other than a platform's introduced, deprecated and obsoleted versions, `deprecated`, `unavailable` and a message;
 - values the compiler couldn't extract (computed at run time).
 
 `--metadata-file-list`, `--static-metadata-file-list`, `--dependency-file`
