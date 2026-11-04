@@ -246,6 +246,15 @@ apple_cross_toolchain.configure(
 `swift_feature_allowlist` and `swift_package_configuration` targets must be
 visible to the toolchain's repository (`//visibility:public`).
 
+## Layering check
+
+`--features=layering_check` (or a package's `features`) works as on a Mac:
+a C, C++ or Objective-C file may include only its target's direct
+dependencies' headers and the SDK's. apple_support generates the SDK's
+`crosstool` module on a Mac; here the toolchain writes it when it is
+fetched (`layering_check.modulemap`, every header of the staged developer
+directory), and the clang wrapper reads it in place.
+
 ## Swift packages
 
 rules_swift_package_manager reads package manifests by running
