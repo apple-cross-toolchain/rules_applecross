@@ -70,6 +70,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         relax_vector: relaxed("ACTOOL_VECTOR"),
         ..Default::default()
     };
+    crate::dmp2::relax_storage(relaxed("ACTOOL_STORAGE"));
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
@@ -835,7 +836,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         deployment_target: o.minimum_deployment_target.clone(),
         platform: platform.into(),
     };
-    if !catalog.bitmap_key_order_established() {
+    if !catalog.bitmap_key_order_established() && !crate::dmp2::storage_relaxed() {
         return Err("this catalog's number of identifiers puts its bitmap keys in an order not established for this actool".into());
     }
     let car_path = out_dir.join("Assets.car");

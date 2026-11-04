@@ -2,7 +2,9 @@
 """Asset catalogs through this repository's actool, against Xcode 27.2's
 output (expected/, from update_expected.py): every file the same, up to
 what Xcode itself varies (tools/xcode_equivalence.py), and refused where
-Xcode reports errors (expected/<case>/<platform>/refused.txt).
+Xcode reports errors (expected/<case>/<platform>/refused.txt). A case with a
+relax.txt is refused without the variables it names, and compiled as Xcode
+does with them.
 
     python3 tests/actool_catalog/actool_catalog_test.py PATH/TO/actool
 """
@@ -11,7 +13,7 @@ import os
 import sys
 import tempfile
 
-from common import HERE, cases, compile_catalog, differences
+from common import HERE, cases, compile_catalog, differences, relaxations
 
 
 def main(argv):
@@ -28,6 +30,19 @@ def main(argv):
                 if os.path.exists(os.path.join(expected, "refused.txt")):
                     if status == 0:
                         failures.append("%s %s: compiled, where Xcode reports errors" % (case, platform))
+                    continue
+                relax = relaxations(case)
+                if relax:
+                    if status == 0:
+                        failures.append("%s %s: compiled without %s" % (case, platform, " ".join(relax)))
+                        continue
+                    with tempfile.TemporaryDirectory() as relaxed_out:
+                        status, log = compile_catalog(tool, catalog, icon, platform, relaxed_out, relax)
+                        different = differences(expected, relaxed_out) if status == 0 else []
+                    if status:
+                        failures.append("%s %s: refused with %s:\n%s" % (case, platform, " ".join(relax), log))
+                    elif different:
+                        failures.append("%s %s: with %s: %s" % (case, platform, " ".join(relax), "; ".join(different)))
                     continue
                 if status:
                     failures.append("%s %s: refused:\n%s" % (case, platform, log))

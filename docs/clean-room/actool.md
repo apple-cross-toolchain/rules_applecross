@@ -418,7 +418,8 @@ and every icon set in the examples:
   sometimes keeps adding a few more images, and how many isn't established
   (23 probes of one shape repeated: 54 x 60 px at 3x takes three more when
   at least three remain and none otherwise, 60 x 54 never more; the
-  images' content plays no part). Such catalogs are refused. A second
+  images' content plays no part). Such catalogs are refused, unless
+  `--config=relax_actool_storage` (below). A second
   atlas's key format includes `dimension1`. A scale's atlases take their `dimension1` in the
   order of their creation indices as decimal strings: with 19 atlases the
   third is 11 and the eleventh 2 ("0", "1", "10", ..., "18", "2", ...). With
@@ -429,6 +430,27 @@ and every icon set in the examples:
 - The atlas's rows are stored bottom-up (the rectangles' y counts from the
   top); each image is surrounded by a copy of its edge pixels one pixel
   wide, the rest transparent.
+
+### Storage Xcode's choice isn't established for
+
+`--config=relax_actool_storage` (`RULES_APPLECROSS_RELAX_ACTOOL_STORAGE=1`)
+accepts, for every image, the storage this actool chooses where the rules
+for Xcode's aren't established, rather than refusing the catalog:
+
+- **Atlas splits:** atlases split next-fit where the next image would fit
+  in the one before.
+- **dmp2:** streams near mode 1's margin, ties between modes, palettes and
+  16-bit images in strips, each taken as for a bitmap this actool draws
+  from a vector image.
+- **Bitmap keys:** bitmap keys in CoreFoundation's order for an identifier
+  count whose table growth isn't pinned.
+
+The images and their pixels are the same; only how they're packed or
+encoded may differ from Xcode's. Of 300 probe catalogs of equal images,
+from 1x to 3x, 296 compile byte-identical with it, among them 82 of the 86
+that are refused without it. The four others, tall images at 1x, are packed
+otherwise. tests/actool_catalog's RS219 and RS229 are two of those 82:
+refused strictly, and Xcode's with the config.
 
 ## dmp2
 
@@ -535,7 +557,8 @@ screen's two 1125 x 932 chunks, which Xcode stores as plain palettes, and
 14 probes of chunked images, byte-identical. Where it might be smaller,
 how Xcode splits it isn't established, and the image is refused. Every layer in the
 examples uses mode 4. Where a row's predictor isn't established and mode 2
-could be the smallest, the image is refused; so are ties between modes.
+could be the smallest, the image is refused; so are ties between modes
+(each accepted with `--config=relax_actool_storage`, above).
 Mode 1 stores the pixels as they are after the header, with no length
 (BGRA, or grey and alpha for GA8): images of fewer than 8 pixels (1x1 to
 1x7 and 2x2, opaque, translucent, black and white), and images the chosen

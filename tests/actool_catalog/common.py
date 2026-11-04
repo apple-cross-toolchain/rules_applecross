@@ -53,9 +53,19 @@ def cases():
         yield case, catalog, icons[0] if icons else None, platforms
 
 
-def compile_catalog(tool, catalog, icon, platform, out):
-    """Runs `tool` (a command list) on `catalog`; returns (status, output)."""
+def relaxations(case):
+    """The RULES_APPLECROSS_RELAX_* variables a case's relax.txt names: this
+    actool refuses it without them (Xcode's choice isn't established) and,
+    with them, writes what Xcode wrote."""
+    listed = os.path.join(HERE, "cases", case, "relax.txt")
+    return open(listed).read().split() if os.path.exists(listed) else []
+
+
+def compile_catalog(tool, catalog, icon, platform, out, relax=()):
+    """Runs `tool` (a command list) on `catalog`, with `relax`'s variables
+    set to 1; returns (status, output)."""
     args = tool + ["--compile", out] + PLATFORMS[platform] + (["--app-icon", icon] if icon else []) + [
         "--output-format", "human-readable-text", "--output-partial-info-plist", os.path.join(out, "partial.plist"), catalog]
-    r = subprocess.run(args, capture_output=True, text=True, env=tool_env(tool))
+    env = dict(os.environ, **{name: "1" for name in relax})
+    r = subprocess.run(args, capture_output=True, text=True, env=tool_env(tool, env))
     return r.returncode, r.stdout + r.stderr

@@ -49,8 +49,22 @@ pub fn tolerant<T>(on: bool, f: impl FnOnce() -> T) -> T {
     out
 }
 
+static STORAGE_RELAXED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Accepts, for every image, the storage this actool chooses where Xcode's
+/// isn't established (RULES_APPLECROSS_RELAX_ACTOOL_STORAGE,
+/// `--config=relax_actool_storage`): the encoder tolerant as for drawn
+/// bitmaps, atlases split next-fit, bitmap keys in CoreFoundation's order.
+pub fn relax_storage(on: bool) {
+    STORAGE_RELAXED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn storage_relaxed() -> bool {
+    STORAGE_RELAXED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn is_tolerant() -> bool {
-    TOLERANT.with(|t| t.get())
+    TOLERANT.with(|t| t.get()) || storage_relaxed()
 }
 
 /// The stream to store: the smallest compressed one, or mode 1 when Xcode's
@@ -394,13 +408,13 @@ fn stream16(width: usize, height: usize, halves: &[u16], alpha: &[u8]) -> Result
         .collect();
     let transform16 = |y: usize, h: usize| transform_values(width, h, alpha[y * width..(y + h) * width].to_vec(), values[y * width..(y + h) * width].to_vec(), 3);
     let predictive = striped_bpp(2, width, height, 7 * width + 1, HALF, transform16);
-    if predictive.len() == lzfse_only.len() {
+    if predictive.len() == lzfse_only.len() && !is_tolerant() {
         return Err("this image's dmp2 modes tie, which is not established for this actool".into());
     }
-    let (chosen, lzvn_input) = if predictive.len() < lzfse_only.len() {
+    let (chosen, lzvn_input) = if predictive.len() <= lzfse_only.len() {
         (predictive, (strip_rows(7 * width + 1, height) == height).then(|| transform16(0, height)))
     } else {
-        if strip_rows(row, height) != std::cmp::min(height, (1 << 21) / row) {
+        if strip_rows(row, height) != std::cmp::min(height, (1 << 21) / row) && !is_tolerant() {
             // Whether these rows are rounded, as mode 2's are, or not, as
             // 8-bit mode 3's aren't, is not established.
             return Err("this image's 16-bit dmp2 strips are not established for this actool".into());
