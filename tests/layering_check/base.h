@@ -1,1 +1,1 @@
-inline int base_value() { return 1; }
+static inline int base_value(void) { return 1; }

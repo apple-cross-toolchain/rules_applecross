@@ -5,7 +5,8 @@ load(":ios_simulator.bzl", "ios_simulator_files")
 licenses(["notice"])
 
 # layering_check with the toolchain's `crosstool` module: a library using its
-# direct dependency's header and the SDK's and C++ library's headers.
+# direct dependency's header and one of the developer directory's (clang's
+# stddef.h: the stub SDKs CI builds against have no C library headers).
 package(features = ["layering_check"])
 
 cc_library(
@@ -16,7 +17,7 @@ cc_library(
 
 cc_library(
     name = "user",
-    srcs = ["user.cc"],
+    srcs = ["user.c"],
     tags = ["manual"],
     deps = [":base"],
 )
