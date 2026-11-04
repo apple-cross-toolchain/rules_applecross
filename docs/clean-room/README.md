@@ -126,6 +126,7 @@ fails on.)
 | [swift-stdlib-tool.md](swift-stdlib-tool.md) | `swift-stdlib-tool`: the Swift runtime libraries copied into apps |
 | [swiftui-macros.md](swiftui-macros.md) | `SwiftUIMacros`: SwiftUI's `@State` macro for the Swift compiler on Linux |
 | [docc.md](docc.md) | `docc`: swift.org's, with Xcode's render template |
+| [momc.md](momc.md) | `momc` and `mapc`: not reproduced; what probing found |
 | [lzfse.md](lzfse.md) | The streaming LZFSE encoder CoreUI compresses renditions with |
 | [foundation-hashing.md](foundation-hashing.md) | Hash-table orders NIB and property-list writers follow |
 
