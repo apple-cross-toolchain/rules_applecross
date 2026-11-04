@@ -35,6 +35,7 @@ def tool_env(tool, env=None):
 # Each platform's arguments, as rules_apple passes them.
 PLATFORMS = {
     "mac": ["--platform", "macosx", "--target-device", "mac", "--minimum-deployment-target", "14.0"],
+    "sim": ["--platform", "iphonesimulator", "--target-device", "iphone", "--target-device", "ipad", "--minimum-deployment-target", "18.0"],
     "watch": ["--platform", "watchsimulator", "--target-device", "watch", "--minimum-deployment-target", "10.0"],
     "tv": ["--platform", "appletvsimulator", "--target-device", "tv", "--minimum-deployment-target", "17.0"],
     "vision": ["--platform", "xrsimulator", "--target-device", "vision", "--minimum-deployment-target", "1.0"],

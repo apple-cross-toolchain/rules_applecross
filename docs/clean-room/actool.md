@@ -309,9 +309,17 @@ image sets: Xcode indexes them together in the image sets' group order
 (translucent colour, translucent grey, opaque colour, opaque grey), the
 icons being opaque colour images, and packs the icons together with that
 scale and idiom's opaque colour images (12 probes of iPhone image sets
-beside an iPhone icon set, and one corpus catalog). Neither is done here:
-an image set packed at a scale and idiom of an icon set's atlases is
-refused. Universal image sets are indexed apart (seven probes).
+beside an iPhone icon set, and one corpus catalog). This actool does both,
+for an opaque colour icon set: where image sets pack images at one of the
+icon set's scales and idioms, its icons there join those images' opaque
+colour group, next-fit as the icon set's own atlases are (the refusal for
+an image fitting a closed atlas doesn't apply), each keeping its icon key;
+an atlas of icons alone is encoded as the icon set's own are. Nine
+catalogs (opaque, translucent, grey and mixed images, at 2x and 3x, nine
+images, iPad and universal ones) are byte-identical to Xcode 27.2's
+(tests/actool_catalog, `icon-imagesets-*`). Translucent or grey icons
+packed with image sets are refused. Universal image sets are indexed apart
+(seven probes).
 
 For the simulators the bundle's 60pt@2x and 76pt@2x icons are the set's
 files, copied. In the partial Info.plist each target device's entry

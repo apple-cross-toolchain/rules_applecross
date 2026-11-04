@@ -429,6 +429,16 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     // first atlas at 2x.
     let reserved: &[(u32, usize)] = if mac && document.is_some() { &[(2, 1)] } else { &[] };
     let mut images = imageset::compile(&scan.image_sets, phone && pad, platform, reserved, o.relax_vector, name_identifier)?;
+    // An app icon set of an image per size whose atlases would share a scale
+    // and idiom with image sets' packed images: its icons pack with theirs.
+    let deferred_icons = per_size_deferral(o, platform, &scan, document.is_some(), phone, pad, &images)?;
+    if let Some((name, slots, defer)) = &deferred_icons {
+        let watch = o.target_devices.iter().any(|d| d == "watch");
+        let mac = o.target_devices.iter().any(|d| d == "mac");
+        let icons = iconset::compile_deferring(name, name_identifier(name), slots, phone, pad, watch, mac, defer)?.deferred;
+        images = imageset::compile_with_icons(&scan.image_sets, phone && pad, platform, reserved, o.relax_vector, name_identifier, icons)?;
+    }
+    let defer: Vec<(u32, u16)> = deferred_icons.map(|d| d.2).unwrap_or_default();
     // A sticker icon set compiles only when --app-icon names it (two
     // probes), for iOS; its name goes in the partial Info.plist.
     if let Some((name, dir)) = scan.sticker_icons.iter().find(|(n, _)| o.app_icon.as_deref() == Some(n.as_str())) {
@@ -517,7 +527,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         IconSource::PerSize(_) if !o.alternate_icons.is_empty() => {
             return Err("alternate app icons beside a primary icon of several sizes are not supported by this actool".into());
         }
-        IconSource::PerSize(slots) => return per_size_icon(o, &out_dir, platform, &icon_name, &slots, phone, pad, outputs, images),
+        IconSource::PerSize(slots) => return per_size_icon(o, &out_dir, platform, &icon_name, &slots, phone, pad, outputs, images, &defer),
     };
 
     let bgra = src.to_bgra();
@@ -880,19 +890,46 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
 /// icons copied as given (simulators and macOS only: devices' CgBI
 /// conversion of them is not established).
 #[allow(clippy::too_many_arguments)]
-fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, slots: &[iconset::Slot], phone: bool, pad: bool, mut outputs: Vec<PathBuf>, images: imageset::Compiled) -> Result<Vec<PathBuf>, String> {
+/// For `--app-icon`'s icon set of an image per size, the (scale, idiom)s
+/// where its atlases would share the image sets' packed images': there
+/// Xcode packs its icons with the image sets' opaque colour images, its
+/// atlases indexed after theirs (three probes, iPhone image sets beside an
+/// iPhone icon set). The icon set's name, its slots, and those.
+#[allow(clippy::type_complexity)]
+fn per_size_deferral(o: &Options, platform: &str, scan: &Scan, document: bool, phone: bool, pad: bool, images: &imageset::Compiled) -> Result<Option<(String, Vec<iconset::Slot>, Vec<(u32, u16)>)>, String> {
+    let Some(name) = o.app_icon.as_deref() else { return Ok(None) };
+    if document || o.platform != "iphonesimulator" {
+        return Ok(None);
+    }
+    let Some((_, dir)) = scan.icon_sets.iter().find(|(n, _)| n == name) else { return Ok(None) };
+    let Some(IconSource::PerSize(slots)) = app_icon_set(dir, platform == "ios")? else { return Ok(None) };
+    let watch = o.target_devices.iter().any(|d| d == "watch");
+    let mac = o.target_devices.iter().any(|d| d == "mac");
+    let Ok(compiled) = iconset::compile(name, name_identifier(name), &slots, phone, pad, watch, mac) else { return Ok(None) };
+    let attr = |r: &car::Rendition, k: u16| r.attrs.iter().find(|a| a.0 == k).map_or(0, |a| a.1);
+    let mut defer: Vec<(u32, u16)> = compiled
+        .renditions
+        .iter()
+        .filter(|r| attr(r, car::ATTR_ELEMENT) == 9)
+        .map(|r| (attr(r, car::ATTR_SCALE) as u32, attr(r, car::ATTR_IDIOM)))
+        .filter(|(scale, idiom)| images.packable.iter().any(|p| p.1 == 0 && (p.0, p.2) == (*scale, *idiom)))
+        .collect();
+    defer.sort();
+    defer.dedup();
+    Ok((!defer.is_empty()).then(|| (name.to_string(), slots, defer)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, slots: &[iconset::Slot], phone: bool, pad: bool, mut outputs: Vec<PathBuf>, images: imageset::Compiled, defer: &[(u32, u16)]) -> Result<Vec<PathBuf>, String> {
     let watch = o.target_devices.iter().any(|d| d == "watch");
     let mac = o.target_devices.iter().any(|d| d == "mac");
     match (o.platform.as_str(), phone || pad, watch, mac) {
         ("iphonesimulator", true, false, false) | ("watchsimulator", false, true, false) | ("macosx", false, false, true) => {}
         _ => return Err(format!("this actool compiles icon sets with an image per size for the iOS and watchOS simulators and macOS, with their own target devices, not --platform {}", o.platform)),
     }
-    let compiled = iconset::compile(icon_name, name_identifier(icon_name), slots, phone, pad, watch, mac)?;
-    // An icon set's atlases take their scale and idiom's indices in order
-    // with the image sets' atlases (translucent colour, translucent grey,
-    // opaque colour, opaque grey), and its images pack with the opaque
-    // colour images (12 probes, iPhone image sets beside an iPhone icon
-    // set); neither is done here.
+    // Its icons at `defer`'s scales and idioms were packed with the image
+    // sets' images (per_size_deferral).
+    let compiled = iconset::compile_deferring(icon_name, name_identifier(icon_name), slots, phone, pad, watch, mac, defer)?;
     let attr = |r: &car::Rendition, k: u16| r.attrs.iter().find(|a| a.0 == k).map_or(0, |a| a.1);
     let atlases: Vec<(u32, u16)> = compiled.renditions.iter().filter(|r| attr(r, car::ATTR_ELEMENT) == 9).map(|r| (attr(r, car::ATTR_SCALE) as u32, attr(r, car::ATTR_IDIOM))).collect();
     if images.packable.iter().any(|p| p.1 == 0 && atlases.contains(&(p.0, p.2))) {

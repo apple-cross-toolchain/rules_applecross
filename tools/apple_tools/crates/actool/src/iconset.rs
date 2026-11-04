@@ -35,8 +35,21 @@ pub struct DeviceIcons {
     pub named: bool,
 }
 
+/// An icon packed with image sets' images rather than in an atlas of the
+/// icon set's own: its rendition's key, file name and pixels.
+pub struct DeferredIcon {
+    pub scale: u32,
+    pub idiom: u16,
+    pub identifier: u16,
+    pub attrs: Vec<(u16, u16)>,
+    pub filename: String,
+    pub image: image::Rgba,
+}
+
 pub struct Compiled {
     pub renditions: Vec<Rendition>,
+    /// The icons left to image sets' atlases (`compile_deferring`).
+    pub deferred: Vec<DeferredIcon>,
     /// A macOS app's icon family.
     pub icns: Option<Vec<u8>>,
     /// Files copied into the bundle: (output name, source).
@@ -163,7 +176,16 @@ pub(crate) fn place_n<T: Copy>(atlas: &mut [T], width: usize, n: usize, ah: u32,
 /// Compiles an icon set for the target devices; `mac` for a macOS catalog,
 /// whose renditions have no idiom or subtype.
 pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool) -> Result<Compiled, String> {
-    compile_with(name, identifier, slots, phone, pad, watch, mac, true)
+    compile_full(name, identifier, slots, phone, pad, watch, mac, true, &[])
+}
+
+/// [`compile`], the icons that would be packed at each `defer` (scale,
+/// idiom) left in `deferred` instead, for the image sets' atlases there,
+/// where Xcode packs them with the opaque colour images (three probes);
+/// they must be opaque colour icons.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_deferring(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool, defer: &[(u32, u16)]) -> Result<Compiled, String> {
+    compile_full(name, identifier, slots, phone, pad, watch, mac, true, defer)
 }
 
 /// [`compile`], with a macOS catalog's icon family left out unless `icns`.
@@ -171,6 +193,12 @@ pub fn compile(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bo
 /// which Xcode stores in colour even when grey (two probes).
 #[allow(clippy::too_many_arguments)]
 pub fn compile_with(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool, icns: bool) -> Result<Compiled, String> {
+    compile_full(name, identifier, slots, phone, pad, watch, mac, icns, &[])
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_full(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: bool, watch: bool, mac: bool, icns: bool, defer: &[(u32, u16)]) -> Result<Compiled, String> {
+    let mut deferred = Vec::new();
     let wanted = |s: &&Slot| {
         (s.idiom == "iphone" && phone)
             || (s.idiom == "ipad" && pad)
@@ -278,6 +306,24 @@ pub fn compile_with(name: &str, identifier: u16, slots: &[Slot], phone: bool, pa
             return Err(format!("{name}: icons of equal area in one atlas are not supported by this actool"));
         }
         let cap = 18_050 * scale as usize;
+        let image_attrs = |i: &Item| {
+            let mut a = vec![(car::ATTR_SCALE, scale as u16)];
+            a.extend(group_attrs(idiom, subtype));
+            a.extend([(car::ATTR_DIMENSION2, i.dimension2), (car::ATTR_IDENTIFIER, identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_ICON_IMAGE)]);
+            a
+        };
+        // Packed with image sets' images: those under the cap go to them;
+        // larger ones are stored on their own, as here.
+        if !mac && subtype == 0 && defer.contains(&(scale, idiom)) {
+            let (big, small): (Vec<&Item>, Vec<&Item>) = group.into_iter().partition(|i| i.image.width * i.image.height > cap);
+            for i in small {
+                if !opaque_image(&i.image) || gray {
+                    return Err(format!("{name}: translucent or grey icons packed with image sets are not supported by this actool"));
+                }
+                deferred.push(DeferredIcon { scale, idiom, identifier, attrs: image_attrs(i), filename: i.filename.clone(), image: i.image.clone() });
+            }
+            group = big;
+        }
         // For iOS, translucent and opaque icons are packed apart, as image
         // sets' are: an opacity's only packable icon is stored on its own
         // (Flutter's gallery). Both needing atlases is not established.
@@ -304,12 +350,6 @@ pub fn compile_with(name: &str, identifier: u16, slots: &[Slot], phone: bool, pa
                 atlases.last_mut().unwrap().push(i);
             }
         }
-        let image_attrs = |i: &Item| {
-            let mut a = vec![(car::ATTR_SCALE, scale as u16)];
-            a.extend(group_attrs(idiom, subtype));
-            a.extend([(car::ATTR_DIMENSION2, i.dimension2), (car::ATTR_IDENTIFIER, identifier), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_ICON_IMAGE)]);
-            a
-        };
         for (n, atlas) in atlases.iter().enumerate() {
             has_dimension1 |= n > 0;
             if mac && n > 0 {
@@ -422,7 +462,7 @@ pub fn compile_with(name: &str, identifier: u16, slots: &[Slot], phone: bool, pa
     } else {
         None
     };
-    Ok(Compiled { renditions, icns, bundle_files, phone: phone_icons, pad: pad_icons, has_dimension1 })
+    Ok(Compiled { renditions, deferred, icns, bundle_files, phone: phone_icons, pad: pad_icons, has_dimension1 })
 }
 
 pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, String> {
