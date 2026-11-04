@@ -83,6 +83,13 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "ported_tools_urls": config.ported_tools_urls,
                 "swift_tools": swift_tools,
                 "swift_tools_macos": swift_tools_macos,
+                "swift_copts": config.swift_copts,
+                "swift_default_enabled_features": config.swift_default_enabled_features,
+                "swift_default_unsupported_features": config.swift_default_unsupported_features,
+                # Canonical, so the toolchain repository's BUILD file names
+                # the module's own targets.
+                "swift_feature_allowlists": [str(label) for label in config.swift_feature_allowlists],
+                "swift_package_configurations": [str(label) for label in config.swift_package_configurations],
                 # docc, from the repositories swift_tools name.
                 "swift_docc": {cpu: tools.rpartition(":")[0] + ":usr/bin/docc" for cpu, tools in swift_tools.items()},
             }
@@ -135,6 +142,29 @@ _configure_tag = tag_class(
                   "xcode_version's SDKs (toolchain/xcode_versions.bzl), in " +
                   "repositories <name>_swift_<platform>, and its macOS build " +
                   "as swift_tools_macos.",
+        ),
+        "swift_copts": attr.string_list(
+            doc = "Swift flags for every compile with these toolchains, as " +
+                  "rules_swift toolchains' `copts`: before " +
+                  "--@rules_swift//swift:copt's.",
+        ),
+        "swift_default_enabled_features": attr.string_list(
+            doc = "Features enabled for every Swift target, as rules_swift " +
+                  "toolchains' `default_enabled_features`.",
+        ),
+        "swift_default_unsupported_features": attr.string_list(
+            doc = "Features no Swift target may enable, as rules_swift " +
+                  "toolchains' `default_unsupported_features`.",
+        ),
+        "swift_feature_allowlists": attr.label_list(
+            doc = "swift_feature_allowlist targets, as rules_swift " +
+                  "toolchains' `feature_allowlists`; visible to the " +
+                  "toolchain's repository (public).",
+        ),
+        "swift_package_configurations": attr.label_list(
+            doc = "swift_package_configuration targets, as rules_swift " +
+                  "toolchains' `package_configurations`; visible to the " +
+                  "toolchain's repository (public).",
         ),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's " +

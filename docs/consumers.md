@@ -223,6 +223,29 @@ simulators. rules_apple alone would choose x86_64 there, which a Mac without
 Rosetta refuses to open and its simulators refuse to install, so
 rules_applecross patches the default (patches/rules_apple_arm64_default.patch).
 
+## Swift toolchain settings
+
+rules_swift's own toolchains take flags, features and package
+configurations as attributes of the toolchain target. Here the toolchains
+are generated, so `apple_cross_toolchain.configure()` takes them and gives
+them to every Swift toolchain it registers:
+
+```starlark
+apple_cross_toolchain.configure(
+    name = "apple_cross_toolchain",
+    # ...
+    swift_copts = ["-DMY_FLAG"],
+    swift_default_enabled_features = ["swift.emit_symbol_graph"],
+    swift_default_unsupported_features = [],
+    swift_feature_allowlists = ["//build:swift_allowlist"],
+    swift_package_configurations = ["//build:strict_packages"],
+)
+```
+
+`swift_copts` come before `--@rules_swift//swift:copt`'s. The
+`swift_feature_allowlist` and `swift_package_configuration` targets must be
+visible to the toolchain's repository (`//visibility:public`).
+
 ## Swift packages
 
 rules_swift_package_manager reads package manifests by running

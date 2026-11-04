@@ -789,11 +789,25 @@ cc_toolchain_suite(
     toolchains = dict(CC_TOOLCHAINS),
 )
 
+# configure()'s swift_copts, swift_default_enabled_features,
+# swift_default_unsupported_features, swift_feature_allowlists and
+# swift_package_configurations, for every Swift toolchain here.
+_SWIFT_COPTS = %{swift_copts}
+_SWIFT_ENABLED_FEATURES = %{swift_default_enabled_features}
+_SWIFT_UNSUPPORTED_FEATURES = %{swift_default_unsupported_features}
+_SWIFT_FEATURE_ALLOWLISTS = %{swift_feature_allowlists}
+_SWIFT_PACKAGE_CONFIGURATIONS = %{swift_package_configurations}
+
 [
     swift_toolchain(
         name = "swift-compiler-" + arch,
+        copts = _SWIFT_COPTS,
         cpu = arch,
+        default_enabled_features = _SWIFT_ENABLED_FEATURES,
+        default_unsupported_features = _SWIFT_UNSUPPORTED_FEATURES,
+        feature_allowlists = _SWIFT_FEATURE_ALLOWLISTS,
         macro_plugins = [":macro_plugins"],
+        package_configurations = _SWIFT_PACKAGE_CONFIGURATIONS,
         swift_tools = "%{swift_tools}",
         toolchain_files = _SWIFT_TOOLCHAIN_FILES_BY_ARCH[arch],
         toolchain_path_prefix = "%{toolchain_path_prefix}",
@@ -823,8 +837,13 @@ _SWIFT_TOOLS_MACOS = "%{swift_tools_macos}"
 [
     swift_toolchain(
         name = "swift-compiler-" + arch + "-macos-exec",
+        copts = _SWIFT_COPTS,
         cpu = arch,
+        default_enabled_features = _SWIFT_ENABLED_FEATURES,
+        default_unsupported_features = _SWIFT_UNSUPPORTED_FEATURES,
         exec_os = "macos",
+        feature_allowlists = _SWIFT_FEATURE_ALLOWLISTS,
+        package_configurations = _SWIFT_PACKAGE_CONFIGURATIONS,
         swift_tools = _SWIFT_TOOLS_MACOS,
         toolchain_files = _SWIFT_TOOLCHAIN_FILES_BY_ARCH[arch],
         toolchain_path_prefix = "%{toolchain_path_prefix}",
