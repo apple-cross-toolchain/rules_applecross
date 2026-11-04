@@ -59,8 +59,11 @@ top-level [README.md](../../README.md#byte-identical-output):
 - `actool`: Icon Composer documents' flattened images (their layers are
   Xcode's); vector images' bitmaps, drawn by resvg and hayro, and PDFs
   stored as they are; tvOS radiosity images
-  that may round apart from Xcode's; catalogs it can't reproduce handed to
-  xcbuild's actool (`tools/apple_tools/xcbuild`);
+  that may round apart from Xcode's; images stored as it chooses where
+  Xcode's choice isn't established (atlas splits, dmp2 streams, bitmap key
+  order: [actool.md](actool.md#storage-xcodes-choice-isnt-established-for));
+  catalogs it can't reproduce handed to xcbuild's actool
+  (`tools/apple_tools/xcbuild`);
 - `ibtool`: files it can't compile left uncompiled, as the stub it replaced
   did;
 - Metal: an empty library;

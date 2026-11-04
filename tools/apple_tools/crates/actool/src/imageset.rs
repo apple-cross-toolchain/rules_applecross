@@ -261,7 +261,8 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
                 // others tall ones at 1x, and 158 of 200 of mixed sizes at
                 // 1x. Where it would grow the atlas, Xcode closes it as
                 // next-fit does. An atlas with bitmaps drawn from vector
-                // images, which aren't Xcode's anyway, is packed next-fit.
+                // images, which aren't Xcode's anyway, is packed next-fit,
+                // as every atlas is with --config=relax_actool_storage.
                 let mut total = 0;
                 for i in packable {
                     if planned.last().is_none_or(|a| (a.0, a.1, a.2) != (gamut, opaque, gray)) || total >= cap {
@@ -272,7 +273,12 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
                             // With an icon set's icons, Xcode packs next-fit, as
                             // the icon set's own atlases (two probes at 3x).
                             let icons = i.attrs.is_some() || last.3.iter().any(|j| j.attrs.is_some());
-                            if crate::iconset::pack::pack(&blocks).1 == closed && !drawn(i) && !last.3.iter().any(|j| drawn(j)) && !icons {
+                            if crate::iconset::pack::pack(&blocks).1 == closed
+                                && !drawn(i)
+                                && !last.3.iter().any(|j| drawn(j))
+                                && !icons
+                                && !crate::dmp2::storage_relaxed()
+                            {
                                 return Err(format!("{scale}x images filling more than one atlas, where the next image fits in the one before, are not supported by this actool"));
                             }
                         }
