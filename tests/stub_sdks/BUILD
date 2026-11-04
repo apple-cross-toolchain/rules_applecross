@@ -36,6 +36,7 @@ swift_library(
     srcs = ["Sources/Greeter.swift"],
     module_name = "Greeter",
     tags = ["manual"],
+    visibility = ["//tests/swift_synthesize_interface:__pkg__"],
     deps = [":Greeting"],
 )
 
