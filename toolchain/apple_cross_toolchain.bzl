@@ -101,6 +101,24 @@ def _linux_exec_cpu(rctx):
         fail("Unsupported Linux host CPU: " + arch)
     return "x86_64"
 
+def _install_docc(rctx, cpu, toolchain_dir):
+    """DocC off a Mac: swift.org's docc, of the Swift that built the SDKs, in
+    usr/libexec/docc with its Swift libraries and render template (all linked
+    from that Swift's repository), run by stubs/docc.sh as usr/bin/docc."""
+    docc = rctx.attr.swift_docc.get(cpu)
+    if not docc or not rctx.os.name.startswith("linux") or rctx.path(toolchain_dir + "bin/docc").exists:
+        return
+    swift_usr = rctx.path(docc).dirname.dirname
+    libexec = toolchain_dir + "libexec/docc/"
+    rctx.symlink(swift_usr.get_child("bin").get_child("docc"), libexec + "bin/docc")
+
+    # Its run path is $ORIGIN/../lib/swift/linux.
+    for lib in swift_usr.get_child("lib").get_child("swift").get_child("linux").readdir():
+        if lib.basename.endswith(".so"):
+            rctx.symlink(lib, libexec + "lib/swift/linux/" + lib.basename)
+    rctx.symlink(swift_usr.get_child("share").get_child("docc"), libexec + "share/docc")
+    _install_executable(rctx, "stubs/docc.sh", toolchain_dir + "bin/docc")
+
 def _install_swift_host_deps(rctx, toolchain_dir, cpu):
     """Stage Ubuntu shared libraries needed by the Swift driver at runtime."""
     arch = _DEB_ARCH[cpu]
@@ -392,6 +410,7 @@ _RULE_INPUT_FILES = [
     "stubs/coremlc.py",
     "stubs/coremlc.sh",
     "stubs/coremlc_ops.json",
+    "stubs/docc.sh",
 ]
 
 _LLVM_PREBUILT = {
@@ -709,6 +728,8 @@ def _apple_cross_toolchain_impl(rctx):
         _install_executable(rctx, "stubs/coremlc.py", _coremlc_path + ".py")
         _install_executable(rctx, "stubs/coremlc_ops.json", xcode_toolchain_bindir + "coremlc_ops.json")
 
+    _install_docc(rctx, cpu, xcode_toolchain_dir)
+
     _nl_training_path = xcode_toolchain_bindir + "appintentsnltrainingprocessor"
     result = rctx.execute(["test", "-e", _nl_training_path])
     if result.return_code != 0:
@@ -842,6 +863,9 @@ archive's file name and {sha256} for its SHA-256. Defaults to this
 repository's release. A content-addressed server takes
 "https://ported-tools.invalid/sha256/{sha256}" with --downloader_config.
 """,
+        ),
+        "swift_docc": attr.string_keyed_label_dict(
+            doc = "swift.org's docc (usr/bin/docc) of swift_tools' Swift, keyed by Linux CPU (\"x86_64\", \"aarch64\").",
         ),
         "swift_tools": attr.string_dict(
             doc = "Labels of rules_swift swift_tools targets used as the Linux-host Swift compiler payload, keyed by Linux CPU (\"x86_64\", \"aarch64\").",

@@ -49,7 +49,7 @@ one fails:
   these in a `.mlpackage` too, with the metadata and feature descriptions
   Xcode's model editor saves there
   ([docs/clean-room/coremlc.md](docs/clean-room/coremlc.md));
-- Reality Composer content (`realitytool`) and DocC;
+- Reality Composer content (`realitytool`);
 - `.xib` files other than an iOS one holding a view or a table view cell
   ([docs/clean-room/ibtool.md](docs/clean-room/ibtool.md#xibs));
 - tvOS app icons, and Icon Composer icons, whose layers (all iOS and macOS
@@ -275,6 +275,7 @@ draw the icon from its layers:
 | `relax_actool_tvos_radiosity` | `RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY` | tvOS radiosity images that may round apart from Xcode's |
 | `relax_actool_vector` | `RULES_APPLECROSS_RELAX_ACTOOL_VECTOR` | vector images (PDF, SVG) whose bitmaps are this actool's drawing and whose PDFs are stored as they are |
 | `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
+| `relax_docc` | `RULES_APPLECROSS_RELAX_DOCC` | DocC archives with swift.org's render template, where the SDK archive lacks Xcode's |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
 | `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library |
 | `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |

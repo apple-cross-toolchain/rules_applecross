@@ -34,9 +34,13 @@ Known variations (docs/clean-room/README.md#determinism):
   (`NAME1024x1024_UIAppearanceAny_<UUID>-<pid>-<16 hex digits>.png`, cut to
   127 bytes), and gives the icon's facet in FACETKEYS the part of its icon
   images (220) or of its icon stacks (245), at random.
+- docc writes each JSON object of a DocC archive (`.doccarchive`: its pages'
+  data, index, metadata) with its keys in a randomly seeded order. Ours sets
+  SWIFT_DETERMINISTIC_HASHING (toolchain/stubs/docc.sh), so it writes one.
 """
 
 import hashlib
+import json
 import os
 import re
 import struct
@@ -613,9 +617,19 @@ def icon_output_digest(path, data):
     return _digest(data)
 
 
+def _docc_json(data):
+    """A DocC archive's JSON, its objects' keys sorted."""
+    return json.dumps(json.loads(data), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
 def canonical(path, data):
     """`data`, the file at `path`, with what Xcode varies put in one order."""
     parts = path.replace(os.sep, "/").split("/")
+    if parts[-1].endswith(".json") and any(p.endswith(".doccarchive") for p in parts[:-1]):
+        try:
+            return _docc_json(data)
+        except ValueError:
+            return data
     if not any(p.endswith(".mlmodelc") for p in parts[:-1]):
         return data
     try:

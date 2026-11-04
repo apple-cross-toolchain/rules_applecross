@@ -328,6 +328,9 @@ filegroup(
         include = [
             _XCODE_TOOLCHAIN_BIN + "/*",
             _XCODE_TOOLCHAIN_DIR + "/usr/libexec/python3/**",
+            # docc (stubs/docc.sh): swift.org's, and Xcode's render template.
+            _XCODE_TOOLCHAIN_DIR + "/usr/libexec/docc/**",
+            _XCODE_TOOLCHAIN_DIR + "/usr/share/docc/**",
             # Back-deployment runtimes for swift-stdlib-tool.
             _XCODE_TOOLCHAIN_LIB + "/swift-*/*/*.dylib",
             # xcrun refuses to run without a toolchain descriptor.

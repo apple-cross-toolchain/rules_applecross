@@ -106,6 +106,8 @@ def _includes(source):
     items.append((_TOOLCHAIN + "/usr/lib/clang", _never_excluded))
     items.append((_TOOLCHAIN + "/usr/lib/swift", _lib_excluded))
     items.append((_TOOLCHAIN + "/usr/lib/swift-5.0", _lib_excluded))
+    # DocC's render template (toolchain/stubs/docc.sh).
+    items.append((_TOOLCHAIN + "/usr/share/docc", _never_excluded))
     items += [(rel, _never_excluded) for rel in _back_deployment_runtimes(source)]
     return items
 

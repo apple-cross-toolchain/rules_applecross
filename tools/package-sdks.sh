@@ -79,6 +79,11 @@ if [[ -d "Toolchains/XcodeDefault.xctoolchain/usr/lib/arc" ]]; then
   rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/arc/" "$NEW_DEVELOPER_DIR"
 fi
 rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/" "$NEW_DEVELOPER_DIR"
+# DocC's render template: Xcode's docc-render, which docc copies into every
+# archive (toolchain/stubs/docc.sh).
+if [[ -d "Toolchains/XcodeDefault.xctoolchain/usr/share/docc" ]]; then
+  rsync -a --relative "./Toolchains/XcodeDefault.xctoolchain/usr/share/docc/" "$NEW_DEVELOPER_DIR"
+fi
 # Exclude .dylibs from Swift runtime dirs — the cross-compilation
 # toolchain uses its own Swift runtime; only .tbd stubs, .swiftmodule/
 # and .swiftinterface files are needed for compilation and linking.

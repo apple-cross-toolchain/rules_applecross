@@ -83,6 +83,8 @@ def _apple_cross_toolchain_impl(module_ctx):
                 "ported_tools_urls": config.ported_tools_urls,
                 "swift_tools": swift_tools,
                 "swift_tools_macos": swift_tools_macos,
+                # docc, from the repositories swift_tools name.
+                "swift_docc": {cpu: tools.rpartition(":")[0] + ":usr/bin/docc" for cpu, tools in swift_tools.items()},
             }
 
             _apple_cross_toolchain_rule(**kwargs)
