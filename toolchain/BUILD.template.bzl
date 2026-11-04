@@ -8,6 +8,7 @@ load("@rules_applecross//toolchain:exec_tool.bzl", "exec_tool")
 load("@rules_applecross//toolchain:swift_toolchain.bzl", "swift_toolchain")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_toolchain_suite")
 load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
+load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
 load("@rules_cc//cc/toolchains:tool.bzl", "cc_tool")
 load("@rules_cc//cc/toolchains:tool_map.bzl", "cc_tool_map")
 load("@rules_cc//cc/toolchains:toolchain.bzl", rule_based_cc_toolchain = "cc_toolchain")
@@ -229,13 +230,14 @@ APPLE_SUPPORT_ENABLED_FEATURES = APPLE_SUPPORT_ENABLED_MARKERS + [
     # LLVM's Mach-O linker takes both (and is reproducible without the flag).
     "@apple_support//toolchain:no_warn_duplicate_libraries",
     "@apple_support//toolchain:reproducible_linker_flag",
-    # NOTE: @apple_support_toolchain_env//:off_by_default_layering_check_enabled_features
-    # is intentionally absent: it depends on @apple_support//crosstool:generate_layering_check_modulemap,
-    # an apple_genrule that can only execute on a macOS host, which this
-    # Linux-only cross toolchain never has.
+    # apple_support's layering check module map comes from a genrule run on a
+    # Mac; this one is written with the toolchain (layering_check.modulemap).
+    ":applecross_layering_check_modulemap",
 ]
 
 APPLE_SUPPORT_KNOWN_FEATURES = APPLE_SUPPORT_MARKER_FEATURES + [
+    # Off unless a build asks for it (--features=layering_check).
+    "@rules_cc//cc/toolchains/args/layering_check",
     "@apple_support//toolchain:opt",
     "@apple_support//toolchain:dbg",
     "@apple_support//toolchain:fastbuild",
@@ -668,6 +670,28 @@ cc_args(
     name = "applecross_relative_ast_path",
     actions = ["@rules_cc//cc/toolchains/actions:link_actions"],
     env = {"RELATIVE_AST_PATH": "1"},
+)
+
+# layering_check's `crosstool` module, for the clang wrapper to mount at
+# $DEVELOPER_DIR/vfs.modulemap (as apple_support's __layering_check_modulemap).
+filegroup(
+    name = "layering_check_modulemap",
+    srcs = ["layering_check.modulemap"],
+)
+
+cc_args(
+    name = "applecross_layering_check_modulemap_args",
+    actions = ["@rules_cc//cc/toolchains/actions:compile_actions"],
+    data = [":layering_check_modulemap"],
+    env = {"APPLE_SUPPORT_MODULEMAP": "{modulemap}"},
+    format = {"modulemap": ":layering_check_modulemap"},
+)
+
+cc_feature(
+    name = "applecross_layering_check_modulemap",
+    args = [":applecross_layering_check_modulemap_args"],
+    feature_name = "applecross_layering_check_modulemap",
+    requires_any_of = ["@rules_cc//cc/toolchains/args/layering_check"],
 )
 
 cc_tool(

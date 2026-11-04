@@ -394,6 +394,7 @@ _RULE_INPUT_FILES = [
     "repo_tools/link_local_xcode.py",
     "repo_tools/patch_swiftinterfaces.py",
     "repo_tools/read_xcode_versions.py",
+    "repo_tools/layering_check_modulemap.py",
     "stubs/metal_unavailable.sh",
     "stubs/intentbuilderc.py",
     "stubs/intentbuilderc.sh",
@@ -681,6 +682,17 @@ def _apple_cross_toolchain_impl(rctx):
         _stage_macos_llvm(rctx)
 
     rctx.template("BUILD", build_tpl, substitutions)
+
+    # layering_check's `crosstool` module: every header of the developer
+    # directory, as apple_support generates it on a Mac.
+    result = rctx.execute([
+        _python3(rctx),
+        str(_toolchain_path(rctx, "repo_tools/layering_check_modulemap.py")),
+        developer_dir,
+        "layering_check.modulemap",
+    ])
+    if result.return_code != 0:
+        fail("Failed to write the layering check's module map: " + result.stderr)
 
     # Create Apple-compatible symlinks for LLVM tools so that actions can
     # invoke them by their traditional Apple names. Done AFTER all extractions

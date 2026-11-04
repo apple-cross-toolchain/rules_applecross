@@ -310,28 +310,6 @@ static std::unique_ptr<TempFile> WriteResponseFile(
   return response_file;
 }
 
-// Writes a VFS overlay file for layering check support with module maps.
-static std::unique_ptr<TempFile> AddLayeringCheckVFS(
-    const std::string &module_map_path) {
-  auto vfs_file = TempFile::Create("layering_check_vfs.XXXXXX");
-  if (!vfs_file) {
-    return nullptr;
-  }
-
-  std::ofstream vfs_stream(vfs_file->GetPath());
-  vfs_stream << "{\n"
-             << "  'version': 0,\n"
-             << "  'roots': [{\n"
-             << "    'name': '__BAZEL_XCODE_SDKROOT__/usr/include/module.modulemap',\n"
-             << "    'type': 'file',\n"
-             << "    'external-contents': '" << module_map_path << "'\n"
-             << "  }]\n"
-             << "}\n";
-  vfs_stream.close();
-
-  return vfs_file;
-}
-
 void ProcessArgument(const std::string arg, const std::string developer_dir,
                      const std::string sdk_root, const std::string cwd,
                      bool relative_ast_path, bool &strip_debug_symbols,
@@ -537,15 +515,14 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // Handle APPLE_SUPPORT_MODULEMAP VFS overlay for layering check support.
+  // The layering check's `crosstool` module (APPLE_SUPPORT_MODULEMAP): the
+  // toolchain writes it beside the developer directory, its headers' paths
+  // relative to it, so it is read where it is, without apple_support's
+  // overlay at $DEVELOPER_DIR/vfs.modulemap.
   const char *module_map_env = getenv("APPLE_SUPPORT_MODULEMAP");
-  std::unique_ptr<TempFile> vfs_file;
   if (module_map_env) {
-    vfs_file = AddLayeringCheckVFS(module_map_env);
-    if (vfs_file) {
-      processed_args.push_back("-ivfsoverlay");
-      processed_args.push_back(vfs_file->GetPath());
-    }
+    processed_args.push_back("-Xclang");
+    processed_args.push_back(std::string("-fmodule-map-file=") + module_map_env);
   }
 
   // Special mode that only prints the command. Used for testing.
