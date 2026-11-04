@@ -1,0 +1,58 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "K %lld %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$#@folders@ hold %2$#@files@"
+          },
+          "substitutions": {
+            "files": {
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg file"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg files"
+                    }
+                  }
+                }
+              },
+              "argNum": 1
+            },
+            "folders": {
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg folder"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg folders"
+                    }
+                  }
+                }
+              },
+              "argNum": 2
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
