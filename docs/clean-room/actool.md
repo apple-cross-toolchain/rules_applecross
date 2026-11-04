@@ -1032,12 +1032,36 @@ strictly. With `--config=relax_actool_vector` they compile:
   mixed sizes at 1x. An app's 23 equal SVG icons, and its whole catalog,
   compile with Xcode's atlases.
 - **Every other byte is Xcode's:** each rendition's key, name, flags, size,
-  TLVs and storage, and the atlases' layout (tests/actool_vector, eleven
-  catalogs for the simulator and macOS).
-- **Supported:** one file per appearance, universal (or the Mac's on
-  macOS), without a scale or at 1x, on iOS and macOS. Images one per scale,
-  beside bitmaps in one set, or for an idiom are refused, as are PDFs of
-  more than one page and images under a point.
+  TLVs and storage, and the atlases' layout (tests/actool_vector,
+  twenty-two catalogs for the simulator and macOS, and three for tvOS,
+  watchOS and visionOS).
+- **Supported:** per appearance and idiom (universal, the Mac's on macOS,
+  or iPhone's and iPad's on iOS for both devices), one file without a
+  scale or one per scale, on iOS, macOS, tvOS, watchOS and visionOS.
+  Vector images beside bitmaps in one set are refused, as are PDFs of more
+  than one page and images under a point.
+
+#### Images one per scale and other platforms
+
+Eighteen probes on iOS, and their sets again on macOS, tvOS, watchOS and
+visionOS:
+
+- **The platform's scales:** 1x to 3x on iOS, 1x and 2x on macOS and tvOS,
+  2x on watchOS and visionOS. A file at a scale the platform doesn't draw
+  is ignored.
+- **The Vector rendition** is the file at the highest of those scales
+  (part 181, no scale). Preserved, each file is stored at its own scale
+  (part 42), the 1x file even where the platform draws no 1x.
+- **Each scale is drawn** from its own file, else from the 1x file, else
+  from the highest scale's (a set of 2x and 3x SVGs draws its 1x from the
+  3x one).
+- **A file at scale `f` drawn at scale `t`:** a PDF at its size over `f`
+  times `t` (a 32-point PDF at 3x drawn at 1x is 11 pixels); an SVG at its
+  size times `t`, Xcode not dividing by `f` (a 64-point SVG at 2x is a
+  128-pixel bitmap), with a slice of its size over `f` times `t`.
+- **Device idioms** (`iphone`, `ipad`) are keyed by idiom, the Vector
+  renditions too; a universal file beside an iPad one is kept for the
+  universal idiom.
 
 ## Data sets
 

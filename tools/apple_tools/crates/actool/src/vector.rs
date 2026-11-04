@@ -54,8 +54,8 @@ pub fn size(kind: Kind, data: &[u8]) -> Result<(f64, f64), String> {
 /// The pixels a side of `points` takes at `scale`: a PDF's rounded to the
 /// nearest (halves up), an SVG's up (fourteen probes, 0.6 to 170.05
 /// points).
-pub fn pixels(kind: Kind, points: f64, scale: u32) -> u32 {
-    let v = points * scale as f64;
+pub fn pixels(kind: Kind, points: f64, scale: f64) -> u32 {
+    let v = points * scale;
     match kind {
         Kind::Pdf => (v + 0.5).floor() as u32,
         Kind::Svg => (v - 1e-9).ceil() as u32,
@@ -66,13 +66,13 @@ pub fn pixels(kind: Kind, points: f64, scale: u32) -> u32 {
 /// `points` at `scale` rounded to the nearest, halves up, for both kinds.
 /// An SVG's bitmap is rounded up, so its slice can be a pixel short of it
 /// (ten probes).
-pub fn slice_pixels(points: f64, scale: u32) -> u32 {
-    (points * scale as f64 + 0.5).floor() as u32
+pub fn slice_pixels(points: f64, scale: f64) -> u32 {
+    (points * scale + 0.5).floor() as u32
 }
 
 /// The image drawn at `scale` (its size in points, `points`, times it)
 /// into a bitmap of `pixels`, transparent where it paints nothing.
-pub fn render(kind: Kind, data: &[u8], points: (f64, f64), scale: u32, pixels: (u32, u32)) -> Result<Rgba, String> {
+pub fn render(kind: Kind, data: &[u8], points: (f64, f64), scale: f64, pixels: (u32, u32)) -> Result<Rgba, String> {
     let (width, height) = pixels;
     let premultiplied: Vec<u8> = match kind {
         Kind::Svg => {
@@ -91,7 +91,7 @@ pub fn render(kind: Kind, data: &[u8], points: (f64, f64), scale: u32, pixels: (
             let page = &pages[0];
             let (w, h) = (u16::try_from(width).map_err(|_| "too wide")?, u16::try_from(height).map_err(|_| "too tall")?);
             let mut ctx = vello_cpu::RenderContext::new(w, h);
-            let transform = hayro::kurbo::Affine::scale(scale as f64) * page.initial_transform(true).to_kurbo();
+            let transform = hayro::kurbo::Affine::scale(scale) * page.initial_transform(true).to_kurbo();
             let cache = hayro::RenderCache::new();
             hayro::render_into(page, &cache, &Default::default(), &Default::default(), &mut ctx, transform);
             ctx.flush();

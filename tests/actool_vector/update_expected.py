@@ -8,7 +8,7 @@ import os
 import sys
 import tempfile
 
-from common import HERE, PLATFORMS, cases, compile_catalog, digests
+from common import HERE, cases, compile_catalog, digests, platforms
 from xcode_equivalence import actool_diagnostics as diagnostics
 
 
@@ -16,7 +16,7 @@ def main():
     os.makedirs(os.path.join(HERE, "expected"), exist_ok=True)
     for case, catalog in cases():
         expected = {}
-        for platform in PLATFORMS:
+        for platform in platforms(case):
             runs = []
             for _ in range(2):
                 with tempfile.TemporaryDirectory() as out:
