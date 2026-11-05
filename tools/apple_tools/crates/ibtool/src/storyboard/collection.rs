@@ -301,9 +301,8 @@ pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name
     if does_not_translate(scene, n) {
         layout.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
     }
-    // Where the layout goes among constraints it holds isn't established.
-    if children(n, "constraints").next().is_some() {
-        return fail("constraints held by a collection view in a view are not supported by this ibtool");
+    if let Some(own) = own_constraints(nib, scene, n, name)? {
+        layout.push(("UIViewAutolayoutConstraints", own));
     }
     let layout_name = format!("{name} layout");
     let (mut values, estimated) = collection_values(nib, scene.module, n, f, &cells, 36, layout, &layout_name)?;
