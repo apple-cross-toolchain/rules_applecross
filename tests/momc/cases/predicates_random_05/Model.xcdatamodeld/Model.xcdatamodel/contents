@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="P" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="P" optional="YES" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+    <fetchRequest name="F00" entity="P" predicateString="FALSEPREDICATE"/>
+    <fetchRequest name="F01" entity="P" predicateString="(((flag != $F AND flag != FALSE AND n IN $LIST) OR name ENDSWITH[c] &quot;a&quot;) AND ((parent.name ENDSWITH[d] &quot;a&quot; OR SELF == nil OR parent.name !=[cd] 'b c') OR (name ==[c] &quot;a&quot; AND kids.n == -2 AND flag == FALSE)) AND !(parent.name == &quot;a&quot;))"/>
+    <fetchRequest name="F02" entity="P" predicateString="!((when != $DATE AND when &gt;= $DATE AND SELF != nil &amp;&amp; !(name ==[c] 'b c') &amp;&amp; kids.n IN {1, 2, 3} OR ALL kids.@count != nil OR parent.name CONTAINS[cd] 'a*'))"/>
+    <fetchRequest name="F03" entity="P" predicateString="(NOT (parent.parent.n &lt;= 2147483648) OR (when &gt;= $DATE AND when &lt;= $DATE AND name CONTAINS[d] $X)) OR NOT ((kids.n != nil &amp;&amp; parent.name != &quot;x\&quot;y&quot; &amp;&amp; kids.@count = $N)) OR FALSEPREDICATE || (ALL kids.@count != -2 AND name != 'b c') || ANY kids.n =&gt; 3.5 || parent.name LIKE[d] 'a*'"/>
+    <fetchRequest name="F04" entity="P" predicateString="(parent.parent.n &lt;= 1e2 &amp;&amp; (SELF != $OBJ OR NOT (flag == TRUE) OR (SELF == nil AND flag != FALSE AND d &lt; 1e2)))"/>
+    <fetchRequest name="F05" entity="P" predicateString='name MATCHES[cd] "a" || d == 42 || NONE kids.@count == 1e2'/>
+    <fetchRequest name="F06" entity="P" predicateString='(!(NOT (n BETWEEN {1, 9})) &amp;&amp; parent.parent.n &lt;= 42 &amp;&amp; parent.name MATCHES[c] "a")'/>
+    <fetchRequest name="F07" entity="P" predicateString="NOT ((ALL kids.n &gt;= $N OR NOT (flag != YES)))"/>
+    <fetchRequest name="F08" entity="P" predicateString="ALL kids.n &gt;= -2"/>
+    <fetchRequest name="F09" entity="P" predicateString="parent.parent.n &gt;= 42"/>
+    <fetchRequest name="F10" entity="P" predicateString="SELF == $OBJ"/>
+    <fetchRequest name="F11" entity="P" predicateString="n == $N"/>
+</model>

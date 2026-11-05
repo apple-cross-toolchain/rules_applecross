@@ -108,11 +108,27 @@ class MomcTest(unittest.TestCase):
                     open(os.path.join(tmp, "b.momd", "Model.mom"), "rb") as g:
                 self.assertEqual(f.read(), g.read())
 
-    def test_generate_refused(self):
+    def test_generate_matches_xcode(self):
+        cases = sorted(os.listdir(os.path.join(HERE, "generate")))
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                out = os.path.join(tmp, "out")
+                result = run("--action", "generate", "--iphonesimulator-deployment-target", "18.0",
+                             model(os.path.join(HERE, "generate", case)), out, env=RELAXED)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = os.path.join(HERE, "generate_expected", case)
+                names = sorted(n for n in os.listdir(expected) if n != ".empty")
+                self.assertEqual(sorted(os.listdir(out)) if os.path.isdir(out) else [], names)
+                for name in names:
+                    with open(os.path.join(expected, name), "rb") as f, open(os.path.join(out, name), "rb") as g:
+                        self.assertTrue(f.read() == g.read(), "%s/%s differs from Xcode's" % (case, name))
+        self.assertGreater(len(cases), 5)
+
+    def test_generate_refused_without_relax_momc(self):
         with tempfile.TemporaryDirectory() as tmp:
-            result = run("--action", "generate", model(os.path.join(HERE, "cases", "two_entities")), tmp, env=RELAXED)
+            result = run("--action", "generate", model(os.path.join(HERE, "generate", "types")), tmp)
             self.assertEqual(result.returncode, 1)
-            self.assertIn("--action generate", result.stderr)
+            self.assertIn("--config=relax_momc", result.stderr)
 
 
 if __name__ == "__main__":

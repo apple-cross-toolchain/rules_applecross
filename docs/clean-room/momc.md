@@ -4,9 +4,10 @@ Core Data models (`.xcdatamodeld`, `.xcdatamodel`) compile off a Mac with
 `--config=relax_momc`: each model version to the `.mom` Xcode 27.2's
 `momc` writes, byte for byte, with a `VersionInfo.plist` that leaves out what
 isn't established (below). `toolchain/stubs/momc.py` is the implementation,
-pure Python; `tests/momc` compares it with Xcode's own output for 86 models,
-and refuses 7 more. Mapping models (`mapc`) and generated classes
-(`momc --action generate`) aren't reproduced.
+pure Python; `tests/momc` compares it with Xcode's own output for 106 models,
+and refuses 7 more. Generated classes (`momc --action generate`) are Xcode's
+but for their header's dated line, with `--config=relax_momc`; mapping models
+(`mapc`) aren't reproduced.
 
 ## What momc writes
 
@@ -109,6 +110,55 @@ numbers they hold.
   - A configuration's entities are a set created whole, in the model's
     order.
 
+### Predicates
+
+Fetch requests' predicates (`predicateString`) and fetched properties' are
+archived as Foundation's NSPredicate and NSExpression trees, from a parser of
+NSPredicate's format as far as it's established:
+
+- **Comparisons:** `==` (also `=`) and `!=` (`<>`) are an
+  `NSEqualityPredicateOperator` (type 4 and 5, `NSNegate`); `<`, `<=` (`=<`),
+  `>`, `>=` (`=>`) an `NSComparisonPredicateOperator` (0 to 3, its variant
+  the same); `BEGINSWITH` and `ENDSWITH` an `NSSubstringPredicateOperator` (8
+  and 9, position 0 and 1); `CONTAINS` and `IN` an `NSInPredicateOperator`
+  (99 and 10); `LIKE` an `NSLikePredicateOperator` (7), `MATCHES` an
+  `NSMatchingPredicateOperator` (6), `BETWEEN` an
+  `NSBetweenPredicateOperator` (100). `[c]`, `[d]` and `[n]` are options 1,
+  2 and 4 (`NSOptions` for equality, `NSFlags` for strings). `ANY` and
+  `SOME` are modifier 2, `ALL` 1; `NONE` is `NOT` of `ANY`.
+- **Compounds:** `NOT` (`!`), `AND` (`&&`) and `OR` (`||`) are an
+  `NSCompoundPredicate` of type 0, 1 and 2. AND binds tighter than OR; a run
+  of ANDs, or of ORs, is one compound however it's parenthesized, and
+  `NOT NOT p` is `p`. `TRUEPREDICATE` and `FALSEPREDICATE` are one object
+  each in a model.
+- **Expressions:** a key path of SELF is an `NSKeyPathExpression` (type 3)
+  by `valueForKey:` for one key and `valueForKeyPath:` for several
+  (`SELF.` dropped); of a variable (`$FETCH_SOURCE.name`), type 4. `$X` is
+  an `NSVariableExpression`, `{…}` an `NSAggregateExpression`, constants an
+  `NSConstantValueExpression`: integers 32-bit where they fit, decimals and
+  exponents doubles, `YES`/`NO` Booleans, `nil` a class name of `$null` and
+  no value.
+- **Strings the parser makes** (key paths, constants, variable names) are one
+  object for their value where Foundation would hold them in a pointer (a
+  tagged pointer string, as published: up to 7 ASCII characters, 9 of a
+  6-bit and 11 of a 5-bit alphabet), else an object each
+  (`parent.parent.n`); the empty string is one object of its own. Several
+  operator and expression classes' names are new strings each time.
+- **Fetched properties** are `NSFetchedPropertyDescription`s, transient and
+  read-only (`_P` 4 and 8), naming their request's entity, whose request
+  refers to it conditionally; they follow the relationships.
+- **Derived attributes** are `NSDerivedAttributeDescription`s, read-only,
+  with an `NSDerivationExpression`: a key path; `now()`; `canonical:`,
+  `uppercase:` and `lowercase:` of a key path, as `NSFunctionExpression`s
+  of `_NSPredicateUtilities`; and a to-many key path's `@count` or `@sum`,
+  as `count:` and `sum:` of the key path before it.
+- Refused: other syntax (`SUBQUERY`, functions, arithmetic, `ANYKEY`,
+  casts), other derivations (`@avg`, …), and derived attributes with user
+  info, a modifier or other settings.
+
+1,080 random predicates in 90 models of up to three entities, with fetched
+properties and derived attributes among them, compiled as Xcode does.
+
 ### Checked against Xcode
 
 During the work, 200 random models were also checked. Each had up to 9
@@ -129,8 +179,8 @@ order, and the other three have two subentities swapped.
 
 Compiling refuses these, relaxed or not:
 
-- fetch requests with predicates;
-- fetched properties, derived and composite attributes, fetch indexes;
+- predicates and derivations beyond those above;
+- composite attributes, fetch indexes;
 - fetch request options other than a limit and a batch size;
 - a userInfo key given twice;
 - names other than ASCII, which Xcode orders by a collation of its own;
@@ -182,7 +232,31 @@ implementation.
 ## Generated classes
 
 `momc --action generate`, which rules_apple runs for
-`apple_core_data_model`, writes Swift classes that don't depend on the
-hashes, but whose header names the user building them and the date
-(`Created by <full name> on 11/4/26.`), so Xcode's own output varies
-between machines and days. It's refused.
+`apple_core_data_model`, writes Swift classes whose header names the user
+building them and the date (`Created by <full name> on 11/4/26.`), so
+Xcode's own output varies between machines and days. With
+`--config=relax_momc` they're generated as Xcode writes them but for that
+line, `//  Created by momc.`; without, refused. `tests/momc/generate` has
+nine models and their expected files, 67 models checked in all.
+
+- **Files:** for each entity generated as a class, `<Class>+CoreDataClass.swift`
+  and `<Class>+CoreDataProperties.swift`; as a category, the second alone;
+  none for an entity without a class or code generation; and
+  `<model>+CoreDataModel.swift` when any are written, its typealiases
+  prefixed by the model's name's letters alone, accents removed (`Ünï`
+  `Uni`; the name decomposed, NFD, as macOS's file system gives it). The
+  current version of a versioned model. `--swift-version` changes nothing.
+- **Classes:** `@objc(<Class>)` for an unqualified class name (an empty
+  line for `App.Class` or `.Class`), the parent entity's class as the
+  superclass, else `NSManagedObject`.
+- **Properties:** attributes, then relationships, each in the document's
+  order; fetched properties left out. Integers, doubles, floats and
+  Booleans are scalars unless `usesScalarValueType="NO"` (`NSNumber?`), a
+  date only when it says so (`TimeInterval`); every other attribute is
+  optional, required or not: `String?`, `NSDecimalNumber?`, `Date?`,
+  `Data?`, `UUID?`, `URL?`, a transformable's custom class or `NSObject?`.
+  Names are written as they are (`var class`). A to-one relationship is its
+  destination's class, optional (`NSManagedObject?` without one), and its
+  module imported for `Module.Class`; to-many `NSSet?`, ordered
+  `NSOrderedSet?`, with Core Data's four and ten accessors.
+- `Identifiable` is declared for a root entity alone.

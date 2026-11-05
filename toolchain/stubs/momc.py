@@ -12,9 +12,12 @@ RULES_APPLECROSS_RELAX_MOMC=1 (--config=relax_momc, or all of
 --config=relaxed), which writes VersionInfo.plist without them and leaves
 out the `.omo` Xcode adds beside a versioned model's current version: Core
 Data loads, saves and migrates stores from the `.mom` and computes the
-hashes itself. A model using anything not established against Xcode
-(fetch request predicates, fetched and derived properties, composite
-attributes, fetch indexes, among others) is refused either way.
+hashes itself. `--action generate` writes the Swift classes Xcode's does
+but for the header's line naming the user and the date, which no build
+reproduces, so it too needs RULES_APPLECROSS_RELAX_MOMC=1. A model using
+anything not established against Xcode
+(composite attributes, fetch indexes, predicates beyond NSPredicate's
+established syntax, among others) is refused either way.
 """
 
 import math
@@ -23,6 +26,7 @@ import plistlib
 import re
 import struct
 import sys
+import unicodedata
 import xml.etree.ElementTree as ET
 
 # corefoundation.py is installed beside this script; its directory isn't on
@@ -155,8 +159,10 @@ class Array:
 FRESH_CLASS_NAMES = {
     "NSManagedObjectModel", "NSEntityDescription", "NSPropertyDescription", "NSAttributeDescription",
     "NSRelationshipDescription", "NSFetchRequest", "NSPersistentStoreRequest",
-    "NSDecimalNumberPlaceholder", "NSDecimalNumber", "NSValue", "NSPredicate",
-    "NSComparisonPredicateOperator", "NSStringPredicateOperator",
+    "NSDecimalNumberPlaceholder", "NSDecimalNumber", "NSValue", "NSComparisonPredicateOperator",
+    "NSStringPredicateOperator", "NSSubstringPredicateOperator", "NSLikePredicateOperator", "NSVariableExpression",
+    "NSTruePredicate", "NSFalsePredicate", "NSAggregateExpression", "NSBetweenPredicateOperator",
+    "NSDerivedAttributeDescription", "NSFetchedPropertyDescription",
 }
 
 def class_name_string(name):
@@ -196,9 +202,26 @@ KEY_ORDER = {
     "NSComparisonPredicateOperator": ["NSOperatorType", "NSOptions", "NSVariant", "$class", "NSModifier"],
     "NSMatchingPredicateOperator": ["NSOperatorType", "$class", "NSModifier", "NSFlags"],
     "NSSelfExpression": ["NSExpressionType", "$class"],
-    "NSConstantValueExpression": ["NSConstantValue", "NSExpressionType", "$class"],
+    "NSConstantValueExpression": ["NSExpressionType", "NSConstantValueClassName", "$class", "NSConstantValue"],
     "NSKeyPathExpression": ["NSExpressionType", "NSSelectorName", "NSOperand", "$class", "NSArguments"],
     "NSKeyPathSpecifierExpression": ["NSExpressionType", "NSKeyPath", "$class"],
+    "NSEqualityPredicateOperator": ["NSNegate", "NSOperatorType", "NSOptions", "$class", "NSModifier"],
+    "NSSubstringPredicateOperator": ["NSModifier", "NSOperatorType", "NSPosition", "$class", "NSFlags"],
+    "NSInPredicateOperator": ["NSOperatorType", "$class", "NSModifier", "NSFlags"],
+    "NSLikePredicateOperator": ["NSOperatorType", "$class", "NSModifier", "NSFlags"],
+    "NSBetweenPredicateOperator": ["NSModifier", "NSOperatorType", "$class"],
+    "NSCompoundPredicate": ["NSCompoundPredicateType", "NSSubpredicates", "$class"],
+    "NSTruePredicate": ["$class"],
+    "NSFalsePredicate": ["$class"],
+    "NSVariableExpression": ["NSExpressionType", "NSVariable", "$class"],
+    "NSAggregateExpression": ["NSCollection", "NSExpressionType", "$class"],
+    "NSFunctionExpression": ["NSExpressionType", "NSSelectorName", "NSOperand", "$class", "NSArguments"],
+    "NSDerivedAttributeDescription": ["NSAttributeValueClassName", "NSDefaultValue", "NSRenamingIdentifier", "NSPropertyName",
+                                      "NSIsOptional", "NSAttributeType", "NSEntity", "NSFlagsKey", "_P", "NSIsReadOnly",
+                                      "NSValueTransformerName", "NSDerivationExpression", "NSFilteringPredicate", "$class"],
+    "NSFetchedPropertyDescription": ["NSUserInfo", "NSVersionHashModifier", "NSRenamingIdentifier", "NSIsOptional",
+                                     "_NSFetchRequestEntityName", "NSIsTransient", "$class", "NSIsReadOnly", "_P",
+                                     "NSFetchRequest", "NSEntity", "NSPropertyName"],
 }
 
 CLASS_CHAINS = {
@@ -222,6 +245,22 @@ CLASS_CHAINS = {
     "NSConstantValueExpression": ["NSConstantValueExpression", "NSExpression", "NSObject"],
     "NSKeyPathExpression": ["NSKeyPathExpression", "NSFunctionExpression", "NSExpression", "NSObject"],
     "NSKeyPathSpecifierExpression": ["NSKeyPathSpecifierExpression", "NSExpression", "NSObject"],
+    "NSEqualityPredicateOperator": ["NSEqualityPredicateOperator", "NSPredicateOperator", "NSObject"],
+    "NSSubstringPredicateOperator": ["NSSubstringPredicateOperator", "NSStringPredicateOperator", "NSPredicateOperator",
+                                     "NSObject"],
+    "NSInPredicateOperator": ["NSInPredicateOperator", "NSPredicateOperator", "NSObject"],
+    "NSLikePredicateOperator": ["NSLikePredicateOperator", "NSMatchingPredicateOperator", "NSStringPredicateOperator",
+                                "NSPredicateOperator", "NSObject"],
+    "NSBetweenPredicateOperator": ["NSBetweenPredicateOperator", "NSPredicateOperator", "NSObject"],
+    "NSCompoundPredicate": ["NSCompoundPredicate", "NSPredicate", "NSObject"],
+    "NSTruePredicate": ["NSTruePredicate", "NSPredicate", "NSObject"],
+    "NSFalsePredicate": ["NSFalsePredicate", "NSPredicate", "NSObject"],
+    "NSVariableExpression": ["NSVariableExpression", "NSExpression", "NSObject"],
+    "NSAggregateExpression": ["NSAggregateExpression", "NSExpression", "NSObject"],
+    "NSFunctionExpression": ["NSFunctionExpression", "NSExpression", "NSObject"],
+    "NSDerivedAttributeDescription": ["NSDerivedAttributeDescription", "NSAttributeDescription", "NSPropertyDescription",
+                                      "NSObject"],
+    "NSFetchedPropertyDescription": ["NSFetchedPropertyDescription", "NSPropertyDescription", "NSObject"],
 }
 
 
@@ -421,7 +460,10 @@ class ConstantValueExpression(Archived):
         self.value = value
 
     def encode_with(self, a, f):
-        f["NSConstantValue"] = a.encode(self.value)
+        if self.value is None:
+            f["NSConstantValueClassName"] = UID(0)
+        else:
+            f["NSConstantValue"] = a.encode(self.value)
         f["NSExpressionType"] = Num("i64", 0)
 
 
@@ -438,44 +480,91 @@ class KeyPathSpecifierExpression(Archived):
 
 
 class KeyPathExpression(Archived):
-    """A key of SELF (`SELF.key`)."""
+    """A key path of SELF (`SELF.key`, type 3) or of a variable
+    (`$VAR.key`, type 4): one key by `valueForKey:`, several by
+    `valueForKeyPath:`."""
     class_name = "NSKeyPathExpression"
 
-    def __init__(self, key):
+    def __init__(self, key, operand=None):
         super().__init__()
         self.key = key
+        self.operand = operand
 
     def encode_with(self, a, f):
-        f["NSExpressionType"] = Num("i64", 3)
-        f["NSSelectorName"] = a.encode(Str("valueForKey:", ("selector", "valueForKey:")))
-        f["NSOperand"] = a.encode(SELF)
+        selector = "valueForKeyPath:" if "." in self.key.value or self.operand else "valueForKey:"
+        f["NSExpressionType"] = Num("i64", 4 if self.operand else 3)
+        f["NSSelectorName"] = a.encode(Str(selector, ("selector", selector)))
+        f["NSOperand"] = a.encode(self.operand or SELF)
         f["NSArguments"] = a.encode(NSArray([KeyPathSpecifierExpression(self.key)], "NSMutableArray"))
 
 
-class ComparisonOperator(Archived):
-    class_name = "NSComparisonPredicateOperator"
+class VariableExpression(Archived):
+    class_name = "NSVariableExpression"
 
-    def __init__(self, kind):
+    def __init__(self, name):
         super().__init__()
-        self.kind = kind
+        self.name = name
+
+    def encode_with(self, a, f):
+        f["NSExpressionType"] = Num("i64", 2)
+        f["NSVariable"] = a.encode(self.name)
+
+
+class AggregateExpression(Archived):
+    class_name = "NSAggregateExpression"
+
+    def __init__(self, items):
+        super().__init__()
+        self.items = items
+
+    def encode_with(self, a, f):
+        f["NSCollection"] = a.encode(NSArray(self.items, "NSMutableArray"))
+        f["NSExpressionType"] = Num("i64", 14)
+
+
+class Operator(Archived):
+    """A predicate's operator: its class, its type, ANY (2) or ALL (1), and
+    its options ([c] 1, [d] 2, [n] 4)."""
+
+    def __init__(self, class_name, kind, modifier=0, options=0):
+        super().__init__()
+        self.class_name, self.kind, self.modifier, self.options = class_name, kind, modifier, options
 
     def encode_with(self, a, f):
         f["NSOperatorType"] = Num("i64", self.kind)
-        f["NSOptions"] = Num("i64", 0)
-        f["NSVariant"] = Num("i64", self.kind)
-        f["NSModifier"] = Num("i64", 0)
+        f["NSModifier"] = Num("i64", self.modifier)
+        if self.class_name == "NSComparisonPredicateOperator":
+            f["NSOptions"] = Num("i64", self.options)
+            f["NSVariant"] = Num("i64", self.kind)
+        elif self.class_name == "NSEqualityPredicateOperator":
+            f["NSOptions"] = Num("i64", self.options)
+            f["NSNegate"] = Bool(self.kind == NOT_EQUAL)
+        elif self.class_name == "NSSubstringPredicateOperator":
+            f["NSFlags"] = Num("i64", self.options)
+            f["NSPosition"] = Num("i64", 0 if self.kind == BEGINS_WITH else 1)
+        elif self.class_name != "NSBetweenPredicateOperator":
+            f["NSFlags"] = Num("i64", self.options)
 
 
-class MatchingOperator(Archived):
-    class_name = "NSMatchingPredicateOperator"
-
-    def encode_with(self, a, f):
-        f["NSOperatorType"] = Num("i64", 6)
-        f["NSModifier"] = Num("i64", 0)
-        f["NSFlags"] = Num("i64", 0)
+def ComparisonOperator(kind):
+    return Operator("NSComparisonPredicateOperator", kind)
 
 
-LESS_OR_EQUAL, GREATER_OR_EQUAL = 1, 3
+def MatchingOperator():
+    return Operator("NSMatchingPredicateOperator", MATCHES)
+
+
+LESS, LESS_OR_EQUAL, GREATER, GREATER_OR_EQUAL, EQUAL, NOT_EQUAL = 0, 1, 2, 3, 4, 5
+MATCHES, LIKE, BEGINS_WITH, ENDS_WITH, IN, CONTAINS, BETWEEN = 6, 7, 8, 9, 10, 99, 100
+# Each operator's class.
+OPERATOR_CLASSES = {
+    LESS: "NSComparisonPredicateOperator", LESS_OR_EQUAL: "NSComparisonPredicateOperator",
+    GREATER: "NSComparisonPredicateOperator", GREATER_OR_EQUAL: "NSComparisonPredicateOperator",
+    EQUAL: "NSEqualityPredicateOperator", NOT_EQUAL: "NSEqualityPredicateOperator",
+    MATCHES: "NSMatchingPredicateOperator", LIKE: "NSLikePredicateOperator",
+    BEGINS_WITH: "NSSubstringPredicateOperator", ENDS_WITH: "NSSubstringPredicateOperator",
+    IN: "NSInPredicateOperator", CONTAINS: "NSInPredicateOperator", BETWEEN: "NSBetweenPredicateOperator",
+}
 
 
 class ComparisonPredicate(Archived):
@@ -489,6 +578,292 @@ class ComparisonPredicate(Archived):
         f["NSLeftExpression"] = a.encode(self.left)
         f["NSRightExpression"] = a.encode(self.right)
         f["NSPredicateOperator"] = a.encode(self.operator)
+
+
+NOT, AND, OR = 0, 1, 2
+
+
+class CompoundPredicate(Archived):
+    class_name = "NSCompoundPredicate"
+
+    def __init__(self, kind, subpredicates):
+        super().__init__()
+        self.kind, self.subpredicates = kind, subpredicates
+
+    def encode_with(self, a, f):
+        f["NSCompoundPredicateType"] = Num("i64", self.kind)
+        f["NSSubpredicates"] = a.encode(NSArray(self.subpredicates))
+
+
+class ConstantPredicate(Archived):
+    """TRUEPREDICATE or FALSEPREDICATE: one object each in a model."""
+
+    def __init__(self, value):
+        self.class_name = "NSTruePredicate" if value else "NSFalsePredicate"
+        self.ident = (self.class_name,)
+
+    def encode_with(self, a, f):
+        pass
+
+
+class PredicateParser:
+    """NSPredicate's format, as far as it's established against Xcode's
+    momc (docs/clean-room/momc.md#predicates): comparisons of key paths,
+    SELF, variables, constants and {aggregates}, with ANY, ALL, SOME and
+    NONE and [cdn] options; NOT, AND and OR; TRUEPREDICATE and
+    FALSEPREDICATE. Anything else is refused."""
+
+    TOKEN = re.compile(r"""\s*(?:
+        (?P<string>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')
+      | (?P<number>-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)
+      | (?P<variable>\$[A-Za-z_][A-Za-z0-9_]*)
+      | (?P<word>[A-Za-z_@][A-Za-z0-9_@]*)
+      | (?P<punct>==|=<|<=|=>|>=|!=|<>|&&|\|\||[()<>=!{},.\[\]])
+    )""", re.X)
+    OPERATORS = {"==": EQUAL, "=": EQUAL, "!=": NOT_EQUAL, "<>": NOT_EQUAL, "<": LESS, "<=": LESS_OR_EQUAL,
+                 "=<": LESS_OR_EQUAL, ">": GREATER, ">=": GREATER_OR_EQUAL, "=>": GREATER_OR_EQUAL,
+                 "BEGINSWITH": BEGINS_WITH, "ENDSWITH": ENDS_WITH, "CONTAINS": CONTAINS, "LIKE": LIKE,
+                 "MATCHES": MATCHES, "IN": IN, "BETWEEN": BETWEEN}
+    # Options apply to these operators (an equality's as NSOptions).
+    OPTIONED = {EQUAL, NOT_EQUAL, BEGINS_WITH, ENDS_WITH, CONTAINS, LIKE, MATCHES, IN}
+    RESERVED = {"AND", "OR", "NOT", "ANY", "ALL", "SOME", "NONE", "IN", "BETWEEN", "BEGINSWITH", "ENDSWITH",
+                "CONTAINS", "LIKE", "MATCHES", "TRUEPREDICATE", "FALSEPREDICATE", "YES", "NO", "TRUE", "FALSE",
+                "NIL", "NULL", "SELF", "SUBQUERY", "FUNCTION", "CAST", "FIRST", "LAST", "SIZE", "ANYKEY", "UTI-CONFORMS-TO",
+                "UTI-EQUALS"}
+
+    def __init__(self, text):
+        self.text = text
+        self.tokens = []
+        pos = 0
+        while pos < len(text):
+            if text[pos:].strip() == "":
+                break
+            m = self.TOKEN.match(text, pos)
+            if not m or m.end() == pos:
+                self.refuse("its text at %r" % text[pos:pos + 10])
+            kind = m.lastgroup
+            self.tokens.append((kind, m.group(kind)))
+            pos = m.end()
+        self.at = 0
+
+    def refuse(self, what):
+        unestablished("the predicate %r (%s)" % (self.text, what))
+
+    def peek(self, offset=0):
+        i = self.at + offset
+        return self.tokens[i] if i < len(self.tokens) else (None, None)
+
+    def word(self, offset=0):
+        kind, value = self.peek(offset)
+        return value.upper() if kind == "word" else value if kind == "punct" else None
+
+    def take(self):
+        token = self.peek()
+        self.at += 1
+        return token
+
+    def parse(self):
+        p = self.disjunction()
+        if self.at != len(self.tokens):
+            self.refuse("its text from %r" % (self.peek()[1],))
+        return p
+
+    @staticmethod
+    def join(kind, left, right):
+        # A run of ANDs, or of ORs, is one compound, however parenthesized.
+        parts = []
+        for p in (left, right):
+            parts += p.subpredicates if isinstance(p, CompoundPredicate) and p.kind == kind else [p]
+        return CompoundPredicate(kind, parts)
+
+    def disjunction(self):
+        p = self.conjunction()
+        while self.word() in ("OR", "||"):
+            self.take()
+            p = self.join(OR, p, self.conjunction())
+        return p
+
+    def conjunction(self):
+        p = self.negation()
+        while self.word() in ("AND", "&&"):
+            self.take()
+            p = self.join(AND, p, self.negation())
+        return p
+
+    def negation(self):
+        if self.word() in ("NOT", "!"):
+            self.take()
+            p = self.negation()
+            # NOT NOT p is p.
+            if isinstance(p, CompoundPredicate) and p.kind == NOT:
+                return p.subpredicates[0]
+            return CompoundPredicate(NOT, [p])
+        return self.primary()
+
+    def primary(self):
+        w = self.word()
+        if w == "(":
+            self.take()
+            p = self.disjunction()
+            if self.take()[1] != ")":
+                self.refuse("an unclosed parenthesis")
+            return p
+        if w in ("TRUEPREDICATE", "FALSEPREDICATE"):
+            self.take()
+            return ConstantPredicate(w == "TRUEPREDICATE")
+        modifier, negate = 0, False
+        if w in ("ANY", "SOME", "ALL", "NONE"):
+            self.take()
+            modifier = 1 if w == "ALL" else 2
+            negate = w == "NONE"
+        left = self.expression()
+        op = self.word()
+        if op not in self.OPERATORS:
+            self.refuse("the operator %r" % (self.peek()[1],))
+        self.take()
+        kind = self.OPERATORS[op]
+        options = 0
+        if self.word() == "[":
+            self.take()
+            kind_, flags = self.take()
+            if kind_ != "word" or self.take()[1] != "]" or not set(flags.lower()) <= set("cdn") or kind not in self.OPTIONED:
+                self.refuse("its options")
+            options = sum({"c": 1, "d": 2, "n": 4}[c] for c in set(flags.lower()))
+        right = self.expression()
+        p = ComparisonPredicate(left, right, Operator(OPERATOR_CLASSES[kind], kind, modifier, options))
+        return CompoundPredicate(NOT, [p]) if negate else p
+
+    def expression(self):
+        kind, value = self.take()
+        if kind == "string":
+            body = value[1:-1]
+            if "\\" in body.replace('\\"', "").replace("\\'", ""):
+                self.refuse("an escape other than a quote's")
+            return ConstantValueExpression(parsed_str(body.replace('\\"', '"').replace("\\'", "'")))
+        if kind == "number":
+            if re.fullmatch(r"-?\d+", value):
+                if not -1 << 63 <= int(value) < 1 << 63:
+                    self.refuse("an integer beyond 64 bits")
+                # 32-bit where it fits.
+                return ConstantValueExpression(Num("i32" if -1 << 31 <= int(value) < 1 << 31 else "i64", int(value)))
+            return ConstantValueExpression(floating(float(value)))
+        if kind == "variable":
+            variable = VariableExpression(parsed_str(value[1:]))
+            if self.word() == ".":
+                self.take()
+                return KeyPathExpression(self.key_path(), variable)
+            return variable
+        if kind == "punct" and value == "{":
+            items = []
+            while self.word() != "}":
+                items.append(self.expression())
+                if self.word() == ",":
+                    self.take()
+                elif self.word() != "}":
+                    self.refuse("an aggregate")
+            self.take()
+            return AggregateExpression(items)
+        if kind == "word":
+            upper = value.upper()
+            if upper in ("YES", "TRUE", "NO", "FALSE"):
+                return ConstantValueExpression(Bool(upper in ("YES", "TRUE")))
+            if upper in ("NIL", "NULL"):
+                return ConstantValueExpression(None)
+            if upper == "SELF":
+                if self.word() == ".":
+                    self.take()
+                    return KeyPathExpression(self.key_path())
+                return SELF
+            if upper in self.RESERVED:
+                self.refuse("the word %s" % value)
+            self.at -= 1
+            return KeyPathExpression(self.key_path())
+        self.refuse("the expression %r" % (value,))
+
+    def key_path(self):
+        keys = []
+        while True:
+            kind, value = self.take()
+            if kind != "word" or value.upper() in self.RESERVED:
+                self.refuse("the key path at %r" % (value,))
+            keys.append(value)
+            if self.word() != ".":
+                return parsed_str(".".join(keys))
+            self.take()
+
+
+# The characters short strings of 8 to 11 characters can be held in a
+# pointer with (Foundation's tagged pointer strings, as published): 6 bits
+# for up to 9, the first 32 at 5 bits for up to 11.
+TAGGED_6 = "eilotrm.apdnsIc ufkMShjTRxgC4013bDNvwyUL2O856P-B79AFKEWV_zGJ/HYX"
+TAGGED_5 = TAGGED_6[:32]
+
+
+def parsed_str(value):
+    """A string a predicate's parser makes: one object for its value where
+    it fits in a pointer (as any equal string), else an object of its own
+    (`parent.parent.n`, `kids.@count`, as a date rule's key). The empty
+    string is one object of the parser's own."""
+    if value == "":
+        return Str("", ("parsed", ""))
+    tagged = value.isascii() and (len(value) <= 7 or (len(value) <= 9 and all(c in TAGGED_6 for c in value))
+                                  or (len(value) <= 11 and all(c in TAGGED_5 for c in value)))
+    return Str(value) if tagged else Str(value, fresh())
+
+
+def predicate(text):
+    return PredicateParser(text).parse()
+
+
+class FunctionExpression(Archived):
+    """A function of NSExpression's (`now()`, `uppercase:(name)`): its
+    selector sent to the class that implements them."""
+    class_name = "NSFunctionExpression"
+
+    def __init__(self, selector, arguments, arguments_class="NSMutableArray"):
+        super().__init__()
+        self.selector, self.arguments, self.arguments_class = selector, arguments, arguments_class
+
+    def encode_with(self, a, f):
+        f["NSExpressionType"] = Num("i64", 4)
+        # A selector's name, one object for its value.
+        f["NSSelectorName"] = a.encode(Str(self.selector, ("selector", self.selector)))
+        f["NSOperand"] = a.encode(ClassExpression("_NSPredicateUtilities"))
+        f["NSArguments"] = a.encode(NSArray(self.arguments, self.arguments_class))
+
+
+class ClassExpression(Archived):
+    """A constant that is a class: its name, a new string each time."""
+    class_name = "NSConstantValueExpression"
+
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+
+    def encode_with(self, a, f):
+        f["NSExpressionType"] = Num("i64", 0)
+        f["NSConstantValueClassName"] = a.encode(Str(self.name, fresh()))
+
+
+KEY_PATH = r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*"
+
+
+def derivation(text):
+    """A derived attribute's expression: a key path, `now()`, a string
+    function of a key path, or a to-many key path's @count or @sum (as
+    count: and sum: of the key path before it)."""
+    text = text.strip()
+    if text == "now()":
+        return FunctionExpression("now", [])
+    m = re.fullmatch(r"(canonical|uppercase|lowercase):\((%s)\)" % KEY_PATH, text)
+    if m:
+        return FunctionExpression(m.group(1) + ":", [KeyPathExpression(parsed_str(m.group(2)))])
+    m = re.fullmatch(r"(%s)\.@(count|sum)" % KEY_PATH, text)
+    if m:
+        return FunctionExpression(m.group(2) + ":", [KeyPathExpression(parsed_str(m.group(1)))], "NSArray")
+    if re.fullmatch(KEY_PATH, text) and text.upper() not in PredicateParser.RESERVED:
+        return KeyPathExpression(parsed_str(text))
+    unestablished("the derivation expression %r" % text)
 
 
 def user_info(element):
@@ -566,6 +941,7 @@ class Property(Archived):
         self.modifier = xml_str(modifier) if modifier else None
         self.optional = yes(element, "optional")
         self.transient = yes(element, "transient")
+        self.read_only = False
         self.validation = []
 
     def encode_property(self, a, f, extra):
@@ -580,11 +956,14 @@ class Property(Archived):
         if self.modifier:
             f["NSVersionHashModifier"] = a.encode(self.modifier)
         f["_P"] = Num("i32", 1 | (0 if self.validation else 16 | 32) | (2 if self.optional else 0) | (8 if self.transient else 0)
+                      | (4 if self.read_only else 0)
                       | (0 if self.user_info else 64) | (0 if self.modifier else 128) | extra)
         if self.optional:
             f["NSIsOptional"] = Bool(True)
         if self.transient:
             f["NSIsTransient"] = Bool(True)
+        if self.read_only:
+            f["NSIsReadOnly"] = Bool(True)
 
 
 class Attribute(Property):
@@ -729,6 +1108,57 @@ class Attribute(Property):
         f["NSFlagsKey"] = Num("i32", self.flags)
 
 
+class DerivedAttribute(Attribute):
+    """An attribute Core Data derives (`derived="YES"`), read-only. Others'
+    settings beside it (user info, a modifier, flags) aren't established."""
+    class_name = "NSDerivedAttributeDescription"
+    ATTRIBUTES = {"name", "attributeType", "optional", "derived", "derivationExpression", "usesScalarValueType", "syncable"}
+
+    def __init__(self, entity, element):
+        known(element, self.ATTRIBUTES)
+        attrs = {k: v for k, v in element.attrib.items() if k not in ("derived", "derivationExpression")}
+        plain = ET.Element(element.tag, attrs)
+        super().__init__(entity, plain)
+        if element.get("derived") != "YES":
+            unestablished("derived=%r" % element.get("derived"))
+        self.read_only = True
+        self.expression = derivation(element.get("derivationExpression") or "")
+
+    def encode_with(self, a, f):
+        super().encode_with(a, f)
+        f["NSDerivationExpression"] = a.encode(self.expression)
+        f["NSFilteringPredicate"] = UID(0)
+
+
+class FetchedProperty(Property):
+    """A fetched property: transient and read-only, its fetch request's
+    entity named beside the request."""
+    class_name = "NSFetchedPropertyDescription"
+    ATTRIBUTES = {"name", "optional", "versionHashModifier", "elementID", "syncable"}
+
+    def __init__(self, entity, element):
+        known(element, self.ATTRIBUTES, ("userInfo", "fetchRequest"))
+        super().__init__(entity, element)
+        self.transient = True
+        self.read_only = True
+        requests = element.findall("fetchRequest")
+        if len(requests) != 1:
+            unestablished("a fetched property without one fetch request")
+        self.request_element = requests[0]
+        self.request = None
+
+    def resolve(self, by_name):
+        name = self.request_element.get("entity")
+        if name not in by_name:
+            unestablished("the fetched property's entity %s" % name)
+        self.request = FetchRequest(self.request_element, by_name[name])
+
+    def encode_with(self, a, f):
+        self.encode_property(a, f, 0)
+        f["_NSFetchRequestEntityName"] = a.encode(self.request.entity.name)
+        f["NSFetchRequest"] = a.encode(self.request)
+
+
 class Relationship(Property):
     class_name = "NSRelationshipDescription"
     ATTRIBUTES = {"name", "optional", "toMany", "ordered", "minCount", "maxCount", "deletionRule", "destinationEntity",
@@ -782,7 +1212,7 @@ class Entity(Archived):
                   "versionHashModifier", "elementID"}
 
     def __init__(self, model, element):
-        known(element, self.ATTRIBUTES, ("attribute", "relationship", "userInfo", "uniquenessConstraints"))
+        known(element, self.ATTRIBUTES, ("attribute", "relationship", "fetchedProperty", "userInfo", "uniquenessConstraints"))
         super().__init__()
         self.model = model
         self.name = xml_str(element.get("name"))
@@ -796,10 +1226,12 @@ class Entity(Archived):
         renaming = element.get("elementID")
         self.renaming = xml_str(renaming) if renaming else self.name
         self.user_info = user_info(element)
-        attributes = [Attribute(self, e) for e in element.findall("attribute")]
+        attributes = [(DerivedAttribute if e.get("derived") else Attribute)(self, e) for e in element.findall("attribute")]
         relationships = [Relationship(self, e) for e in element.findall("relationship")]
+        fetched = [FetchedProperty(self, e) for e in element.findall("fetchedProperty")]
         self.properties = sorted(attributes, key=lambda p: natural_key(p.name.value)) + \
-            sorted(relationships, key=lambda p: natural_key(p.name.value))
+            sorted(relationships, key=lambda p: natural_key(p.name.value)) + \
+            sorted(fetched, key=lambda p: natural_key(p.name.value))
         if len({p.name.value for p in self.properties}) != len(self.properties):
             unestablished("two properties of %s named alike" % self.name.value)
         self.unique = []
@@ -831,9 +1263,11 @@ class FetchRequest(Archived):
     class_name = "NSFetchRequest"
 
     def __init__(self, element, entity):
-        known(element, {"name", "entity", "fetchLimit", "fetchBatchSize"})
+        known(element, {"name", "entity", "fetchLimit", "fetchBatchSize", "predicateString"})
         super().__init__()
         self.entity = entity
+        text = element.get("predicateString")
+        self.predicate = predicate(text) if text else None
         try:
             self.limit = int(element.get("fetchLimit", "0"))
             self.batch = int(element.get("fetchBatchSize", "0"))
@@ -841,8 +1275,11 @@ class FetchRequest(Archived):
             unestablished("the fetch request %s's limits" % element.get("name"))
 
     def encode_with(self, a, f):
-        f["NSEntity"] = a.encode(self.entity)
-        for k in ("NSPredicate", "NSSortDescriptors", "NSValuesToFetch", "NSValuesToGroupBy", "NSHavingPredicate",
+        # Conditionally: a fetched property's entity is written where the
+        # model's entities are (templates follow them all).
+        f["NSEntity"] = a.encode(self.entity, conditional=True)
+        f["NSPredicate"] = a.encode(self.predicate)
+        for k in ("NSSortDescriptors", "NSValuesToFetch", "NSValuesToGroupBy", "NSHavingPredicate",
                   "NSRelationshipKeyPathsForPrefetching"):
             f[k] = UID(0)
         f["NSHasFetchRequestFlags"] = Bool(True)
@@ -876,6 +1313,8 @@ class Model(Archived):
                 e.parent = by_name[e.parent_name]
                 e.parent.subentities.append(e)
             for r in e.properties:
+                if isinstance(r, FetchedProperty):
+                    r.resolve(by_name)
                 if isinstance(r, Relationship):
                     if r.destination_name not in by_name:
                         unestablished("the destination entity %s" % r.destination_name)
@@ -1096,6 +1535,174 @@ def compile_models(source, output, versions):
         plistlib.dump(info, f, fmt=plistlib.FMT_BINARY)
 
 
+# --- Generated classes (momc --action generate) -------------------------------
+
+# The line of Xcode's header naming the user and the date it ran, which no
+# build reproduces: this one in its place (docs/clean-room/momc.md).
+GENERATED_BY = "//  Created by momc."
+
+# Each attribute type's Swift type: as a scalar, and as an object.
+SWIFT_TYPES = {
+    "Integer 16": ("Int16", "NSNumber?"), "Integer 32": ("Int32", "NSNumber?"), "Integer 64": ("Int64", "NSNumber?"),
+    "Double": ("Double", "NSNumber?"), "Float": ("Float", "NSNumber?"), "Boolean": ("Bool", "NSNumber?"),
+    "Date": ("TimeInterval", "Date?"), "String": (None, "String?"), "Decimal": (None, "NSDecimalNumber?"),
+    "Binary": (None, "Data?"), "UUID": (None, "UUID?"), "URI": (None, "URL?"),
+}
+
+
+def header(file_name):
+    return ["//", "//  " + file_name, "//  ", "//", GENERATED_BY, "//",
+            "//  This file was automatically generated and should not be edited.", "//", ""]
+
+
+def swift_class(class_name):
+    """The Swift class an entity's class name declares, and its module (""
+    for a leading dot, None unqualified)."""
+    if "." in class_name:
+        module, _, name = class_name.rpartition(".")
+        return name, module
+    return class_name, None
+
+
+def generate(source, output):
+    """The Swift classes Xcode's momc generates for a model's current
+    version: for each entity generated as a class, its class and its
+    properties; as a category, its properties; and the model's file."""
+    source = source.rstrip("/")
+    if source.endswith(".xcdatamodeld"):
+        try:
+            models = sorted(n for n in os.listdir(source) if n.endswith(".xcdatamodel"))
+        except OSError as e:
+            raise Invalid("can't read the model: %s" % e.strerror)
+        current = None
+        try:
+            with open(os.path.join(source, ".xccurrentversion"), "rb") as f:
+                current = plistlib.load(f).get("_XCCurrentVersionName")
+        except FileNotFoundError:
+            pass
+        if current is None:
+            if len(models) != 1:
+                unestablished("a model bundle without one current version")
+            current = models[0]
+        version = os.path.join(source, current)
+    elif source.endswith(".xcdatamodel"):
+        version = source
+    else:
+        unestablished("the model %s" % source)
+    try:
+        root = ET.parse(os.path.join(version, "contents")).getroot()
+    except (OSError, ET.ParseError) as e:
+        raise Invalid("can't read %s: %s" % (version, e))
+    entities = {e.get("name"): e for e in root.findall("entity")}
+
+    def class_of(entity):
+        return entity.get("representedClassName") or None
+
+    files = {}
+    for e in root.findall("entity"):
+        mode = e.get("codeGenerationType")
+        if mode is None:
+            continue
+        if mode not in ("class", "category"):
+            unestablished("the code generation type %r" % mode)
+        if class_of(e) is None:
+            continue
+        name, _ = swift_class(class_of(e))
+        if not name.isascii():
+            unestablished("the class name %r in generated classes" % name)
+        parent = entities.get(e.get("parentEntity")) if e.get("parentEntity") else None
+        if e.get("parentEntity") and parent is None:
+            unestablished("the parent entity %s" % e.get("parentEntity"))
+        if parent is not None and class_of(parent) is None:
+            unestablished("a parent entity without a class")
+        superclass = swift_class(class_of(parent))[0] if parent is not None else "NSManagedObject"
+        if mode == "class":
+            objc = "" if "." in class_of(e) else "@objc(%s)" % name
+            files[name + "+CoreDataClass.swift"] = header(name + "+CoreDataClass.swift") + [
+                "public import Foundation", "public import CoreData", "",
+                "public typealias %sCoreDataClassSet = NSSet" % name, "", objc,
+                "public class %s: %s {" % (name, superclass), "", "}"]
+        imports, lines, accessors = [], [], []
+        # Attributes, then relationships, each in the document's order.
+        for p in [p for p in e if p.tag == "attribute"] + [p for p in e if p.tag != "attribute"]:
+            if p.tag == "attribute":
+                kind = p.get("attributeType")
+                if p.get("attributeType") == "Transformable":
+                    swift = (p.get("customClassName") or "NSObject") + "?"
+                elif kind in SWIFT_TYPES:
+                    scalar, boxed = SWIFT_TYPES[kind]
+                    # Numbers are scalars unless the model says not; dates aren't
+                    # unless it says so.
+                    default = "NO" if kind == "Date" else "YES"
+                    swift = scalar if scalar and p.get("usesScalarValueType", default) == "YES" else boxed
+                else:
+                    unestablished("the generated type of a %s attribute" % kind)
+                lines.append("    @NSManaged nonisolated public var %s: %s" % (p.get("name"), swift))
+            elif p.tag == "relationship":
+                destination = entities.get(p.get("destinationEntity"))
+                if destination is None:
+                    unestablished("the destination entity %s" % p.get("destinationEntity"))
+                target, module = swift_class(class_of(destination)) if class_of(destination) else ("NSManagedObject", None)
+                if module and "import %s" % module not in imports:
+                    imports.append("import %s" % module)
+                rel = p.get("name")
+                if p.get("toMany") != "YES":
+                    lines.append("    @NSManaged nonisolated public var %s: %s?" % (rel, target))
+                    continue
+                ordered = p.get("ordered") == "YES"
+                lines.append("    @NSManaged nonisolated public var %s: %s?" % (rel, "NSOrderedSet" if ordered else "NSSet"))
+                cap = rel[:1].upper() + rel[1:]
+                methods = [
+                    ("insertObject:in%sAtIndex:" % cap, "insertInto%s(_ value: %s, at idx: Int)" % (cap, target)),
+                    ("removeObjectFrom%sAtIndex:" % cap, "removeFrom%s(at idx: Int)" % cap),
+                    ("insert%s:atIndexes:" % cap, "insertInto%s(_ values: [%s], at indexes: NSIndexSet)" % (cap, target)),
+                    ("remove%sAtIndexes:" % cap, "removeFrom%s(at indexes: NSIndexSet)" % cap),
+                    ("replaceObjectIn%sAtIndex:withObject:" % cap, "replace%s(at idx: Int, with value: %s)" % (cap, target)),
+                    ("replace%sAtIndexes:with%s:" % (cap, cap), "replace%s(at indexes: NSIndexSet, with values: [%s])" % (cap, target)),
+                ] if ordered else []
+                collection = "NSOrderedSet" if ordered else "NSSet"
+                methods += [
+                    ("add%sObject:" % cap, "addTo%s(_ value: %s)" % (cap, target)),
+                    ("remove%sObject:" % cap, "removeFrom%s(_ value: %s)" % (cap, target)),
+                    ("add%s:" % cap, "addTo%s(_ values: %s)" % (cap, collection)),
+                    ("remove%s:" % cap, "removeFrom%s(_ values: %s)" % (cap, collection)),
+                ]
+                accessors += ["", "// MARK: Generated accessors for %s" % rel, "extension %s {" % name, ""]
+                for selector, signature in methods:
+                    accessors += ["    @objc(%s)" % selector, "    @NSManaged nonisolated public func %s" % signature, ""]
+                accessors.append("}")
+            elif p.tag not in ("fetchedProperty", "userInfo", "uniquenessConstraints", "fetchIndex"):
+                unestablished("an entity's <%s> in generated classes" % p.tag)
+        body = header(name + "+CoreDataProperties.swift") + [
+            "public import Foundation", "public import CoreData"] + (imports or [""]) + [
+            "", "public typealias %sCoreDataPropertiesSet = NSSet" % name, "", "extension %s {" % name, "",
+            "    @nonobjc public class func fetchRequest() -> NSFetchRequest<%s> {" % name,
+            "        return NSFetchRequest<%s>(entityName: \"%s\")" % (name, e.get("name")), "    }", ""] + lines + [
+            "", "}"] + accessors
+        # Identifiable once, on the root of an entity hierarchy.
+        if parent is None:
+            body += ["", "extension %s : Identifiable {" % name, "", "}"]
+        files[name + "+CoreDataProperties.swift"] = body
+    if not files:
+        return
+    # The model's name as macOS's file system gives it, decomposed (NFD).
+    model_name = unicodedata.normalize("NFD", os.path.splitext(os.path.basename(source))[0])
+    # The model's name as an identifier: its letters alone, accents removed
+    # (`My-Model` My Model, `9lives` lives, `Ünï` Uni).
+    folded = "".join(c for c in unicodedata.normalize("NFD", model_name) if not unicodedata.combining(c))
+    prefix = "".join(c for c in folded if c.isalpha())
+    if not prefix or not prefix.isascii():
+        unestablished("the model name %r in generated classes" % model_name)
+    files[model_name + "+CoreDataModel.swift"] = header(model_name + "+CoreDataModel.swift") + [
+        "public import Foundation", "public import CoreData", "",
+        "public typealias %sFoundationFrameworkSet = NSSet" % prefix,
+        "public typealias %sCoreDataFrameworkManagedObject = NSManagedObject" % prefix, "", ""]
+    os.makedirs(output, exist_ok=True)
+    for name, lines in files.items():
+        with open(os.path.join(output, name), "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+
 def main(argv):
     action = "compile"
     positional = []
@@ -1123,13 +1730,27 @@ def main(argv):
         else:
             positional.append(a)
         i += 1
-    if action != "compile":
-        print("error: momc: --action %s isn't supported off a Mac: only models are compiled" % action, file=sys.stderr)
+    if action not in ("compile", "generate"):
+        print("error: momc: --action %s isn't supported off a Mac" % action, file=sys.stderr)
         return 1
     if len(positional) != 2:
         print("error: momc: expected `momc [options] MODEL OUTPUT`", file=sys.stderr)
         return 1
     source, output = positional
+    if action == "generate":
+        if not RELAXED:
+            print("error: momc: %s: Xcode's generated classes name the user and the date in their header, which no "
+                  "build reproduces; --config=relax_momc writes them with a fixed header" % source, file=sys.stderr)
+            return 1
+        try:
+            generate(source, output)
+        except Unestablished as e:
+            print("error: momc: %s: %s is not generated as Xcode generates it" % (source, e), file=sys.stderr)
+            return 1
+        except Invalid as e:
+            print("error: momc: %s: %s" % (source, e), file=sys.stderr)
+            return 1
+        return 0
     if not RELAXED:
         print("error: momc: %s: VersionInfo.plist's entity version hashes aren't reproduced off a Mac; "
               "--config=relax_momc writes the model without them (Core Data computes them itself)" % source, file=sys.stderr)

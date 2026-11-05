@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="D" representedClassName="D" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <relationship name="kids" destinationEntity="K" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <attribute name="stamp" attributeType="Date" optional="YES" derived="YES" derivationExpression="now()"/>
+        <attribute name="count" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="kids.@count" usesScalarValueType="YES"/>
+        <attribute name="total" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="kids.v.@sum" usesScalarValueType="YES"/>
+        <attribute name="upper" attributeType="String" optional="YES" derived="YES" derivationExpression="uppercase:(name)"/>
+        <attribute name="canon" attributeType="String" optional="YES" derived="YES" derivationExpression="canonical:(name)"/>
+        <attribute name="copy" attributeType="String" optional="YES" derived="YES" derivationExpression="name"/>
+        <attribute name="ln" attributeType="String" optional="YES" derived="YES" derivationExpression="lowercase:(name)"/>
+    </entity>
+    <entity name="K" representedClassName="K" syncable="YES" codeGenerationType="class">
+        <attribute name="v" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+    </entity>
+</model>

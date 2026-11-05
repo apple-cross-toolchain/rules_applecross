@@ -36,13 +36,12 @@ one fails:
   default; set it to `False`). App Intents' intents, parameters, enums,
   entities, queries and App Shortcuts compile as Xcode compiles them
   ([docs/clean-room/appintentsmetadataprocessor.md](docs/clean-room/appintentsmetadataprocessor.md));
-- Core Data mapping models (`mapc`), and Core Data models' generated
-  classes (`momc --action generate`). Models compile, each version to the
+- Core Data mapping models (`mapc`). Models compile, each version to the
   `.mom` Xcode writes, with `--config=relax_momc`: their `VersionInfo.plist`
   leaves out the entity version hashes, which Core Data computes itself, so
-  stores load, save and migrate as with Xcode's. Fetch request predicates,
-  fetched and derived properties, composite attributes, fetch indexes and
-  names other than ASCII are refused
+  stores load, save and migrate as with Xcode's; their generated classes are
+  Xcode's but for the header line naming the user and the date. Composite
+  attributes, fetch indexes and names other than ASCII are refused
   ([docs/clean-room/momc.md](docs/clean-room/momc.md));
 - Core ML's older neural networks. ML Programs (`.mlpackage`, states,
   several functions, flexible shapes, optional inputs and compressed weights
@@ -290,7 +289,7 @@ draw the icon from its layers:
 | `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
 | `relax_docc` | `RULES_APPLECROSS_RELAX_DOCC` | DocC archives with swift.org's render template, where the SDK archive lacks Xcode's |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
-| `relax_momc` | `RULES_APPLECROSS_RELAX_MOMC` | Core Data models whose `VersionInfo.plist` has no entity version hashes or checksums, without the `.omo` Xcode writes beside a versioned model's current version |
+| `relax_momc` | `RULES_APPLECROSS_RELAX_MOMC` | Core Data models whose `VersionInfo.plist` has no entity version hashes or checksums, without the `.omo` Xcode writes beside a versioned model's current version; generated classes whose header doesn't name the user and the date |
 | `relax_pngcrush` | `RULES_APPLECROSS_RELAX_PNGCRUSH` | iOS PNG resources this pngcrush can't make Xcode's iPhone-optimized PNG of (other than 8-bit RGB and RGBA), copied as they are |
 | `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library (they fail at run time; bundling on a Mac compiles them) |
 | `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |

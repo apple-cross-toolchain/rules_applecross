@@ -47,7 +47,8 @@ build:relax_docc --action_env=RULES_APPLECROSS_RELAX_DOCC=1
 # Interface Builder files this ibtool can't reproduce, left uncompiled.
 build:relax_ibtool --action_env=RULES_APPLECROSS_RELAX_IBTOOL=1
 # Core Data models, whose VersionInfo.plist leaves out the entity version
-# hashes and checksums (Core Data computes them itself) and with no .omo.
+# hashes and checksums (Core Data computes them itself) and with no .omo;
+# generated classes with a fixed header line in place of the user and date.
 build:relax_momc --action_env=RULES_APPLECROSS_RELAX_MOMC=1
 # iOS PNGs this pngcrush can't reproduce (other than 8-bit RGB and RGBA),
 # copied as they are rather than iPhone-optimized.

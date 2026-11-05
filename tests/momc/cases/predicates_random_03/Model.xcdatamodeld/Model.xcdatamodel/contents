@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="P" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="P" optional="YES" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+    <fetchRequest name="F00" entity="P" predicateString="parent.parent.n != nil"/>
+    <fetchRequest name="F01" entity="P" predicateString="TRUEPREDICATE"/>
+    <fetchRequest name="F02" entity="P" predicateString="FALSEPREDICATE"/>
+    <fetchRequest name="F03" entity="P" predicateString="flag == FALSE"/>
+    <fetchRequest name="F04" entity="P" predicateString="NOT (NOT (parent.parent.n &gt; 1 OR SELF == $OBJ))"/>
+    <fetchRequest name="F05" entity="P" predicateString="SELF != nil"/>
+    <fetchRequest name="F06" entity="P" predicateString="SELF != $OBJ"/>
+    <fetchRequest name="F07" entity="P" predicateString="flag != FALSE AND (!(parent.parent.n =&gt; 3.5) &amp;&amp; d &lt;= 1 AND flag != YES AND kids.@count &lt;= $N &amp;&amp; NONE kids.n = 0)"/>
+    <fetchRequest name="F08" entity="P" predicateString="!(NOT (n IN $LIST))"/>
+    <fetchRequest name="F09" entity="P" predicateString="flag != TRUE"/>
+    <fetchRequest name="F10" entity="P" predicateString="name ==[c] 'b c'"/>
+    <fetchRequest name="F11" entity="P" predicateString="(NOT (SELF == nil) || flag != TRUE || NOT (ALL kids.n &gt; -2))"/>
+</model>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="P" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="P" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="dc0" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="kids.@count" usesScalarValueType="YES"/>
+        <attribute name="ds1" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="kids.n.@sum" usesScalarValueType="YES"/>
+        <attribute name="dc2" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="kids.@count" usesScalarValueType="YES"/>
+    </entity>
+    <entity name="Q" representedClassName="Q" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="Q" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="Q" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="dz0" attributeType="Date" optional="YES" derived="YES" derivationExpression="now()"/>
+        <attribute name="dc1" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="kids.@count" usesScalarValueType="YES"/>
+        <attribute name="du2" attributeType="String" optional="YES" derived="YES" derivationExpression="uppercase:(name)"/>
+    </entity>
+    <entity name="Rx" representedClassName="Rx" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="Rx" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="Rx" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <attribute name="dc0" attributeType="Integer 64" optional="YES" derived="YES" derivationExpression="kids.@count" usesScalarValueType="YES"/>
+        <fetchedProperty name="fp0">
+            <fetchRequest name="fetchedPropertyFetchRequest" entity="Rx" predicateString="SELF != $FETCH_SOURCE AND n &gt; $FETCHED_PROPERTY.userInfo.min"/>
+        </fetchedProperty>
+        <fetchedProperty name="fp1" optional="YES">
+            <fetchRequest name="fetchedPropertyFetchRequest" entity="P" predicateString="kids.n =&gt; 1e2"/>
+        </fetchedProperty>
+    </entity>
+</model>

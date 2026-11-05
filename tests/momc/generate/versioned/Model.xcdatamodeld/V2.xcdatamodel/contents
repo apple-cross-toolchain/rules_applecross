@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Author" representedClassName="Author" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <relationship name="books" destinationEntity="Book" optional="YES" toMany="YES" deletionRule="Nullify" inverseName="author" inverseEntity="Book"/>
+        <relationship name="ordered" destinationEntity="Book" optional="YES" toMany="YES" ordered="YES" deletionRule="Nullify"/>
+        <relationship name="fav" destinationEntity="Book" optional="YES" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+    <entity name="Book" representedClassName="Book" syncable="YES" codeGenerationType="class">
+        <attribute name="title" attributeType="String" optional="YES"/>
+        <relationship name="author" destinationEntity="Author" optional="YES" maxCount="1" deletionRule="Nullify" inverseName="books" inverseEntity="Author"/>
+    </entity>
+</model>
