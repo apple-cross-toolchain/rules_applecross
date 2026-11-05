@@ -49,7 +49,7 @@ fn check_table(table: Node) -> Result<(), String> {
         ("key", Some("view")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("clearsContextBeforeDrawing", Some("NO")),
         ("userInteractionEnabled", Some("NO")),
         ("contentMode", Some("scaleToFill")), ("alwaysBounceVertical", None), ("showsHorizontalScrollIndicator", Some("NO")),
-        ("showsVerticalScrollIndicator", Some("NO")),
+        ("showsVerticalScrollIndicator", Some("NO")), ("bouncesZoom", Some("NO")),
         ("keyboardDismissMode", None), ("dataMode", None), ("style", None), ("separatorStyle", None),
         ("allowsSelection", Some("NO")), ("allowsMultipleSelection", Some("YES")), ("allowsSelectionDuringEditing", Some("YES")),
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
@@ -78,7 +78,9 @@ fn check_table(table: Node) -> Result<(), String> {
     for i in children(table, "inset") {
         only_attributes(i, &[("key", Some("separatorInset")), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
     }
-    if !matches!(table.attribute("dataMode"), Some("prototypes" | "static")) {
+    // A xib's table without one is a prototypes table (one probe, eleven
+    // corpus xibs).
+    if !matches!(table.attribute("dataMode"), None | Some("prototypes" | "static")) {
         return fail("a table's dataMode other than prototypes or static is not supported by this ibtool");
     }
     let selection_keys = ["allowsSelection", "allowsMultipleSelection", "allowsSelectionDuringEditing"];
@@ -222,7 +224,10 @@ fn table_values(
     if table.attribute("showsHorizontalScrollIndicator").is_some() {
         values.push(("UIShowsHorizontalScrollIndicator", Value::Bool(false)));
     }
-    values.push(("UIBouncesZoom", Value::Bool(true)));
+    // Left out when it doesn't, as a text view's (ten corpus storyboards).
+    if table.attribute("bouncesZoom").is_none() {
+        values.push(("UIBouncesZoom", Value::Bool(true)));
+    }
     match table.attribute("alwaysBounceVertical") {
         Some("YES") => values.push(("UIAlwaysBounceVertical", Value::Bool(true))),
         Some("NO") | None => {}
@@ -411,7 +416,7 @@ pub(super) fn table_view_nib(
                 return fail(format!("a refresh control without {required} is not supported by this ibtool"));
             }
         }
-        if table.attribute("dataMode") != Some("prototypes")
+        if table.attribute("dataMode").is_some_and(|m| m != "prototypes")
             || header_or_footer(table, "tableHeaderView").is_some()
             || header_or_footer(table, "tableFooterView").is_some()
             || table.attribute("keyboardDismissMode").is_some()
@@ -503,11 +508,11 @@ pub(super) fn table_view_nib(
     let refresh_value = match refresh {
         Some(r) => {
             let mut values = Vec::new();
-            // Without a frame, 1000x1000 at the origin, as a subview (two
-            // corpus storyboards).
+            // Without a frame, the missing frame, as a subview (two corpus
+            // storyboards).
             let f = match child(r, "rect", "frame") {
                 Some(_) => frame(r)?,
-                None => Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 },
+                None => missing_frame(r)?,
             };
             geometry(&mut values, &f);
             values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIMultipleTouchEnabled", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
@@ -741,7 +746,10 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("restorationIdentifier", None),
         ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections", "accessibility"])?;
+    only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections", "accessibility", "inset", "userDefinedRuntimeAttributes"])?;
+    for i in children(cell, "inset") {
+        only_attributes(i, &[("key", Some("separatorInset")), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
+    }
     // A built-in style's labels, the content view's.
     let style = match cell.attribute("style") {
         None | Some("IBUITableViewCellStyleDefault") => 0,
@@ -796,7 +804,15 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
 
     // The content view and its subviews, compiled as a container's are.
     let mut scene = Scene::new(target, module, content, Some(content_name.clone()));
-    let cf = frame(content)?;
+    // The cell's runtime attributes are pairs of its own, listed before its
+    // views' (two probes).
+    let own = runtime_attributes(nib, cell, &cell_name)?;
+    scene.pairs.extend(own.into_iter().map(|p| (cell_name.clone(), p)));
+    // Without a frame, the missing frame, whatever the cell's (four probes).
+    let cf = match child(content, "rect", "frame") {
+        Some(_) => frame(content)?,
+        None => missing_frame(content)?,
+    };
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
     let mut subviews = Vec::new();
@@ -879,10 +895,16 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     nib.large_content(&mut cv);
     let content_view = Value::New(Object::new("UITableViewCellContentView", cv).with_fallback("UIView").named(content_name.clone()));
 
-    // The separator: a point high at the cell's foot, from 8 points in.
+    // The separator: a point high at the cell's foot, from 8 points in,
+    // and the separator inset's left edge further (three probes; its other
+    // edges change nothing).
     let f = frame(cell)?;
+    let inset = match child(cell, "inset", "separatorInset") {
+        Some(i) => number(attr(i, "minX")?)?,
+        None => 0.0,
+    };
     let mut sv = Vec::new();
-    geometry(&mut sv, &Frame { x: 8.0, y: f.h - 1.0, w: f.w - 8.0, h: 1.0 });
+    geometry(&mut sv, &Frame { x: 8.0 + inset, y: f.h - 1.0, w: f.w - 8.0 - inset, h: 1.0 });
     sv.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIOpaque", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
     sv.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut sv);
@@ -959,6 +981,12 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         values.push(("UIAccessoryType", Value::Int(a)));
     }
     values.push(("UIIndentationWidth", Value::Float(number(attr(cell, "indentationWidth")?)? as f32)));
+    // Its separator inset, top, left, bottom and right, as a table's, even
+    // when zero (two probes).
+    if let Some(i) = child(cell, "inset", "separatorInset") {
+        let [top, left, bottom, right] = ["minY", "minX", "maxY", "maxX"].map(|e| attr(i, e).and_then(number));
+        values.push(("UISeparatorInset", doubles(&[top?, left?, bottom?, right?])));
+    }
     if background.is_some() {
         values.push(("UITableCellBackgroundColorSet", Value::Bool(true)));
     }

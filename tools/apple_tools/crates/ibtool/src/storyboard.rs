@@ -1186,9 +1186,10 @@ fn runtime_class_name(n: Node, module: Option<&str>, default: &str) -> Result<St
         return Ok(default.into());
     };
     let module = match (n.attribute("customModuleProvider"), module) {
-        (Some("target"), Some(m)) => Some(m),
-        (None | Some("" | "target"), _) => n.attribute("customModule"),
-        (Some(p), _) => return fail(format!("customModuleProvider={p:?} is not supported by this ibtool")),
+        // Any provider but none is the target's (an unexpanded template
+        // variable among them: 20 corpus templates).
+        (Some(p), Some(m)) if !p.is_empty() => Some(m),
+        _ => n.attribute("customModule"),
     };
     Ok(match module {
         None | Some("") => class.to_string(),
@@ -1399,10 +1400,22 @@ fn frame(n: Node) -> Result<Frame, String> {
     Ok(Frame { x: number(attr(r, "x")?)?, y: number(attr(r, "y")?)?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? })
 }
 
+/// The frame Xcode gives a view without one (or with an all-zero one): 1000x1000
+/// at the origin in a document from Interface Builder's toolsVersion 11019
+/// on, none before (nine probes, by toolsVersion).
+fn missing_frame(n: Node) -> Result<Frame, String> {
+    let tools = n.document().root_element().attribute("toolsVersion").and_then(|v| v.parse::<f64>().ok());
+    match tools {
+        Some(v) if v >= 11019.0 => Ok(Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }),
+        Some(_) => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
+        None => fail(format!("<{}> without a frame in a document without a toolsVersion", n.tag_name().name())),
+    }
+}
+
 /// A subview's frame. Without one, or with an all-zero one, a label, button,
-/// image view, segmented control or plain view is 1000x1000 at the origin,
-/// or has no size if its frame is fixed (image views and segmented controls:
-/// four probes).
+/// image view, segmented control or plain view has the missing frame (see
+/// `missing_frame`), or has no size if its frame is fixed (image views and
+/// segmented controls: four probes).
 fn subview_frame(n: Node) -> Result<Frame, String> {
     if let Some(f) = child(n, "rect", "frame").map(|_| frame(n)).transpose()? {
         if f.x != 0.0 || f.y != 0.0 || f.w != 0.0 || f.h != 0.0 {
@@ -1411,7 +1424,7 @@ fn subview_frame(n: Node) -> Result<Frame, String> {
     }
     match n.tag_name().name() {
         "label" | "view" | "button" | "imageView" | "segmentedControl" if n.attribute("fixedFrame").is_some() => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
-        "label" | "view" | "button" | "imageView" | "segmentedControl" => Ok(Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }),
+        "label" | "view" | "button" | "imageView" | "segmentedControl" => missing_frame(n),
         other => fail(format!("<{other}> without a frame")),
     }
 }
@@ -2717,6 +2730,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("horizontalHuggingPriority", None),
                 ("verticalHuggingPriority", None), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
                 ("verticalCompressionResistancePriority", None),
+                // `fixedFrame` changes nothing beside a frame (one probe).
+                ("fixedFrame", Some("YES")),
             ])?;
             // `none` is the style a text field without one has (one probe).
             let border = match n.attribute("borderStyle") {
@@ -4093,9 +4108,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIStackViewAxis", Value::Int(vertical as i64)));
             values.push(("UIStackViewDistribution", Value::Int(distribution)));
             values.push(("UIStackViewAlignment", Value::Int(alignment)));
-            // The standard spacing is archived as none, whatever the spacing.
+            // The standard spacing is archived as the least normal float,
+            // whatever the spacing (UIStackViewSpacingUseSystem; three
+            // probes, from iOS 11).
             let spacing = match n.attribute("spacingType") {
-                Some("standard") => 0.0,
+                Some("standard") => f32::MIN_POSITIVE as f64,
                 None => n.attribute("spacing").map(number).transpose()?.unwrap_or(0.0),
                 Some(other) => return fail(format!("spacingType=\"{other}\" on <stackView> is not supported by this ibtool")),
             };
@@ -4330,7 +4347,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
                 ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")),
                 ("fixedFrame", Some("YES")), ("catalog", Some("system")), ("id", None),
-                ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")),
+                ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("autoresizesSubviews", Some("NO")),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
             view_connections(scene, n, &name)?;
@@ -4366,7 +4383,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("multipleTouchEnabled").is_some() {
                 values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
             }
-            values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            // Left out when it doesn't (one probe).
+            if n.attribute("autoresizesSubviews").is_none() {
+                values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+            }
             values.extend(mask_key(scene, n)?);
             alpha(&mut values, n)?;
             if content_mode != 0 {
@@ -6114,6 +6134,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let view_key = match vc.tag_name().name() {
             "tableViewController" => "tableView",
             "collectionViewController" => "collectionView",
+            // A xib's top-level reusable view, as its controller's view
+            // (xib.rs).
+            _ if xib && children(vc, "collectionReusableView").next().is_some() => "collectionReusableView",
             _ => "view",
         };
         let original_class = segue::original_class(vc);
@@ -6160,7 +6183,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 ("key", Some("view")), ("contentMode", None), ("insetsLayoutMarginsFromSafeArea", None),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
                 ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
-                ("autoresizesSubviews", Some("NO")), ("clipsSubviews", Some("YES")),
+                ("autoresizesSubviews", Some("NO")), ("clipsSubviews", Some("YES")), ("restorationIdentifier", None),
+                ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("reuseIdentifier", None),
                 // A simulated app context is Interface Builder's alone (one
                 // probe).
                 ("simulatedAppContext", None),
@@ -6358,10 +6382,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 Frame { x: origin.as_ref().map_or(0.0, |o| o.x), y: origin.as_ref().map_or(0.0, |o| o.y), w, h }
             }
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
-            // Without a frame (and no device), 1000x1000 at the origin, as
-            // a subview without one is (Flutter's accessibility launch
-            // screen).
-            (false, false, _, _) if child(view, "rect", "frame").is_none() => Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 },
+            // Without a frame (and no device), the missing frame, as a
+            // subview without one has (Flutter's accessibility launch
+            // screen; two probes).
+            (false, false, _, _) if child(view, "rect", "frame").is_none() => missing_frame(view)?,
             (false, _, _, _) => frame(view)?,
         };
         if is_list && !vc_collections.is_empty() {
@@ -6387,7 +6411,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // Laid out at another size than its frame's, the root view resizes
             // its autoresizing subviews: only those whose masks keep their
             // frames (fixed left and top margins, size) are established.
-            let document = if child(view, "rect", "frame").is_none() && !has_device { Frame { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 } } else { frame(view)? };
+            let document = if child(view, "rect", "frame").is_none() && !has_device { missing_frame(view)? } else { frame(view)? };
             if (f.w, f.h) != (document.w, document.h) {
                 for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
                     if s.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
@@ -6402,9 +6426,11 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     }
                 }
             }
+            // Without a mask, Interface Builder's default, flexible right
+            // and bottom margins; an empty one is left out (four probes).
             let mask = match children(view, "autoresizingMask").next() {
                 Some(m) => autoresizing_mask(m)?,
-                None => 0,
+                None => 36,
             };
             let background = child(view, "color", "backgroundColor");
             if let Some(c) = children(view, "color").find(|c| !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor"))) {
@@ -6513,11 +6539,20 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if view.attribute("opaque").is_none() {
                 values.push(("UIOpaque", Value::Bool(true)));
             }
+            // Its touch handling, as a subview's (three probes).
+            if view.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
+            if view.attribute("multipleTouchEnabled").is_some() {
+                values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
+            }
             // Not resizing its subviews, it leaves the key out (one probe).
             if view.attribute("autoresizesSubviews").is_none() {
                 values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             }
-            values.push(("UIAutoresizingMask", Value::Int(mask)));
+            if mask != 0 {
+                values.push(("UIAutoresizingMask", Value::Int(mask)));
+            }
             // A content mode other than scale to fill after the mask (two
             // probes), then clipping (one); beside clearing or a tint they
             // are refused.
@@ -6745,16 +6780,26 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![guide])));
             }
             margins(&mut values, view)?;
+            restoration_identifier(&mut nib, &mut values, view);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
+            // A reusable view's identifier, even empty, after the large
+            // content (three probes).
+            let root_class = if view.has_tag_name("collectionReusableView") { "UICollectionReusableView" } else { "UIView" };
+            if let Some(reuse) = view.attribute("reuseIdentifier") {
+                if root_class == "UIView" {
+                    return fail("the reuseIdentifier attribute of <view> is not supported by this ibtool");
+                }
+                values.push(("UIReuseIdentifier", nib.string(reuse)));
+            }
             // A custom class is swapped in for the root view when it loads.
             let root_object = if view.attribute("customClass").is_some() {
-                let class = runtime_class_name(view, module, "UIView")?;
+                let class = runtime_class_name(view, module, root_class)?;
                 values.push(("UIClassName", nib.string(&class)));
-                values.push(("UIOriginalClassName", nib.string("UIView")));
+                values.push(("UIOriginalClassName", nib.string(root_class)));
                 Object::new("UIClassSwapper", values)
             } else {
-                Object::new("UIView", values)
+                Object::new(root_class, values)
             };
             top.push(Value::New(root_object.named(root_name.clone())));
 

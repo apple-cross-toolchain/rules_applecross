@@ -23,7 +23,9 @@ fn fail<T>(msg: impl Into<String>) -> Result<T, String> {
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
-    if root.attribute("type") != Some("com.apple.InterfaceBuilder3.CocoaTouch.XIB") {
+    // An iPad xib compiles as any other (one probe).
+    let kind = root.attribute("type");
+    if !matches!(kind, Some("com.apple.InterfaceBuilder3.CocoaTouch.XIB" | "com.apple.InterfaceBuilder3.CocoaTouch.iPad.XIB")) {
         return fail("only iOS xibs are supported by this ibtool");
     }
     if doc.descendants().any(|d| d.attribute("id") == Some(CONTROLLER)) {
@@ -42,7 +44,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
                 responder = Some(o.attribute("id").ok_or("a first responder without an id")?);
             }
-            ("view" | "tableViewCell" | "collectionViewCell", _) if view.is_none() => view = Some(o),
+            ("view" | "collectionReusableView" | "tableViewCell" | "collectionViewCell", _) if view.is_none() => view = Some(o),
             (tag, _) => return fail(format!("a xib's top-level {tag} beside its one view is not supported by this ibtool")),
         }
     }
@@ -97,7 +99,8 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     // Actions and outlets to the owner are the controller's.
     let retarget = |text: &str| text.replace(&format!("destination=\"{owner_id}\""), &format!("destination=\"{CONTROLLER}\""));
     let text = without(xml, view, canvas);
-    controller.push_str(&retarget(&text.replacen("<view", "<view key=\"view\"", 1)));
+    let tag = format!("<{}", view.tag_name().name());
+    controller.push_str(&retarget(&text.replacen(&tag, &format!("{tag} key=\"view\""), 1)));
     controller.push('\n');
     if !outlets.is_empty() {
         controller.push_str(&format!("<connections>\n{}</connections>\n", retarget(&outlets)));
@@ -111,7 +114,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     // its initial controller.
     let head_end = xml[root.range().start..].find('>').map(|i| root.range().start + i).ok_or("a xib's document element")?;
     let mut head = xml[root.range().start..head_end].trim_end_matches('/').to_string();
-    head = head.replacen("type=\"com.apple.InterfaceBuilder3.CocoaTouch.XIB\"", "type=\"com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB\"", 1);
+    head = head.replacen(&format!("type=\"{}\"", kind.unwrap_or_default()), "type=\"com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB\"", 1);
     if root.attribute("initialViewController").is_some() {
         return fail("a xib's initialViewController is not supported by this ibtool");
     }

@@ -8,17 +8,18 @@ the watch app's WatchKit `Interface`. Compiled and linked, every file is
 byte-identical to Xcode 27.0's (toolchain compiler mode, the default).
 Linking copies an iOS or tvOS storyboard; a WatchKit one is rewritten
 (below). `ibtool --compile X.nib ... X.xib`, as rules_apple's compile_xib
-runs it, is reproduced for iOS xibs holding one view or one table view
-cell (below, "Xibs").
+runs it, is reproduced for iOS xibs holding one view, table or
+collection view cell, or reusable view (below, "Xibs").
 
 ## Xibs
 
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
-(iOS 12 to 26, one probe each). Of 359 iOS xibs found on one machine (old
-projects, examples and libraries, Interface Builder 3 to 27), 143 compile
-byte-identical to Xcode 27.0's and the rest are refused; none compile
-differently. `tests/ibtool_xib` holds 23 cases written for this, checked
-against Xcode's digests.
+(iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
+machine that Xcode 27.2 compiles (old projects, examples and libraries,
+Interface Builder 3 to 27), 195 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 50 cases written for this, checked
+against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
+any other (one probe).
 
 - **A view.** The xib's File's Owner, first responder and one top-level
   `<view>`: its nib is the view nib Xcode compiles for a storyboard scene
@@ -49,7 +50,8 @@ against Xcode's digests.
   unowned `UILayoutGuide` (no owning view, an empty identifier, none of it
   archived) listed after the content view, and after the style's detail
   label when it has one (five probes: plain, default, subtitle and right
-  detail cells, with and without the guide).
+  detail cells, with and without the guide). A cell without a reuse
+  identifier has no `UIReuseIdentifier` (one probe).
 - **A collection view cell.** A top-level `<collectionViewCell>` compiles
   as a collection view's prototype cell does (Collection views, below),
   with three differences:
@@ -68,7 +70,11 @@ against Xcode's digests.
   (eleven probes, and 17 more of the corpus's: every collection view cell
   and transparent table view cell there).
 - A table view cell's `opaque="NO"` leaves out `UIOpaque` (one probe).
-- Refused: other top-level objects (reusable views, several views, custom
+- **A collection reusable view.** A top-level `<collectionReusableView>`
+  compiles as a top-level view does, a `UICollectionReusableView` (or
+  swapped in for one), with its `reuseIdentifier`, even an empty one, as
+  `UIReuseIdentifier` after its large content (three probes).
+- Refused: other top-level objects (tables, several views, custom
   objects, gesture recognizers), an owner's connections beside a cell,
   macOS xibs, and xibs in the archive format of Interface Builder before
   Xcode 5.
@@ -95,10 +101,13 @@ the view, its colour and safe-area guide, the owner's `view` outlet).
 - A custom class in a module is named as the Swift runtime names it:
   `_TtC`, the module and the class, each after its length in UTF-8 bytes
   (`_TtC3Bär3Foo`), with `s` for the module `Swift`; a dotted class name
-  is taken whole (`_TtC3Bar11Outer.Inner`). With
-  `customModuleProvider="target"`, `--module` is the module when given,
-  the document's `customModule` otherwise (an empty provider is none); an
-  empty or missing module leaves the class name as written (17 probes).
+  is taken whole (`_TtC3Bar11Outer.Inner`). With a
+  `customModuleProvider`, `--module` is the module when given, the
+  document's `customModule` otherwise (an empty provider is none). Any
+  provider counts, not only `target`: Xcode's file templates leave
+  `___VARIABLE_ibCustomModuleProvider___` unexpanded (one probe, 20 of the
+  corpus's templates). An empty or missing module leaves the class name
+  as written (18 probes).
 
 ## NIB archives
 
@@ -470,8 +479,8 @@ other values of the attributes these use, is refused. Observed:
   its compression resistance, before its semantic content attribute (two
   probes).
 - A `<device>` without an orientation is portrait (one probe). Without a
-  device, a root view without a frame is 1000x1000 at the origin, as a
-  subview without one is; an image view with `opaque="NO"` leaves
+  device, a root view without a frame has the frame a subview without one
+  has (below); an image view with `opaque="NO"` leaves
   `UIOpaque` out, and `multipleTouchEnabled` is `UIMultipleTouchEnabled`
   before its autoresizing keys (Flutter's accessibility launch screen).
 - With a `<device>`, the root view is laid out at the device's size (or
@@ -493,7 +502,8 @@ other values of the attributes these use, is refused. Observed:
   aspect fill or centre) archives as a label's geometry and flags (a
   background colour first, hidden and tag after `UIOpaque`, alpha after
   the mask), then `UIContentMode` unless scale to fill, `UIClipsToBounds`,
-  `UITintColor`, the autoresizing key, its own constraints, its hugging
+  `UITintColor`, the autoresizing key (left out with
+  `autoresizesSubviews="NO"`: one probe), its own constraints, its hugging
   (none without priorities; a missing one is 250), its compression
   resistance if given (each 750 unless given), and `UIImage`:
   a `UIImageNibPlaceholder` per image name (width and height 1, the name,
@@ -517,6 +527,12 @@ other values of the attributes these use, is refused. Observed:
 - A controller's own `restorationIdentifier` is `UIRestorationIdentifier`
   after `UINibName` (one probe; beside a storyboard identifier, or in an
   embedded controller, it is refused).
+- A root view's mask is 36 without one and left out when empty (two
+  storyboard probes, two xib probes). Its `userInteractionEnabled="NO"` and
+  `multipleTouchEnabled="YES"` are `UIUserInteractionDisabled` and
+  `UIMultipleTouchEnabled` after `UIOpaque`, as a subview's are (two
+  probes), and its `restorationIdentifier` is `UIRestorationIdentifier`
+  just before its semantic content attribute (two probes).
 - A root view's content mode other than scale to fill is `UIContentMode`
   after its mask (two probes), then `UIClipsToBounds` when it clips (one);
   beside `clearsContextBeforeDrawing` or a tint they are refused. One that
@@ -565,7 +581,10 @@ other values of the attributes these use, is refused. Observed:
   `labelColor` (two probes).
 - A view's `UIBounds` is left out when its size is zero, and its
   `UICenter` when the centre is the origin. A label, button or plain view
-  without a frame, or with an all-zero one, is 1000x1000 at the origin,
+  without a frame, or with an all-zero one, is 1000x1000 at the origin in
+  a document of Interface Builder's `toolsVersion` 11019 or later, and has
+  no frame at all (zero) in an older one (nine probes, bisected by
+  `toolsVersion`, root views and a table cell's content view among them),
   or has no size when the document says `fixedFrame="YES"` (18 probes,
   three corpus storyboards); so is an image view or a segmented control
   (four probes, one corpus storyboard), an image view's `fixedFrame`
@@ -1149,7 +1168,8 @@ probes:
   the semantic content attribute, `UIViewLargeContentStoredProperties`,
   `UIScrollViewIndicatorInsetAdjustmentBehavior` 1,
   `UIShowsHorizontalScrollIndicator` false when it says NO (the vertical
-  one changes nothing), `UIBouncesZoom`, `UIAlwaysBounceVertical` when
+  one changes nothing), `UIBouncesZoom` (left out when it says NO: one
+  probe), `UIAlwaysBounceVertical` when
   YES, `UIKeyboardDismissMode` (onDrag 1, interactive 2),
   `UIScrollViewContentInsetAdjustmentBehavior` 0, `UITableViewStyle`
   (plain 0, grouped 1, insetGrouped 2), `UIStyle` (0 plain, else 1), the
@@ -1199,7 +1219,8 @@ probes:
   its key-value pairs, ordered as a controller's view's: by the views'
   places in its objects, counted from 1 and compared as decimal strings
   (eleven probes, up to eleven views and two switches), and so are a
-  collection view cell's (two probes).
+  collection view cell's (two probes). The cell's own runtime attributes
+  are pairs of its own, before its views' (two probes).
 - The cell: geometry from its frame in the document, `UISubviews` (the
   content view and a `_UITableViewCellSeparatorView`), its background,
   `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, its
@@ -1230,7 +1251,12 @@ probes:
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 when it says NO, the semantic
   content attribute, large content.
 - The separator is a point high at the cell's foot, from 8 points in to
-  its right edge, whatever the table's separator style or the device.
+  its right edge, whatever the table's separator style or the device;
+  a cell's `<inset key="separatorInset">` moves its start right by its
+  left inset and is `UISeparatorInset` (top, left, bottom, right) after
+  `UIIndentationWidth` (four probes, a zero inset among them). A cell's
+  content view without a frame has the missing frame (see subviews),
+  whatever the cell's (four probes).
 
 Refused for now: static tables, cells with a style (Basic, Subtitle and
 the rest), actions in cells, tables as subviews, header and footer views,
@@ -1240,7 +1266,8 @@ A table view can also be a subview of a controller's view: the same values
 as a table view controller's (one probe), with a subview's mask (36) when
 it gives none and its `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints`
 and own constraints after `UIClipsToBounds`; its outlets go to the
-controller's placeholder. Its cells' segues are refused.
+controller's placeholder. Its cells' segues are refused. A xib's table,
+which has no `dataMode`, compiles as a prototypes table (one probe).
 
 A controller's `<extendedEdge key="edgesForExtendedLayout">` is
 `UIKeyEdgesForExtendedLayout`, a UIRectEdge (top 1, left 2, bottom 4,
@@ -1295,7 +1322,8 @@ A view's outlets to another view of its nib, or to the controller, are
 sorted by name with the controller's; one between views uses no
 placeholder. A plain view may be `opaque="NO"` (no `UIOpaque`) or clip its
 subviews (`UIClipsToBounds`, after its content mode), and its
-`fixedFrame` changes nothing (seven probes).
+`fixedFrame` changes nothing (seven probes), nor does a text field's
+(one probe).
 
 A static cell's segue has a placeholder in the table's nib, after the
 controller's: section by section, each section's cells in reverse. The
@@ -1380,8 +1408,9 @@ probes). A label's compression resistance is
 `UIViewContentCompressionResistancePriority` (`{h, v}`, each 750 unless
 given) after its hugging priorities; labels and buttons take user-defined
 runtime attributes as views do; a disabled slider is `UIDisabled` before its
-value; a stack view's standard spacing (`spacingType`) is archived as 0,
-whatever its spacing (eight probes).
+value; a stack view's standard spacing (`spacingType`) is archived as the least
+normal float (1.1754944e-38), whatever its spacing (three probes, from a
+deployment target of iOS 11; corpus storyboards).
 
 A button's states are its `UIButtonStatefulContent`, keyed by
 UIControlState in that order whatever the document's (normal 0, which it
@@ -1798,7 +1827,9 @@ inside it. Observed with 15 probes and one corpus storyboard:
   outlets, the cell its destination (one corpus storyboard).
 - An old-format content view (`<view key="contentView">`, no id) is not
   the document's: it compiles to a plain opaque view the objects leave
-  out, its subviews compiled as usual. The constraints the cell holds are
+  out, its subviews compiled as usual. Its background colour is left out;
+  its mask is 36 without one, the document's when it has one, after
+  `UIAutoresizeSubviews` (five probes, four corpus xibs). The constraints the cell holds are
   that view's (the cell's id in them, explicit or implied, is the view,
   margins included). Then the view doesn't translate its mask and is
   pinned to the cell, as a new-format content view holding constraints is.
