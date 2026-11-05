@@ -49,6 +49,8 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
         // An empty list of gesture recognizers, or of animations (older
         // documents), is Interface Builder's alone (one probe).
         let empty_gestures = (c.has_tag_name("gestureRecognizers") || c.has_tag_name("animations")) && !c.children().any(|g| g.is_element());
+        // So are a view's user guides, the canvas's (one probe).
+        let empty_gestures = empty_gestures || c.has_tag_name("userGuides");
         // A view's variations go with its constraints, which compile them
         // (`excluded_constraints`).
         let variation = c.has_tag_name("variation") && allowed.contains(&"constraints");
@@ -2382,8 +2384,11 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
                 return fail("a subview's constraint without a second item on another view is not supported by this ibtool");
             }
             let rank = 2 * ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
-            if sizes.iter().any(|(r, _)| *r == rank) {
-                return fail("two constraints on a subview's same dimension are not supported by this ibtool");
+            // Two on one dimension go by relation (less than or equal,
+            // greater than or equal, then equal: five probes), then id;
+            // with different priorities they aren't established.
+            if sizes.iter().any(|(r, o): &(usize, Node)| *r == rank && o.attribute("priority") != c.attribute("priority")) {
+                return fail("two constraints on a subview's same dimension with different priorities are not supported by this ibtool");
             }
             sizes.push((rank, c));
             continue;
@@ -2429,7 +2434,12 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         };
         others.push(((f.x * f.x + f.y * f.y, f.x), key, c, first, second));
     }
-    sizes.sort_by_key(|f| (f.0, f.1.attribute("id")));
+    let relation = |c: Node| match c.attribute("relation") {
+        Some("lessThanOrEqual") => 0,
+        Some("greaterThanOrEqual") => 1,
+        _ => 2,
+    };
+    sizes.sort_by_key(|f| (f.0, relation(f.1), f.1.attribute("id")));
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
     order_ties(&mut others, |o| (o.1, o.2), &direct, &[])?;
     for (_, key, _, _, second) in &others {
@@ -2991,7 +3001,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // Also a table's header or footer view (a corpus storyboard).
             only_attributes(n, &[
                 ("contentMode", Some("scaleToFill")), ("hidden", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None), ("key", None),
-            ])?;
+            ("preservesSuperviewLayoutMargins", Some("YES")), ])?;
             if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
                 return fail(format!("key=\"{}\" on <pickerView> is not supported by this ibtool", n.attribute("key").unwrap_or("")));
             }
@@ -3015,6 +3025,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIViewAutolayoutConstraints", own));
             }
             values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            // Preserving its superview's margins after its hugging, as a
+            // view's (one probe).
+            if n.attribute("preservesSuperviewLayoutMargins").is_some() {
+                values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
+                values.push(("UIViewPreservesSpecificSuperviewMargins", Value::Int(15)));
+            }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIAllowSelectingCells", Value::Bool(true)));
@@ -3164,9 +3180,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if !scene.lists_toolbar_items {
                 return fail("a navigation bar in a table, a cell or a collection view is not supported by this ibtool");
             }
-            if n.attribute("translucent").is_none() || n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
-                return fail("a translucent navigation bar, or one translating its mask, is not supported by this ibtool");
+            if n.attribute("translatesAutoresizingMaskIntoConstraints").is_none() {
+                return fail("a navigation bar translating its mask is not supported by this ibtool");
             }
+            // Translucent, the default, it is not opaque and its
+            // translucence is 1 (one probe).
+            let translucent = n.attribute("translucent").is_none();
             let mut items = Vec::new();
             let mut names = Vec::new();
             for list in children(n, "items") {
@@ -3194,7 +3213,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
-            values.push(("UIOpaque", Value::Bool(true)));
+            if !translucent {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
             if does_not_translate(scene, n) {
@@ -3210,7 +3231,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             nib.large_content(&mut values);
             values.push(("UIItems", nib.array("NSMutableArray", items)));
             values.push(("UIBarPosition", Value::Int(2)));
-            values.push(("UIBarTranslucence", Value::Int(2)));
+            values.push(("UIBarTranslucence", Value::Int(if translucent { 1 } else { 2 })));
             scene.toolbar_items.push((name.clone(), names));
             Object::new("UINavigationBar", values)
         }
@@ -3223,6 +3244,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("clearsContextBeforeDrawing", Some("NO")), ("contentMode", Some("scaleToFill")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+                // `fixedFrame` changes nothing (one probe).
+                ("fixedFrame", Some("YES")),
             ])?;
             only_children(n, &["rect", "items", "constraints"])?;
             if !scene.lists_toolbar_items {
@@ -3302,7 +3325,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("fixedFrame", Some("YES")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("restorationIdentifier", None),
             ])?;
-            only_children(n, &["rect", "color", "constraints", "wkWebViewConfiguration"])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "wkWebViewConfiguration", "connections"])?;
+            // Its outlets (a navigation delegate) as any view's (one probe).
+            view_connections(scene, n, &name)?;
             if children(n, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
                 return fail("web view colours other than the background are not supported by this ibtool");
             }
@@ -3329,7 +3354,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            // The document's mask, 36 without one, as a UIWebView's (one
+            // probe).
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) => autoresizing_mask(m)?,
+                None => 36,
+            };
+            if mask != 0 {
+                values.push(("UIAutoresizingMask", Value::Int(mask)));
+            }
             if n.attribute("clipsSubviews").is_some() {
                 values.push(("UIClipsToBounds", Value::Bool(true)));
             }
@@ -3458,7 +3491,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("contentMode", Some("scaleToFill")), ("scalesPageToFit", Some("YES")), ("fixedFrame", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "dataDetectorType"])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "dataDetectorType", "connections"])?;
+            // Its outlets (a delegate) as any view's (one probe).
+            view_connections(scene, n, &name)?;
             // Data detectors given are UIDataDetectorTypes (phone numbers 1,
             // links 2), left out when none; without them, phone numbers
             // (three probes).
@@ -3610,7 +3645,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
                 // `fixedFrame` changes nothing, nor does Interface Builder's
                 // placeholder intrinsic size (one probe each).
-                ("fixedFrame", Some("YES")), ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
+                ("fixedFrame", Some("YES")), ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None), ("keyboardDismissMode", None),
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("horizontalCompressionResistancePriority", None),
                 ("verticalCompressionResistancePriority", None),
             ])?;
@@ -3714,6 +3749,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if n.attribute("bouncesZoom").is_none() {
                 values.push(("UIBouncesZoom", Value::Bool(true)));
+            }
+            // Its keyboard dismiss mode after `UIBouncesZoom`, as a table's
+            // (onDrag 1, interactive 2: one probe).
+            match n.attribute("keyboardDismissMode") {
+                None | Some("none") => {}
+                Some("onDrag") => values.push(("UIKeyboardDismissMode", Value::Int(1))),
+                Some("interactive") => values.push(("UIKeyboardDismissMode", Value::Int(2))),
+                Some(other) => return fail(format!("keyboardDismissMode {other} is not supported by this ibtool")),
             }
             values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
             let alignment = text_alignment(n.attribute("textAlignment"))?;
@@ -4113,7 +4156,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("preservesSuperviewLayoutMargins", Some("YES")), ("id", None),
                 ("tag", None), ("alpha", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
-                ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
+                ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None), ("userInteractionEnabled", Some("NO")),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
             // An explicit horizontal axis is the default (fuzzed storyboards).
@@ -4173,6 +4216,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
+            // Not interactive after its hidden flag and tag, as a plain view (one
+            // probe).
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
@@ -4454,7 +4502,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
                 ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")),
-                ("fixedFrame", Some("YES")), ("catalog", Some("system")), ("id", None),
+                ("fixedFrame", Some("YES")), ("catalog", Some("system")), ("id", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("autoresizesSubviews", Some("NO")),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
@@ -4515,6 +4563,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if resistance != (None, None) {
                 let (h, v) = (resistance.0.unwrap_or("750"), resistance.1.unwrap_or("750"));
                 values.push(("UIViewContentCompressionResistancePriority", nib.string(&format!("{{{h}, {v}}}"))));
+            }
+            // Not insetting margins from the safe area, after its
+            // priorities (one probe).
+            if n.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+                values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
@@ -6105,7 +6158,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             "collectionView", "webView", "wkWebView",
         ])?;
         // A xib's table view cells and views beside its view (xib.rs).
-        let extra_roots: Vec<Node> = objects_node.children().filter(|c| c.has_tag_name("tableViewCell") || crate::xib::BESIDE_VIEWS.contains(&c.tag_name().name())).collect();
+        let extra_roots: Vec<Node> = objects_node
+            .children()
+            .filter(|c| c.has_tag_name("tableViewCell") || (xib && c.has_tag_name("customObject")) || crate::xib::BESIDE_VIEWS.contains(&c.tag_name().name()))
+            .collect();
         if !xib && !extra_roots.is_empty() {
             return fail(format!("<{}> inside <objects> is not supported by this ibtool", extra_roots[0].tag_name().name()));
         }
@@ -6339,7 +6395,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("preservesSuperviewLayoutMargins", Some("YES")), ("opaque", Some("NO")),
                 ("clearsContextBeforeDrawing", Some("NO")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                 ("autoresizesSubviews", Some("NO")), ("clipsSubviews", Some("YES")), ("restorationIdentifier", None),
-                ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("reuseIdentifier", None),
+                ("userInteractionEnabled", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("reuseIdentifier", None), ("tag", None),
                 // A simulated app context is Interface Builder's alone (one
                 // probe).
                 ("simulatedAppContext", None),
@@ -6361,7 +6417,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // in the controller's nib as the recognizers are: those the view's
         // outlets name are reached through placeholders after the
         // recognizers', in reverse document order (eight probes).
-        let custom_objects: Vec<Node> = objects_node.children().filter(|c| c.has_tag_name("customObject")).collect();
+        // A xib's are top-level objects of its nib instead (below).
+        let custom_objects: Vec<Node> = objects_node.children().filter(|c| c.has_tag_name("customObject") && !xib).collect();
         for o in &custom_objects {
             only_attributes(*o, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
             if o.attribute("customClass").is_none() || o.children().any(|c| c.is_element()) {
@@ -6379,7 +6436,14 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // The recognizers' and objects' placeholders: the recognizers', then
         // the objects', the controller's after them, but before the
         // objects' when its outlets reach into the view (twelve probes).
-        let gesture = recognizers.len() + referenced.len();
+        // Only recognizers a view has get placeholders; one no view has is
+        // the controller's nib's alone, kept alive there (one probe).
+        let attached: Vec<&str> = recognizers
+            .iter()
+            .filter_map(|r| r.attribute("id"))
+            .filter(|id| vc.descendants().any(|d| d.has_tag_name("outletCollection") && d.attribute("property") == Some("gestureRecognizers") && d.attribute("destination") == Some(*id)))
+            .collect();
+        let gesture = attached.len() + referenced.len();
         for g in children(vc, "layoutGuides") {
             only_children(g, &["viewControllerLayoutGuide"])?;
             for guide in children(g, "viewControllerLayoutGuide") {
@@ -6461,7 +6525,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     }
                     // One to a custom object is in the controller's nib too,
                     // after its storyboard outlet (three probes).
-                    Some(g) if g.has_tag_name("customObject") => {
+                    // A xib's is the owner's own outlet to its object.
+                    Some(g) if g.has_tag_name("customObject") && !xib => {
                         object_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
                         continue;
                     }
@@ -6638,8 +6703,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // controller's.
             view_connections(&mut scene, view, &root_name)?;
             let numbered = gesture_order(&scene.gesture_views);
-            if numbered.len() != recognizers.len() {
-                return fail("a gesture recognizer no view has is not supported by this ibtool");
+            if numbered.len() != attached.len() {
+                return fail("a gesture recognizer listed by a view outside the controller's is not supported by this ibtool");
             }
             // Popover segues' placeholders come first, in reverse document
             // order, then the others in document order; their templates
@@ -6712,7 +6777,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if view.attribute("opaque").is_none() {
                 values.push(("UIOpaque", Value::Bool(true)));
             }
-            // Its touch handling, as a subview's (three probes).
+            // Its tag and touch handling, as a subview's (four probes).
+            hidden_and_tag(&mut values, view)?;
             if view.attribute("userInteractionEnabled").is_some() {
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             }
@@ -7109,9 +7175,25 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
                 let mut roots = Vec::new();
                 for r in &extra_roots {
+                    // A custom object: its class swapped in for
+                    // UICustomObject, listing nothing, its outlets sorted
+                    // with the others (one probe).
+                    if r.has_tag_name("customObject") {
+                        only_attributes(*r, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+                        only_children(*r, &["connections"])?;
+                        let name = view_name(attr(*r, "id")?);
+                        let class = runtime_class_name(*r, module, "UICustomObject")?;
+                        let values = vec![("UIClassName", nib.string(&class)), ("UIOriginalClassName", nib.string("UICustomObject"))];
+                        view_connections(&mut scene, *r, &name)?;
+                        scene.subviews.push((None, name.clone()));
+                        roots.push((name.clone(), Value::New(Object::new("UIClassSwapper", values).named(name)), Vec::new(), Vec::new()));
+                        continue;
+                    }
                     if r.has_tag_name("tableViewCell") {
                         let guide = layout.is_some_and(|l| l.cell_guides.iter().any(|g| Some(g.as_str()) == r.attribute("id")));
-                        let cell = table::xib_cell(&mut nib, module, *r, guide)?;
+                        let cell = table::xib_cell(&mut nib, module, *r, guide, vc_id)?;
+                        scene.control_outlets.extend(cell.control_outlets);
+                        scene.actions.extend(cell.actions);
                         roots.push((cell.names[0].clone(), cell.value, cell.first, cell.rest));
                         scene.subviews.extend(cell.names.iter().map(|n| (None, n.clone())));
                         continue;

@@ -55,6 +55,8 @@ fn check_table(table: Node) -> Result<(), String> {
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("restorationIdentifier", None), ("id", None),
         ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+        // `fixedFrame` changes nothing (one probe).
+        ("fixedFrame", Some("YES")), ("bounces", Some("NO")),
     ])?;
     only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "searchBar", "pickerView", "prototypes", "sections", "connections", "constraints"])?;
     // A picker as a header or footer view too (a corpus storyboard).
@@ -221,6 +223,10 @@ fn table_values(
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+    // Not bouncing, before its indicators as a text view's (one probe).
+    if table.attribute("bounces").is_some() {
+        values.push(("UIBounceEnabled", Value::Bool(false)));
+    }
     if table.attribute("showsHorizontalScrollIndicator").is_some() {
         values.push(("UIShowsHorizontalScrollIndicator", Value::Bool(false)));
     }
@@ -339,10 +345,17 @@ pub(super) fn subview_table(nib: &mut Nib, scene: &mut Scene, n: Node, name: &st
         only_children(c, &["outlet"])?;
         for o in children(c, "outlet") {
             only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
-            if attr(o, "destination")? != scene.vc_id {
-                return fail("a table's outlets to anything but its controller are not supported by this ibtool");
-            }
-            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string(), "upstream".into()));
+            // Or a custom object of the scene, as a collection view's
+            // (one probe).
+            let destination = attr(o, "destination")?;
+            let to = if destination == scene.vc_id {
+                "upstream".into()
+            } else if custom_object(n, destination) {
+                view_name(destination)
+            } else {
+                return fail("a table's outlets to anything but its controller or a custom object are not supported by this ibtool");
+            };
+            scene.control_outlets.push((attr(o, "property")?.to_string(), name.to_string(), to));
         }
     }
     let mut layout = Vec::new();
@@ -589,7 +602,7 @@ pub(super) fn table_view_nib(
                 for cs in children(sec, "cells") {
                     only_children(cs, &["tableViewCell"])?;
                     for cell in children(cs, "tableViewCell") {
-                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell, vc_id)?;
+                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell, vc_id, false)?;
                         if !cell_parts.scene.accessibility.is_empty() {
                             return fail("accessibility settings on a static table's cells are not supported by this ibtool");
                         }
@@ -738,7 +751,9 @@ struct CellParts<'a> {
 /// separator Xcode lays out at its foot.
 /// Its controls' actions may target `target`: the cell itself in a
 /// prototype's nib, the controller in a static table's.
-fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, target: &'a str) -> Result<(Value, CellParts<'a>), String> {
+/// `outlets`: whether its controls may have outlets to `target` (a xib's
+/// cell beside its view).
+fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, target: &'a str, outlets: bool) -> Result<(Value, CellParts<'a>), String> {
     only_attributes(cell, &[
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("preservesSuperviewLayoutMargins", Some("YES")),
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
@@ -848,7 +863,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         }
         scene.subviews.sort_by_key(|s| Some(&s.1) != detail_label.as_ref());
     }
-    if scene.actions.iter().any(|a| a.3 != "upstream") || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
+    if scene.actions.iter().any(|a| a.3 != "upstream") || !scene.segues.is_empty() || (!outlets && !scene.control_outlets.is_empty()) || !scene.view_outlets.is_empty() {
         return fail("actions other than on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
     // A prototype's nib holds its switches' frames and its views' runtime
@@ -1028,7 +1043,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     // A cell's segue is its placeholder's.
     let upstream = if has_segue { Some(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream")) } else { None };
 
-    let (cell_value, parts) = cell_object(&mut nib, module, cell, attr(cell, "id")?)?;
+    let (cell_value, parts) = cell_object(&mut nib, module, cell, attr(cell, "id")?, false)?;
     let CellParts { name: cell_name, content: content_name, mut scene } = parts;
     let mut top = vec![owner, responder];
     top.extend(upstream);
@@ -1114,25 +1129,31 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
 /// what the objects list first for it (its content view, its safe-area
 /// guide when it has one, the content view's subviews) and then (the rest,
 /// breadth first, as `cell_nib` lists them), and the names of its views,
-/// for outlets to them. Its own connections, actions, runtime attributes
-/// and accessibility aren't established there and are refused.
+/// for outlets to them; its controls' outlets and actions on the owner
+/// (`vc_id`, the xib's controller), sorted with the view's (one probe). Its
+/// own connections, runtime attributes and accessibility aren't established
+/// there and are refused.
 pub(super) struct XibCell {
     pub value: Value,
     pub first: Vec<Value>,
     pub rest: Vec<Value>,
     pub names: Vec<String>,
+    pub control_outlets: Vec<(String, String, String)>,
+    pub actions: Vec<(String, String, i64, String)>,
 }
 
-pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_area: bool) -> Result<XibCell, String> {
+pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_area: bool, vc_id: &str) -> Result<XibCell, String> {
     let (segue, outlets) = cell_connections(cell)?;
     if segue.is_some() || !outlets.is_empty() {
         return fail("connections of a cell beside a xib's view are not supported by this ibtool");
     }
-    let (value, parts) = cell_object(nib, module, cell, attr(cell, "id")?)?;
-    let CellParts { name, content, scene } = parts;
-    if !scene.actions.is_empty() || !scene.pairs.is_empty() || !scene.accessibility.is_empty() || !scene.view_outlets.is_empty() || !scene.control_outlets.is_empty() {
-        return fail("actions, outlets, runtime attributes or accessibility in a cell beside a xib's view are not supported by this ibtool");
+    let (value, parts) = cell_object(nib, module, cell, vc_id, true)?;
+    let CellParts { name, content, mut scene } = parts;
+    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() || !scene.view_outlets.is_empty() || scene.actions.iter().any(|a| a.3 != "upstream") {
+        return fail("outlets, runtime attributes or accessibility in a cell beside a xib's view are not supported by this ibtool");
     }
+    let control_outlets = std::mem::take(&mut scene.control_outlets);
+    let actions = std::mem::take(&mut scene.actions);
     let content_parent = Some(content.clone());
     let direct: Vec<&String> = scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| &s.1).collect();
     // Its guide after a style's detail label, as in its own nib.
@@ -1160,7 +1181,7 @@ pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_are
     }
     let mut names = vec![name, content];
     names.extend(scene.subviews.iter().map(|s| s.1.clone()));
-    Ok(XibCell { value, first, rest, names })
+    Ok(XibCell { value, first, rest, names, control_outlets, actions })
 }
 
 /// A xib's cell's safe-area guide: unowned and not archived.
