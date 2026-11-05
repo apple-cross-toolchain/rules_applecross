@@ -90,7 +90,7 @@ _MULTIARCH = {
 
 _HOST_DEBS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/host-debs-20260829/"
 
-_PORTED_TOOLS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/ported-tools-0.0.27/"
+_PORTED_TOOLS_URL = "https://github.com/apple-cross-toolchain/rules_applecross/releases/download/ported-tools-0.0.28/"
 
 def _linux_exec_cpu(rctx):
     """The host's CPU on Linux; x86_64 (remote executors) elsewhere."""
