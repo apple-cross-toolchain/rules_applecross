@@ -16,8 +16,8 @@ collection view cell, or reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 212 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 68 cases written for this, checked
+Interface Builder 3 to 27), 215 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 71 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -1333,7 +1333,8 @@ probes; container views in a footer are refused). A table's `separatorInset` is
 before `UISeparatorInsetReference` (36 probes in all).
 
 A view's outlets to another view of its nib, or to the controller, are
-sorted by name with the controller's; one between views uses no
+sorted by name with the controller's (the owner's `view` outlet before a
+controller's explicit one: a corpus storyboard); one between views uses no
 placeholder. One to a constraint of the nib is as a controller's (one
 probe). A plain view may be `opaque="NO"` (no `UIOpaque`) or clip its
 subviews (`UIClipsToBounds`, after its content mode), and its
@@ -1531,7 +1532,8 @@ A collection view in a view is compiled as a collection view controller's
 outlets the controller's, its flow layout listed as its child (after the
 collection view's siblings) and its automatic estimated item size a pair
 of the layout's; its cells' segues and constraints it holds are refused
-(three probes). With `opaque="NO"` it leaves out `UIOpaque`; with
+(three probes). A custom class swaps in for it, its class names last (one
+probe). With `opaque="NO"` it leaves out `UIOpaque`; with
 `dataMode="none"` its nil `UIDelegate`; zoom scales are
 `UIMinimumZoomScale` and `UIMaximumZoomScale` after `UIBouncesZoom`, as a
 scroll view's (four probes).
@@ -1573,6 +1575,14 @@ given) and, for a count-down timer, `UIDatePickerUseCurrentDateDuringDecoding`
 false (eight probes; Xcode lays the wheels style out at its own width, so
 it is refused).
 
+A controller's view may be a SceneKit view (`<sceneKitView key="view">`,
+Xcode's game templates): an `SCNView` with a root view's keys (white,
+`whiteColor`, without a background), then SceneKit's defaults as an
+`ARSCNView`'s, below, its `backgroundColor` the same colour object or nil.
+It has no layout guides at all, neither a safe-area guide nor the legacy
+ones (two corpus storyboards); one listing a guide or holding subviews is
+refused.
+
 An ARKit SceneKit view is an `ARSCNView`: its background (white,
 `whiteColor`, unless the document gives one), opaque, multiple touch,
 `UIAutoresizeSubviews`, its mask as a label's, clipping, its constraint
@@ -1598,7 +1608,10 @@ A toolbar in a view is a `UIToolbar`: `UIDeepDrawRect`, mask 36,
 `UIClearsContextBeforeDrawing` false when it says so, its constraint keys,
 hugging `{250, 250}`, semantic content and large content properties, then
 `UIItems` (its bar button items, defined there as a navigation item's
-are), `UIBarPosition` 1 and `UIBarTranslucence` 1. The objects list its
+are; with none, the nib's one empty array, where a tab bar's empty items
+are an array of their own: one probe, three corpus storyboards),
+`UIBarPosition` 1 and `UIBarTranslucence` 1, then the class names when a
+custom class swaps in for it (one probe). The objects list its
 items in its turn, after its constraints, as its subviews would be (two
 probes). An item's action on the controller is an event connection
 without a mask, which sorts before the controls' actions (one probe). An
