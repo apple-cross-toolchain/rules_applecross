@@ -4,8 +4,8 @@ Core Data models (`.xcdatamodeld`, `.xcdatamodel`) compile off a Mac with
 `--config=relax_momc`: each model version to the `.mom` Xcode 27.2's
 `momc` writes, byte for byte, with a `VersionInfo.plist` that leaves out what
 isn't established (below). `toolchain/stubs/momc.py` is the implementation,
-pure Python; `tests/momc` compares it with Xcode's own output for 77 models,
-and refuses 8 more. Mapping models (`mapc`) and generated classes
+pure Python; `tests/momc` compares it with Xcode's own output for 86 models,
+and refuses 7 more. Mapping models (`mapc`) and generated classes
 (`momc --action generate`) aren't reproduced.
 
 ## What momc writes
@@ -19,7 +19,8 @@ The deployment target, platform and `--module` don't change any of them.
 A `.mom` is an `NSKeyedArchiver` archive of an `NSManagedObjectModel`, its
 `NSEntityDescription`s, their `NSAttributeDescription`s and
 `NSRelationshipDescription`s, and the fetch requests, configurations,
-dictionaries, sets, arrays, dates and decimal numbers they hold.
+validation predicates, dictionaries, sets, arrays, dates and decimal
+numbers they hold.
 
 ### The archive
 
@@ -39,7 +40,8 @@ dictionaries, sets, arrays, dates and decimal numbers they hold.
   - Any other string is one for each attribute in the XML it comes from.
   - Integers are one object for each value and CoreFoundation type. The
     archive's keys, counts and flags are 32-bit; default values, Xcode's
-    version and a fetch request's flags and types are 64-bit.
+    version, a fetch request's flags and types, and predicates' constants,
+    types and warnings are 64-bit.
   - A floating-point number is one object for its value and type when it's
     a whole number of magnitude below 2^55. Otherwise it's an object of its
     own.
@@ -47,10 +49,15 @@ dictionaries, sets, arrays, dates and decimal numbers they hold.
   - Booleans and UIDs are written each time they occur, referring to the
     first.
   - A decimal's mantissa is written each time.
+  - A predicate's `SELF` is one object, and so is its `valueForKey:`
+    selector name (apart from an equal string in the XML). A date rule's
+    key, `timeIntervalSinceReferenceDate`, is a new string each time; a
+    string rule's, `length`, is shared with equal strings.
 - **Class names.** These are one string shared with equal values, except
-  Core Data's own classes, `NSDecimalNumber` and its placeholder, and
-  `NSValue`, whose names are a new string each time (as the value class
-  name of a Decimal attribute is).
+  Core Data's own classes, `NSDecimalNumber` and its placeholder, `NSValue`,
+  `NSPredicate`, `NSComparisonPredicateOperator` and
+  `NSStringPredicateOperator`, whose names are a new string each time (as
+  the value class name of a Decimal attribute is).
 
 ### The model
 
@@ -71,6 +78,22 @@ dictionaries, sets, arrays, dates and decimal numbers they hold.
   400; Double 500; Float 600; String 700; Boolean 800; Date 900; Binary
   1000; UUID 1100; URI 1200; Transformable 1800.
 - **Delete rules.** No Action 0, Nullify 1, Cascade 2, Deny 3.
+- **Validation rules.** An attribute's minimum, maximum and pattern become
+  `NSValidationPredicates`, an array of `NSComparisonPredicate`s in that
+  order, and `NSValidationWarnings`, an array of their warning codes,
+  encoded after the renaming identifier.
+  - A number's bound compares `SELF` (1620 for the minimum, 1610 for the
+    maximum); a date's compares `SELF.timeIntervalSinceReferenceDate`
+    (1640, 1630); a string's compares `SELF.length` (1670, 1660).
+  - A minimum is `>=` (operator type and variant 3), a maximum `<=` (1).
+  - A pattern is `SELF MATCHES` it (`NSMatchingPredicateOperator`, 1680).
+  - Integer, Decimal and string-length bounds are the text's `longLongValue`
+    (white space skipped, anything after the integer ignored, 0 for none,
+    saturating); Double and Float bounds its `doubleValue` as a 64-bit
+    number (`inf` is 0); a date's is whole minutes, rounded down, as for
+    default values.
+  - A rule given, even empty, is a predicate. Booleans', Binary data's,
+    UUIDs', URIs' and Transformables' rules are left out.
 - **Default values.**
   - Integers are 64-bit numbers.
   - Floats are 32-bit, doubles 64-bit.
@@ -106,7 +129,7 @@ order, and the other three have two subentities swapped.
 
 Compiling refuses these, relaxed or not:
 
-- predicates: fetch requests with them, validation rules;
+- fetch requests with predicates;
 - fetched properties, derived and composite attributes, fetch indexes;
 - fetch request options other than a limit and a batch size;
 - a userInfo key given twice;

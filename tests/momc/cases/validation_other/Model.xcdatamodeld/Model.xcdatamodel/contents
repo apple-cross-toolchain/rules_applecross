@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="O" representedClassName="O" syncable="YES" codeGenerationType="class">
+        <attribute name="a" attributeType="Binary" optional="YES" minValueString="1" maxValueString="5"/>
+        <attribute name="b" attributeType="UUID" optional="YES" minValueString="1"/>
+        <attribute name="c" attributeType="URI" optional="YES" maxValueString="5"/>
+        <attribute name="d" attributeType="Transformable" optional="YES" minValueString="1" valueTransformerName="NSSecureUnarchiveFromData"/>
+        <attribute name="e" attributeType="Integer 16" optional="YES" minValueString="40000" maxValueString=" 7" usesScalarValueType="YES"/>
+        <attribute name="f" attributeType="String" optional="YES" minValueString="abc" maxValueString="99999999999999999999"/>
+        <attribute name="g" attributeType="Double" optional="YES" minValueString="1,5" maxValueString="inf"/>
+    </entity>
+</model>

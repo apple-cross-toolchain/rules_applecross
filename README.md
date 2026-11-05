@@ -40,9 +40,9 @@ one fails:
   classes (`momc --action generate`). Models compile, each version to the
   `.mom` Xcode writes, with `--config=relax_momc`: their `VersionInfo.plist`
   leaves out the entity version hashes, which Core Data computes itself, so
-  stores load, save and migrate as with Xcode's. Predicates, fetched and
-  derived properties, composite attributes, fetch indexes and names other
-  than ASCII are refused
+  stores load, save and migrate as with Xcode's. Fetch request predicates,
+  fetched and derived properties, composite attributes, fetch indexes and
+  names other than ASCII are refused
   ([docs/clean-room/momc.md](docs/clean-room/momc.md));
 - Core ML's older neural networks. ML Programs (`.mlpackage`, states,
   several functions, flexible shapes, optional inputs and compressed weights

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="V" representedClassName="V" syncable="YES" codeGenerationType="class">
+        <attribute name="i16" attributeType="Integer 16" optional="YES" minValueString="1" maxValueString="9" usesScalarValueType="YES"/>
+        <attribute name="i32min" attributeType="Integer 32" optional="YES" minValueString="0" usesScalarValueType="YES"/>
+        <attribute name="i64max" attributeType="Integer 64" optional="YES" maxValueString="1000000" usesScalarValueType="YES"/>
+        <attribute name="dbl" attributeType="Double" optional="YES" minValueString="0.5" maxValueString="2" usesScalarValueType="YES"/>
+        <attribute name="flt" attributeType="Float" optional="YES" minValueString="1.5" usesScalarValueType="YES"/>
+        <attribute name="dec" attributeType="Decimal" optional="YES" minValueString="1" maxValueString="3"/>
+        <attribute name="smin" attributeType="String" optional="YES" minValueString="2"/>
+        <attribute name="smax" attributeType="String" optional="YES" maxValueString="40"/>
+        <attribute name="sre" attributeType="String" optional="YES" regularExpressionString="^[A-Z].*$"/>
+        <attribute name="dmin" attributeType="Date" optional="YES" minDateTimeInterval="-3600"/>
+        <attribute name="dmax" attributeType="Date" optional="YES" maxDateTimeInterval="86400"/>
+    </entity>
+</model>
