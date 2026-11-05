@@ -1104,7 +1104,11 @@ fn gesture_recognizer(nib: &mut Nib, module: Option<&str>, r: Node, vc_id: &str)
 fn content_mode(name: &str) -> Result<i64, String> {
     const MODES: [&str; 13] =
         ["scaleToFill", "scaleAspectFit", "scaleAspectFill", "redraw", "center", "top", "bottom", "left", "right", "", "topRight", "bottomLeft", "bottomRight"];
-    // Xcode compiles topLeft as scaleToFill: refused.
+    // Xcode compiles topLeft as scaleToFill: refused. Older documents'
+    // `TopLeft` is UIViewContentModeTopLeft, 9 (one probe).
+    if name == "TopLeft" {
+        return Ok(9);
+    }
     MODES.iter().position(|m| !m.is_empty() && *m == name).map(|p| p as i64).ok_or_else(|| format!("contentMode=\"{name}\" is not supported by this ibtool"))
 }
 
@@ -1434,6 +1438,8 @@ fn subview_frame(n: Node) -> Result<Frame, String> {
     match n.tag_name().name() {
         "label" | "view" | "button" | "imageView" | "segmentedControl" if n.attribute("fixedFrame").is_some() => Ok(Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }),
         "label" | "view" | "button" | "imageView" | "segmentedControl" => missing_frame(n),
+        // So is a table view's or navigation bar's (two probes).
+        "tableView" | "navigationBar" if n.attribute("fixedFrame").is_none() => missing_frame(n),
         other => fail(format!("<{other}> without a frame")),
     }
 }
@@ -3093,14 +3099,17 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("contentHorizontalAlignment", Some("left")),
                 ("contentVerticalAlignment", Some("top")), ("segmentControlStyle", None), ("selectedSegmentIndex", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("fixedFrame", Some("YES")), ("id", None),
-                ("hidden", Some("YES")), ("tag", None), ("alpha", None),
+                ("hidden", Some("YES")), ("tag", None), ("alpha", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
             ])?;
             // `fixedFrame` changes nothing beside a frame (one probe), nor
             // does the deprecated bar style (one probe).
             if !matches!(n.attribute("segmentControlStyle"), None | Some("plain" | "bar")) {
                 return fail("a segmented control style other than plain or bar is not supported by this ibtool");
             }
-            only_children(n, &["rect", "autoresizingMask", "segments", "constraints", "connections"])?;
+            only_children(n, &["rect", "autoresizingMask", "segments", "constraints", "connections", "color"])?;
+            if children(n, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
+                return fail("a segmented control's colours other than its background are not supported by this ibtool");
+            }
             for c in children(n, "connections") {
                 only_children(c, &["action"])?;
                 for a in children(c, "action") {
@@ -3140,6 +3149,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             built.push(selected_segment);
             let subviews = built.into_iter().map(|(_, segment_name, o)| Value::New(o.named(segment_name))).collect();
             values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
+            // Its background after its segments (one probe).
+            if let Some(c) = child(n, "color", "backgroundColor") {
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
@@ -3151,7 +3164,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
-            values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            // Its hugging, 250 each unless given (one probe).
+            values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.extend([
@@ -3247,7 +3261,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 // `fixedFrame` changes nothing (one probe).
                 ("fixedFrame", Some("YES")),
             ])?;
-            only_children(n, &["rect", "items", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "items", "constraints"])?;
             if !scene.lists_toolbar_items {
                 return fail("a toolbar in a table, a cell or a collection view is not supported by this ibtool");
             }
@@ -3285,7 +3299,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.push(("UIAutoresizingMask", Value::Int(36)));
+            // The document's mask, 36 without one; an empty one is
+            // UIToolbar's own, flexible width and top margin (three probes).
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) => match autoresizing_mask(m)? {
+                    0 => 10,
+                    m => m,
+                },
+                None => 36,
+            };
+            values.push(("UIAutoresizingMask", Value::Int(mask)));
             if n.attribute("clearsContextBeforeDrawing").is_some() {
                 values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
             }
@@ -3325,7 +3348,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("fixedFrame", Some("YES")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("restorationIdentifier", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "wkWebViewConfiguration", "connections"])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "wkWebViewConfiguration", "connections", "userDefinedRuntimeAttributes"])?;
+            // Its runtime attributes, key-value pairs as a label's (one
+            // probe).
+            let pairs = runtime_attributes(nib, n, &name)?;
+            scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             // Its outlets (a navigation delegate) as any view's (one probe).
             view_connections(scene, n, &name)?;
             if children(n, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
@@ -3651,8 +3678,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             ])?;
             only_children(n, &[
                 "rect", "autoresizingMask", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility",
-                "userDefinedRuntimeAttributes",
+                "userDefinedRuntimeAttributes", "dataDetectorType",
             ])?;
+            // Data detectors given are UIDataDetectorTypes after its
+            // alignment (phone numbers 1, links 2; two probes).
+            let mut detectors = 0;
+            if let Some(d) = child(n, "dataDetectorType", "dataDetectorTypes") {
+                only_attributes(d, &[("key", None), ("phoneNumber", Some("YES")), ("link", Some("YES"))])?;
+                detectors = i64::from(d.attribute("phoneNumber").is_some()) | (i64::from(d.attribute("link").is_some()) << 1);
+            }
             // An accessibility configuration as any view's (one probe), and
             // runtime attributes as a label's (one probe).
             accessibility(nib, scene, n, &name)?;
@@ -3833,6 +3867,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UITextColor", color(nib, c)?));
             }
             values.push(("UITextAlignment", Value::Int(alignment)));
+            if detectors != 0 {
+                values.push(("UIDataDetectorTypes", Value::Int(detectors)));
+            }
             if n.attribute("editable").is_some() {
                 values.push(("UIEditable", Value::Bool(false)));
             }

@@ -6,7 +6,7 @@ use super::*;
 /// A table's header or footer view (`key`): a plain view, or for the
 /// header a search bar.
 fn header_or_footer<'a, 'i>(table: Node<'a, 'i>, key: &str) -> Option<Node<'a, 'i>> {
-    table.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("searchBar") || c.has_tag_name("pickerView")) && c.attribute("key") == Some(key))
+    table.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("searchBar") || c.has_tag_name("pickerView") || c.has_tag_name("stackView")) && c.attribute("key") == Some(key))
 }
 
 /// A table's background: a plain table's white, as a system background
@@ -51,16 +51,16 @@ fn check_table(table: Node) -> Result<(), String> {
         ("contentMode", Some("scaleToFill")), ("alwaysBounceVertical", None), ("showsHorizontalScrollIndicator", Some("NO")),
         ("showsVerticalScrollIndicator", Some("NO")), ("bouncesZoom", Some("NO")),
         ("keyboardDismissMode", None), ("dataMode", None), ("style", None), ("separatorStyle", None),
-        ("allowsSelection", Some("NO")), ("allowsMultipleSelection", Some("YES")), ("allowsSelectionDuringEditing", Some("YES")),
+        ("allowsSelection", Some("NO")), ("allowsMultipleSelection", Some("YES")), ("allowsSelectionDuringEditing", Some("YES")), ("allowsMultipleSelectionDuringEditing", Some("YES")),
         ("rowHeight", None), ("estimatedRowHeight", None), ("sectionHeaderHeight", None), ("estimatedSectionHeaderHeight", None),
         ("sectionFooterHeight", None), ("estimatedSectionFooterHeight", None), ("restorationIdentifier", None), ("id", None),
         ("customClass", None), ("customModule", None), ("customModuleProvider", None),
         // `fixedFrame` changes nothing (one probe).
         ("fixedFrame", Some("YES")), ("bounces", Some("NO")),
     ])?;
-    only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "searchBar", "pickerView", "prototypes", "sections", "connections", "constraints"])?;
+    only_children(table, &["rect", "autoresizingMask", "color", "inset", "view", "searchBar", "pickerView", "stackView", "prototypes", "sections", "connections", "constraints"])?;
     // A picker as a header or footer view too (a corpus storyboard).
-    for v in children(table, "view").chain(children(table, "pickerView")) {
+    for v in children(table, "view").chain(children(table, "pickerView")).chain(children(table, "stackView")) {
         if !matches!(v.attribute("key"), Some("tableHeaderView" | "tableFooterView")) {
             return fail("a <view> in a table other than its header or footer view is not supported by this ibtool");
         }
@@ -286,6 +286,10 @@ fn table_values(
     }
     if table.attribute("allowsSelectionDuringEditing").is_some() {
         values.push(("UIAllowsSelectionDuringEditing", Value::Bool(true)));
+    }
+    // One probe.
+    if table.attribute("allowsMultipleSelectionDuringEditing").is_some() {
+        values.push(("UIAllowsMultipleSelectionDuringEditing", Value::Bool(true)));
     }
     values.push(("UIInsetsContentViewsToSafeArea", Value::Bool(true)));
     for (key, value) in [("tableHeaderView", "UITableHeaderView"), ("tableFooterView", "UITableFooterView")] {
@@ -788,8 +792,8 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         }
     }
     for c in children(cell, "color") {
-        if c.attribute("key") != Some("backgroundColor") {
-            return fail("a cell's colours other than its background are not supported by this ibtool");
+        if !matches!(c.attribute("key"), Some("backgroundColor" | "tintColor")) {
+            return fail("a cell's colours other than its background and tint are not supported by this ibtool");
         }
     }
     let cell_id = attr(cell, "id")?;
@@ -968,6 +972,10 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     }
     if cell.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
+    }
+    // Its tint after its mask and clipping (two probes).
+    if let Some(t) = child(cell, "color", "tintColor") {
+        values.push(("UITintColor", color(nib, t)?));
     }
     if cell.attribute("preservesSuperviewLayoutMargins").is_some() {
         values.push(("UIViewPreservesSuperviewMargins", Value::Bool(true)));
