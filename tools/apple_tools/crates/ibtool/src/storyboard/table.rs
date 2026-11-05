@@ -744,7 +744,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         ("selectionStyle", None), ("hidesAccessoryWhenEditing", Some("NO")), ("indentationLevel", None), ("indentationWidth", None),
         ("accessoryType", None), ("reuseIdentifier", None), ("rowHeight", None), ("customClass", None), ("customModule", None),
         ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("restorationIdentifier", None),
-        ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
+        ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("userInteractionEnabled", Some("NO")), ("id", None),
     ])?;
     only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections", "accessibility", "inset", "userDefinedRuntimeAttributes"])?;
     for i in children(cell, "inset") {
@@ -943,6 +943,10 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     if cell.attribute("opaque").is_none() {
         values.push(("UIOpaque", Value::Bool(true)));
     }
+    // Not interactive, after its opacity (one probe).
+    if cell.attribute("userInteractionEnabled").is_some() {
+        values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+    }
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
     if mask != 0 {
         values.push(("UIAutoresizingMask", Value::Int(mask)));
@@ -1104,6 +1108,59 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
     let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
     nib::archive(root_object_full(&mut nib, top, objects, connections, accessibility, pairs))
+}
+
+/// A table view cell beside a xib's view, in the view's nib: its object,
+/// what the objects list first for it (its content view, its safe-area
+/// guide when it has one, the content view's subviews) and then (the rest,
+/// breadth first, as `cell_nib` lists them), and the names of its views,
+/// for outlets to them. Its own connections, actions, runtime attributes
+/// and accessibility aren't established there and are refused.
+pub(super) struct XibCell {
+    pub value: Value,
+    pub first: Vec<Value>,
+    pub rest: Vec<Value>,
+    pub names: Vec<String>,
+}
+
+pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_area: bool) -> Result<XibCell, String> {
+    let (segue, outlets) = cell_connections(cell)?;
+    if segue.is_some() || !outlets.is_empty() {
+        return fail("connections of a cell beside a xib's view are not supported by this ibtool");
+    }
+    let (value, parts) = cell_object(nib, module, cell, attr(cell, "id")?)?;
+    let CellParts { name, content, scene } = parts;
+    if !scene.actions.is_empty() || !scene.pairs.is_empty() || !scene.accessibility.is_empty() || !scene.view_outlets.is_empty() || !scene.control_outlets.is_empty() {
+        return fail("actions, outlets, runtime attributes or accessibility in a cell beside a xib's view are not supported by this ibtool");
+    }
+    let content_parent = Some(content.clone());
+    let direct: Vec<&String> = scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| &s.1).collect();
+    // Its guide after a style's detail label, as in its own nib.
+    let at = match cell.attribute("detailTextLabel").map(view_name) {
+        Some(detail) if direct.first() == Some(&&detail) => 1,
+        Some(_) if safe_area => return fail("a xib's cell whose detail label isn't its content's first is not supported by this ibtool"),
+        _ => 0,
+    };
+    let mut listed: Vec<Value> = direct.iter().map(|v| reference((*v).clone())).collect();
+    if safe_area {
+        listed.insert(at, cell_safe_area(nib));
+    }
+    let mut first = vec![reference(content.clone())];
+    first.extend(listed);
+    let mut rest = Vec::new();
+    let mut queue: std::collections::VecDeque<&String> = [&content].into();
+    while let Some(v) = queue.pop_front() {
+        rest.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
+        for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == Some(v)) {
+            if *v != content {
+                rest.push(reference(s.clone()));
+            }
+            queue.push_back(s);
+        }
+    }
+    let mut names = vec![name, content];
+    names.extend(scene.subviews.iter().map(|s| s.1.clone()));
+    Ok(XibCell { value, first, rest, names })
 }
 
 /// A xib's cell's safe-area guide: unowned and not archived.
