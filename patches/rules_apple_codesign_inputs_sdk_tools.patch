@@ -29,7 +29,8 @@ macOS host requires because the staged tool binaries are Linux
 executables.
 
 Also feed them to ExtractFromProvisioningProfile, whose tool runs the
-toolchain's security.
+toolchain's security, and to ImportedDynamicFrameworkProcessor, whose
+lipo.py runs `xcrun lipo` on an imported framework's binaries.
 
 diff --git a/apple/internal/apple_toolchains.bzl b/apple/internal/apple_toolchains.bzl
 index 35f1640c..ed3bccbb 100644
@@ -697,3 +698,20 @@ index ec387373..d1c69491 100644
  # The path where the archive should be created, including the name of the
  # archive itself.
  readonly OUTPUT_PATH=%output_path%
+diff --git a/apple/internal/partials/framework_import.bzl b/apple/internal/partials/framework_import.bzl
+--- a/apple/internal/partials/framework_import.bzl
++++ b/apple/internal/partials/framework_import.bzl
+@@ -186,9 +186,12 @@
+ 
+         # Inputs of action are all the framework files, plus binaries needed for identifying the
+         # current build's preferred architecture, and the provisioning profile if specified.
++        # The cross-toolchain's xcrun and lipo, found through PATH, are
++        # inputs too, so a sandbox or remote executor stages them.
+         input_files = (
+             files_by_framework[framework_basename] +
+-            framework_binaries_by_framework[framework_basename]
++            framework_binaries_by_framework[framework_basename] +
++            apple_mac_toolchain_info.sdk_tool_files
+         )
+         if codesign_args and provisioning_profile:
+             input_files.append(provisioning_profile)
