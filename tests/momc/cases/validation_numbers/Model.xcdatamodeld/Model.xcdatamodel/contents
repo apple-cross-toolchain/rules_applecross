@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="N" representedClassName="N" syncable="YES" codeGenerationType="class">
+        <attribute name="a" attributeType="Decimal" optional="YES" minValueString="1.5" maxValueString="-2.25"/>
+        <attribute name="b" attributeType="Double" optional="YES" minValueString="1e3" maxValueString="0.1" usesScalarValueType="YES"/>
+        <attribute name="c" attributeType="Float" optional="YES" minValueString="0.1" maxValueString="-7" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" minValueString="0.1" maxValueString="1e300" usesScalarValueType="YES"/>
+        <attribute name="e" attributeType="Integer 64" optional="YES" minValueString="-5" maxValueString="9223372036854775807" usesScalarValueType="YES"/>
+        <attribute name="f" attributeType="Integer 16" optional="YES" minValueString="1" usesScalarValueType="YES"/>
+        <attribute name="g" attributeType="Double" optional="YES" minValueString="0.5" usesScalarValueType="YES"/>
+    </entity>
+</model>

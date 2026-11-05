@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="D" representedClassName="D" syncable="YES" codeGenerationType="class">
+        <attribute name="a" attributeType="Date" optional="YES" minDateTimeInterval="100" maxDateTimeInterval="-30"/>
+        <attribute name="b" attributeType="Date" optional="YES" minDateTimeInterval="59.9" maxDateTimeInterval="1e9"/>
+        <attribute name="c" attributeType="Date" optional="YES" minDateTimeInterval="0"/>
+    </entity>
+</model>

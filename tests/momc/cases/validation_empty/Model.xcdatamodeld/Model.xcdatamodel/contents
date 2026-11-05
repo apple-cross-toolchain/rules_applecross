@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="B" representedClassName="B" syncable="YES" codeGenerationType="class">
+        <attribute name="a" attributeType="Integer 32" optional="YES" minValueString="" usesScalarValueType="YES"/>
+        <attribute name="b" attributeType="String" optional="YES" regularExpressionString=""/>
+        <attribute name="c" optional="YES" attributeType="Integer 32" minValueString="1.5" usesScalarValueType="YES"/>
+        <attribute name="d" optional="YES" attributeType="Integer 32" minValueString="x" usesScalarValueType="YES"/>
+        <attribute name="e" optional="YES" attributeType="Boolean" minValueString="1" usesScalarValueType="YES"/>
+    </entity>
+</model>

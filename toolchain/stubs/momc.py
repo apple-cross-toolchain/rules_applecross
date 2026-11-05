@@ -13,8 +13,8 @@ RULES_APPLECROSS_RELAX_MOMC=1 (--config=relax_momc, or all of
 out the `.omo` Xcode adds beside a versioned model's current version: Core
 Data loads, saves and migrates stores from the `.mom` and computes the
 hashes itself. A model using anything not established against Xcode
-(predicates, fetched and derived properties, composite attributes, fetch
-indexes, among others) is refused either way.
+(fetch request predicates, fetched and derived properties, composite
+attributes, fetch indexes, among others) is refused either way.
 """
 
 import math
@@ -155,7 +155,8 @@ class Array:
 FRESH_CLASS_NAMES = {
     "NSManagedObjectModel", "NSEntityDescription", "NSPropertyDescription", "NSAttributeDescription",
     "NSRelationshipDescription", "NSFetchRequest", "NSPersistentStoreRequest",
-    "NSDecimalNumberPlaceholder", "NSDecimalNumber", "NSValue",
+    "NSDecimalNumberPlaceholder", "NSDecimalNumber", "NSValue", "NSPredicate",
+    "NSComparisonPredicateOperator", "NSStringPredicateOperator",
 }
 
 def class_name_string(name):
@@ -174,7 +175,8 @@ KEY_ORDER = {
     "NSAttributeDescription": ["NSVersionHashModifier", "NSUserInfo", "NSIsOptional", "NSPropertyName", "_P",
                                "NSEntity", "NSAllowsCloudEncryption", "NSAttributeType", "NSRenamingIdentifier",
                                "NSAttributeValueClassName", "NSIndexedBySpotlight", "NSIsTransient",
-                               "NSDefaultValue", "NSFlagsKey", "NSValueTransformerName", "$class"],
+                               "NSValidationWarnings", "NSDefaultValue", "NSFlagsKey", "NSValueTransformerName",
+                               "NSValidationPredicates", "$class"],
     "NSRelationshipDescription": ["NSIsOrdered", "NSIsOptional", "NSEntity", "NSMaxCount", "_P", "NSDeleteRule",
                                   "NSMinCount", "NSVersionHashModifier", "NSDestinationEntity", "NSPropertyName",
                                   "NSRenamingIdentifier", "NSUserInfo", "_NSDestinationEntityName",
@@ -190,6 +192,13 @@ KEY_ORDER = {
     "NSDate": ["NS.time", "$class"],
     "NSDecimalNumberPlaceholder": ["NS.mantissa", "NS.exponent", "NS.length", "NS.compact", "NS.negative",
                                    "NS.mantissa.bo", "$class"],
+    "NSComparisonPredicate": ["NSLeftExpression", "NSRightExpression", "NSPredicateOperator", "$class"],
+    "NSComparisonPredicateOperator": ["NSOperatorType", "NSOptions", "NSVariant", "$class", "NSModifier"],
+    "NSMatchingPredicateOperator": ["NSOperatorType", "$class", "NSModifier", "NSFlags"],
+    "NSSelfExpression": ["NSExpressionType", "$class"],
+    "NSConstantValueExpression": ["NSConstantValue", "NSExpressionType", "$class"],
+    "NSKeyPathExpression": ["NSExpressionType", "NSSelectorName", "NSOperand", "$class", "NSArguments"],
+    "NSKeyPathSpecifierExpression": ["NSExpressionType", "NSKeyPath", "$class"],
 }
 
 CLASS_CHAINS = {
@@ -205,6 +214,14 @@ CLASS_CHAINS = {
     "NSSet": ["NSSet", "NSObject"],
     "NSDate": ["NSDate", "NSObject"],
     "NSDecimalNumberPlaceholder": ["NSDecimalNumberPlaceholder", "NSDecimalNumber", "NSNumber", "NSValue", "NSObject"],
+    "NSComparisonPredicate": ["NSComparisonPredicate", "NSPredicate", "NSObject"],
+    "NSComparisonPredicateOperator": ["NSComparisonPredicateOperator", "NSPredicateOperator", "NSObject"],
+    "NSMatchingPredicateOperator": ["NSMatchingPredicateOperator", "NSStringPredicateOperator", "NSPredicateOperator",
+                                    "NSObject"],
+    "NSSelfExpression": ["NSSelfExpression", "NSExpression", "NSObject"],
+    "NSConstantValueExpression": ["NSConstantValueExpression", "NSExpression", "NSObject"],
+    "NSKeyPathExpression": ["NSKeyPathExpression", "NSFunctionExpression", "NSExpression", "NSObject"],
+    "NSKeyPathSpecifierExpression": ["NSKeyPathSpecifierExpression", "NSExpression", "NSObject"],
 }
 
 
@@ -363,6 +380,117 @@ class NSDecimalNumber(Archived):
 EMPTY_USER_INFO = NSDictionary([])
 
 
+def whole_minutes(text):
+    """A date in a model (seconds since 2001) as Core Data holds it: whole
+    minutes, earlier ones for a time between."""
+    try:
+        seconds = float(text)
+    except ValueError:
+        unestablished("the date %r" % text)
+    if not math.isfinite(seconds):
+        unestablished("the date %r" % text)
+    return float(math.floor(seconds / 60) * 60)
+
+
+def floating(value, kind="f64"):
+    """A floating-point NSNumber: a whole number of magnitude below 2^55 is
+    one object for its value (and type); any other is an object of its own."""
+    shared = math.isfinite(value) and value == int(value) and abs(value) < 1 << 55
+    return Num(kind, value, None if shared else fresh())
+
+
+class SelfExpression(Archived):
+    """SELF: one object in a model."""
+    class_name = "NSSelfExpression"
+
+    def __init__(self):
+        self.ident = ("NSSelfExpression",)
+
+    def encode_with(self, a, f):
+        f["NSExpressionType"] = Num("i64", 1)
+
+
+SELF = SelfExpression()
+
+
+class ConstantValueExpression(Archived):
+    class_name = "NSConstantValueExpression"
+
+    def __init__(self, value):
+        super().__init__()
+        self.value = value
+
+    def encode_with(self, a, f):
+        f["NSConstantValue"] = a.encode(self.value)
+        f["NSExpressionType"] = Num("i64", 0)
+
+
+class KeyPathSpecifierExpression(Archived):
+    class_name = "NSKeyPathSpecifierExpression"
+
+    def __init__(self, key):
+        super().__init__()
+        self.key = key
+
+    def encode_with(self, a, f):
+        f["NSExpressionType"] = Num("i64", 10)
+        f["NSKeyPath"] = a.encode(self.key)
+
+
+class KeyPathExpression(Archived):
+    """A key of SELF (`SELF.key`)."""
+    class_name = "NSKeyPathExpression"
+
+    def __init__(self, key):
+        super().__init__()
+        self.key = key
+
+    def encode_with(self, a, f):
+        f["NSExpressionType"] = Num("i64", 3)
+        f["NSSelectorName"] = a.encode(Str("valueForKey:", ("selector", "valueForKey:")))
+        f["NSOperand"] = a.encode(SELF)
+        f["NSArguments"] = a.encode(NSArray([KeyPathSpecifierExpression(self.key)], "NSMutableArray"))
+
+
+class ComparisonOperator(Archived):
+    class_name = "NSComparisonPredicateOperator"
+
+    def __init__(self, kind):
+        super().__init__()
+        self.kind = kind
+
+    def encode_with(self, a, f):
+        f["NSOperatorType"] = Num("i64", self.kind)
+        f["NSOptions"] = Num("i64", 0)
+        f["NSVariant"] = Num("i64", self.kind)
+        f["NSModifier"] = Num("i64", 0)
+
+
+class MatchingOperator(Archived):
+    class_name = "NSMatchingPredicateOperator"
+
+    def encode_with(self, a, f):
+        f["NSOperatorType"] = Num("i64", 6)
+        f["NSModifier"] = Num("i64", 0)
+        f["NSFlags"] = Num("i64", 0)
+
+
+LESS_OR_EQUAL, GREATER_OR_EQUAL = 1, 3
+
+
+class ComparisonPredicate(Archived):
+    class_name = "NSComparisonPredicate"
+
+    def __init__(self, left, right, operator):
+        super().__init__()
+        self.left, self.right, self.operator = left, right, operator
+
+    def encode_with(self, a, f):
+        f["NSLeftExpression"] = a.encode(self.left)
+        f["NSRightExpression"] = a.encode(self.right)
+        f["NSPredicateOperator"] = a.encode(self.operator)
+
+
 def user_info(element):
     """An element's userInfo entries, as Core Data holds them."""
     entries = [(xml_str(e.get("key")), xml_str(e.get("value"))) for u in element.findall("userInfo") for e in u.findall("entry")]
@@ -438,16 +566,20 @@ class Property(Archived):
         self.modifier = xml_str(modifier) if modifier else None
         self.optional = yes(element, "optional")
         self.transient = yes(element, "transient")
+        self.validation = []
 
     def encode_property(self, a, f, extra):
         f["NSEntity"] = a.encode(self.entity, conditional=True)
         f["NSPropertyName"] = a.encode(self.name)
         f["NSRenamingIdentifier"] = a.encode(self.renaming)
+        if self.validation:
+            f["NSValidationPredicates"] = a.encode(NSArray([p for p, _ in self.validation]))
+            f["NSValidationWarnings"] = a.encode(NSArray([Num("i64", w) for _, w in self.validation]))
         if self.user_info:
             f["NSUserInfo"] = a.encode(self.user_info)
         if self.modifier:
             f["NSVersionHashModifier"] = a.encode(self.modifier)
-        f["_P"] = Num("i32", 1 | 16 | 32 | (2 if self.optional else 0) | (8 if self.transient else 0)
+        f["_P"] = Num("i32", 1 | (0 if self.validation else 16 | 32) | (2 if self.optional else 0) | (8 if self.transient else 0)
                       | (0 if self.user_info else 64) | (0 if self.modifier else 128) | extra)
         if self.optional:
             f["NSIsOptional"] = Bool(True)
@@ -460,7 +592,8 @@ class Attribute(Property):
     ATTRIBUTES = {"name", "attributeType", "optional", "transient", "defaultValueString", "defaultDateTimeInterval",
                   "usesScalarValueType", "spotlightIndexingEnabled", "allowsExternalBinaryDataStorage",
                   "preserveAfterDeletion", "allowsCloudEncryption", "valueTransformerName", "customClassName",
-                  "versionHashModifier", "elementID", "syncable"}
+                  "versionHashModifier", "elementID", "syncable", "minValueString", "maxValueString",
+                  "regularExpressionString", "minDateTimeInterval", "maxDateTimeInterval"}
 
     def __init__(self, entity, element):
         known(element, self.ATTRIBUTES, ("userInfo",))
@@ -482,6 +615,74 @@ class Attribute(Property):
         self.flags = (4 if yes(element, "allowsExternalBinaryDataStorage") else 0) | \
             (16 if yes(element, "preserveAfterDeletion") else 0)
         self.default = self._default(kind, element)
+        self.validation = self._validation(kind, element)
+
+    # Each rule's warning code: a number's, a date's and a string's minimum
+    # and maximum, and a string's pattern.
+    WARNINGS = {"number": (1620, 1610), "date": (1640, 1630), "string": (1670, 1660)}
+    PATTERN_WARNING = 1680
+
+    @staticmethod
+    def _validation(kind, element):
+        """The validation rules: predicates on the value, each with its
+        warning code, the minimum's before the maximum's before a pattern's."""
+        if kind == "Date":
+            bounds = [element.get("minDateTimeInterval"), element.get("maxDateTimeInterval")]
+            given = [element.get("minValueString"), element.get("maxValueString")]
+        else:
+            bounds = [element.get("minValueString"), element.get("maxValueString")]
+            given = [element.get("minDateTimeInterval"), element.get("maxDateTimeInterval")]
+        pattern = element.get("regularExpressionString")
+        if any(x is not None for x in given) or (pattern is not None and kind != "String"):
+            unestablished("a validation rule of another type's for a %s attribute" % kind)
+        if all(x is None for x in bounds + [pattern]) or kind in ("Boolean", "Binary", "UUID", "URI", "Transformable"):
+            # These types' are left out.
+            return []
+        if kind in ("Integer 16", "Integer 32", "Integer 64", "Decimal", "Double", "Float"):
+            group = "number"
+            value = Attribute._double_value if kind in ("Double", "Float") else Attribute._long_long
+        elif kind == "Date":
+            group, value = "date", lambda text: floating(whole_minutes(text))
+        else:
+            group, value = "string", Attribute._long_long
+        rules = []
+        for text, operator, warning in zip(bounds, (GREATER_OR_EQUAL, LESS_OR_EQUAL), Attribute.WARNINGS[group]):
+            if text is None:
+                continue
+            if group == "date":
+                # A new key string each time.
+                subject = KeyPathExpression(Str("timeIntervalSinceReferenceDate", fresh()))
+            elif group == "string":
+                subject = KeyPathExpression(Str("length"))
+            else:
+                subject = SELF
+            rules.append((ComparisonPredicate(subject, ConstantValueExpression(value(text)),
+                                              ComparisonOperator(operator)), warning))
+        if pattern is not None:
+            rules.append((ComparisonPredicate(SELF, ConstantValueExpression(xml_str(pattern)), MatchingOperator()),
+                          Attribute.PATTERN_WARNING))
+        return rules
+
+    @staticmethod
+    def _long_long(text):
+        """The string's longLongValue: the integer after any white space,
+        anything after it ignored, 0 for none, and the nearest 64-bit integer
+        for one outside them."""
+        m = re.match(r"\s*([+-]?\d+)", text)
+        value = int(m.group(1)) if m else 0
+        return Num("i64", max(-1 << 63, min(value, (1 << 63) - 1)))
+
+    @staticmethod
+    def _double_value(text):
+        """The string's doubleValue: the decimal number after any white
+        space, anything after it ignored, and 0 for none ("inf" too)."""
+        if re.match(r"\s*[+-]?0[xX]", text):
+            unestablished("the validation bound %r" % text)
+        m = re.match(r"\s*([+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?)", text)
+        value = float(m.group(1)) if m else 0.0
+        if not math.isfinite(value):
+            unestablished("the validation bound %r" % text)
+        return floating(value)
 
     @staticmethod
     def _default(kind, element):
@@ -490,12 +691,7 @@ class Attribute(Property):
         if interval is not None:
             if kind != "Date" or text is not None:
                 unestablished("a defaultDateTimeInterval for a %s attribute" % kind)
-            try:
-                seconds = float(interval)
-            except ValueError:
-                unestablished("the default date %r" % interval)
-            # Whole minutes, earlier ones for a time between.
-            return NSDate(float(math.floor(seconds / 60) * 60))
+            return NSDate(whole_minutes(interval))
         if text is None:
             return None
         if kind in ("Integer 16", "Integer 32", "Integer 64"):
@@ -508,11 +704,8 @@ class Attribute(Property):
             except ValueError:
                 unestablished("the default value %r" % text)
             if kind == "Float":
-                value = struct.unpack(">f", struct.pack(">f", value))[0]
-            # A whole number of magnitude below 2^55 is one object for its
-            # value (and type); any other is an object of its own.
-            shared = value == int(value) and abs(value) < 1 << 55 if math.isfinite(value) else False
-            return Num("f32" if kind == "Float" else "f64", value, None if shared else fresh())
+                return floating(struct.unpack(">f", struct.pack(">f", value))[0], "f32")
+            return floating(value)
         if kind == "Boolean":
             if text not in ("YES", "NO"):
                 unestablished("the Boolean default value %r" % text)
