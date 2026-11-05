@@ -85,10 +85,6 @@ fn check_table(table: Node) -> Result<(), String> {
     if !matches!(table.attribute("dataMode"), None | Some("prototypes" | "static")) {
         return fail("a table's dataMode other than prototypes or static is not supported by this ibtool");
     }
-    let selection_keys = ["allowsSelection", "allowsMultipleSelection", "allowsSelectionDuringEditing"];
-    if selection_keys.iter().filter(|k| table.attribute(**k).is_some()).count() > 1 {
-        return fail("more than one of a table's selection settings is not supported by this ibtool");
-    }
     for c in children(table, "color") {
         if !matches!(c.attribute("key"), Some("backgroundColor" | "sectionIndexBackgroundColor" | "separatorColor")) {
             return fail(format!("a table's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
@@ -278,16 +274,17 @@ fn table_values(
     values.push(("UIEstimatedSectionFooterHeight", Value::Float(height(table, "estimatedSectionFooterHeight", Some(0.0))?)));
     values.push(("UIFillerRowHeight", Value::Double(0.0)));
     values.push(("UISectionHeaderTopPadding", Value::Double(-1.0)));
+    // Selection, then multiple selection, each before its setting while
+    // editing (four probes of them together).
     if table.attribute("allowsSelection").is_some() {
         values.push(("UIAllowsSelection", Value::Bool(false)));
-    }
-    if table.attribute("allowsMultipleSelection").is_some() {
-        values.push(("UIAllowsMultipleSelection", Value::Bool(true)));
     }
     if table.attribute("allowsSelectionDuringEditing").is_some() {
         values.push(("UIAllowsSelectionDuringEditing", Value::Bool(true)));
     }
-    // One probe.
+    if table.attribute("allowsMultipleSelection").is_some() {
+        values.push(("UIAllowsMultipleSelection", Value::Bool(true)));
+    }
     if table.attribute("allowsMultipleSelectionDuringEditing").is_some() {
         values.push(("UIAllowsMultipleSelectionDuringEditing", Value::Bool(true)));
     }
@@ -1081,8 +1078,15 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     objects.extend(listed);
     let mut queue: std::collections::VecDeque<&String> = [&content_name].into();
     while let Some(v) = queue.pop_front() {
+        // A collection view's layout before its constraints, as in a view.
+        let layout = format!("{v} layout");
+        let (layouts, others): (Vec<_>, Vec<_>) = scene.subviews.iter().filter(|s| s.0.as_ref() == Some(v)).partition(|s| s.1 == layout);
+        for (_, s) in &layouts {
+            objects.push(reference(s.clone()));
+            queue.push_back(s);
+        }
         objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
-        for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == Some(v)) {
+        for (_, s) in others {
             if *v != content_name {
                 objects.push(reference(s.clone()));
             }
@@ -1097,14 +1101,40 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         outlets.push(("selectionSegueTemplate", "upstream".to_string()));
     }
     for (label, destination) in cell_connections(cell)?.1 {
-        let destination = view_name(destination);
-        if !scene.subviews.iter().any(|s| s.1 == destination) {
-            return fail("a cell's outlets to anything but its content's views are not supported by this ibtool");
+        // One to a constraint of its views as to a view (a corpus xib).
+        let constraint = cell.descendants().find(|d| d.has_tag_name("constraint") && d.attribute("id") == Some(destination));
+        let destination = match constraint {
+            Some(c) => constraint_name(c)?,
+            None => view_name(destination),
+        };
+        if !scene.subviews.iter().any(|s| s.1 == destination) && !scene.own_constraints.iter().any(|c| c.1 == destination) {
+            return fail("a cell's outlets to anything but its content's views and their constraints are not supported by this ibtool");
         }
         outlets.push((label, destination));
     }
     outlets.sort_by(|a, b| a.0.cmp(b.0));
     let mut connections: Vec<Value> = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
+    // A xib's File's Owner's outlets, to the cell or its content's views,
+    // by name (one probe); beside the cell's own connections they aren't
+    // established.
+    if xib.is_some() {
+        let owner = cell.document().descendants().find(|d| d.attribute("placeholderIdentifier") == Some("IBFilesOwner"));
+        let mut owner_outlets = Vec::new();
+        for o in owner.into_iter().flat_map(|o| children(o, "connections")).flat_map(|c| children(c, "outlet")) {
+            only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
+            let destination = attr(o, "destination")?;
+            let name = if destination == attr(cell, "id")? { cell_name.clone() } else { view_name(destination) };
+            if name != cell_name && !scene.subviews.iter().any(|s| s.1 == name) {
+                return fail("a File's Owner's outlets to anything but a cell and its content's views are not supported by this ibtool");
+            }
+            owner_outlets.push((attr(o, "property")?, name));
+        }
+        if !owner_outlets.is_empty() && (!connections.is_empty() || !scene.actions.is_empty()) {
+            return fail("a File's Owner's outlets beside a cell's own connections are not supported by this ibtool");
+        }
+        owner_outlets.sort_by(|a, b| a.0.cmp(b.0));
+        connections.extend(owner_outlets.iter().map(|(label, destination)| outlet(&mut nib, label, "owner", destination)));
+    }
     // Its controls' actions on the cell after its outlets, by mask and then
     // selector (five probes, one corpus storyboard).
     let mut actions: Vec<_> = scene.actions.iter().collect();
@@ -1179,8 +1209,15 @@ pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_are
     let mut rest = Vec::new();
     let mut queue: std::collections::VecDeque<&String> = [&content].into();
     while let Some(v) = queue.pop_front() {
+        // A collection view's layout before its constraints, as in a view.
+        let layout = format!("{v} layout");
+        let (layouts, others): (Vec<_>, Vec<_>) = scene.subviews.iter().filter(|s| s.0.as_ref() == Some(v)).partition(|s| s.1 == layout);
+        for (_, s) in &layouts {
+            rest.push(reference(s.clone()));
+            queue.push_back(s);
+        }
         rest.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
-        for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == Some(v)) {
+        for (_, s) in others {
             if *v != content {
                 rest.push(reference(s.clone()));
             }

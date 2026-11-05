@@ -92,7 +92,9 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
 
     // A cell is a prototype cell's nib, with its safe-area guide.
     if view.has_tag_name("tableViewCell") || view.has_tag_name("collectionViewCell") {
-        if elements(owner).next().is_some() {
+        // Its outlets are the cell nib's (`table::cell_nib`).
+        let outlets_only = elements(owner).all(|c| c.has_tag_name("connections") && elements(c).all(|o| o.has_tag_name("outlet")));
+        if elements(owner).next().is_some() && (!outlets_only || !view.has_tag_name("tableViewCell")) {
             return fail("a File's Owner's connections beside a cell are not supported by this ibtool");
         }
         let safe_area = |c: &Node| c.has_tag_name("viewLayoutGuide") && c.attribute("key") == Some("safeArea");

@@ -132,7 +132,7 @@ pub(super) fn load_order<'a>(controllers: &[Node<'a, '_>], initial: Option<&str>
 
 /// A segue's template: its identifier, its destination's nib and how it is
 /// performed.
-fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<Object, String> {
+fn template(nib: &mut Nib, module: Option<&str>, s: Node, names: &HashMap<String, String>) -> Result<Object, String> {
     if s.attribute("kind") == Some("unwind") {
         return unwind_template(nib, s);
     }
@@ -150,18 +150,15 @@ fn template(nib: &mut Nib, s: Node, names: &HashMap<String, String>) -> Result<O
     if creation.is_some() && (s.attribute("kind") != Some("show") || s.attribute("animates").is_some()) {
         return fail("a segue action on other than an animated show segue is not supported by this ibtool");
     }
-    if s.attribute("customModuleProvider") == Some("target") {
-        return fail("a segue's class in the target's module is not supported by this ibtool");
-    }
     let destination = names.get(attr(s, "destination")?).ok_or("a segue to anything but a view, table view, collection view, navigation, tab bar or split view controller or a storyboard reference is not supported by this ibtool")?;
     let mut values = Vec::new();
     if let Some(identifier) = s.attribute("identifier") {
         values.push(("UIIdentifier", nib.string(identifier)));
     }
     // Its custom class, by its runtime name, after its identifier (three
-    // probes).
+    // probes), the target's module's as a view controller's (one probe).
     if s.attribute("customClass").is_some() {
-        values.push(("UISegueClassName", nib.string(&runtime_class_name(s, None, "")?)));
+        values.push(("UISegueClassName", nib.string(&runtime_class_name(s, module, "")?)));
     }
     values.push(("UIDestinationViewControllerIdentifier", nib.string(destination)));
     let animates = s.attribute("animates").is_some();
@@ -316,7 +313,7 @@ pub(super) fn external_table(nib: &mut Nib, mut entries: Vec<(usize, Value)>) ->
 /// button items trigger `bar_segues` (each with the item's name).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn templates(
-    nib: &mut Nib, controller: &str, upstream_used: bool, first: usize, view_segues: &[(usize, Node)], own_segues: &[Node],
+    nib: &mut Nib, module: Option<&str>, controller: &str, upstream_used: bool, first: usize, view_segues: &[(usize, Node)], own_segues: &[Node],
     bar_segues: &[(Node, String)], names: &HashMap<String, String>,
 ) -> Result<Templates, String> {
     // `first` is the controller's placeholder's number (a gesture
@@ -331,7 +328,7 @@ pub(super) fn templates(
     let mut classes = HashMap::new();
     for (i, s) in by_placeholder {
         let name = format!("segue {i}");
-        let t = template(nib, *s, names)?;
+        let t = template(nib, module, *s, names)?;
         classes.insert(*i, t.class);
         external.push((i + first + usize::from(upstream_used), Value::New(t.named(name))));
     }
@@ -344,7 +341,7 @@ pub(super) fn templates(
             return fail("a controller's segue without an identifier is not supported by this ibtool");
         }
         let name = format!("own segue {i}");
-        let t = template(nib, *s, names)?;
+        let t = template(nib, module, *s, names)?;
         outlets.push((t.class, name.clone()));
         array.push(Value::New(t.named(name.clone())));
         objects.push(reference(name));
@@ -359,7 +356,7 @@ pub(super) fn templates(
     let mut performs = Vec::new();
     for (i, (s, item)) in bar_segues.iter().enumerate() {
         let name = format!("{controller} bar segue {i}");
-        let t = template(nib, *s, names)?;
+        let t = template(nib, module, *s, names)?;
         outlets.push((t.class, name.clone()));
         array.push(Value::New(t.named(name.clone())));
         objects.push(reference(name.clone()));

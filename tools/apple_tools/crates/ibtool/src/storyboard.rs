@@ -206,6 +206,49 @@ fn exact_color_components(names: &[(&'static str, &'static str)], values: &[f64]
 const RGB_KEYS: [(&str, &str); 4] = [("UIRed", "UIRed-Double"), ("UIGreen", "UIGreen-Double"), ("UIBlue", "UIBlue-Double"), ("UIAlpha", "UIAlpha-Double")];
 const GRAY_KEYS: [(&str, &str); 2] = [("UIWhite", "UIWhite-Double"), ("UIAlpha", "UIAlpha-Double")];
 
+/// Interface Builder's palette in calibrated white, as Xcode converts it to
+/// the gamma 2.2 grey: dark grey, grey and light grey (black and white are
+/// `color`'s own). A component matches at a float's precision, as Xcode
+/// converts it, so 1/3 to 10 digits is 1/3 (probes, in xibs and
+/// storyboards, opaque and not: alpha is kept).
+const CALIBRATED_WHITES: [(f32, f64); 3] = [(1.0 / 3.0, 0.40781933069229126), (0.5, 0.572306752204895), (2.0 / 3.0, 0.7233663201332092)];
+
+/// The palette in calibrated RGB, as Xcode converts it to extended sRGB:
+/// black, white, the primaries and secondaries, orange, purple, brown and
+/// the greys, matched as `CALIBRATED_WHITES`. The converted components are
+/// floats, archived as they are in storyboards too (the same probes).
+const CALIBRATED_RGBS: [([f32; 3], [f64; 3]); 14] = [
+    ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    ([1.0, 1.0, 1.0], [0.9999999403953552, 1.0000001192092896, 1.0000001192092896]),
+    ([1.0, 0.0, 0.0], [1.0110152959823608, 0.14910027384757996, -0.02276673913002014]),
+    ([0.0, 1.0, 0.0], [-0.17758449912071228, 0.9767891764640808, -0.018533367663621902]),
+    ([0.0, 0.0, 1.0], [0.016841866075992584, 0.19834142923355103, 1.001404047012329]),
+    ([0.0, 1.0, 1.0], [-0.17275553941726685, 0.9914230704307556, 1.0007742643356323]),
+    ([1.0, 1.0, 0.0], [0.9994266629219055, 0.9855353236198425, -0.04128071665763855]),
+    ([1.0, 0.0, 1.0], [1.0115798711776733, 0.2527676224708557, 1.0006303787231445]),
+    ([1.0, 0.5, 0.0], [1.007705569267273, 0.5763571262359619, -0.028089046478271484]),
+    ([0.5, 0.0, 0.5], [0.5791921019554138, 0.12799972295761108, 0.5726815462112427]),
+    ([0.6, 0.4, 0.2], [0.6679973006248474, 0.4751102924346924, 0.2586003243923187]),
+    ([1.0 / 3.0; 3], [0.40781933069229126, 0.40781930088996887, 0.40781933069229126]),
+    ([0.5; 3], [0.572306752204895, 0.572306752204895, 0.572306752204895]),
+    ([2.0 / 3.0; 3], [0.7233662605285645, 0.7233663201332092, 0.7233663201332092]),
+];
+
+/// Display P3's black and white, as Xcode converts them to extended sRGB:
+/// white as calibrated RGB's (probes, plain and named).
+const DISPLAY_P3S: [([f32; 3], [f64; 3]); 2] = [
+    ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    ([1.0, 1.0, 1.0], [0.9999999403953552, 1.0000001192092896, 1.0000001192092896]),
+];
+
+/// A colour's red, green and blue as Xcode converts them from `space`
+/// (`CALIBRATED_RGBS`, `DISPLAY_P3S`), else refused.
+fn converted_rgb(space: &str, rgb: [f64; 3]) -> Result<[f64; 3], String> {
+    let table: &[([f32; 3], [f64; 3])] = if space == "calibratedRGB" { &CALIBRATED_RGBS } else { &DISPLAY_P3S };
+    let key = rgb.map(|x| x as f32);
+    table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v).ok_or_else(|| format!("{space} colours other than Interface Builder's palette are converted by Xcode in a way not established for this ibtool"))
+}
+
 fn autoresizing_mask(n: Node) -> Result<i64, String> {
     let mut m = 0;
     for (name, bit) in [("flexibleMinX", 1), ("widthSizable", 2), ("flexibleMaxX", 4), ("flexibleMinY", 8), ("heightSizable", 16), ("flexibleMaxY", 32)] {
@@ -435,7 +478,7 @@ impl Nib {
 fn document_tint<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> {
     let root = n.document().root_element();
     let Some(tint) = root.children().find(|c| c.has_tag_name("color") && c.attribute("key") == Some("tintColor")) else { return Ok(None) };
-    const UNKNOWN: [&str; 5] = ["tabBar", "toolbar", "splitViewController", "pageViewController", "searchBar"];
+    const UNKNOWN: [&str; 4] = ["tabBar", "splitViewController", "pageViewController", "searchBar"];
     if let Some(d) = root.descendants().find(|d| UNKNOWN.contains(&d.tag_name().name())) {
         return fail(format!("a document tint colour beside a <{}> is not supported by this ibtool", d.tag_name().name()));
     }
@@ -498,6 +541,12 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
                 let (keys, text) = exact_color_components(&RGB_KEYS, &c);
                 (4, keys, "NSRGB", text, 2)
             }
+            Some("displayP3") => {
+                only_attributes(definition, &[("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
+                let rgb = converted_rgb("displayP3", [number(attr(definition, "red")?)?, number(attr(definition, "green")?)?, number(attr(definition, "blue")?)?])?;
+                let (keys, text) = exact_color_components(&RGB_KEYS, &[rgb[0], rgb[1], rgb[2], number(attr(definition, "alpha")?)?]);
+                (4, keys, "NSRGB", text, 2)
+            }
             Some("genericGamma22GrayColorSpace") => {
                 only_attributes(definition, &[("white", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", None)])?;
                 let c = [number(attr(definition, "white")?)?, number(attr(definition, "alpha")?)?];
@@ -528,7 +577,20 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         let white = number(attr(n, "white")?)?;
         let alpha = nib.component(number(attr(n, "alpha")?)?);
         if white != 0.0 && white != 1.0 {
-            return fail(format!("calibrated white {white} is converted by Xcode in a way not established for this ibtool"));
+            let Some(&(_, converted)) = CALIBRATED_WHITES.iter().find(|(w, _)| *w == white as f32) else {
+                return fail(format!("calibrated white {white} is converted by Xcode in a way not established for this ibtool"));
+            };
+            let c = [converted, alpha];
+            let key = format!("color:gray:{c:?}");
+            if let Some(v) = nib.existing(&key) {
+                return Ok(v);
+            }
+            let (components, text) = exact_color_components(&GRAY_KEYS, &c);
+            let mut keys = vec![("UIColorComponentCount", Value::Int(2))];
+            keys.extend(components);
+            keys.push(("NSWhite", Value::Data(text)));
+            keys.push(("NSColorSpace", Value::Int(4)));
+            return Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")));
         }
         if white == 1.0 && alpha != 1.0 {
             let key = format!("color:calibrated-white:{alpha:?}");
@@ -569,8 +631,19 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         keys.push(("NSColorSpace", Value::Int(4)));
         return Ok(nib.shared(format!("color:gray:{c:?}"), || Object::new("UIColor", keys).with_fallback("NSColor")));
     }
-    only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", Some("sRGB"))])?;
-    let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?].map(|x| nib.component(x));
+    let space = match (n.attribute("colorSpace"), n.attribute("customColorSpace")) {
+        (Some("calibratedRGB"), None) | (Some("custom"), Some("calibratedRGB")) => "calibratedRGB",
+        (Some("custom"), Some("displayP3")) => "displayP3",
+        _ => "sRGB",
+    };
+    let c = if space == "sRGB" {
+        only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", Some("sRGB"))])?;
+        [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?].map(|x| nib.component(x))
+    } else {
+        only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None)])?;
+        let rgb = converted_rgb(space, [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?])?;
+        [rgb[0], rgb[1], rgb[2], nib.component(number(attr(n, "alpha")?)?)]
+    };
     let key = format!("color:rgb:{c:?}");
     if let Some(v) = nib.existing(&key) {
         return Ok(v);
@@ -1975,6 +2048,21 @@ fn geometry(values: &mut Vec<(&'static str, Value)>, f: &Frame) {
     }
 }
 
+/// The UIKit class of a view element.
+fn uikit_class(tag: &str) -> String {
+    match tag {
+        "view" => "UIView".into(),
+        "wkWebView" => "WKWebView".into(),
+        "mapView" => "MKMapView".into(),
+        "sceneKitView" => "SCNView".into(),
+        "activityIndicatorView" => "UIActivityIndicatorView".into(),
+        _ => {
+            let mut c = tag.chars();
+            c.next().map_or_else(String::new, |f| format!("UI{}{}", f.to_ascii_uppercase(), c.as_str()))
+        }
+    }
+}
+
 fn view_name(id: &str) -> String {
     format!("view {id}")
 }
@@ -2763,10 +2851,21 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("hidden", Some("YES")), ("restorationIdentifier", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("horizontalHuggingPriority", None),
                 ("verticalHuggingPriority", None), ("tag", None), ("alpha", None), ("horizontalCompressionResistancePriority", None),
-                ("verticalCompressionResistancePriority", None),
+                ("verticalCompressionResistancePriority", None), ("usesAttributedText", Some("YES")),
                 // `fixedFrame` changes nothing beside a frame (one probe).
                 ("fixedFrame", Some("YES")),
             ])?;
+            // Empty attributed text: no font or text colour, the empty
+            // attributed string and text after the alignment, and the text
+            // colour updated on trait changes (one probe); other attributed
+            // text isn't established.
+            let attributed = n.attribute("usesAttributedText").is_some();
+            if attributed {
+                let empty = child(n, "attributedString", "attributedText").is_some_and(|a| a.children().all(|c| !c.is_element()));
+                if !empty || n.attribute("text").is_some() || children(n, "fontDescription").next().is_some() || children(n, "color").any(|c| c.attribute("key") == Some("textColor")) {
+                    return fail("a text field's attributed text other than an empty one is not supported by this ibtool");
+                }
+            }
             // `none` is the style a text field without one has (one probe).
             let border = match n.attribute("borderStyle") {
                 None | Some("none") => None,
@@ -2783,7 +2882,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some("always") => Some(3),
                 Some(other) => return fail(format!("clearButtonMode=\"{other}\" on <textField> is not supported by this ibtool")),
             };
-            only_children(n, &["rect", "autoresizingMask", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
+            only_children(n, &["rect", "autoresizingMask", "nil", "color", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility", "attributedString"])?;
+            if !attributed && children(n, "attributedString").next().is_some() {
+                return fail("a text field's attributed text without usesAttributedText is not supported by this ibtool");
+            }
             accessibility(nib, scene, n, &name)?;
             let traits = children(n, "textInputTraits").next().ok_or("text field without text input traits")?;
             let trait_values = text_input_traits(nib, traits, false)?;
@@ -2866,19 +2968,28 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIDisabled", Value::Bool(true)));
             }
             values.push(("UIContentHorizontalAlignment", Value::Int(1)));
-            values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
+            if !attributed {
+                values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
+            }
             if let Some(placeholder) = n.attribute("placeholder") {
                 values.push(("UIPlaceholder", nib.text(id, "placeholder", placeholder)));
             }
             values.push(("UITextAlignment", Value::Int(alignment)));
+            if attributed {
+                let empty = nib.string("");
+                values.push(("UIAttributedText", Value::New(Object::new("NSAttributedString", vec![("NSString", empty)]))));
+                values.push(("UIText", Value::New(Object::new("NSMutableString", vec![("NS.bytes", Value::Data(Vec::new()))]))));
+            }
             if let Some(text) = n.attribute("text") {
                 values.push(("UIText", nib.text(id, "text", text)));
             }
-            let text_color = match text_color {
-                Some(c) => color(nib, c)?,
-                None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
-            };
-            values.push(("UITextColor", text_color));
+            if !attributed {
+                let text_color = match text_color {
+                    Some(c) => color(nib, c)?,
+                    None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
+                };
+                values.push(("UITextColor", text_color));
+            }
             if let Some(border) = border {
                 values.push(("UIBorderStyle", Value::Int(border)));
             }
@@ -2889,7 +3000,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIClearButtonOffset", doubles(&[3.0, 1.0])));
             values.extend(trait_values);
-            values.push(("UIDisableTextColorUpdateOnTraitCollectionChange", Value::Bool(true)));
+            values.push(("UIDisableTextColorUpdateOnTraitCollectionChange", Value::Bool(!attributed)));
             if border == Some(3) {
                 values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
             }
@@ -3209,6 +3320,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // connections without a mask.
             only_attributes(n, &[
                 ("contentMode", Some("scaleToFill")), ("translucent", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
             ])?;
             only_children(n, &["rect", "items", "constraints"])?;
             if !scene.lists_toolbar_items {
@@ -3259,6 +3371,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIViewAutolayoutConstraints", own));
             }
             values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+            compression_resistance(nib, &mut values, n);
             values.push(("UIViewLayoutMargins", doubles(&[0.0; 4])));
             values.push(("UIViewLayoutMarginsAreDirectional", Value::Bool(true)));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
@@ -3279,7 +3392,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 // `fixedFrame` changes nothing (one probe).
-                ("fixedFrame", Some("YES")),
+                ("fixedFrame", Some("YES")), ("barStyle", Some("black")),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "items", "constraints"])?;
             if !scene.lists_toolbar_items {
@@ -3344,6 +3457,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // Empty, its items are the nib's one empty array, where a tab bar's
             // are an array of their own (a probe and three corpus storyboards).
             let items = if items.is_empty() { nib.empty_array() } else { nib.array("NSArray", items) };
+            // A black style before its items, as a navigation
+            // controller's toolbar's (a corpus storyboard).
+            if n.attribute("barStyle").is_some() {
+                values.push(("UIBarStyle", Value::Int(1)));
+            }
             values.push(("UIItems", items));
             values.push(("UIBarPosition", Value::Int(1)));
             values.push(("UIBarTranslucence", Value::Int(1)));
@@ -4489,14 +4607,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![guide])));
             }
             // Its hugging and compression resistance when given, after its
-            // constraint keys (two probes); beside margins or a restoration
-            // identifier they aren't established.
+            // constraint keys and before its margins (six probes); beside a
+            // restoration identifier or scrolling they aren't established.
             let priorities = ["horizontalHuggingPriority", "verticalHuggingPriority", "horizontalCompressionResistancePriority", "verticalCompressionResistancePriority"];
             if priorities.iter().any(|p| n.attribute(*p).is_some()) {
-                if n.attribute("restorationIdentifier").is_some() || n.attribute("preservesSuperviewLayoutMargins").is_some()
-                    || n.attribute("layoutMarginsFollowReadableWidth").is_some() || children(n, "edgeInsets").next().is_some() || children(n, "directionalEdgeInsets").next().is_some() || scroll
-                {
-                    return fail("a view's hugging or compression resistance beside margins, a restoration identifier or scrolling is not supported by this ibtool");
+                if n.attribute("restorationIdentifier").is_some() || scroll {
+                    return fail("a view's hugging or compression resistance beside a restoration identifier or scrolling is not supported by this ibtool");
                 }
                 if n.attribute("horizontalHuggingPriority").is_some() || n.attribute("verticalHuggingPriority").is_some() {
                     values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
@@ -4770,7 +4886,7 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
         if let Some((_, f)) = guides.iter().find(|g| g.0 == id) {
             return Ok(Some(*f));
         }
-        siblings.iter().find(|s| s.attribute("id") == Some(id)).map(|s| frame(*s)).transpose()
+        siblings.iter().find(|s| s.attribute("id") == Some(id)).map(|s| subview_frame(*s)).transpose()
     };
     let mut start = 0;
     while start < v.len() {
@@ -5313,12 +5429,14 @@ struct RootController<'a, 'i> {
     gesture_order: Vec<String>,
     /// Its outlets to its navigation item's custom views, (property, view).
     item_outlets: Vec<(String, String)>,
+    /// The module of the target's own classes.
+    module: Option<String>,
 }
 
 /// The id of a navigation controller's root view controller, its one
 /// relationship segue, if it has one.
 fn navigation_root<'a>(nav: Node<'a, '_>) -> Result<Option<&'a str>, String> {
-    only_children(nav, &["navigationBar", "connections", "toolbarItems", "nil", "tabBarItem", "navigationItem"])?;
+    only_children(nav, &["navigationBar", "connections", "toolbarItems", "nil", "tabBarItem", "navigationItem", "toolbar"])?;
     for c in children(nav, "toolbarItems") {
         if c.has_children() {
             return fail("navigation controllers with toolbar items are not supported by this ibtool");
@@ -5461,7 +5579,7 @@ fn embedded_controller(
         return fail("an embedded controller's gesture recognizer's segue beside other segues is not supported by this ibtool");
     }
     bar_segues.extend(gesture_segues);
-    let mut templates = segue::templates(nib, name, root.upstream_used, 1 + gesture_count, &root.view_segues, &root.own_segues, &bar_segues, nib_names)?;
+    let mut templates = segue::templates(nib, root.module.as_deref(), name, root.upstream_used, 1 + gesture_count, &root.view_segues, &root.own_segues, &bar_segues, nib_names)?;
     let gesture_performs: Vec<(String, String)> = templates.performs.iter().filter(|p| p.0.starts_with(&format!("{name} gesture "))).cloned().collect();
     templates.performs.retain(|p| !p.0.starts_with(&format!("{name} gesture ")));
     // Its gesture recognizers, defined in its external objects table, in
@@ -5822,6 +5940,7 @@ fn check_navigation_controller(nav: Node) -> Result<(), String> {
             ("useStoryboardIdentifierAsRestorationIdentifier", Some("YES")),
             ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")),
+            ("toolbarHidden", Some("NO")),
             ("modalPresentationStyle", None),
             ("extendedLayoutIncludesOpaqueBars", Some("YES")),
             ("definesPresentationContext", Some("YES")),
@@ -5867,6 +5986,7 @@ fn navigation_controller(
     held: Option<(Option<Value>, &str)>,
 ) -> Result<Value, String> {
     let bar_name = format!("{name} bar");
+    let is_held = held.is_some();
     let item = root.navigation_item.clone().unwrap_or_else(|| format!("{root_name} implied navigation item"));
     let mut values = Vec::new();
     // Its own navigation item, empty, is its first value (one probe); one
@@ -5920,6 +6040,16 @@ fn navigation_controller(
     }
     values.push(("UIViewControllers", nib.array("NSMutableArray", vec![reference(root_name)])));
     values.push(("UINavigationBar", navigation_bar(nib, nav, &bar_name, Some(&item), name)?));
+    // Its shown toolbar after its bar (a corpus launch screen); hidden, or
+    // beside a parent or its own navigation item, it isn't established.
+    match (child(nav, "toolbar", "toolbar"), nav.attribute("toolbarHidden")) {
+        (None, None) => {}
+        (Some(t), Some(_)) if !is_held && child(nav, "navigationItem", "navigationItem").is_none() => {
+            values.push(("UIToolbar", navigation_toolbar(nib, t, &format!("{name} toolbar"))?));
+            values.push(("UIToolbarShown", Value::Bool(true)));
+        }
+        _ => return fail("a navigation controller's toolbar, other than a shown one in its own nib, is not supported by this ibtool"),
+    }
     // Swapped in for its class only when initial, identified or of a
     // custom class.
     let controller = if swapped || nav.attribute("customClass").is_some() {
@@ -5931,6 +6061,47 @@ fn navigation_controller(
         Object::new("UINavigationController", values)
     };
     Ok(Value::New(controller.named(name)))
+}
+
+/// A navigation controller's toolbar: as a toolbar in a view, without
+/// items or layout margins, 54 points high (Xcode's height for it, as for
+/// a navigation bar) and its document width at its document place; an
+/// empty mask is UIToolbar's own (a corpus launch screen).
+fn navigation_toolbar(nib: &mut Nib, t: Node, name: &str) -> Result<Value, String> {
+    only_attributes(t, &[
+        ("opaque", Some("NO")), ("clearsContextBeforeDrawing", Some("NO")), ("contentMode", Some("scaleToFill")),
+        ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("barStyle", Some("black")), ("id", None), ("key", Some("toolbar")),
+    ])?;
+    only_children(t, &["rect", "autoresizingMask"])?;
+    if t.attribute("opaque").is_none() {
+        return fail("an opaque navigation controller's toolbar is not supported by this ibtool");
+    }
+    for m in children(t, "autoresizingMask") {
+        if autoresizing_mask(m)? != 0 || m.has_children() {
+            return fail("a navigation controller's toolbar with an autoresizing mask is not supported by this ibtool");
+        }
+    }
+    let f = frame(t)?;
+    let mut values = vec![("UIBounds", doubles(&[0.0, 0.0, f.w, 54.0])), ("UICenter", doubles(&[f.x + f.w / 2.0, f.y + 27.0]))];
+    values.push(("UIDeepDrawRect", Value::Bool(true)));
+    values.push(("UIAutoresizeSubviews", Value::Bool(true)));
+    values.push(("UIAutoresizingMask", Value::Int(10)));
+    if t.attribute("clearsContextBeforeDrawing").is_some() {
+        values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+    }
+    values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
+    if t.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
+        values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
+    }
+    values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+    nib.large_content(&mut values);
+    if t.attribute("barStyle").is_some() {
+        values.push(("UIBarStyle", Value::Int(1)));
+    }
+    values.push(("UIItems", nib.empty_array()));
+    values.push(("UIBarPosition", Value::Int(1)));
+    values.push(("UIBarTranslucence", Value::Int(1)));
+    Ok(Value::New(Object::new("UIToolbar", values).named(name.to_string())))
 }
 
 /// A navigation controller's title, made before what it holds: a string
@@ -5997,6 +6168,9 @@ fn navigation_controller_nib(
     let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
     objects.extend(gestures.iter().map(|g| reference(g.clone())));
     objects.push(reference("controller bar"));
+    if child(nav, "toolbar", "toolbar").is_some() {
+        objects.push(reference("controller toolbar"));
+    }
     // Its own navigation item after its bar (one probe).
     if child(nav, "navigationItem", "navigationItem").is_some() {
         objects.push(reference("controller navigation item"));
@@ -6613,7 +6787,17 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 if !matches!(class, "NSArray" | "NSMutableArray") {
                     return fail(format!("an outlet collection of class {class} is not supported by this ibtool"));
                 }
-                let destination = view_name(attr(o, "destination")?);
+                // Of constraints as of views (the outlets' rule).
+                let id = attr(o, "destination")?;
+                let destination = match vc.document().descendants().find(|d| d.is_element() && d.attribute("id") == Some(id)) {
+                    Some(c) if c.has_tag_name("constraint") => {
+                        if c.attribute("placeholder").is_some() {
+                            return fail("an outlet collection of a placeholder constraint is not supported by this ibtool");
+                        }
+                        constraint_name(c)?
+                    }
+                    _ => view_name(id),
+                };
                 match vc_collections.iter_mut().find(|c| c.0 == property) {
                     Some(c) if c.1 == class => c.2.push(destination),
                     Some(_) => return fail("an outlet collection of two classes is not supported by this ibtool"),
@@ -6856,9 +7040,6 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 values.push(("UIClipsToBounds", Value::Bool(true)));
             }
             if view.attribute("clearsContextBeforeDrawing").is_some() {
-                if tint.is_some() {
-                    return fail("a root view's tint colour beside clearsContextBeforeDrawing is not supported by this ibtool");
-                }
                 values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
             }
             if let Some(tint) = tint {
@@ -7185,6 +7366,15 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     }
                     objects.push(Value::New(placeholder(&mut nib)));
                 }
+                // A collection view's layout comes before its constraints
+                // (three probes).
+                let layout_child = v.map(|v| format!("{v} layout")).filter(|l| scene.subviews.iter().any(|s| s.0.as_ref() == v && s.1 == *l));
+                if let Some(l) = &layout_child {
+                    let s = &scene.subviews.iter().find(|s| s.1 == *l).expect("found above").1;
+                    objects.push(reference(s.clone()));
+                    order.push(s.clone());
+                    queue.push_back((depth + 1, Some(s)));
+                }
                 if let Some(v) = v.filter(|_| !subviews_first) {
                     objects.extend(constraints(v));
                 }
@@ -7195,7 +7385,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 if let Some((_, view)) = v.and_then(|v| scene.item_views.iter().find(|t| &t.0 == v)) {
                     objects.push(reference(view.clone()));
                 }
-                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1) && !held_pulled.iter().any(|p| p.1 == s.1)) {
+                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1) && !held_pulled.iter().any(|p| p.1 == s.1) && Some(&s.1) != layout_child.as_ref()) {
                     objects.push(reference(s.clone()));
                     order.push(s.clone());
                     queue.push_back((depth + 1, Some(s)));
@@ -7355,7 +7545,15 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
                 outlets.push((label, source, destination));
             }
-            outlets.sort_by(|a, b| a.0.cmp(b.0));
+            // Those of one name from views by the views' UIKit classes,
+            // whatever their custom classes: a picker's before a text
+            // field's, a text field's before a text view's (five probes).
+            let class_of = |source: &str| {
+                let id = source.strip_prefix("view ")?;
+                let v = view.document().descendants().find(|d| d.is_element() && d.attribute("id") == Some(id))?;
+                Some(uikit_class(v.tag_name().name()))
+            };
+            outlets.sort_by_cached_key(|o| (o.0, class_of(o.1).unwrap_or_default()));
             // A view's gesture recognizers are an outlet collection, before
             // the outlets.
             // The root view's first, as the objects list it (one probe).
@@ -7364,9 +7562,16 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             outlets.splice(0..0, gesture_sources.into_iter().map(|v| ("gestureRecognizers", v, "")));
             // The controller's outlet collections, before its outlets.
             for (label, class, views) in &vc_collections {
+                // Several constraints' order isn't their document order
+                // (a corpus storyboard).
+                let is_constraint = |v: &String| constraint_names.contains(v) || scene.own_constraints.iter().any(|c| c.1 == *v);
+                if views.len() > 1 && views.iter().any(is_constraint) {
+                    return fail("an outlet collection of several constraints is not supported by this ibtool");
+                }
                 for v in views {
-                    if *v != root_name && !scene.subviews.iter().any(|s| s.1 == *v) {
-                        return fail("an outlet collection of anything but the controller's views is not supported by this ibtool");
+                    let constraint = is_constraint(v);
+                    if *v != root_name && !constraint && !scene.subviews.iter().any(|s| s.1 == *v) {
+                        return fail("an outlet collection of anything but the controller's views and constraints is not supported by this ibtool");
                     }
                 }
                 let views = views.iter().map(|v| reference(v.clone())).collect();
@@ -7385,12 +7590,20 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // Xcode visits their controls: the root view's subviews in
             // document order, then, from the last visited, each one's own
             // the same way (a stack).
+            // A xib's go in document order, each view before its
+            // subviews (three probes, containers nested and not).
             let mut visit: Vec<String> = Vec::new();
-            let mut stack = vec![view];
-            while let Some(v) = stack.pop() {
-                for s in children(v, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
-                    visit.push(view_name(attr(s, "id")?));
-                    stack.push(s);
+            if xib {
+                for d in view.descendants().filter(|d| d.is_element() && d != &view && d.parent().is_some_and(|p| p.has_tag_name("subviews"))) {
+                    visit.push(view_name(attr(d, "id")?));
+                }
+            } else {
+                let mut stack = vec![view];
+                while let Some(v) = stack.pop() {
+                    for s in children(v, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
+                        visit.push(view_name(attr(s, "id")?));
+                        stack.push(s);
+                    }
                 }
             }
             let visited = |name: &String| visit.iter().position(|v| v == name);
@@ -7530,7 +7743,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             return fail("several gesture recognizers' segues, or one beside bar button items' segues, are not supported by this ibtool");
         }
         bar_segues.extend(gesture_segues);
-        let mut templates = segue::templates(&mut vnib, "controller", upstream_used, controller_placeholder, &view_segues, &own_segues, &bar_segues, &nib_names)?;
+        let mut templates = segue::templates(&mut vnib, module, "controller", upstream_used, controller_placeholder, &view_segues, &own_segues, &bar_segues, &nib_names)?;
         let gesture_performs: Vec<(String, String)> = templates.performs.iter().filter(|p| p.0.starts_with("gesture ")).cloned().collect();
         templates.performs.retain(|p| !p.0.starts_with("gesture "));
         let mut external = templates.external;
@@ -7820,6 +8033,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 recognizers: recognizers.clone(),
                 item_outlets: item_outlets.clone(),
                 gesture_order: gesture_order(&scene.gesture_views).into_iter().cloned().collect(),
+                module: module.map(str::to_string),
             });
         }
         if !is_initial && !identified && !segue_destination && !embedded {

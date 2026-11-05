@@ -17,8 +17,8 @@ collection view cell, or a reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 243 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 115 cases written for this, checked
+Interface Builder 3 to 27), 261 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 128 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -52,7 +52,11 @@ any other (one probe).
   archived) listed after the content view, and after the style's detail
   label when it has one (five probes: plain, default, subtitle and right
   detail cells, with and without the guide). A cell without a reuse
-  identifier has no `UIReuseIdentifier` (one probe).
+  identifier has no `UIReuseIdentifier` (one probe). The owner's outlets,
+  to the cell or its content's views, are the nib's connections, from the
+  `IBFilesOwner` proxy, by name (two probes); beside the cell's own
+  connections they are refused. The cell's outlets may go to its views'
+  constraints too, as a view's (one probe).
 - **A collection view cell.** A top-level `<collectionViewCell>` compiles
   as a collection view's prototype cell does (Collection views, below),
   with three differences:
@@ -237,7 +241,15 @@ other values of the attributes these use, is refused. Observed:
   white 0 and 1 (most of the corpus's): 0 is archived as 0; 1 as
   `whiteColor` when opaque and otherwise as the float after 1
   (1.0000001192092896, no `-Double`, text `1`), named as the grey would
-  be (eight probes).
+  be (eight probes); and Interface Builder's palette, whose conversions
+  are established by probe: calibrated white 1/3, 1/2 and 2/3 (0.408,
+  0.572, 0.723), and in calibrated RGB black, white, red, green, blue,
+  cyan, yellow, magenta, orange, purple, brown and the three greys.
+  Components match at a float's precision, as Xcode converts them (1/3
+  to 10 digits is 1/3), alpha is kept, and the converted components are
+  floats, archived without `-Double` in storyboards too (84 components,
+  opaque and not, in a xib and a storyboard). `colorSpace="custom"
+  customColorSpace="calibratedRGB"` is the same space.
 - A document without `colorMatched="YES"` (older ones) takes colours'
   components as they are instead of converting them: calibrated RGB is
   archived as sRGB with the document's values, calibrated white as sRGB
@@ -367,6 +379,8 @@ other values of the attributes these use, is refused. Observed:
     of them), the top legacy guide as the root view's width and a point
     tall at its top, and the bottom one as its width and no height at its
     foot (240 probe scenes on three devices, placed to a quarter point).
+  - A view without a frame measures by its laid-out frame (1000x1000 at
+    the origin, see subviews: Xcode's Action Extension template).
   - Equal lengths are left to the earlier rules: second items with the
     same frame in id order (three of the corpus's), and centres the lower
     one first, then the one further right (19 probes). Otherwise they
@@ -580,7 +594,9 @@ other values of the attributes these use, is refused. Observed:
   just before its semantic content attribute (two probes).
 - A root view's content mode other than scale to fill is `UIContentMode`
   after its mask (two probes), then `UIClipsToBounds` when it clips (one);
-  beside `clearsContextBeforeDrawing` or a tint they are refused. One that
+  beside `clearsContextBeforeDrawing` or a tint they are refused.
+  `UIClearsContextBeforeDrawing` false comes before its own or the
+  document's tint (two probes). One that
   doesn't autoresize its subviews leaves `UIAutoresizeSubviews` out (one
   probe). A table view controller's `autoresizesArchivedViewToFullSize="NO"`
   is `UIAutoresizesArchivedViewToFullSize` false after its identifiers,
@@ -623,7 +639,12 @@ other values of the attributes these use, is refused. Observed:
   text colour its `UITextColor` (`UIDisableTextColorUpdateOnTraitCollectionChange`
   is set either way; three probes). A text field with no text colour
   element is as with a nil one; a label with none is as with a declared
-  `labelColor` (two probes).
+  `labelColor` (two probes). A text field with `usesAttributedText` and
+  an empty `<attributedString>` has no `UIFont` or `UITextColor`; after
+  `UITextAlignment` come `UIAttributedText`, an `NSAttributedString` of
+  the empty string without attributes, and `UIText`, an empty
+  `NSMutableString`, and `UIDisableTextColorUpdateOnTraitCollectionChange`
+  is false (one probe); other attributed text is refused.
 - A view's `UIBounds` is left out when its size is zero, and its
   `UICenter` when the centre is the origin. A label, button or plain view
   without a frame, or with an all-zero one, is 1000x1000 at the origin in
@@ -759,6 +780,11 @@ other values of the attributes these use, is refused. Observed:
   last visited, each one's subviews the same way, as a stack (so siblings
   stay in document order, 19 probes, and controls in containers of their
   own come last container first, eight probes and one of the corpus's).
+  A xib's go in document order, each view before its subviews, whatever
+  the containers (three probes, two of the corpus's). Outlets of one
+  name from several views (two `delegate`s) go by the views' UIKit
+  classes, whatever their custom classes: a picker's before a text
+  field's, a text field's before a text view's (six probes).
   Actions on other
   events sort by event mask first (valueChanged 4096,
   primaryActionTriggered 8192, editingDidBegin 65536, editingChanged
@@ -787,9 +813,10 @@ other values of the attributes these use, is refused. Observed:
   its clipping) and on a navigation bar (after its mask); a root view's
   own tint goes in the same place, and its colours other than background
   and tint are refused. A segmented control beside it takes nothing of it
-  (one probe); beside tab bars, toolbars, split and page view controllers
-  and search bars the document's tint is refused, not yet probed (six
-  probes).
+  (one probe), and neither does a toolbar, in a view or a navigation
+  controller (three probes and two corpus storyboards); beside tab bars,
+  split and page view controllers and search bars the document's tint is
+  refused, not yet probed (six probes).
 
 - A stack view's `userInteractionEnabled="NO"` is
   `UIUserInteractionDisabled` after its hidden flag and tag (one probe).
@@ -827,7 +854,9 @@ other values of the attributes these use, is refused. Observed:
 - A named colour (`<color name=...>`, defined by a `<namedColor>` in the
   document's resources) is `UIDynamicCatalogName`,
   `UIDynamicCatalogUseNibBundle` and its definition's components, unrounded
-  (sRGB and grey; three probes and one corpus storyboard). Colours in
+  (sRGB and grey; three probes and one corpus storyboard); Display P3
+  black and white, plain or named, convert as calibrated RGB's (white to
+  0.99999994, 1.0000001, 1.0000001: four probes). Other colours in
   Display P3 and calibrated RGB are converted to extended sRGB in floats,
   through a matrix this ibtool doesn't reproduce exactly (it fits 24
   colours to 2e-7): refused. For calibrated RGB, 148 colours fit a
@@ -842,7 +871,12 @@ other values of the attributes these use, is refused. Observed:
   conversion is single precision, per channel where the primaries agree,
   and off the exact curves by up to about 8 ulps, without a table's
   interpolation or a fixed-point grid; that arithmetic isn't reproduced
-  here.
+  here. Its power function behaves as `exp2(g·log2 x)` in floats; for
+  `exp2` alone (x = 1/2 through a parametric curve, 65,535 gammas) a
+  degree-6 polynomial on the fraction's floor domain, evaluated by
+  Horner's rule in floats, matches 94.6% at best, and neither
+  round-to-nearest reduction, even and odd halves, power sums nor
+  `exp(r·ln 2)` does better.
 - A scene's gesture recognizer whose delegate is the controller has a
   `delegate` outlet to it in the controller's nib, after the controller's
   storyboard outlet (one probe; several, or one in an embedded controller,
@@ -993,6 +1027,18 @@ is refused. Observed with 25 probes:
   `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1;
   `largeTitles` is `UIBarPrefersLargeTitles` after the large content
   properties, the layout the same (two probes).
+- A navigation controller's shown toolbar (`toolbarHidden="NO"` and a
+  `<toolbar key="toolbar">`) is `UIToolbar` after its `UINavigationBar`,
+  then `UIToolbarShown` true, listed after the bar: a `UIToolbar` 54
+  points high at its document place and width (as the bar's 54), with
+  `UIDeepDrawRect`, `UIAutoresizeSubviews`, mask 10,
+  `UIClearsContextBeforeDrawing` false when it says so, hugging, no
+  layout margins, the safe-area insets setting, semantic and large
+  content, `UIBarStyle` 1 for black, the nib's empty array as its items,
+  `UIBarPosition` 1 and `UIBarTranslucence` 1 (a corpus launch screen).
+  A hidden one, or one beside a parent or its own navigation item, is
+  refused. A toolbar in a view takes a black style the same way, before
+  its items (two probes and a corpus storyboard).
 - The bar's appearance: a background colour before `UIDeepDrawRect`;
   `translucent="NO"` adds `UIOpaque` after it and makes
   `UIBarTranslucence` 2 (a translucent bar's `opaque="NO"` changes
@@ -1240,9 +1286,9 @@ probes:
   separator style, `UIPrefetchingEnabled`, the row, section header and
   footer heights and their three estimates as floats, `UIFillerRowHeight`
   0.0 and `UISectionHeaderTopPadding` -1.0 as doubles,
-  `UIAllowsSelection` false, `UIAllowsMultipleSelection` or
-  `UIAllowsSelectionDuringEditing` true when set,
-  `UIAllowsMultipleSelectionDuringEditing` true when set (one probe),
+  `UIAllowsSelection` false, `UIAllowsSelectionDuringEditing`,
+  `UIAllowsMultipleSelection` and `UIAllowsMultipleSelectionDuringEditing`
+  true when set, in that order (five probes, together and alone),
   `UIInsetsContentViewsToSafeArea`, the header and footer views,
   `UISeparatorColor` (four probes with a header, a footer or both), the
   prototypes,
@@ -1422,7 +1468,9 @@ of those constraints, and not again under its own superview (ten probes).
 A controller's outlet collections (`<outletCollection>`, `collectionClass`
 NSArray by default or NSMutableArray) are `UIRuntimeOutletCollectionConnection`s
 from its placeholder, before its outlets, each property's in the order of
-its first entry: the views in a mutable array in document order,
+its first entry: the views (or a single constraint, as an outlet's: one
+probe; several constraints aren't in document order in a corpus
+storyboard, and are refused) in a mutable array in document order,
 `runtimeCollectionClassName` the class and `addsContentToExistingCollection`
 false. Those of table and collection view controllers, and beside a gesture
 recognizer, are refused (six probes).
@@ -1491,9 +1539,11 @@ hugging (each 250 unless given) or compression resistance (each 750
 unless given) priorities, written when given, before its semantic content
 attribute (three probes). A plain view's and a text field's are written
 the same way, after their constraint keys and hugging, as `{h, v}` (three
-probes and 100 random storyboards); beside a plain view's margins,
-scrolling or a restoration identifier, or a text field's restoration
-identifier, they are refused. A selected button has `UISelected` before
+probes and 100 random storyboards), a plain view's before its margins
+(layout margins, preserving its superview's, following the readable
+width and the safe-area insets setting: four probes); beside a plain
+view's scrolling or restoration identifier, or a text field's
+restoration identifier, they are refused. A selected button has `UISelected` before
 `UIDisabled`, and a line break mode other than middle truncation is
 `UILineBreakMode` (word wrap 0, tail truncation 4) after its stateful
 content (four probes). A button may have no states at all, and then no
@@ -1582,8 +1632,10 @@ A collection view in a view is compiled as a collection view controller's
 (mask 36 when none is given, its constraint keys after its clipping), its
 outlets the controller's, its flow layout listed as its child (after the
 collection view's siblings) and its automatic estimated item size a pair
-of the layout's; its cells' segues and constraints it holds are refused
-(three probes). A custom class swaps in for it, its class names last (one
+of the layout's; its cells' segues are refused (three probes). Constraints
+it holds are `UIViewAutolayoutConstraints` after its translation flag,
+and the objects list its layout first in its turn, before them, in a
+view or a cell (three probes and a corpus xib). A custom class swaps in for it, its class names last (one
 probe). With `opaque="NO"` it leaves out `UIOpaque`; with
 `dataMode="none"` its nil `UIDelegate`; zoom scales are
 `UIMinimumZoomScale` and `UIMaximumZoomScale` after `UIBouncesZoom`, as a
@@ -1678,7 +1730,8 @@ Items with segues, opaque toolbars and toolbars in tables, cells or
 collection views are refused.
 
 A navigation bar in a view is a `UINavigationBar`: opaque unless
-translucent (the default; then `UIBarTranslucence` 1, not 2: one probe), mask 36, its constraint keys, hugging `{250, 250}`, zero
+translucent (the default; then `UIBarTranslucence` 1, not 2: one probe), mask 36, its constraint keys, hugging `{250, 250}`, its compression
+resistance when given (Xcode's Action Extension template), zero
 directional layout margins, semantic content and large content
 properties, then `UIItems` (an `NSMutableArray` of its navigation items,
 each as a controller's with `UINavigationBar` referring back to the bar),
@@ -1972,7 +2025,8 @@ the same. Observed with 55 probes:
   `UIStoryboardPushSegueTemplate`; a custom segue (with a class) a plain
   `UIStoryboardSegueTemplate` without an action name. Its values:
   `UIIdentifier` (the segue's identifier, if any), `UISegueClassName` (a
-  custom class's runtime name, for any kind: three probes),
+  custom class's runtime name, for any kind: three probes; in the
+  target's module, the `--module` one, as a controller's: one probe),
   `UIDestinationViewControllerIdentifier`
   (the destination's nib's name), then for show `UIAnimates` false when it
   doesn't animate, a segue action's selector (`destinationCreationSelector`)
