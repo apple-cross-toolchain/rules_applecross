@@ -23,7 +23,10 @@ http_archive(
     build_file_content = 'exports_files(glob(["*.patch"]))',
     sha256 = "c0e284982dcfd6078aa02086dfc786e4f2a5df02ed3a94c6db73cf6c46849136",
     strip_prefix = "debian/patches",
-    urls = ["https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/z/zip/zip_3.0-15%2Bdeb13u1.debian.tar.xz"],
+    urls = [
+        "https://deb.debian.org/debian/pool/main/z/zip/zip_3.0-15%2Bdeb13u1.debian.tar.xz",
+        "https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/z/zip/zip_3.0-15%2Bdeb13u1.debian.tar.xz",
+    ],
 )
 
 http_archive(
@@ -52,7 +55,10 @@ http_archive(
     ],
     sha256 = "f0e8bb1f9b7eb0b01285495a2699df3a4b766784c1765a8f1aeedf63c0806369",
     strip_prefix = "zip30",
-    urls = ["https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/z/zip/zip_3.0.orig.tar.gz"],
+    urls = [
+        "https://deb.debian.org/debian/pool/main/z/zip/zip_3.0.orig.tar.gz",
+        "https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/z/zip/zip_3.0.orig.tar.gz",
+    ],
 )
 
 http_archive(
@@ -60,7 +66,10 @@ http_archive(
     build_file_content = 'exports_files(glob(["*.patch"]))',
     sha256 = "32716adbdf903ee4e7e28f8c9884fc3459b22b2214e0ff4cefc0ab9839f43481",
     strip_prefix = "debian/patches",
-    urls = ["https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/u/unzip/unzip_6.0-29%2Bdeb13u1.debian.tar.xz"],
+    urls = [
+        "https://deb.debian.org/debian/pool/main/u/unzip/unzip_6.0-29%2Bdeb13u1.debian.tar.xz",
+        "https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/u/unzip/unzip_6.0-29%2Bdeb13u1.debian.tar.xz",
+    ],
 )
 
 http_archive(
@@ -106,5 +115,8 @@ http_archive(
     ],
     sha256 = "036d96991646d0449ed0aa952e4fbe21b476ce994abc276e49d30e686708bd37",
     strip_prefix = "unzip60",
-    urls = ["https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/u/unzip/unzip_6.0.orig.tar.gz"],
+    urls = [
+        "https://deb.debian.org/debian/pool/main/u/unzip/unzip_6.0.orig.tar.gz",
+        "https://snapshot.debian.org/archive/debian/20260819T030017Z/pool/main/u/unzip/unzip_6.0.orig.tar.gz",
+    ],
 )
