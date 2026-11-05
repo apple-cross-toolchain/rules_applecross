@@ -8,16 +8,17 @@ the watch app's WatchKit `Interface`. Compiled and linked, every file is
 byte-identical to Xcode 27.0's (toolchain compiler mode, the default).
 Linking copies an iOS or tvOS storyboard; a WatchKit one is rewritten
 (below). `ibtool --compile X.nib ... X.xib`, as rules_apple's compile_xib
-runs it, is reproduced for iOS xibs holding one view, table or
-collection view cell, or reusable view (below, "Xibs").
+runs it, is reproduced for iOS xibs holding a view (and table view cells
+or other views beside it), a lone table, collection or web view, a table or
+collection view cell, or a reusable view (below, "Xibs").
 
 ## Xibs
 
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 215 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 71 cases written for this, checked
+Interface Builder 3 to 27), 231 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 84 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -69,7 +70,29 @@ any other (one probe).
   and its own runtime attributes are key-value pairs, as its views' are
   (eleven probes, and 17 more of the corpus's: every collection view cell
   and transparent table view cell there).
-- A table view cell's `opaque="NO"` leaves out `UIOpaque` (one probe).
+- A table view cell's `opaque="NO"` leaves out `UIOpaque` (one probe), and
+  its `userInteractionEnabled="NO"` is `UIUserInteractionDisabled` after
+  `UIOpaque` (one probe).
+- **Cells and views beside the view.** Table view cells and other views
+  after a top-level view are in the view's nib, the owner's outlets
+  reaching them and their views. They are top-level after the view, in
+  document order, the first responder in its own place among them. The
+  objects list each root's first listing in turn, then each root's rest in
+  turn. The view's first listing runs through its own turn in the
+  breadth-first order (its guide, its constraints, its subviews); a cell's
+  is its content view, its safe-area guide (after a style's detail label)
+  and its content subviews; another view's is its constraints and its
+  subviews (a collection view's layout before its guide). Another view, of
+  any kind a storyboard compiles, compiles as a subview does, its own
+  safe-area guide unowned and first. A cell's connections, actions,
+  runtime attributes and accessibility there aren't established and are
+  refused (eight probes, four corpus xibs).
+- **A lone table, collection or web view.** Alone in the xib, its owner's
+  `view` outlet its own, it compiles as beside a view (the table view and
+  collection view controller templates, three probes): this ibtool
+  compiles it beside a placeholder view the nib then leaves out. An empty
+  xib (the Empty template) is its owner and first responder alone (one
+  probe).
 - The nib's top-level objects and its objects list follow the document's
   order: a first responder placed after the view comes after it there
   too (one probe, two corpus xibs).
@@ -80,8 +103,9 @@ any other (one probe).
   compiles as a top-level view does, a `UICollectionReusableView` (or
   swapped in for one), with its `reuseIdentifier`, even an empty one, as
   `UIReuseIdentifier` after its large content (three probes).
-- Refused: other top-level objects (tables, several views, custom
-  objects, gesture recognizers), an owner's connections beside a cell,
+- Refused: other top-level objects (custom objects, gesture recognizers,
+  windows and controllers, a cell or view before the view), an owner's connections
+  beside a cell alone,
   macOS xibs, and xibs in the archive format of Interface Builder before
   Xcode 5.
 
@@ -1642,15 +1666,18 @@ controller and the default data store, then its flags: data detectors
 configuration (`mediaTypesRequiringUserActionForPlayback` none, empty
 preferences) is compiled; others are refused. `userInteractionEnabled="NO"`
 is `UIUserInteractionDisabled` after `UIOpaque`, clipping
-`UIClipsToBounds` after the mask, a custom class swaps in for it last, and
-`fixedFrame` changes nothing (three probes).
+`UIClipsToBounds` after the mask, its restoration identifier
+`UIRestorationIdentifier` before its semantic content, a custom class
+swaps in for it last, and `fixedFrame` changes nothing (four probes).
 
 The older `<webView>` is a `UIWebView`: a background colour if any,
 `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, the document's mask
 (36 without one, left out when empty, whether or not it's constrained),
 its constraint keys, semantic content and large content, a nil
 `UIDelegate`, `UIScalesPageToFit` when it says so, and
-`UIDataDetectorTypes` 1 (seven probes, `fixedFrame` changing nothing).
+`UIDataDetectorTypes` (1, phone numbers, without a `<dataDetectorType>`;
+with one, phone numbers 1 and links 2, left out when none: ten probes,
+`fixedFrame` changing nothing).
 
 A picker view is a `UIPickerView`: the view keys (opaque, hidden, the mask as a label's),
 hugging `{250, 250}` and after its large content properties

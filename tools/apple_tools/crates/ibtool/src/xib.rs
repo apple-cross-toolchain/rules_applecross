@@ -15,12 +15,26 @@ use roxmltree::{Document, Node};
 /// Builder's `abc-de-fgh` or the placeholders' negative numbers.
 const CONTROLLER: &str = "xib-files-owner";
 
+/// The views that may be top-level beside a xib's view, compiled as its
+/// subviews are (the views a storyboard compiles, as `subview` does).
+pub(crate) const BESIDE_VIEWS: [&str; 9] = ["view", "label", "button", "textField", "imageView", "tableView", "collectionView", "webView", "wkWebView"];
+
 fn fail<T>(msg: impl Into<String>) -> Result<T, String> {
     Err(msg.into())
 }
 
 /// The nib of an iOS xib.
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+    compile_with(xml, minimum_deployment_target, module, localizable, false)
+}
+
+/// The id of the placeholder view a lone table, collection or web view is
+/// compiled beside, which the nib leaves out.
+const PLACEHOLDER: &str = "xib-placeholder-view";
+
+/// `placeholder`: whether the xib's view is the placeholder a lone view was
+/// given, its owner's `view` outlet then the lone view's.
+fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, placeholder: bool) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     // An iPad xib compiles as any other (one probe).
@@ -35,6 +49,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     let mut owner = None;
     let mut responder = None;
     let mut view = None;
+    // Table view cells and views after a top-level view, compiled into its
+    // nib.
+    let mut cells: Vec<Node> = Vec::new();
+    // Or one of those views alone, compiled beside a placeholder view the
+    // nib then leaves out.
+    let mut lone = None;
     for o in elements(objects) {
         match (o.tag_name().name(), o.attribute("placeholderIdentifier")) {
             ("placeholder", Some("IBFilesOwner")) if owner.is_none() => owner = Some(o),
@@ -44,11 +64,30 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
                 }
                 responder = Some(o.attribute("id").ok_or("a first responder without an id")?);
             }
-            ("view" | "collectionReusableView" | "tableViewCell" | "collectionViewCell", _) if view.is_none() => view = Some(o),
+            ("view" | "collectionReusableView" | "tableViewCell" | "collectionViewCell", _) if view.is_none() && lone.is_none() => view = Some(o),
+            (tag, _) if view.is_none() && lone.is_none() && BESIDE_VIEWS.contains(&tag) => lone = Some(o),
+            (tag, _) if view.is_some_and(|v| v.has_tag_name("view")) && (tag == "tableViewCell" || BESIDE_VIEWS.contains(&tag)) => cells.push(o),
             (tag, _) => return fail(format!("a xib's top-level {tag} beside its one view is not supported by this ibtool")),
         }
     }
     let owner = owner.ok_or("a xib without a File's Owner is not supported by this ibtool")?;
+    // A lone view (a table view controller's template, say) is the root
+    // beside a placeholder view, which the nib leaves out: its values,
+    // objects and outlets are as beside a view (three probes).
+    // An empty xib (Xcode's Empty template) is its placeholders alone, as
+    // the placeholder view leaves them (one probe).
+    if lone.is_some() || (view.is_none() && cells.is_empty()) {
+        if placeholder {
+            return fail("a xib's lone view beside a placeholder");
+        }
+        let stub = format!("<view contentMode=\"scaleToFill\" id=\"{PLACEHOLDER}\">\n<rect key=\"frame\" x=\"0.0\" y=\"0.0\" width=\"0.0\" height=\"0.0\"/>\n<autoresizingMask key=\"autoresizingMask\"/>\n</view>\n");
+        let at = lone.map_or(objects.range().end - "</objects>".len(), |l| l.range().start);
+        if !xml[..objects.range().end].ends_with("</objects>") {
+            return fail("a xib's objects element");
+        }
+        let rewritten = format!("{}{stub}{}", &xml[..at], &xml[at..]);
+        return compile_with(&rewritten, minimum_deployment_target, module, localizable, true);
+    }
     let view = view.ok_or("a xib without a top-level view is not supported by this ibtool")?;
 
     // A cell is a prototype cell's nib, with its safe-area guide.
@@ -89,7 +128,7 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
             return fail(format!("a File's Owner's {} is not supported by this ibtool", c.tag_name().name()));
         }
         for o in elements(c) {
-            if o.has_tag_name("outlet") && o.attribute("property") == Some("view") && o.attribute("destination") != Some(view_id) {
+            if o.has_tag_name("outlet") && o.attribute("property") == Some("view") && o.attribute("destination") != Some(view_id) && !placeholder {
                 return fail("a File's Owner's view outlet to anything but the top-level view is not supported by this ibtool");
             }
             outlets.push_str(&xml[o.range()]);
@@ -108,7 +147,12 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     controller.push_str("</viewController>\n");
     // Actions sent to the first responder are the scene's.
     let responder = responder.map_or(String::new(), |id| format!("<placeholder placeholderIdentifier=\"IBFirstResponder\" id=\"{}\" sceneMemberID=\"firstResponder\"/>\n", escape(id)));
-    let scene = format!("<scenes>\n<scene sceneID=\"{CONTROLLER}-scene\">\n<objects>\n{controller}{responder}</objects>\n</scene>\n</scenes>");
+    // Cells beside the view follow the controller, their canvas places
+    // left out.
+    let safe_area = |c: &Node| c.has_tag_name("viewLayoutGuide") && c.attribute("key") == Some("safeArea");
+    let cell_text: String = cells.iter().map(|c| retarget(&without(xml, *c, |d| canvas(d) || safe_area(d))) + "\n").collect();
+    let cell_guides = cells.iter().filter(|c| elements(**c).any(|d| safe_area(&d))).filter_map(|c| c.attribute("id").map(str::to_string)).collect();
+    let scene = format!("<scenes>\n<scene sceneID=\"{CONTROLLER}-scene\">\n<objects>\n{controller}{responder}{cell_text}</objects>\n</scene>\n</scenes>");
 
     // The document's own attributes, as a storyboard's, with the scene as
     // its initial controller.
@@ -121,9 +165,15 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     head.push_str(&format!(" initialViewController=\"{CONTROLLER}\""));
     let storyboard = format!("{}{head}{}{scene}{}", &xml[..root.range().start], &xml[head_end..objects.range().start], &xml[objects.range().end..]);
 
-    // Its first responder after its view puts them in that order in the nib.
-    let responder_last = elements(objects).position(|o| o.attribute("placeholderIdentifier") == Some("IBFirstResponder")) > elements(objects).position(|o| o == view);
-    let compiled = crate::storyboard::compile_xib(&storyboard, minimum_deployment_target, module, localizable, responder_last)?;
+    // Its first responder's place among its view and cells, which the nib
+    // keeps.
+    let roots: Vec<Node> = elements(objects).filter(|o| *o == view || cells.contains(o)).collect();
+    let responder_at = match elements(objects).position(|o| o.attribute("placeholderIdentifier") == Some("IBFirstResponder")) {
+        Some(r) => roots.iter().filter(|o| elements(objects).position(|e| e == **o) < Some(r)).count(),
+        None => 0,
+    };
+    let layout = crate::storyboard::XibLayout { responder_at, cell_guides, placeholder };
+    let compiled = crate::storyboard::compile_xib(&storyboard, minimum_deployment_target, module, localizable, &layout)?;
     let name = format!("{CONTROLLER}-view-{view_id}.nib");
     compiled.files.into_iter().find(|f| f.0 == name).map(|f| f.1).ok_or_else(|| "the xib's view compiled to no nib".to_string())
 }

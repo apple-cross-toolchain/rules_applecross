@@ -3300,7 +3300,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 // `fixedFrame` changes nothing (one probe).
                 ("fixedFrame", Some("YES")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")),
-                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("restorationIdentifier", None),
             ])?;
             only_children(n, &["rect", "color", "constraints", "wkWebViewConfiguration"])?;
             if children(n, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
@@ -3339,6 +3339,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
+            restoration_identifier(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             let empty = nib.string("");
@@ -3457,7 +3458,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("contentMode", Some("scaleToFill")), ("scalesPageToFit", Some("YES")), ("fixedFrame", Some("YES")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "color", "constraints"])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "dataDetectorType"])?;
+            // Data detectors given are UIDataDetectorTypes (phone numbers 1,
+            // links 2), left out when none; without them, phone numbers
+            // (three probes).
+            let mut detectors = 1;
+            if let Some(d) = child(n, "dataDetectorType", "dataDetectorTypes") {
+                only_attributes(d, &[("key", None), ("phoneNumber", Some("YES")), ("link", Some("YES"))])?;
+                detectors = i64::from(d.attribute("phoneNumber").is_some()) | (i64::from(d.attribute("link").is_some()) << 1);
+            }
             for c in children(n, "color") {
                 if c.attribute("key") != Some("backgroundColor") {
                     return fail("web view colours other than a background colour are not supported by this ibtool");
@@ -3486,7 +3495,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("scalesPageToFit").is_some() {
                 values.push(("UIScalesPageToFit", Value::Bool(true)));
             }
-            values.push(("UIDataDetectorTypes", Value::Int(1)));
+            if detectors != 0 {
+                values.push(("UIDataDetectorTypes", Value::Int(detectors)));
+            }
             Object::new("UIWebView", values)
         }
         "mapView" => {
@@ -5920,18 +5931,30 @@ fn navigation_controller_nib(
 }
 
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
-    compile_document(xml, minimum_deployment_target, module, localizable, false, false)
+    compile_document(xml, minimum_deployment_target, module, localizable, None)
 }
 
 /// A xib rewritten as a one-scene storyboard (xib.rs): its view nib has the
 /// nib's own File's Owner where a scene's has its controller's placeholder,
 /// and the owner's `view` outlet only when the xib has it (as the
 /// controller's outlet).
-/// A xib rewritten as a one-scene storyboard (xib.rs); `responder_last`
-/// when its first responder follows its view, which the nib's objects
-/// then list in that order (one probe, two corpus xibs).
-pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, responder_last: bool) -> Result<Compiled, String> {
-    compile_document(xml, minimum_deployment_target, module, localizable, true, responder_last)
+/// What a xib's rewriting as a storyboard (xib.rs) leaves out of it: where
+/// its first responder is among its view and the cells and views beside it
+/// (0 before the view), which the nib's objects follow (three probes, two
+/// corpus xibs), and which of those had a safe-area guide.
+#[derive(Default)]
+pub struct XibLayout {
+    pub responder_at: usize,
+    pub cell_guides: Vec<String>,
+    /// Whether its view is the placeholder a lone view is compiled beside,
+    /// left out of the nib.
+    pub placeholder: bool,
+}
+
+/// A xib rewritten as a one-scene storyboard (xib.rs), the table view
+/// cells beside its view in the scene's objects after the controller.
+pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, layout: &XibLayout) -> Result<Compiled, String> {
+    compile_document(xml, minimum_deployment_target, module, localizable, Some(layout))
 }
 
 /// A xib's top-level table view cell (xib.rs), its canvas location and
@@ -5952,7 +5975,10 @@ pub fn compile_xib_cell(xml: &str, module: Option<&str>, localizable: bool, safe
     table::cell_nib(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable, module, cell, false, Some(safe_area))
 }
 
-fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, xib: bool, responder_last: bool) -> Result<Compiled, String> {
+fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, layout: Option<&XibLayout>) -> Result<Compiled, String> {
+    let xib = layout.is_some();
+    let responder_at = layout.map_or(0, |l| l.responder_at);
+    let responder_last = responder_at > 0;
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let platform = match root.attribute("type") {
@@ -6075,8 +6101,14 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         only_children(objects_node, &[
             "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
             "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer", "pageViewController",
-            "hostingController", "customObject",
+            "hostingController", "customObject", "tableViewCell", "view", "label", "button", "textField", "imageView", "tableView",
+            "collectionView", "webView", "wkWebView",
         ])?;
+        // A xib's table view cells and views beside its view (xib.rs).
+        let extra_roots: Vec<Node> = objects_node.children().filter(|c| c.has_tag_name("tableViewCell") || crate::xib::BESIDE_VIEWS.contains(&c.tag_name().name())).collect();
+        if !xib && !extra_roots.is_empty() {
+            return fail(format!("<{}> inside <objects> is not supported by this ibtool", extra_roots[0].tag_name().name()));
+        }
         // An exit is Interface Builder's alone; the unwind segues to it
         // compile to templates of their own.
         for exit in children(objects_node, "exit") {
@@ -7005,6 +7037,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
             let held_pulled: Vec<(String, String)> = std::mem::take(&mut scene.held_pulled);
             let mut queue: std::collections::VecDeque<(usize, Option<&String>)> = [(0, None)].into();
+            let mut root_turn_end = objects.len();
             let mut level = 0;
             let mut level_holders: Vec<&String> = Vec::new();
             // The views in the objects' order: the root, then breadth first.
@@ -7061,7 +7094,97 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         order.push(p.clone());
                         queue.push_back((depth + 1, Some(p)));
                     }
+                    root_turn_end = objects.len();
                 }
+            }
+            // A xib's cells and views beside its view: top-level after it in
+            // document order (the first responder in its place), then in
+            // the objects each root's first listing in turn (the view's
+            // through its turn in the breadth-first order; a cell's content
+            // view, guide and content subviews; another view's constraints
+            // and subviews), then each root's rest in turn (five probes).
+            if !extra_roots.is_empty() {
+                if is_list || !scene.gestures.is_empty() || !referenced.is_empty() {
+                    return fail("cells or views beside a xib's table, collection view, gesture recognizers or custom objects are not supported by this ibtool");
+                }
+                let mut roots = Vec::new();
+                for r in &extra_roots {
+                    if r.has_tag_name("tableViewCell") {
+                        let guide = layout.is_some_and(|l| l.cell_guides.iter().any(|g| Some(g.as_str()) == r.attribute("id")));
+                        let cell = table::xib_cell(&mut nib, module, *r, guide)?;
+                        roots.push((cell.names[0].clone(), cell.value, cell.first, cell.rest));
+                        scene.subviews.extend(cell.names.iter().map(|n| (None, n.clone())));
+                        continue;
+                    }
+                    // Another view, compiled as a plain subview is, its
+                    // constraints those its subviews are on.
+                    scene.constrained.extend(constrained_views(*r));
+                    let saved = scene.parent.take();
+                    let value = subview(&mut nib, &mut scene, *r)?;
+                    scene.parent = saved;
+                    let name = view_name(attr(*r, "id")?);
+                    let held = |scene: &Scene, v: &String| scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())).collect::<Vec<_>>();
+                    let direct: Vec<String> = scene.subviews.iter().filter(|s| s.0.as_ref() == Some(&name)).map(|s| s.1.clone()).collect();
+                    // Its safe-area guide, unowned, first (one probe), after
+                    // a collection view's layout (one probe).
+                    let flow = format!("{name} layout");
+                    let (layouts, direct): (Vec<String>, Vec<String>) = direct.into_iter().partition(|d| *d == flow);
+                    let mut first: Vec<Value> = layouts.iter().map(|d| reference(d.clone())).collect();
+                    if layout.is_some_and(|l| l.cell_guides.iter().any(|g| Some(g.as_str()) == r.attribute("id"))) {
+                        first.push(table::cell_safe_area(&mut nib));
+                    }
+                    first.extend(held(&scene, &name));
+                    first.extend(direct.iter().map(|d| reference(d.clone())));
+                    let mut rest = Vec::new();
+                    let mut queue: std::collections::VecDeque<String> = direct.into_iter().collect();
+                    while let Some(v) = queue.pop_front() {
+                        rest.extend(held(&scene, &v));
+                        for (_, sv) in scene.subviews.iter().filter(|s| s.0.as_ref() == Some(&v)) {
+                            rest.push(reference(sv.clone()));
+                            queue.push_back(sv.clone());
+                        }
+                    }
+                    roots.push((name, value, first, rest));
+                }
+                let root_top = top.iter().position(|v| matches!(v, Value::New(o) if o.name.as_deref() == Some(root_name.as_str()))).ok_or("the xib's view among the nib's top-level objects")?;
+                let root_obj = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == root_name)).ok_or("the xib's view among the nib's objects")?;
+                if responder_at > roots.len() {
+                    return fail("a xib's first responder after its other top-level objects is not supported by this ibtool");
+                }
+                let mut responder_top = if responder_last { Some(top.remove(root_top + 1)) } else { None };
+                if responder_last {
+                    objects.remove(root_obj + 1);
+                }
+                let mut top_after = Vec::new();
+                let mut objects_after = Vec::new();
+                let mut firsts = Vec::new();
+                let mut rests = Vec::new();
+                for (i, (name, value, first, rest)) in roots.into_iter().enumerate() {
+                    if responder_last && i + 1 == responder_at {
+                        top_after.extend(responder_top.take());
+                        objects_after.push(reference("responder"));
+                    }
+                    top_after.push(value);
+                    objects_after.push(reference(name));
+                    firsts.extend(first);
+                    rests.extend(rest);
+                }
+                if let Some(r) = responder_top.take() {
+                    top_after.push(r);
+                    objects_after.push(reference("responder"));
+                }
+                top.splice(root_top + 1..root_top + 1, top_after);
+                let shift = objects_after.len() - usize::from(responder_last);
+                objects.splice(root_obj + 1..root_obj + 1, objects_after);
+                let split = root_turn_end + shift;
+                objects.splice(split..split, firsts);
+                objects.extend(rests);
+            }
+            // The placeholder view of a lone view, or of an empty xib, leaves
+            // the nib; nothing else refers to it.
+            if layout.is_some_and(|l| l.placeholder) {
+                top.retain(|v| !matches!(v, Value::New(o) if o.name.as_deref() == Some(root_name.as_str())));
+                objects.retain(|v| !matches!(v, Value::Ref(r) if *r == root_name));
             }
             // Runtime attributes and accessibility configurations go in that
             // order too, each view's as the document gives them (eight
