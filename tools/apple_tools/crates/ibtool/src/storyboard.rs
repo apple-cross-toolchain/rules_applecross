@@ -251,10 +251,10 @@ struct Nib {
     varied: Vec<String>,
     /// Excluded constraints, encoded where the objects list them.
     withheld: Vec<Object>,
-    /// A xib's colours keep their components as the document gives them;
-    /// a storyboard's are rounded to 10 significant digits (one probe of
-    /// each).
-    exact_colors: bool,
+    /// A xib's: its colours keep their components as the document gives
+    /// them, where a storyboard's are rounded to 10 significant digits (one
+    /// probe of each), and its views their masks (`document_mask`).
+    xib: bool,
 }
 
 /// A view's constraints, some of which its default variation excludes.
@@ -268,12 +268,12 @@ struct Variation {
 
 impl Nib {
     fn new(platform: Platform, color_matched: bool, localizable: bool) -> Nib {
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), withheld: Vec::new(), exact_colors: false }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), withheld: Vec::new(), xib: false }
     }
 
     /// A colour's component as this nib keeps it.
     fn component(&self, x: f64) -> f64 {
-        if self.exact_colors { x } else { significant_10(x) }
+        if self.xib { x } else { significant_10(x) }
     }
 
     fn fresh(&mut self) -> String {
@@ -968,8 +968,15 @@ fn view_connections(scene: &mut Scene, n: Node, name: &str) -> Result<(), String
         for o in children(c, "outlet") {
             only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
             let (label, destination) = (attr(o, "property")?.to_string(), attr(o, "destination")?);
+            // One to a constraint is as a controller's (one probe).
+            let constraint = n.document().descendants().find(|d| d.has_tag_name("constraint") && d.attribute("id") == Some(destination));
             if destination == scene.vc_id {
                 scene.control_outlets.push((label, name.to_string(), "upstream".into()));
+            } else if let Some(c) = constraint {
+                if c.attribute("placeholder").is_some() {
+                    return fail("an outlet to a placeholder constraint is not supported by this ibtool");
+                }
+                scene.view_outlets.push((label, name.to_string(), constraint_name(c)?));
             } else {
                 scene.view_outlets.push((label, name.to_string(), view_name(destination)));
             }
@@ -1569,7 +1576,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         // Any of UIControlEvents (one probe for a slider's).
         for a in children(c, "action") {
             only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
-            let target = action_target(scene, a)?;
+            let Some(target) = action_target(scene, a)? else { continue };
             scene.actions.push((attr(a, "selector")?.to_string(), name.to_string(), control_event(attr(a, "eventType")?)?, target.into()));
         }
     }
@@ -1609,7 +1616,7 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
         values.retain(|v| v.0 != "UIHidden");
     }
     values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-    values.extend(mask_key(scene, n)?);
+    values.extend(mask_key(nib, scene, n)?);
     // A stepper's clipping right after its mask (one probe); beside an
     // alpha it isn't established.
     if n.attribute("clipsSubviews").is_some() {
@@ -2098,13 +2105,15 @@ fn text_alignment(s: Option<&str>) -> Result<i64, String> {
 }
 
 /// A view's autoresizing mask: flexible right and bottom margins (36) when
-/// it doesn't translate it into constraints, as `does_not_translate`
-/// decides, or has none; otherwise the document's, whether or not it says
-/// `translatesAutoresizingMaskIntoConstraints="NO"` (ten probes: labels,
-/// buttons and switches, constrained or not, translating or not).
-fn document_mask(scene: &Scene, n: Node) -> Result<i64, String> {
+/// it has none, or in a storyboard when it doesn't translate it into
+/// constraints, as `does_not_translate` decides; otherwise the document's,
+/// whether or not it says `translatesAutoresizingMaskIntoConstraints="NO"`
+/// (ten probes: labels, buttons and switches, constrained or not,
+/// translating or not). A xib keeps the document's either way (four
+/// probes: labels and plain views, in a view and a cell).
+fn document_mask(nib: &Nib, scene: &Scene, n: Node) -> Result<i64, String> {
     match children(n, "autoresizingMask").next() {
-        Some(m) if !does_not_translate(scene, n) => autoresizing_mask(m),
+        Some(m) if nib.xib || !does_not_translate(scene, n) => autoresizing_mask(m),
         _ => Ok(36),
     }
 }
@@ -2112,8 +2121,8 @@ fn document_mask(scene: &Scene, n: Node) -> Result<i64, String> {
 /// `UIAutoresizingMask` for `document_mask`, left out when empty as UIKit
 /// leaves out defaults (fuzzed storyboards: labels, buttons, controls,
 /// image and plain views).
-fn mask_key(scene: &Scene, n: Node) -> Result<Option<(&'static str, Value)>, String> {
-    let mask = document_mask(scene, n)?;
+fn mask_key(nib: &Nib, scene: &Scene, n: Node) -> Result<Option<(&'static str, Value)>, String> {
+    let mask = document_mask(nib, scene, n)?;
     Ok((mask != 0).then_some(("UIAutoresizingMask", Value::Int(mask))))
 }
 
@@ -2596,7 +2605,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             // An empty mask is left out.
-            let mask = document_mask(scene, n)?;
+            let mask = document_mask(nib, scene, n)?;
             if mask != 0 {
                 values.push(("UIAutoresizingMask", Value::Int(mask)));
             }
@@ -2770,7 +2779,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 for a in children(c, "action") {
                     only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
-                    let target = action_target(scene, a)?;
+                    let Some(target) = action_target(scene, a)? else { continue };
                     let mask = match attr(a, "eventType")? {
                         "valueChanged" => 4096,
                         "primaryActionTriggered" => 8192,
@@ -2800,7 +2809,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
             if n.attribute("clipsSubviews").is_some() {
                 values.push(("UIClipsToBounds", Value::Bool(true)));
@@ -2998,7 +3007,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIOpaque", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -3080,7 +3089,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 only_children(c, &["action"])?;
                 for a in children(c, "action") {
                     only_attributes(a, &[("selector", None), ("destination", None), ("eventType", Some("valueChanged")), ("id", None)])?;
-                    let target = action_target(scene, a)?;
+                    let Some(target) = action_target(scene, a)? else { continue };
                     scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), 4096, target.into()));
                 }
             }
@@ -3118,7 +3127,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -3277,6 +3286,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // then WebKit's, its defaults for this SDK (two probes).
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                // `fixedFrame` changes nothing (one probe).
+                ("fixedFrame", Some("YES")), ("clipsSubviews", Some("YES")), ("userInteractionEnabled", Some("NO")),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ])?;
             only_children(n, &["rect", "color", "constraints", "wkWebViewConfiguration"])?;
             if children(n, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
@@ -3299,8 +3311,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("opaque").is_none() {
                 values.push(("UIOpaque", Value::Bool(true)));
             }
+            // Not interactive, then clipping after the mask, as a plain
+            // view's (one probe).
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.push(("UIAutoresizingMask", Value::Int(36)));
+            if n.attribute("clipsSubviews").is_some() {
+                values.push(("UIClipsToBounds", Value::Bool(true)));
+            }
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
             }
@@ -3346,7 +3366,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("customUserAgent", nib.string("")));
             values.push(("allowsLinkPreview", Value::Bool(true)));
             values.push(("findInteractionEnabled", Value::Bool(false)));
-            Object::new("WKWebView", values)
+            // A custom class swaps in for it, last (one probe).
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "WKWebView")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("WKWebView")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("WKWebView", values)
+            }
         }
         "arscnView" => {
             // An ARSCNView: a view's keys, its background white unless the
@@ -3385,7 +3413,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("UIMultipleTouchEnabled", Value::Bool(true)),
                 ("UIAutoresizeSubviews", Value::Bool(true)),
             ]);
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             values.push(("UIClipsToBounds", Value::Bool(true)));
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -3408,6 +3436,46 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("ibPreferredRenderingAPI", Value::Int(0)),
             ]);
             Object::new("ARSCNView", values)
+        }
+        "webView" => {
+            // A UIWebView: a view's keys, then a nil delegate, whether it
+            // scales pages to fit, and phone number detection (seven probes,
+            // `fixedFrame` changing nothing).
+            only_attributes(n, &[
+                ("contentMode", Some("scaleToFill")), ("scalesPageToFit", Some("YES")), ("fixedFrame", Some("YES")),
+                ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+            ])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints"])?;
+            for c in children(n, "color") {
+                if c.attribute("key") != Some("backgroundColor") {
+                    return fail("web view colours other than a background colour are not supported by this ibtool");
+                }
+                values.push(("UIBackgroundColor", color(nib, c)?));
+            }
+            values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIOpaque", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
+            // The document's mask, 36 without one, even when constrained
+            // (three probes).
+            let mask = match children(n, "autoresizingMask").next() {
+                Some(m) => autoresizing_mask(m)?,
+                None => 36,
+            };
+            if mask != 0 {
+                values.push(("UIAutoresizingMask", Value::Int(mask)));
+            }
+            if does_not_translate(scene, n) {
+                values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+            }
+            if let Some(own) = own_constraints(nib, scene, n, &name)? {
+                values.push(("UIViewAutolayoutConstraints", own));
+            }
+            values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
+            nib.large_content(&mut values);
+            values.push(("UIDelegate", Value::Nil));
+            if n.attribute("scalesPageToFit").is_some() {
+                values.push(("UIScalesPageToFit", Value::Bool(true)));
+            }
+            values.push(("UIDataDetectorTypes", Value::Int(1)));
+            Object::new("UIWebView", values)
         }
         "mapView" => {
             // An MKMapView: a view's keys, zero layout margins, then MapKit's
@@ -3483,7 +3551,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIOpaque", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             values.push(("UIContentMode", Value::Int(3)));
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -3517,10 +3585,21 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("indicatorStyle", None),
                 ("adjustsFontForContentSizeCategory", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
+                // `fixedFrame` changes nothing, nor does Interface Builder's
+                // placeholder intrinsic size (one probe each).
+                ("fixedFrame", Some("YES")), ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
+                ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("horizontalCompressionResistancePriority", None),
+                ("verticalCompressionResistancePriority", None),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility"])?;
-            // An accessibility configuration as any view's (one probe).
+            only_children(n, &[
+                "rect", "autoresizingMask", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility",
+                "userDefinedRuntimeAttributes",
+            ])?;
+            // An accessibility configuration as any view's (one probe), and
+            // runtime attributes as a label's (one probe).
             accessibility(nib, scene, n, &name)?;
+            let pairs = runtime_attributes(nib, n, &name)?;
+            scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             for c in children(n, "color") {
                 if !matches!(c.attribute("key"), Some("backgroundColor" | "textColor")) {
                     return fail("text view colours other than its background and text are not supported by this ibtool");
@@ -3569,7 +3648,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
             // A text view that doesn't scroll doesn't clip either.
             if n.attribute("clipsSubviews").is_some() && scrolls {
@@ -3581,6 +3660,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
+            // Its hugging and compression resistance when given, after its
+            // constraints (four probes).
+            if n.attribute("horizontalHuggingPriority").is_some() || n.attribute("verticalHuggingPriority").is_some() {
+                values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            }
+            compression_resistance(nib, &mut values, n);
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
@@ -3805,7 +3890,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 only_children(c, &["action", "segue"])?;
                 for a in children(c, "action") {
                     only_attributes(a, &[("selector", None), ("destination", None), ("eventType", None), ("id", None)])?;
-                    let target = action_target(scene, a)?;
+                    let Some(target) = action_target(scene, a)? else { continue };
                     let mask = control_event(attr(a, "eventType")?)?;
                     scene.actions.push((attr(a, "selector")?.to_string(), name.clone(), mask, target.into()));
                 }
@@ -3836,7 +3921,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIUserInteractionDisabled", Value::Bool(true)));
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
             // A content mode other than scale to fill after the mask (one
             // probe).
@@ -4066,7 +4151,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -4260,7 +4345,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("autoresizesSubviews").is_none() {
                 values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             }
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
             if n.attribute("clearsContextBeforeDrawing").is_some() {
                 values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
@@ -4355,13 +4440,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             accessibility(nib, scene, n, &name)?;
 
-            let content_mode = match attr(n, "contentMode")? {
-                "scaleToFill" => 0,
-                "scaleAspectFit" => 1,
-                "scaleAspectFill" => 2,
-                "center" => 4,
-                other => return fail(format!("contentMode {other} on <imageView> is not supported by this ibtool")),
-            };
+            // Any of UIViewContentMode's but topLeft (ten probes).
+            let content_mode = content_mode(attr(n, "contentMode")?)?;
             let mut tint = None;
             for c in children(n, "color") {
                 match c.attribute("key") {
@@ -4387,7 +4467,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("autoresizesSubviews").is_none() {
                 values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             }
-            values.extend(mask_key(scene, n)?);
+            values.extend(mask_key(nib, scene, n)?);
             alpha(&mut values, n)?;
             if content_mode != 0 {
                 values.push(("UIContentMode", Value::Int(content_mode)));
@@ -5028,17 +5108,27 @@ fn first_responder<'a>(n: Node<'a, '_>) -> Option<&'a str> {
         .and_then(|r| r.attribute("id"))
 }
 
-fn action_target(scene: &Scene, a: Node) -> Result<&'static str, String> {
+/// An action's target: the scene's controller (`upstream`), first
+/// responder or controller's view, or none for an action on another scene's
+/// object, which Xcode drops without a warning (four probes).
+fn action_target(scene: &Scene, a: Node) -> Result<Option<String>, String> {
     let destination = attr(a, "destination")?;
     if destination == scene.vc_id {
-        return Ok("upstream");
+        return Ok(Some("upstream".into()));
     }
-    let responder = a
-        .ancestors()
-        .find(|n| n.has_tag_name("scene"))
-        .and_then(|sc| sc.descendants().find(|d| d.has_tag_name("placeholder") && d.attribute("placeholderIdentifier") == Some("IBFirstResponder")));
+    let own_scene = a.ancestors().find(|n| n.has_tag_name("scene"));
+    let responder = own_scene.and_then(|sc| sc.descendants().find(|d| d.has_tag_name("placeholder") && d.attribute("placeholderIdentifier") == Some("IBFirstResponder")));
     if responder.and_then(|r| r.attribute("id")) == Some(destination) {
-        return Ok("responder");
+        return Ok(Some("responder".into()));
+    }
+    let target = a.document().descendants().find(|d| d.attribute("id") == Some(destination));
+    let root = |t: Node| t.attribute("key") == Some("view") && t.parent().and_then(|p| p.attribute("id")) == Some(scene.vc_id);
+    if target.is_some_and(root) {
+        return Ok(Some(view_name(destination)));
+    }
+    let target_scene = target.and_then(|t| t.ancestors().find(|n| n.has_tag_name("scene")));
+    if own_scene.is_some() && target_scene.is_some() && target_scene != own_scene {
+        return Ok(None);
     }
     fail("actions that target anything but the scene's view controller or first responder are not supported by this ibtool")
 }
@@ -5103,7 +5193,7 @@ struct RootController<'a, 'i> {
 /// The id of a navigation controller's root view controller, its one
 /// relationship segue, if it has one.
 fn navigation_root<'a>(nav: Node<'a, '_>) -> Result<Option<&'a str>, String> {
-    only_children(nav, &["navigationBar", "connections", "toolbarItems", "nil", "tabBarItem"])?;
+    only_children(nav, &["navigationBar", "connections", "toolbarItems", "nil", "tabBarItem", "navigationItem"])?;
     for c in children(nav, "toolbarItems") {
         if c.has_children() {
             return fail("navigation controllers with toolbar items are not supported by this ibtool");
@@ -5654,6 +5744,17 @@ fn navigation_controller(
     let bar_name = format!("{name} bar");
     let item = root.navigation_item.clone().unwrap_or_else(|| format!("{root_name} implied navigation item"));
     let mut values = Vec::new();
+    // Its own navigation item, empty, is its first value (one probe); one
+    // with anything in it, or beside a title, identifier or parent, isn't
+    // established.
+    if let Some(own) = child(nav, "navigationItem", "navigationItem") {
+        only_attributes(own, &[("key", Some("navigationItem")), ("id", None)])?;
+        if own.has_children() || title.is_some() || held.is_some() || nav.attribute("storyboardIdentifier").is_some() || child(nav, "tabBarItem", "tabBarItem").is_some() {
+            return fail("a navigation controller's own navigation item, other than an empty one in its own nib, is not supported by this ibtool");
+        }
+        let parts = navigation_item(nib, own, &format!("{name} navigation item"), attr(nav, "id")?)?;
+        values.push(("UINavigationItem", parts.value));
+    }
     if let Some(title) = title {
         values.push(("UITitle", title));
     }
@@ -5771,6 +5872,10 @@ fn navigation_controller_nib(
     let mut objects = vec![reference("root storyboard"), reference("owner"), reference("responder"), reference("storyboard"), reference("controller")];
     objects.extend(gestures.iter().map(|g| reference(g.clone())));
     objects.push(reference("controller bar"));
+    // Its own navigation item after its bar (one probe).
+    if child(nav, "navigationItem", "navigationItem").is_some() {
+        objects.push(reference("controller navigation item"));
+    }
     if has_tab_item {
         objects.push(reference("tab bar item"));
     }
@@ -5803,15 +5908,18 @@ fn navigation_controller_nib(
 }
 
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
-    compile_document(xml, minimum_deployment_target, module, localizable, false)
+    compile_document(xml, minimum_deployment_target, module, localizable, false, false)
 }
 
 /// A xib rewritten as a one-scene storyboard (xib.rs): its view nib has the
 /// nib's own File's Owner where a scene's has its controller's placeholder,
 /// and the owner's `view` outlet only when the xib has it (as the
 /// controller's outlet).
-pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Compiled, String> {
-    compile_document(xml, minimum_deployment_target, module, localizable, true)
+/// A xib rewritten as a one-scene storyboard (xib.rs); `responder_last`
+/// when its first responder follows its view, which the nib's objects
+/// then list in that order (one probe, two corpus xibs).
+pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, responder_last: bool) -> Result<Compiled, String> {
+    compile_document(xml, minimum_deployment_target, module, localizable, true, responder_last)
 }
 
 /// A xib's top-level table view cell (xib.rs), its canvas location and
@@ -5832,7 +5940,7 @@ pub fn compile_xib_cell(xml: &str, module: Option<&str>, localizable: bool, safe
     table::cell_nib(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable, module, cell, false, Some(safe_area))
 }
 
-fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, xib: bool) -> Result<Compiled, String> {
+fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, xib: bool, responder_last: bool) -> Result<Compiled, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let platform = match root.attribute("type") {
@@ -6348,7 +6456,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         }
 
         let mut nib = Nib::new(platform, color_matched, localizable);
-        nib.exact_colors = xib;
+        nib.xib = xib;
         // A controller's freeform size (`<size key="freeformSize">`, the
         // simulated metrics' own size) replaces the device's or the generic
         // canvas's, but not the frame a device-less view from iOS 17 keeps,
@@ -6450,8 +6558,11 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             let upstream_used = !vc_outlets.is_empty()
                 || !vc_collections.is_empty()
                 || view.descendants().any(|d| (d.has_tag_name("action") || d.has_tag_name("outlet")) && d.attribute("destination") == Some(vc_id));
-            let mut top = vec![owner, responder];
-            let mut objects = vec![reference("owner"), reference("responder")];
+            let (mut top, mut responder) = if responder_last { (vec![owner], Some(responder)) } else { (vec![owner, responder], None) };
+            let mut objects = vec![reference("owner")];
+            if !responder_last {
+                objects.push(reference("responder"));
+            }
             if upstream_used && !xib {
                 top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{controller_placeholder}"), "upstream"));
                 objects.push(reference("upstream"));
@@ -6509,11 +6620,16 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
             let gesture_proxies: Vec<Value> =
                 numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1), &format!("gesture {g}"))).collect();
-            top.splice(2..2, gesture_proxies);
-            objects.splice(2..2, numbered.iter().map(|g| reference(format!("gesture {g}"))));
+            // Where they go with the first responder last isn't established.
+            if responder_last && (!gesture_proxies.is_empty() || !referenced.is_empty()) {
+                return fail("gesture recognizers or custom objects in a xib whose first responder follows its view are not supported by this ibtool");
+            }
+            let lead = if responder_last { 1 } else { 2 };
+            top.splice(lead..lead, gesture_proxies);
+            objects.splice(lead..lead, numbered.iter().map(|g| reference(format!("gesture {g}"))));
             let object_proxies: Vec<Value> =
                 referenced.iter().enumerate().map(|(i, id)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", object_base + i + 1), &view_name(id))).collect();
-            let at = 2 + numbered.len() + usize::from(controller_first);
+            let at = lead + numbered.len() + usize::from(controller_first);
             top.splice(at..at, object_proxies);
             objects.splice(at..at, referenced.iter().map(|id| reference(view_name(id))));
             for i in 0..scene.segues.len() {
@@ -6804,6 +6920,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             top.push(Value::New(root_object.named(root_name.clone())));
 
             objects.push(reference(root_name.clone()));
+            if let Some(responder) = responder.take() {
+                top.push(responder);
+                objects.push(reference("responder"));
+            }
             // The safe-area guide follows the root view.
             let placeholder = |nib: &mut Nib| {
                 let identifier = nib.string("");
@@ -6919,7 +7039,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
             outlets.extend(scene.control_outlets.iter().map(|(l, v, d)| (l.as_str(), v.as_str(), d.as_str())));
             for (label, source, destination) in &scene.view_outlets {
-                if *destination != root_name && !scene.subviews.iter().any(|s| s.1 == *destination) && !referenced.iter().any(|id| view_name(id) == *destination) {
+                let constraint = constraint_names.contains(destination) || scene.own_constraints.iter().any(|c| c.1 == *destination);
+                if *destination != root_name && !constraint && !scene.subviews.iter().any(|s| s.1 == *destination) && !referenced.iter().any(|id| view_name(id) == *destination) {
                     return fail("a view's outlets to anything but the controller and its views are not supported by this ibtool");
                 }
                 outlets.push((label, source, destination));

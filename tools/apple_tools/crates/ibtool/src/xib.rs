@@ -121,7 +121,9 @@ pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Optio
     head.push_str(&format!(" initialViewController=\"{CONTROLLER}\""));
     let storyboard = format!("{}{head}{}{scene}{}", &xml[..root.range().start], &xml[head_end..objects.range().start], &xml[objects.range().end..]);
 
-    let compiled = crate::storyboard::compile_xib(&storyboard, minimum_deployment_target, module, localizable)?;
+    // Its first responder after its view puts them in that order in the nib.
+    let responder_last = elements(objects).position(|o| o.attribute("placeholderIdentifier") == Some("IBFirstResponder")) > elements(objects).position(|o| o == view);
+    let compiled = crate::storyboard::compile_xib(&storyboard, minimum_deployment_target, module, localizable, responder_last)?;
     let name = format!("{CONTROLLER}-view-{view_id}.nib");
     compiled.files.into_iter().find(|f| f.0 == name).map(|f| f.1).ok_or_else(|| "the xib's view compiled to no nib".to_string())
 }

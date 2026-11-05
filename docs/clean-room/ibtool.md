@@ -16,8 +16,8 @@ collection view cell, or reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 195 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 50 cases written for this, checked
+Interface Builder 3 to 27), 212 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 68 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -70,6 +70,12 @@ any other (one probe).
   (eleven probes, and 17 more of the corpus's: every collection view cell
   and transparent table view cell there).
 - A table view cell's `opaque="NO"` leaves out `UIOpaque` (one probe).
+- The nib's top-level objects and its objects list follow the document's
+  order: a first responder placed after the view comes after it there
+  too (one probe, two corpus xibs).
+- A view keeps its document mask when it doesn't translate it into
+  constraints, where a storyboard's has 36 (four probes: labels and plain
+  views, in a view and a table view cell, against one storyboard).
 - **A collection reusable view.** A top-level `<collectionReusableView>`
   compiles as a top-level view does, a `UICollectionReusableView` (or
   swapped in for one), with its `reuseIdentifier`, even an empty one, as
@@ -498,8 +504,8 @@ other values of the attributes these use, is refused. Observed:
   Where the root's size isn't its frame's, a subview whose mask has a
   flexible left or top margin or a sizable width or height is refused; the
   rest are compiled, with or without a device (eight probes).
-- An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`; scale to fill, aspect fit,
-  aspect fill or centre) archives as a label's geometry and flags (a
+- An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`;
+  any content mode but `topLeft`, as UIViewContentMode's: ten probes) archives as a label's geometry and flags (a
   background colour first, hidden and tag after `UIOpaque`, alpha after
   the mask), then `UIContentMode` unless scale to fill, `UIClipsToBounds`,
   `UITintColor`, the autoresizing key (left out with
@@ -631,7 +637,10 @@ other values of the attributes these use, is refused. Observed:
   delete, quotes and dashes types. Secure entry also sets autocorrection
   to no, whatever the document says, and `UITextInlinePredictionType` 1
   last (45 probes; `asciiCapableNumberPad` is not compiled and refused).
-- A text view (`UITextView`) is a scroll view: after its view values,
+- A text view (`UITextView`) is a scroll view: after its view values (its
+  hugging and compression resistance, when given, after its constraint
+  keys; its runtime attributes pairs as a label's; `fixedFrame` and a
+  placeholder intrinsic size changing nothing: seven probes),
   `UIScrollViewIndicatorInsetAdjustmentBehavior` 1, its `UIIndicatorStyle`
   (black 1, white 2: three probes), then `UIBounceEnabled`,
   `UIShowsHorizontalScrollIndicator`, `UIShowsVerticalScrollIndicator`
@@ -849,7 +858,8 @@ other values of the attributes these use, is refused. Observed:
   outlet with the others, and the recognizer's `perform:` on it sorted by
   selector with the recognizers' actions. In a navigation controller's
   nib the root's templates come before its recognizers kept alive (five
-  probes). Several recognizers' segues, one beside bar button items' segues
+  probes). Its destination is loaded as a control's segue's is (a corpus
+  storyboard). Several recognizers' segues, one beside bar button items' segues
   or items, and in a navigation root beside other segues, are refused.
 
 - A scene's custom objects (`<customObject>`, of a custom class) are
@@ -894,6 +904,10 @@ is refused. Observed with 25 probes:
 - The root's own tab bar item is its `UITabBarItem` before its navigation
   item, listed after its navigation item (two probes and a corpus
   storyboard); beside the navigation controller's own, it is refused.
+- The navigation controller's own empty navigation item is its first
+  value, `UINavigationItem` (as any empty item: its centre item groups and
+  large title mode), listed after its bar (one probe); one with contents,
+  or beside a title, an identifier or a tab bar item, is refused.
 - Top-level objects: the root's scene's storyboard placeholder, the owner,
   the first responder, the navigation controller's storyboard placeholder
   and a class swapper for the controller (`UINavigationController`, or the
@@ -1320,7 +1334,8 @@ before `UISeparatorInsetReference` (36 probes in all).
 
 A view's outlets to another view of its nib, or to the controller, are
 sorted by name with the controller's; one between views uses no
-placeholder. A plain view may be `opaque="NO"` (no `UIOpaque`) or clip its
+placeholder. One to a constraint of the nib is as a controller's (one
+probe). A plain view may be `opaque="NO"` (no `UIOpaque`) or clip its
 subviews (`UIClipsToBounds`, after its content mode), and its
 `fixedFrame` changes nothing (seven probes), nor does a text field's
 (one probe).
@@ -1516,7 +1531,10 @@ A collection view in a view is compiled as a collection view controller's
 outlets the controller's, its flow layout listed as its child (after the
 collection view's siblings) and its automatic estimated item size a pair
 of the layout's; its cells' segues and constraints it holds are refused
-(three probes).
+(three probes). With `opaque="NO"` it leaves out `UIOpaque`; with
+`dataMode="none"` its nil `UIDelegate`; zoom scales are
+`UIMinimumZoomScale` and `UIMaximumZoomScale` after `UIBouncesZoom`, as a
+scroll view's (four probes).
 
 A search bar, in a view or as a table's header view (laid out as a header
 view is), is a `UISearchBar`: `UIOpaque` when not translucent, its mask
@@ -1609,7 +1627,17 @@ controller and the default data store, then its flags: data detectors
 (the configuration's empty application name), `allowsLinkPreview` true and
 `findInteractionEnabled` false (two probes). Only the default
 configuration (`mediaTypesRequiringUserActionForPlayback` none, empty
-preferences) is compiled; others are refused.
+preferences) is compiled; others are refused. `userInteractionEnabled="NO"`
+is `UIUserInteractionDisabled` after `UIOpaque`, clipping
+`UIClipsToBounds` after the mask, a custom class swaps in for it last, and
+`fixedFrame` changes nothing (three probes).
+
+The older `<webView>` is a `UIWebView`: a background colour if any,
+`UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, the document's mask
+(36 without one, left out when empty, whether or not it's constrained),
+its constraint keys, semantic content and large content, a nil
+`UIDelegate`, `UIScalesPageToFit` when it says so, and
+`UIDataDetectorTypes` 1 (seven probes, `fixedFrame` changing nothing).
 
 A picker view is a `UIPickerView`: the view keys (opaque, hidden, the mask as a label's),
 hugging `{250, 250}` and after its large content properties
@@ -1675,6 +1703,10 @@ controls (42 probes):
   content properties, before its own values (nine probes). Their
   actions are event connections with their UIControlEvents mask, as a
   button's (value changed 4096; a slider's touch up inside 64: one probe).
+  An action may also target the controller's own view, the root view its
+  destination (one probe, as a xib's view's); one on another scene's
+  object, which Interface Builder no longer makes, is dropped without a
+  warning (three probes).
 - **A switch.** `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
   `UISwitchOnTintColor`. Its frame is also a key-value pair, `frame`
   (`NS.special` 3, `{{x, y}, {w, h}}`), however it is laid out.
