@@ -17,7 +17,7 @@ Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 359 iOS xibs found on one machine (old
 projects, examples and libraries, Interface Builder 3 to 27), 143 compile
 byte-identical to Xcode 27.0's and the rest are refused; none compile
-differently. `tests/ibtool_xib` holds twelve cases written for this, checked
+differently. `tests/ibtool_xib` holds 23 cases written for this, checked
 against Xcode's digests.
 
 - **A view.** The xib's File's Owner, first responder and one top-level
@@ -50,10 +50,28 @@ against Xcode's digests.
   archived) listed after the content view, and after the style's detail
   label when it has one (five probes: plain, default, subtitle and right
   detail cells, with and without the guide).
-- Refused: other top-level objects (collection view cells and reusable
-  views, several views, custom objects, gesture recognizers), an owner's
-  connections beside a cell, macOS xibs, and xibs in the archive format of
-  Interface Builder before Xcode 5.
+- **A collection view cell.** A top-level `<collectionViewCell>` compiles
+  as a collection view's prototype cell does (Collection views, below),
+  with three differences:
+  - Its content view is always pinned to the cell by the four
+    `UIIBSystemGenerated` constraints, as a prototype's is only when it holds
+    constraints.
+  - Its safe-area guide, unowned as a table cell's, follows its content
+    view.
+  - In the old format (a `<view key="contentView">` without an id), a cell
+    with a guide and constraints of its own also archives its content
+    view's safe-area guide, with its system constraints, after the content
+    view's constraints.
+
+  A cell's `insetsLayoutMarginsFromSafeArea="NO"` follows its constraints,
+  and its own runtime attributes are key-value pairs, as its views' are
+  (eleven probes, and 17 more of the corpus's: every collection view cell
+  and transparent table view cell there).
+- A table view cell's `opaque="NO"` leaves out `UIOpaque` (one probe).
+- Refused: other top-level objects (reusable views, several views, custom
+  objects, gesture recognizers), an owner's connections beside a cell,
+  macOS xibs, and xibs in the archive format of Interface Builder before
+  Xcode 5.
 
 ## The compiled storyboard
 

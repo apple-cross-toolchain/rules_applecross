@@ -5777,6 +5777,14 @@ pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: O
 /// A xib's top-level table view cell (xib.rs), its canvas location and
 /// safe-area guide taken out (`safe_area`: whether it had one): its nib is
 /// the one Xcode compiles for a prototype cell, the guide listed.
+/// A xib's collection view cell, as a collection view's prototype cell's nib.
+pub fn compile_xib_collection_cell(xml: &str, module: Option<&str>, localizable: bool, safe_area: bool) -> Result<Vec<u8>, String> {
+    let doc = Document::parse(xml).map_err(|e| e.to_string())?;
+    let root = doc.root_element();
+    let cell = children(root, "objects").flat_map(|o| children(o, "collectionViewCell")).next().ok_or("a xib without a cell")?;
+    collection::cell_nib(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable, module, cell, false, Some(safe_area))
+}
+
 pub fn compile_xib_cell(xml: &str, module: Option<&str>, localizable: bool, safe_area: bool) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
