@@ -11,12 +11,6 @@ trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$OUT/bin" "$OUT/lib"
 cd "$WORK"
 
-curl -fsSL -o pngcrush.tar.gz https://sourceforge.net/projects/pmt/files/pngcrush/1.8.13/pngcrush-1.8.13.tar.gz/download
-echo "bac37d4b2be88d7e88aadcde9661beb3a513a90e7d26784f906c1e2da8ba332e  pngcrush.tar.gz" | sha256sum -c --quiet
-tar -xf pngcrush.tar.gz
-make -C pngcrush-1.8.13 -j"$(nproc)"
-install -m 755 pngcrush-1.8.13/pngcrush "$OUT/bin/pngcrush"
-
 cd "$ROOT/tools/apple_tools"
 bazel build -c opt //:tools
 bazel cquery -c opt --output=files //:tools 2>/dev/null | while read -r tool; do

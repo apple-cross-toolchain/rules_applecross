@@ -291,6 +291,7 @@ draw the icon from its layers:
 | `relax_docc` | `RULES_APPLECROSS_RELAX_DOCC` | DocC archives with swift.org's render template, where the SDK archive lacks Xcode's |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
 | `relax_momc` | `RULES_APPLECROSS_RELAX_MOMC` | Core Data models whose `VersionInfo.plist` has no entity version hashes or checksums, without the `.omo` Xcode writes beside a versioned model's current version |
+| `relax_pngcrush` | `RULES_APPLECROSS_RELAX_PNGCRUSH` | iOS PNG resources this pngcrush can't make Xcode's iPhone-optimized PNG of (other than 8-bit RGB and RGBA), copied as they are |
 | `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library (they fail at run time; bundling on a Mac compiles them) |
 | `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |
 | `relax_app_intents` | `RULES_APPLECROSS_RELAX_APP_INTENTS` | App Intents not yet reproduced, left out |
@@ -322,11 +323,10 @@ them.
 `tools/build-ported-tools.sh` builds, for the host's CPU, the Linux tools the
 toolchain stages that LLVM doesn't provide:
 
-- `tools/apple_tools`: `actool`, `ibtool`, `codesign`, `swift-stdlib-tool`,
-  `PlistBuddy`, `plutil`, `sw_vers`, and `xcrun`
+- `tools/apple_tools`: `actool`, `ibtool`, `pngcrush`, `codesign`,
+  `swift-stdlib-tool`, `PlistBuddy`, `plutil`, `sw_vers`, and `xcrun`
 - `tools/apple_tools/swiftui_macros`: `SwiftUIMacros`
 - `tools/system_tools`: `zip`, `unzip`, and `python3`
-- `pngcrush`
 
 These are prebuilt and uploaded here in this repository. See
 `ported-tools-<VERSION>` releases.

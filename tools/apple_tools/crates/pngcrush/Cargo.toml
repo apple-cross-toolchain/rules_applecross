@@ -1,0 +1,15 @@
+[package]
+name = "pngcrush"
+description = "Xcode's `pngcrush -iphone` (copypng), for 8-bit RGB and RGBA PNGs."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "pngcrush"
+path = "src/main.rs"
+
+[dependencies]
+flate2.workspace = true
+libz-sys = { version = "1", features = ["static"] }
+png = "0.17"

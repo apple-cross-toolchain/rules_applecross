@@ -7,6 +7,7 @@ members = [
     "crates/ibtool",
     "crates/lzfse",
     "crates/macho",
+    "crates/pngcrush",
     "crates/swift-stdlib-tool",
     "xcbuild/crates/xcbuild-acdriver",
     "xcbuild/crates/xcbuild-bom",
