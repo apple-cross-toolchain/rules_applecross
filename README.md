@@ -327,8 +327,9 @@ toolchain stages that LLVM doesn't provide:
 - `tools/apple_tools/swiftui_macros`: `SwiftUIMacros`
 - `tools/system_tools`: `zip`, `unzip`, and `python3`
 
-These are prebuilt and uploaded here in this repository. See
-`ported-tools-<VERSION>` releases.
+These are prebuilt and released here as `ported-tools-<version>`. When a push
+to `main` changes them, the `ported-tools` workflow releases the next patch
+version and opens a PR that moves the toolchain to it.
 
 ### Tests
 

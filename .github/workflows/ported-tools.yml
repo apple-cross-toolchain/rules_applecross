@@ -35,9 +35,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  VERSION: 0.0.29
-
 jobs:
   build:
     strategy:
@@ -77,20 +74,30 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
           pattern: ported-tools-linux-*
           merge-multiple: true
-      - run: sha256sum -- *.tar.zst > SHA256.txt
-      - env:
+          path: dist
+      - id: release
+        env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="ported-tools-$VERSION"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "$tag is already released"
+          last="$(git tag --list 'ported-tools-*' --sort=-version:refname | head -n 1)"
+          if git diff --quiet "$last" HEAD -- tools/apple_tools tools/system_tools tools/build-ported-tools.sh tools/linux_vm/Containerfile; then
+            echo "The ported tools haven't changed since $last"
             exit 0
           fi
+          version="${last#ported-tools-}"
+          tag="ported-tools-${version%.*}.$((${version##*.} + 1))"
+          cd dist
+          sha256sum -- *.tar.zst > SHA256.txt
           gh release create "$tag" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
@@ -98,3 +105,29 @@ jobs:
             --notes "Built from $GITHUB_SHA." \
             --latest=false \
             -- *.tar.zst SHA256.txt
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+  pin:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - run: |
+          branch="pin-$TAG"
+          title="Use ported tools ${TAG#ported-tools-}"
+          gh release download "$TAG" --pattern SHA256.txt --output toolchain/ported_tools.sha256 --clobber
+          sed -i "s|/download/ported-tools-[0-9.]*/|/download/$TAG/|" toolchain/apple_cross_toolchain.bzl
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git commit -am "$title"
+          git push origin "$branch"
+          gh pr create --head "$branch" --title "$title" --body "Moves \`_PORTED_TOOLS_URL\` to \`$TAG\`, built from $GITHUB_SHA, and \`toolchain/ported_tools.sha256\` to that release's \`SHA256.txt\`."
