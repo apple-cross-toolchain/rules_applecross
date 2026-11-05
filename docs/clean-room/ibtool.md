@@ -17,8 +17,8 @@ collection view cell, or a reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 231 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 84 cases written for this, checked
+Interface Builder 3 to 27), 241 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 101 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -66,7 +66,9 @@ any other (one probe).
     view's safe-area guide, with its system constraints, after the content
     view's constraints.
 
-  A cell's `insetsLayoutMarginsFromSafeArea="NO"` follows its constraints,
+  A cell's layout margins, then its `insetsLayoutMarginsFromSafeArea="NO"`,
+  follow its constraints (two probes), its restoration identifier comes
+  just before its semantic content (one probe),
   and its own runtime attributes are key-value pairs, as its views' are
   (eleven probes, and 17 more of the corpus's: every collection view cell
   and transparent table view cell there).
@@ -84,9 +86,13 @@ any other (one probe).
   and its content subviews; another view's is its constraints and its
   subviews (a collection view's layout before its guide). Another view, of
   any kind a storyboard compiles, compiles as a subview does, its own
-  safe-area guide unowned and first. A cell's connections, actions,
-  runtime attributes and accessibility there aren't established and are
-  refused (eight probes, four corpus xibs).
+  safe-area guide unowned and first. A custom object there is a class
+  swapper for `UICustomObject` listing nothing, the owner's outlets and a
+  table's data source and delegate reaching it. A cell's controls'
+  outlets and actions on the owner are sorted with the view's (outlets by
+  name, actions by mask and selector); the cell's own connections, runtime
+  attributes and accessibility there aren't established and are refused
+  (eleven probes, four corpus xibs).
 - **A lone table, collection or web view.** Alone in the xib, its owner's
   `view` outlet its own, it compiles as beside a view (the table view and
   collection view controller templates, three probes): this ibtool
@@ -496,7 +502,10 @@ other values of the attributes these use, is refused. Observed:
   the root view holds on one of its subviews is the subview's own, in its
   constraints and in its turn among the objects (one probe). Two aspect
   ratios on one dimension, its own and one the root view holds, go by id
-  (three probes and one of the corpus's).
+  (three probes and one of the corpus's). Two of a subview's own
+  constants on one dimension go by relation (less than or equal, greater
+  than or equal, then equal), then id (five probes); with different
+  priorities they are refused.
 - A plain `<view>` subview archives its subviews, background colour, the
   flags, its autoresizing mask (36 without one), the autoresizing key
   (left out when it doesn't autoresize its subviews: one probe) and its
@@ -529,6 +538,8 @@ other values of the attributes these use, is refused. Observed:
   flexible left or top margin or a sizable width or height is refused; the
   rest are compiled, with or without a device (eight probes).
 - An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`;
+  `UIViewInsetsLayoutMarginsFromSafeArea` 0 after its priorities when it
+  says NO: one probe;
   any content mode but `topLeft`, as UIViewContentMode's: ten probes) archives as a label's geometry and flags (a
   background colour first, hidden and tag after `UIOpaque`, alpha after
   the mask), then `UIContentMode` unless scale to fill, `UIClipsToBounds`,
@@ -558,7 +569,8 @@ other values of the attributes these use, is refused. Observed:
   after `UINibName` (one probe; beside a storyboard identifier, or in an
   embedded controller, it is refused).
 - A root view's mask is 36 without one and left out when empty (two
-  storyboard probes, two xib probes). Its `userInteractionEnabled="NO"` and
+  storyboard probes, two xib probes). Its `tag` is `UITag` after `UIOpaque`
+  (one probe), and its `userInteractionEnabled="NO"` and
   `multipleTouchEnabled="YES"` are `UIUserInteractionDisabled` and
   `UIMultipleTouchEnabled` after `UIOpaque`, as a subview's are (two
   probes), and its `restorationIdentifier` is `UIRestorationIdentifier`
@@ -619,7 +631,8 @@ other values of the attributes these use, is refused. Observed:
   three corpus storyboards); so is an image view or a segmented control
   (four probes, one corpus storyboard), an image view's `fixedFrame`
   otherwise changing nothing. An image view's `UIAutoresizingMask` is a
-  label's (below). An empty `<toolbarItems/>` on a view
+  label's (below). A view's `<userGuides>`, the canvas's, change nothing
+  (one probe). An empty `<toolbarItems/>` on a view
   controller changes nothing (one probe).
 - A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
   (or where it would be): wordWrap 0, characterWrap 1, clip 2,
@@ -669,7 +682,8 @@ other values of the attributes these use, is refused. Observed:
   (black 1, white 2: three probes), then `UIBounceEnabled`,
   `UIShowsHorizontalScrollIndicator`, `UIShowsVerticalScrollIndicator`
   (each false when turned off), `UIScrollDisabled`, `UIBouncesZoom` (left
-  out when off) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
+  out when off), `UIKeyboardDismissMode` (onDrag 1, interactive 2: one
+  probe) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
   that doesn't scroll doesn't clip. Its text (a `<string key="text">` or
   the older `text` attribute) is `UIText` (in `Base.lproj` localizable as
   `<id>.text`, the attributed string sharing its development value: one
@@ -770,6 +784,8 @@ other values of the attributes these use, is refused. Observed:
   and search bars the document's tint is refused, not yet probed (six
   probes).
 
+- A stack view's `userInteractionEnabled="NO"` is
+  `UIUserInteractionDisabled` after its hidden flag and tag (one probe).
 - A stack view's `axis` is `UIStackViewAxis` (horizontal 0, vertical 1),
   `distribution` `UIStackViewDistribution` (fill 0, fillEqually 1,
   fillProportionally 2, equalSpacing 3, equalCentering 4), `alignment`
@@ -825,7 +841,8 @@ other values of the attributes these use, is refused. Observed:
   storyboard outlet (one probe; several, or one in an embedded controller,
   are refused).
 - A scene's gesture recognizer (tap, pan or swipe) is in
-  the controller's nib, after the storyboard placeholder, with
+  the controller's nib (one no view has there alone, kept alive with the
+  others but without a placeholder in the view's nib: one probe), after the storyboard placeholder, with
   `UIGestureRecognizer.allowedTouchTypes` 15 and
   `requiresExclusiveTouchType`, then a tap's `_imp` `UITapRecognizer`
   (taps or touches when not 1), a pan's minimum and maximum touches and
@@ -1204,10 +1221,10 @@ probes:
   `UIAutoresizeSubviews`, `UIAutoresizingMask`,
   `UIClearsContextBeforeDrawing` false when it says NO, `UIClipsToBounds`,
   the semantic content attribute, `UIViewLargeContentStoredProperties`,
-  `UIScrollViewIndicatorInsetAdjustmentBehavior` 1,
-  `UIShowsHorizontalScrollIndicator` false when it says NO (the vertical
-  one changes nothing), `UIBouncesZoom` (left out when it says NO: one
-  probe), `UIAlwaysBounceVertical` when
+  `UIScrollViewIndicatorInsetAdjustmentBehavior` 1, `UIBounceEnabled`
+  false when it says so (one probe), `UIShowsHorizontalScrollIndicator`
+  false when it says NO (the vertical one changes nothing), `UIBouncesZoom`
+  (left out when it says NO: one probe), `UIAlwaysBounceVertical` when
   YES, `UIKeyboardDismissMode` (onDrag 1, interactive 2),
   `UIScrollViewContentInsetAdjustmentBehavior` 0, `UITableViewStyle`
   (plain 0, grouped 1, insetGrouped 2), `UIStyle` (0 plain, else 1), the
@@ -1644,8 +1661,8 @@ its action keeps its mask, sorting with the controls' (four probes).
 Items with segues, opaque toolbars and toolbars in tables, cells or
 collection views are refused.
 
-A navigation bar in a view (not translucent) is a `UINavigationBar`:
-opaque, mask 36, its constraint keys, hugging `{250, 250}`, zero
+A navigation bar in a view is a `UINavigationBar`: opaque unless
+translucent (the default; then `UIBarTranslucence` 1, not 2: one probe), mask 36, its constraint keys, hugging `{250, 250}`, zero
 directional layout margins, semantic content and large content
 properties, then `UIItems` (an `NSMutableArray` of its navigation items,
 each as a controller's with `UINavigationBar` referring back to the bar),
@@ -1666,7 +1683,9 @@ controller and the default data store, then its flags: data detectors
 configuration (`mediaTypesRequiringUserActionForPlayback` none, empty
 preferences) is compiled; others are refused. `userInteractionEnabled="NO"`
 is `UIUserInteractionDisabled` after `UIOpaque`, clipping
-`UIClipsToBounds` after the mask, its restoration identifier
+`UIClipsToBounds` after the mask (the document's mask, 36 without one, as
+a `UIWebView`'s), its outlets (a navigation delegate) as any view's, its
+restoration identifier
 `UIRestorationIdentifier` before its semantic content, a custom class
 swaps in for it last, and `fixedFrame` changes nothing (four probes).
 
@@ -1674,13 +1693,15 @@ The older `<webView>` is a `UIWebView`: a background colour if any,
 `UIDeepDrawRect`, `UIOpaque`, `UIAutoresizeSubviews`, the document's mask
 (36 without one, left out when empty, whether or not it's constrained),
 its constraint keys, semantic content and large content, a nil
-`UIDelegate`, `UIScalesPageToFit` when it says so, and
+`UIDelegate`, `UIScalesPageToFit` when it says so, its outlets (a delegate)
+as any view's, and
 `UIDataDetectorTypes` (1, phone numbers, without a `<dataDetectorType>`;
 with one, phone numbers 1 and links 2, left out when none: ten probes,
 `fixedFrame` changing nothing).
 
 A picker view is a `UIPickerView`: the view keys (opaque, hidden, the mask as a label's),
-hugging `{250, 250}` and after its large content properties
+hugging `{250, 250}`, preserving its superview's margins when it says so
+(one probe), and after its large content properties
 `UIAllowSelectingCells` true; its data source and delegate outlets are
 outlets like others (four probes). A visual effect view (non-opaque, with a
 blur effect) is a `UIVisualEffectView`: `UIDeepDrawRect`,

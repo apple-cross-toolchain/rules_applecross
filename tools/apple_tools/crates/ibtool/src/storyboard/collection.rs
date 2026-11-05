@@ -424,8 +424,9 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("insetsLayoutMarginsFromSafeArea", Some("NO")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+        ("restorationIdentifier", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections", "constraints", "userDefinedRuntimeAttributes"])?;
+    only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections", "constraints", "userDefinedRuntimeAttributes", "edgeInsets"])?;
     if let Some(c) = children(cell, "color").find(|c| c.attribute("key") != Some("backgroundColor")) {
         return fail(format!("a collection view cell's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
     }
@@ -612,10 +613,12 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         }
         values.push(("UIViewAutolayoutConstraints", nib.array("NSMutableArray", pins)));
     }
-    // After the constraints (one probe).
-    if cell.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
-        values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
-    }
+    // Its layout margins, then not insetting them from the safe area,
+    // after the constraints, as a view's (two probes).
+    margins(&mut values, cell)?;
+    // Its restoration identifier just before its semantic content (one
+    // probe).
+    restoration_identifier(&mut nib, &mut values, cell);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     // A xib's cell may have none (one probe); a prototype always has one.
