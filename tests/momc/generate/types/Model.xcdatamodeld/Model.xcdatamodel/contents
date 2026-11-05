@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Thing" representedClassName="Thing" syncable="YES" codeGenerationType="class">
+        <attribute name="s" attributeType="String" optional="YES"/>
+        <attribute name="i16" attributeType="Integer 16" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="i32" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="i64" attributeType="Integer 64" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="dbl" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flt" attributeType="Float" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="b" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="dec" attributeType="Decimal" optional="YES"/>
+        <attribute name="date" attributeType="Date" optional="YES"/>
+        <attribute name="data" attributeType="Binary" optional="YES"/>
+        <attribute name="uuid" attributeType="UUID" optional="YES"/>
+        <attribute name="uri" attributeType="URI" optional="YES"/>
+        <attribute name="obj" attributeType="Integer 32" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="req" attributeType="String"/>
+        <attribute name="reqi" attributeType="Integer 32" usesScalarValueType="YES" defaultValueString="0"/>
+        <attribute name="t" attributeType="Transformable" optional="YES" valueTransformerName="NSSecureUnarchiveFromDataTransformer" customClassName="[String]"/>
+        <attribute name="t2" attributeType="Transformable" optional="YES"/>
+    </entity>
+</model>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="F" representedClassName="F" syncable="YES" codeGenerationType="class">
+        <attribute name="n" attributeType="String" optional="YES"/>
+        <relationship name="g" destinationEntity="G" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <fetchedProperty name="a" optional="YES">
+            <fetchRequest name="fetchedPropertyFetchRequest" entity="G" predicateString="tag == &quot;x&quot;"/>
+        </fetchedProperty>
+    </entity>
+    <entity name="G" representedClassName="G" syncable="YES" codeGenerationType="class">
+        <attribute name="tag" attributeType="String" optional="YES"/>
+        <fetchedProperty name="b" optional="YES">
+            <fetchRequest name="fetchedPropertyFetchRequest" entity="F" predicateString="n BEGINSWITH[c] $FETCH_SOURCE.tag"/>
+        </fetchedProperty>
+    </entity>
+</model>

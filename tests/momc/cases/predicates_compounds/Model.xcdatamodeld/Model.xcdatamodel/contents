@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="P" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="P" optional="YES" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+    <fetchRequest name="F00" entity="P" predicateString='name == "a" AND n &gt; 1'/>
+    <fetchRequest name="F01" entity="P" predicateString='name == "a" OR n &gt; 1'/>
+    <fetchRequest name="F02" entity="P" predicateString='NOT name == "a"'/>
+    <fetchRequest name="F03" entity="P" predicateString='name == "a" AND n &gt; 1 AND d &lt; 2'/>
+    <fetchRequest name="F04" entity="P" predicateString='(name == "a" OR n &gt; 1) AND d &lt; 2'/>
+    <fetchRequest name="F05" entity="P" predicateString="TRUEPREDICATE"/>
+    <fetchRequest name="F06" entity="P" predicateString="FALSEPREDICATE"/>
+</model>

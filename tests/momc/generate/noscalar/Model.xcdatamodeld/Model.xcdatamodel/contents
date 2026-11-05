@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="A1" representedClassName="A1" syncable="YES" codeGenerationType="class">
+        <attribute name="i" attributeType="Integer 32" optional="YES"/>
+        <attribute name="b" attributeType="Boolean" optional="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES"/>
+        <attribute name="t" attributeType="Date" optional="YES"/>
+        <relationship name="peer" destinationEntity="A2" optional="YES" maxCount="1" deletionRule="Nullify"/>
+        <relationship name="peers" destinationEntity="A2" optional="YES" toMany="YES" deletionRule="Nullify"/>
+    </entity>
+    <entity name="A2" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="A3" representedClassName="A3" syncable="YES" codeGenerationType="class">
+    </entity>
+</model>

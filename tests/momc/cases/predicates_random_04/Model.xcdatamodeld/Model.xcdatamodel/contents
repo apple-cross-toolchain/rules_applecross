@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="P" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="P" optional="YES" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+    <fetchRequest name="F00" entity="P" predicateString="n &gt;= 1"/>
+    <fetchRequest name="F01" entity="P" predicateString="parent.parent.n &lt; 0"/>
+    <fetchRequest name="F02" entity="P" predicateString="parent.parent.n &lt;= -2"/>
+    <fetchRequest name="F03" entity="P" predicateString="(parent.name MATCHES[d] $X OR flag == TRUE) AND (SELF != $OBJ &amp;&amp; SELF != $OBJ) AND name LIKE[d] $X &amp;&amp; !(flag == NO)"/>
+    <fetchRequest name="F04" entity="P" predicateString="d =&gt; 42"/>
+    <fetchRequest name="F05" entity="P" predicateString="parent.name BEGINSWITH[c] 'a*'"/>
+    <fetchRequest name="F06" entity="P" predicateString='d == 1 OR (when &lt;= $DATE &amp;&amp; (flag != TRUE || d == nil) &amp;&amp; kids.@count &gt; 1 &amp;&amp; name != "é" &amp;&amp; flag != YES)'/>
+    <fetchRequest name="F07" entity="P" predicateString="ANY kids.@count &gt;= $N OR NONE kids.n &lt;&gt; 1e2 OR parent.parent.n &lt;&gt; $N"/>
+    <fetchRequest name="F08" entity="P" predicateString='name ==[c] "é"'/>
+    <fetchRequest name="F09" entity="P" predicateString='name BEGINSWITH[cd] "a"'/>
+    <fetchRequest name="F10" entity="P" predicateString='(NONE kids.@count &lt;= 42 OR when &lt;= $DATE OR ((SELF == nil OR name !=[cd] "") AND name ENDSWITH $X AND kids.n &lt;&gt; 2147483648 AND parent.parent.n &gt;= nil AND name == "x\"y"))'/>
+    <fetchRequest name="F11" entity="P" predicateString='(when &gt; $DATE || kids.n IN $LIST || parent.name !=[cd] "" AND flag != FALSE) AND (parent.name BEGINSWITH[c] "a" OR n &gt;= nil OR !(parent.name ENDSWITH $X) OR parent.name !=[cd] "é") AND when =&gt; $DATE || d =&gt; 2147483648 OR parent.name == "" OR d &lt;= 1e2 || TRUEPREDICATE'/>
+</model>

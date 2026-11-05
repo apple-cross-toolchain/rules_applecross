@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="P" representedClassName="P" syncable="YES" codeGenerationType="class">
+        <attribute name="name" attributeType="String" optional="YES"/>
+        <attribute name="n" attributeType="Integer 32" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="d" attributeType="Double" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="when" attributeType="Date" optional="YES"/>
+        <relationship name="kids" destinationEntity="P" optional="YES" toMany="YES" deletionRule="Nullify"/>
+        <relationship name="parent" destinationEntity="P" optional="YES" maxCount="1" deletionRule="Nullify"/>
+    </entity>
+    <fetchRequest name="F00" entity="P" predicateString='SOME kids.name == "a"'/>
+    <fetchRequest name="F01" entity="P" predicateString='NONE kids.name == "a"'/>
+    <fetchRequest name="F02" entity="P" predicateString="ANY kids == $OBJ"/>
+    <fetchRequest name="F03" entity="P" predicateString="kids.@count == 0"/>
+    <fetchRequest name="F04" entity="P" predicateString='SELF.name == "a"'/>
+    <fetchRequest name="F05" entity="P" predicateString="name == $FETCH_SOURCE.name"/>
+    <fetchRequest name="F06" entity="P" predicateString="n IN {1, 2}"/>
+    <fetchRequest name="F07" entity="P" predicateString="name IN $LIST"/>
+    <fetchRequest name="F08" entity="P" predicateString='TRUEPREDICATE AND name == "a"'/>
+    <fetchRequest name="F09" entity="P" predicateString='name LIKE[c] "a?"'/>
+    <fetchRequest name="F10" entity="P" predicateString='name ENDSWITH[cd] "a"'/>
+    <fetchRequest name="F11" entity="P" predicateString='name MATCHES[c] "a"'/>
+</model>

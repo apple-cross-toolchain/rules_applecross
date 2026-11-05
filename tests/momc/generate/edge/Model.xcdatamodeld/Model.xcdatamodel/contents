@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="E1" representedClassName="E1" syncable="YES" codeGenerationType="class">
+        <attribute name="flag" attributeType="Boolean" optional="YES" usesScalarValueType="NO"/>
+        <attribute name="when" attributeType="Date" optional="YES" usesScalarValueType="YES"/>
+        <attribute name="mine" attributeType="Transformable" optional="YES" customClassName="MyType"/>
+        <attribute name="class" attributeType="String" optional="YES"/>
+        <attribute name="d2" attributeType="Double" usesScalarValueType="NO"/>
+        <relationship name="owner" destinationEntity="E2" maxCount="1" deletionRule="Nullify"/>
+        <relationship name="many" destinationEntity="E2" toMany="YES" deletionRule="Nullify"/>
+    </entity>
+    <entity name="E2" representedClassName="App.E2Model" syncable="YES" codeGenerationType="class">
+        <attribute name="x" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E3" syncable="YES" codeGenerationType="class">
+        <attribute name="y" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="E4" representedClassName=".E4Dot" syncable="YES" codeGenerationType="class">
+        <attribute name="z" attributeType="String" optional="YES"/>
+    </entity>
+</model>

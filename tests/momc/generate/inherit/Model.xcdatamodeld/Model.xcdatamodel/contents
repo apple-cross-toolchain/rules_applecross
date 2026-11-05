@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23504" systemVersion="25A354" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Base" representedClassName="Base" syncable="YES" codeGenerationType="class" isAbstract="YES">
+        <attribute name="a" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Sub" representedClassName="Sub" syncable="YES" codeGenerationType="class" parentEntity="Base">
+        <attribute name="b" attributeType="String" optional="YES"/>
+    </entity>
+    <entity name="Sub2" representedClassName="Sub2" syncable="YES" codeGenerationType="category" parentEntity="Base">
+        <attribute name="c" attributeType="String" optional="YES"/>
+    </entity>
+</model>
