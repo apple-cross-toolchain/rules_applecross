@@ -1091,6 +1091,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pngcrush"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "libz-sys",
+ "png 0.17.16",
+]
+
+[[package]]
 name = "polycool"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

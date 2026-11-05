@@ -66,6 +66,7 @@ top-level [README.md](../../README.md#byte-identical-output):
   (`tools/apple_tools/xcbuild`);
 - `ibtool`: files it can't compile left uncompiled, as the stub it replaced
   did;
+- `pngcrush`: PNGs other than 8-bit RGB and RGBA copied as they are;
 - Metal: an empty library;
 - `docc`: archives with swift.org's render template, where the SDK archive
   lacks Xcode's ([docc.md](docc.md));
@@ -123,6 +124,7 @@ fails on.)
 | Page | Tool |
 | --- | --- |
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
+| [pngcrush.md](pngcrush.md) | `pngcrush -iphone`: an iOS bundle's PNGs as Apple-optimized (CgBI) PNGs |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
 | [coremlc.md](coremlc.md) | `coremlc`: ML Programs and the other Core ML model types but neural networks, Create ML's included, compiled to `.mlmodelc`, and their Swift and Objective-C classes |

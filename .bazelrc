@@ -49,6 +49,9 @@ build:relax_ibtool --action_env=RULES_APPLECROSS_RELAX_IBTOOL=1
 # Core Data models, whose VersionInfo.plist leaves out the entity version
 # hashes and checksums (Core Data computes them itself) and with no .omo.
 build:relax_momc --action_env=RULES_APPLECROSS_RELAX_MOMC=1
+# iOS PNGs this pngcrush can't reproduce (other than 8-bit RGB and RGBA),
+# copied as they are rather than iPhone-optimized.
+build:relax_pngcrush --action_env=RULES_APPLECROSS_RELAX_PNGCRUSH=1
 # Metal shaders, compiled to an empty library (they fail at run time).
 build:relax_metal --action_env=RULES_APPLECROSS_RELAX_METAL=1
 # String Catalog entries not yet reproduced, written in their nearest form.
@@ -69,6 +72,7 @@ build:relaxed --config=relax_actool_xcbuild
 build:relaxed --config=relax_docc
 build:relaxed --config=relax_ibtool
 build:relaxed --config=relax_momc
+build:relaxed --config=relax_pngcrush
 build:relaxed --config=relax_metal
 build:relaxed --config=relax_xcstrings
 build:relaxed --config=relax_app_intents
