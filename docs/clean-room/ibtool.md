@@ -17,8 +17,8 @@ collection view cell, or a reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 241 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 101 cases written for this, checked
+Interface Builder 3 to 27), 243 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 113 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -72,6 +72,8 @@ any other (one probe).
   and its own runtime attributes are key-value pairs, as its views' are
   (eleven probes, and 17 more of the corpus's: every collection view cell
   and transparent table view cell there).
+- A table view cell's tint colour is `UITintColor` after its mask and
+  clipping (two probes).
 - A table view cell's `opaque="NO"` leaves out `UIOpaque` (one probe), and
   its `userInteractionEnabled="NO"` is `UIUserInteractionDisabled` after
   `UIOpaque` (one probe).
@@ -629,7 +631,8 @@ other values of the attributes these use, is refused. Observed:
   `toolsVersion`, root views and a table cell's content view among them),
   or has no size when the document says `fixedFrame="YES"` (18 probes,
   three corpus storyboards); so is an image view or a segmented control
-  (four probes, one corpus storyboard), an image view's `fixedFrame`
+  (four probes, one corpus storyboard), and a table view or navigation bar
+  without `fixedFrame` (two probes), an image view's `fixedFrame`
   otherwise changing nothing. An image view's `UIAutoresizingMask` is a
   label's (below). A view's `<userGuides>`, the canvas's, change nothing
   (one probe). An empty `<toolbarItems/>` on a view
@@ -684,7 +687,9 @@ other values of the attributes these use, is refused. Observed:
   (each false when turned off), `UIScrollDisabled`, `UIBouncesZoom` (left
   out when off), `UIKeyboardDismissMode` (onDrag 1, interactive 2: one
   probe) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
-  that doesn't scroll doesn't clip. Its text (a `<string key="text">` or
+  that doesn't scroll doesn't clip. Its data detectors are
+  `UIDataDetectorTypes` (phone numbers 1, links 2) after its alignment,
+  left out when none (two probes). Its text (a `<string key="text">` or
   the older `text` attribute) is `UIText` (in `Base.lproj` localizable as
   `<id>.text`, the attributed string sharing its development value: one
   probe; text that fits an Objective-C tagged pointer string, up to 7
@@ -814,8 +819,8 @@ other values of the attributes these use, is refused. Observed:
   the defaults; nine probes).
 - A view's or label's `contentMode` is `UIContentMode` after
   `UIAutoresizingMask`, UIViewContentMode's values, scaleToFill (0) left
-  out; Xcode compiles `topLeft` as scaleToFill, so it is refused (18
-  probes). A label is `UIUserInteractionDisabled` only when it says so, and
+  out; Xcode compiles `topLeft` as scaleToFill, so it is refused, but
+  older documents' `TopLeft` as UIViewContentModeTopLeft, 9 (19 probes). A label is `UIUserInteractionDisabled` only when it says so, and
   so is a button, after its hidden flag and tag (five probes).
 - A named colour (`<color name=...>`, defined by a `<namedColor>` in the
   document's resources) is `UIDynamicCatalogName`,
@@ -1110,7 +1115,8 @@ relationship segues, empty toolbar items) compiles to
 child: view and table view controllers as a navigation controller embeds
 its root, and navigation controllers with their bar and root. The
 children's scenes add their view nibs, and their own nibs only when they
-are identified or a segue reaches them. Observed with 17 probes and 19
+are identified or a segue reaches them. An empty navigation item of its
+own is its first value, listed after it (one probe). Observed with 17 probes and 19
 storyboards from the corpus that use one (4 of them compile today; the
 rest are refused for other elements):
 
@@ -1233,6 +1239,7 @@ probes:
   0.0 and `UISectionHeaderTopPadding` -1.0 as doubles,
   `UIAllowsSelection` false, `UIAllowsMultipleSelection` or
   `UIAllowsSelectionDuringEditing` true when set,
+  `UIAllowsMultipleSelectionDuringEditing` true when set (one probe),
   `UIInsetsContentViewsToSafeArea`, the header and footer views,
   `UISeparatorColor` (four probes with a header, a footer or both), the
   prototypes,
@@ -1354,7 +1361,7 @@ Without `colorMatched`, a grey white background stays as it is rather
 than becoming the table's or text view's system background.
 
 A table's header and footer views (`<view key="tableHeaderView">`,
-`key="tableFooterView"`) are its subviews, the footer view first, and the
+`key="tableFooterView"`, or a stack view there) are its subviews, the footer view first, and the
 table's `UITableHeaderView` and `UITableFooterView`, after
 `UIInsetsContentViewsToSafeArea`. Xcode lays them out itself: the header
 view at the top, as wide as the table is laid out, whatever its frame
@@ -1597,9 +1604,10 @@ the selected one, which comes last; each a `UISegment` with bounds 0x32 at
 (0, 16) whatever the control's size, `UIDeepDrawRect`,
 `UIAutoresizeSubviews`, the semantic and large content keys, its title as
 `UISegmentInfo` (localizable as `<id>.segmentTitles[i]`),
-`UISegmentStyle` 5 and `UISegmentPosition` by index: none for the first,
+`UISegmentStyle` 5 and `UISegmentPosition` by index (a background colour
+after the segments: one probe): none for the first,
 3 for the second, 1 for the rest. Then the control's mask 36, constraint
-keys, hugging `{250, 250}`, the alignments (vertical 1 and 1, horizontal
+keys, its hugging (250 each unless given: one probe), the alignments (vertical 1 and 1, horizontal
 1), `UIPointerInteractionEnabled`, `UISegments` (the segments in order)
 and `UISelectedSegmentIndex`; value-changed actions as other controls'
 (24 probes, every selection of two to five segments, three heights, and
@@ -1645,7 +1653,9 @@ interest on, an `MKStandardMapConfiguration`, `MKPitchButtonVisibility` 1,
 no user tracking button); its delegate outlet is an outlet like others
 (six probes; other map types and settings are refused).
 
-A toolbar in a view is a `UIToolbar`: `UIDeepDrawRect`, mask 36,
+A toolbar in a view is a `UIToolbar`: `UIDeepDrawRect`, mask 36 (the
+document's when it gives one; an empty one is UIToolbar's own 10, flexible
+width and top margin: three probes),
 `UIClearsContextBeforeDrawing` false when it says so, its constraint keys,
 hugging `{250, 250}`, semantic content and large content properties, then
 `UIItems` (its bar button items, defined there as a navigation item's
@@ -1686,7 +1696,8 @@ is `UIUserInteractionDisabled` after `UIOpaque`, clipping
 `UIClipsToBounds` after the mask (the document's mask, 36 without one, as
 a `UIWebView`'s), its outlets (a navigation delegate) as any view's, its
 restoration identifier
-`UIRestorationIdentifier` before its semantic content, a custom class
+`UIRestorationIdentifier` before its semantic content, its runtime
+attributes key-value pairs as a label's (one probe), a custom class
 swaps in for it last, and `fixedFrame` changes nothing (four probes).
 
 The older `<webView>` is a `UIWebView`: a background colour if any,

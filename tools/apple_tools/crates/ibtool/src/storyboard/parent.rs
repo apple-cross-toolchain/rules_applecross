@@ -116,6 +116,17 @@ pub(super) fn parent_controller_nib(
     top.push(proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard"));
 
     let mut values = Vec::new();
+    // A tab bar controller's own navigation item, empty, is its first
+    // value, listed after it (one probe); one with contents, or beside a
+    // title or identifier, isn't established.
+    let own_item = child(node, "navigationItem", "navigationItem");
+    if let Some(item) = own_item {
+        only_attributes(item, &[("key", Some("navigationItem")), ("id", None)])?;
+        if kind != Kind::Tab || item.has_children() || node.attribute("title").is_some() || node.attribute("storyboardIdentifier").is_some() {
+            return fail("a container's own navigation item, other than an empty tab bar controller's, is not supported by this ibtool");
+        }
+        values.push(("UINavigationItem", navigation_item(&mut nib, item, "own navigation item", id)?.value));
+    }
     if let Some(title) = node.attribute("title") {
         values.push(("UITitle", nib.text(id, "title", title)));
     }
@@ -285,6 +296,12 @@ pub(super) fn parent_controller_nib(
 
     let mut objects: Vec<Value> = held.iter().rev().map(|(n, _)| reference(format!("{n} storyboard"))).collect();
     objects.extend([reference("owner"), reference("responder"), reference("storyboard"), reference("controller")]);
+    if own_item.is_some() {
+        if !child_gestures.is_empty() {
+            return fail("a tab bar controller's own navigation item beside its children's gesture recognizers is not supported by this ibtool");
+        }
+        objects.push(reference("own navigation item"));
+    }
     objects.extend(child_gestures.iter().map(|g| reference(g.clone())));
     if kind == Kind::Tab {
         objects.push(reference("tab bar"));

@@ -7,7 +7,7 @@ use super::*;
 /// The ids of a tab bar controller's children: its `viewControllers`
 /// relationships, in order.
 pub(super) fn tab_children<'a>(tab: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
-    only_children(tab, &["tabBar", "connections", "nil", "toolbarItems"])?;
+    only_children(tab, &["tabBar", "connections", "nil", "toolbarItems", "navigationItem"])?;
     for c in children(tab, "toolbarItems") {
         if c.has_children() {
             return fail("tab bar controllers with toolbar items are not supported by this ibtool");
