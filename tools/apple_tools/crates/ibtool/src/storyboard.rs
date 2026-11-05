@@ -1858,6 +1858,15 @@ fn margins(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), Strin
     Ok(())
 }
 
+/// A view's `<dataDetectorType>`, as UIDataDetectorTypes (phone numbers 1,
+/// links 2, addresses 4, calendar events 8: four probes), if it has one.
+fn data_detectors(n: Node) -> Result<Option<i64>, String> {
+    let Some(d) = child(n, "dataDetectorType", "dataDetectorTypes") else { return Ok(None) };
+    only_attributes(d, &[("key", None), ("phoneNumber", Some("YES")), ("link", Some("YES")), ("address", Some("YES")), ("calendarEvent", Some("YES"))])?;
+    let bits = [("phoneNumber", 1), ("link", 2), ("address", 4), ("calendarEvent", 8)];
+    Ok(Some(bits.iter().filter(|(a, _)| d.attribute(*a).is_some()).map(|(_, b)| b).sum()))
+}
+
 /// A view's `UIRestorationIdentifier`, just before
 /// `UIViewSemanticContentAttribute`.
 fn restoration_identifier(nib: &mut Nib, values: &mut Vec<(&'static str, Value)>, n: Node) {
@@ -3051,6 +3060,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("datePickerMode", None), ("minuteInterval", None), ("style", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "date", "constraints"])?;
+            // A xib archives the document's date (`UIDate`, its place
+            // beside the mode not established), and a storyboard naming
+            // its deployment target (a `<deployment>` with a version, iOS 8
+            // on) the time it's compiled (twelve probes): refused.
+            if child(n, "date", "date").is_some() && (nib.xib || n.document().descendants().any(|d| d.has_tag_name("deployment") && d.attribute("version").is_some())) {
+                return fail("a date picker's date in a xib, or in a storyboard naming its deployment target, is not supported by this ibtool");
+            }
             let mode = match n.attribute("datePickerMode").unwrap_or("dateAndTime") {
                 "time" => Some(0),
                 "date" => Some(1),
@@ -3083,8 +3099,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(s) = style {
                 values.push(("UIPickerStyle", Value::Int(s)));
             }
+            // 0 unless given, and left out at 1, UIDatePicker's default (three
+            // probes).
             let interval: i64 = n.attribute("minuteInterval").map_or(Ok(0), |i| i.parse().map_err(|_| format!("not a number: {i}")))?;
-            values.push(("UIMinuteInterval", Value::Int(interval)));
+            if interval != 1 {
+                values.push(("UIMinuteInterval", Value::Int(interval)));
+            }
             if mode == Some(3) {
                 values.push(("UIDatePickerUseCurrentDateDuringDecoding", Value::Bool(false)));
             }
@@ -3524,11 +3544,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // Data detectors given are UIDataDetectorTypes (phone numbers 1,
             // links 2), left out when none; without them, phone numbers
             // (three probes).
-            let mut detectors = 1;
-            if let Some(d) = child(n, "dataDetectorType", "dataDetectorTypes") {
-                only_attributes(d, &[("key", None), ("phoneNumber", Some("YES")), ("link", Some("YES"))])?;
-                detectors = i64::from(d.attribute("phoneNumber").is_some()) | (i64::from(d.attribute("link").is_some()) << 1);
-            }
+            let detectors = data_detectors(n)?.unwrap_or(1);
             for c in children(n, "color") {
                 if c.attribute("key") != Some("backgroundColor") {
                     return fail("web view colours other than a background colour are not supported by this ibtool");
@@ -3682,11 +3698,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             ])?;
             // Data detectors given are UIDataDetectorTypes after its
             // alignment (phone numbers 1, links 2; two probes).
-            let mut detectors = 0;
-            if let Some(d) = child(n, "dataDetectorType", "dataDetectorTypes") {
-                only_attributes(d, &[("key", None), ("phoneNumber", Some("YES")), ("link", Some("YES"))])?;
-                detectors = i64::from(d.attribute("phoneNumber").is_some()) | (i64::from(d.attribute("link").is_some()) << 1);
-            }
+            let detectors = data_detectors(n)?.unwrap_or(0);
             // An accessibility configuration as any view's (one probe), and
             // runtime attributes as a label's (one probe).
             accessibility(nib, scene, n, &name)?;
@@ -6894,7 +6906,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 let mut v = leaf;
                 let (mut x, mut y) = (0.0, 0.0);
                 while v != view {
-                    let kind = if v == leaf { ["view", "label", "textField", "containerView"].iter().any(|t| v.has_tag_name(*t)) } else { ["view", "stackView", "scrollView"].iter().any(|t| v.has_tag_name(*t)) };
+                    let kind = if v == leaf { ["view", "label", "textField", "containerView", "stackView"].iter().any(|t| v.has_tag_name(*t)) } else { ["view", "stackView", "scrollView"].iter().any(|t| v.has_tag_name(*t)) };
                     if !kind || v.parent().is_none_or(|p| !p.has_tag_name("subviews")) {
                         return fail(nested());
                     }
@@ -7675,13 +7687,27 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             connections.push(outlet(&mut vnib, property, "controller", view));
         }
         // Its outlets to its recognizers by name, after its storyboard
-        // outlet and before their delegates' (three probes).
-        gesture_outlets.sort();
+        // outlet and before their delegates' (three probes), and by name
+        // with those to its bar button items (three probes).
+        let mut named: Vec<(String, String)> = Vec::new();
         for (property, id) in &gesture_outlets {
             if !recognizers.iter().any(|r| r.attribute("id") == Some(id.as_str())) {
                 return fail("a controller's outlet to another scene's gesture recognizer is not supported by this ibtool");
             }
-            connections.push(outlet(&mut vnib, property, "controller", &format!("gesture {id}")));
+            named.push((property.clone(), format!("gesture {id}")));
+        }
+        if !gesture_outlets.is_empty() && !bar_outlets.is_empty() {
+            if recognizers.iter().any(|r| gesture_delegate(*r)) || !item_outlets.is_empty() || !object_outlets.is_empty() || embedded_here {
+                return fail("outlets to bar button items and gesture recognizers beside delegates or other outlets are not supported by this ibtool");
+            }
+            for (property, id) in std::mem::take(&mut bar_outlets) {
+                let name = item_ids.iter().find(|i| i.0 == id).map(|i| i.1.clone()).ok_or("an outlet to a bar button item this ibtool doesn't compile is not supported")?;
+                named.push((property, name));
+            }
+        }
+        named.sort();
+        for (property, name) in &named {
+            connections.push(outlet(&mut vnib, property, "controller", name));
         }
         // A recognizer's delegate outlet to the controller after its
         // storyboard outlet (one probe); several are not established.

@@ -18,7 +18,7 @@ Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
 Interface Builder 3 to 27), 243 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 113 cases written for this, checked
+rest are refused; none compile differently. `tests/ibtool_xib` holds 115 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -318,7 +318,8 @@ other values of the attributes these use, is refused. Observed:
   whatever the scroll view's content, five probes and one of the corpus's;
   one whose root subview is resized where it is laid out is refused). A
   container view nested so goes the same way (40 random probes in plain
-  and stack views, and two corpus storyboards). But Xcode compares two
+  and stack views, and two corpus storyboards), and so does a stack view
+  nested in a scroll view, by its document frame (two corpus storyboards). But Xcode compares two
   views nested in one of the root's subviews by their places in the
   nearest view holding both, and other pairs by their places in the root
   view: two children of a view at (33, 249), at (4, 77) and (58, 60),
@@ -688,7 +689,8 @@ other values of the attributes these use, is refused. Observed:
   out when off), `UIKeyboardDismissMode` (onDrag 1, interactive 2: one
   probe) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
   that doesn't scroll doesn't clip. Its data detectors are
-  `UIDataDetectorTypes` (phone numbers 1, links 2) after its alignment,
+  `UIDataDetectorTypes` (phone numbers 1, links 2, addresses 4, calendar
+  events 8) after its alignment,
   left out when none (two probes). Its text (a `<string key="text">` or
   the older `text` attribute) is `UIText` (in `Base.lproj` localizable as
   `<id>.text`, the attributed string sharing its development value: one
@@ -914,7 +916,8 @@ other values of the attributes these use, is refused. Observed:
   name) and `UIOriginalClassName` `UICustomObject`, and listed so;
   `UITopLevelObjectsToKeepAliveFromStoryboard` holds them and the
   recognizers in document order. The controller's outlets to them are in
-  its nib after its storyboard outlet, by name. Those the view's outlets
+  its nib after its storyboard outlet, by name (with those to its bar
+  button items when it has both: three probes). Those the view's outlets
   name (a text field's delegate, a collection view's data source or
   delegate, in document order beside the controller's) have placeholders
   in the view nib, numbered after the recognizers' in the same order; the
@@ -1617,12 +1620,15 @@ deprecated bar style (two probes). A segment's fixed width is
 `UISegmentWidth`, single precision, after its `UISegmentInfo`, leaving
 its bounds alone (one probe).
 
-A date picker's date isn't archived: a `UIDatePicker` has the view keys,
+A storyboard's date picker's date isn't archived: a `UIDatePicker` has the view keys,
 then `UIDatePickerMode` unless date and time (time 0, date 1, count-down
 timer 3), `UIPickerStyle` 3 for inline, `UIMinuteInterval` (0 unless
-given) and, for a count-down timer, `UIDatePickerUseCurrentDateDuringDecoding`
-false (eight probes; Xcode lays the wheels style out at its own width, so
-it is refused).
+given, left out at 1, UIDatePicker's default: three probes) and, for a
+count-down timer, `UIDatePickerUseCurrentDateDuringDecoding` false (eight
+probes; Xcode lays the wheels style out at its own width, so it is
+refused). A xib archives the document's date as `UIDate`, and a storyboard
+with a `<deployment>` naming a version (iOS 8 on) the time it is compiled,
+which no build can repeat; both are refused (twelve probes).
 
 A controller's view may be a SceneKit view (`<sceneKitView key="view">`,
 Xcode's game templates): an `SCNView` with a root view's keys (white,
@@ -1707,7 +1713,8 @@ its constraint keys, semantic content and large content, a nil
 `UIDelegate`, `UIScalesPageToFit` when it says so, its outlets (a delegate)
 as any view's, and
 `UIDataDetectorTypes` (1, phone numbers, without a `<dataDetectorType>`;
-with one, phone numbers 1 and links 2, left out when none: ten probes,
+with one, phone numbers 1, links 2, addresses 4 and calendar events 8, left
+out when none: twelve probes,
 `fixedFrame` changing nothing).
 
 A picker view is a `UIPickerView`: the view keys (opaque, hidden, the mask as a label's),
