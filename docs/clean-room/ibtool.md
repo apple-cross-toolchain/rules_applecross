@@ -117,7 +117,9 @@ trailer. Observed from Xcode's nibs:
   in encoding order rather than the order the document gives them: a root
   view's runtime attribute of 0, listed in the nib's key-value pairs at its
   end, refers back to the 0 a later button's states are keyed by (one
-  probe);
+  probe); an integer and a double of one value are one number, of the
+  type encoded first (a runtime attribute's `<integer value="16">` is a
+  font size's 16.0 encoded earlier; five probes);
 - classes are listed in first use, then the fallback classes not already
   listed (UIColor's NSColor, UIFont's NSFont), which the class entry
   references, in byte order: NSColor, NSFont, then UIView for a table
@@ -739,7 +741,9 @@ other values of the attributes these use, is refused. Observed:
   the directional flag (two probes and one of the corpus's; beside a
   readable width it is refused). A
   background colour comes after its subviews, its own constraints after
-  the not-translating key (26 probes).
+  the not-translating key (26 probes), then its hugging and its
+  compression resistance, each `{h, v}` when either is given (250 and 750
+  the defaults; nine probes).
 - A view's or label's `contentMode` is `UIContentMode` after
   `UIAutoresizingMask`, UIViewContentMode's values, scaleToFill (0) left
   out; Xcode compiles `topLeft` as scaleToFill, so it is refused (18
@@ -991,9 +995,11 @@ nib with their navigation items: listed after every child's parts and the
 roots' navigation items, child by child, and their actions on their
 controllers follow the scene outlet by selector, children sharing a
 selector in their order (seven probes, and 150 random storyboards). A
-child that also has a tab bar item has no nib of its own to refuse them
-in. Bar items with segues or custom views' actions, two actions of one
-child sharing a selector, and bar items beside a child's segues are
+child's segue templates come before them, after the roots' navigation
+items, whether the segues and the bar items are one child's or two
+(six probes and a corpus storyboard). A child that also has a tab bar
+item has no nib of its own to refuse them in. Bar items with segues or
+custom views' actions and two actions of one child sharing a selector are
 refused, as are a child's bar button items beside gesture recognizers and with
 images (46 probes).
 
@@ -1104,6 +1110,9 @@ one. Observed with 17 probes and two corpus storyboards:
 - Three orders meet. The storyboard placeholders are in reverse, and the
   storyboard outlets stably by class, of the held controllers in the
   relationships' document order (a navigation child before its root).
+  Xcode's own order of these outlets varies from run to run beside
+  several navigation children (three orders in twelve runs of a corpus
+  storyboard); this one is one of them.
   The objects list the children by relationship name (detail before
   master), then their parts and then the roots' navigation items in that
   order too. With a tab bar controller's single relationship name, all

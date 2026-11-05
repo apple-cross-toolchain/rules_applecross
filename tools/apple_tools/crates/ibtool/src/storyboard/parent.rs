@@ -293,9 +293,6 @@ pub(super) fn parent_controller_nib(
     for &i in &listed {
         objects.append(&mut parts[at(i)]);
     }
-    if !bar_items.is_empty() && !template_objects.is_empty() {
-        return fail("children's bar button items beside a child's segues are not supported by this ibtool");
-    }
     for &i in &listed {
         objects.append(&mut deeper[at(i)]);
         if template_child == Some(i) {

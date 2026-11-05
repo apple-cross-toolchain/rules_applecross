@@ -300,8 +300,19 @@ impl Nib {
         self.shared(format!("s:{s}"), || Object::new("NSString", vec![("NS.bytes", Value::Data(s.as_bytes().to_vec()))]))
     }
 
+    /// A number, one object for each value and type; an integer and a
+    /// double of one value are named as one (nib.rs), so that whichever is
+    /// encoded first stands for both (five probes).
+    fn number(&mut self, value: String, kind: char, make: impl FnOnce() -> Object) -> Value {
+        let name = format!("{}n:{value}:{kind}", nib::SHARED);
+        if self.shared.insert(name.clone(), name.clone()).is_some() {
+            return reference(name);
+        }
+        Value::New(make().named(name))
+    }
+
     fn double_number(&mut self, d: f64) -> Value {
-        self.shared(format!("d:{d}"), || Object::new("NSNumber", vec![("NS.dblval", Value::Double(d))]))
+        self.number(d.to_string(), 'd', || Object::new("NSNumber", vec![("NS.dblval", Value::Double(d))]))
     }
 
     /// A named image, as the nib refers to it: one placeholder per name.
@@ -371,7 +382,9 @@ impl Nib {
     }
 
     fn int_number(&mut self, i: i64) -> Value {
-        self.shared(format!("i:{i}"), || Object::new("NSNumber", vec![("NS.intval", Value::Int(i))]))
+        // Equal to a double only below 2^53.
+        let value = if i.unsigned_abs() < 1 << 53 { (i as f64).to_string() } else { format!("{i}i") };
+        self.number(value, 'i', || Object::new("NSNumber", vec![("NS.intval", Value::Int(i))]))
     }
 
     fn array(&mut self, class: &'static str, items: Vec<Value>) -> Value {
@@ -3976,7 +3989,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("preservesSuperviewLayoutMargins", Some("YES")), ("id", None),
-                ("tag", None), ("alpha", None),
+                ("tag", None), ("alpha", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
+                ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
             // An explicit horizontal axis is the default (fuzzed storyboards).
@@ -4045,6 +4059,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(own) = own_constraints(nib, scene, n, &name)? {
                 values.push(("UIViewAutolayoutConstraints", own));
             }
+            // Its hugging, then its compression resistance, each when given
+            // (nine probes).
+            if n.attribute("horizontalHuggingPriority").is_some() || n.attribute("verticalHuggingPriority").is_some() {
+                values.push(("UIViewContentHuggingPriority", hugging(nib, n)?));
+            }
+            compression_resistance(nib, &mut values, n);
             values.push(("UIViewLayoutMargins", doubles(&margins.unwrap_or([0.0; 4]))));
             if n.attribute("layoutMarginsFollowReadableWidth").is_some() {
                 values.push(("UIViewLayoutMarginsFollowReadableWidth", Value::Bool(true)));

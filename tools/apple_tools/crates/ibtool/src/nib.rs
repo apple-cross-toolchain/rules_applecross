@@ -77,6 +77,16 @@ enum Stored {
     Object(u32),
 }
 
+/// A number's name for the other type (`=n:<value>:i` or `:d`): equal
+/// numbers are one object, of whichever type is encoded first.
+fn other_number(name: &str) -> Option<String> {
+    let rest = name.strip_prefix(SHARED)?.strip_prefix("n:")?;
+    match rest.strip_suffix(":i") {
+        Some(v) => Some(format!("{SHARED}n:{v}:d")),
+        None => rest.strip_suffix(":d").map(|v| format!("{SHARED}n:{v}:i")),
+    }
+}
+
 struct Encoder {
     /// (class, values) per object number.
     objects: Vec<(&'static str, Option<&'static str>, Vec<(usize, Stored)>)>,
@@ -105,6 +115,10 @@ impl Encoder {
         let me = self.objects.len() as u32;
         self.objects.push((o.class, o.fallback, Vec::new()));
         if let Some(n) = o.name {
+            if let Some(other) = other_number(&n) {
+                self.defs.remove(&other);
+                self.names.insert(other, me);
+            }
             self.names.insert(n, me);
         }
         for (k, v) in o.values {
