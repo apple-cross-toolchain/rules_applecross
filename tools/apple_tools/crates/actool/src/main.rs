@@ -51,6 +51,8 @@ struct Options {
     sticker_icon: std::cell::RefCell<Option<String>>,
     /// `--alternate-app-icon`s, in the order given.
     alternate_icons: Vec<String>,
+    /// The catalogs' warnings, as Xcode prints them.
+    warnings: std::cell::RefCell<Vec<String>>,
 }
 
 /// Whether a deviation from Xcode's output is accepted: strict, the default,
@@ -187,6 +189,62 @@ fn scan(catalogs: &[PathBuf]) -> Result<Scan, String> {
         scan_dir(catalog, "", true, &mut found)?;
     }
     Ok(found)
+}
+
+/// Image sets named alike, in several catalogs or in folders without a
+/// namespace: Xcode compiles one of them, warning of each (17 probes). Which
+/// one follows no order of their paths probed (likely the file system's
+/// own), so they're compiled only when their files are identical, when the
+/// one kept makes no difference.
+fn one_image_set_per_name(catalogs: &[PathBuf], sets: &mut Vec<(String, PathBuf)>, warnings: &mut Vec<String>) -> Result<(), String> {
+    let mut kept: Vec<(String, PathBuf)> = Vec::new();
+    for (name, path) in std::mem::take(sets) {
+        match kept.iter().find(|(n, _)| *n == name) {
+            None => kept.push((name, path)),
+            Some((_, first)) => {
+                if files(first)? != files(&path)? {
+                    return Err(format!("image sets named alike (\"{name}\") with different contents are not supported by this actool: which one Xcode keeps isn't established"));
+                }
+                for p in [first.clone(), path] {
+                    let line = warning_line(catalogs, &p, &name);
+                    if !warnings.contains(&line) {
+                        warnings.push(line);
+                    }
+                }
+            }
+        }
+    }
+    *sets = kept;
+    Ok(())
+}
+
+/// A set's files, by name relative to it, with their bytes.
+fn files(dir: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
+    let mut out = Vec::new();
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    entries.sort();
+    for p in entries {
+        if p.is_dir() {
+            out.extend(files(&p)?.into_iter().map(|(n, b)| (Path::new(p.file_name().unwrap()).join(n), b)));
+        } else {
+            out.push((PathBuf::from(p.file_name().unwrap()), std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?));
+        }
+    }
+    Ok(out)
+}
+
+/// Xcode's warning of an image set whose name another uses: its catalog's
+/// absolute path, then the set's within it.
+fn warning_line(catalogs: &[PathBuf], set: &Path, name: &str) -> String {
+    let (catalog, inner) = catalogs.iter().find_map(|c| set.strip_prefix(c).ok().map(|i| (c, i))).unwrap_or((&catalogs[0], set));
+    // Joined to the working directory as the shell names it (PWD), not
+    // with its links resolved.
+    let base = std::env::var_os("PWD").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| std::env::current_dir().ok());
+    let catalog = match base {
+        Some(b) if catalog.is_relative() => b.join(catalog),
+        _ => catalog.clone(),
+    };
+    format!("{}:./{}: warning: The image set name \"{name}\" is used by multiple image sets.", catalog.display(), inner.display())
 }
 
 /// A catalog's directory, or a folder in it: image sets in folders are named
@@ -394,6 +452,12 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     let is_document = |p: &PathBuf| p.extension().is_some_and(|e| e == "icon");
     let catalogs: Vec<PathBuf> = o.inputs.iter().filter(|p| !is_document(p)).cloned().collect();
     let mut scan = scan(&catalogs)?;
+    one_image_set_per_name(&catalogs, &mut scan.image_sets, &mut o.warnings.borrow_mut())?;
+    for (kind, sets) in [("colour", &scan.color_sets), ("data", &scan.data_sets)] {
+        if let Some(name) = sets.iter().enumerate().find_map(|(i, (n, _))| sets[..i].iter().any(|(m, _)| m == n).then_some(n)) {
+            return Err(format!("{kind} sets named alike (\"{name}\") are not supported by this actool"));
+        }
+    }
     // An iOS build leaves out tvOS brand assets and visionOS solid image
     // stacks that --app-icon doesn't name (two probes).
     if platform == "ios" {
@@ -1072,6 +1136,13 @@ fn main() -> ExitCode {
     match run(&o) {
         Ok(outputs) => {
             if o.output_format == "human-readable-text" {
+                let warnings = o.warnings.borrow();
+                if !warnings.is_empty() {
+                    println!("/* com.apple.actool.document.warnings */");
+                    for w in warnings.iter() {
+                        println!("{w}");
+                    }
+                }
                 println!("/* com.apple.actool.compilation-results */");
                 for p in outputs {
                     println!("{}", p.display());

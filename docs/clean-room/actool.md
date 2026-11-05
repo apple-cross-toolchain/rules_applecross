@@ -894,7 +894,16 @@ Folders are scanned for image sets: a folder's assets are named as at the
 top, or with its name and a slash before theirs when its `Contents.json`
 says `provides-namespace` (nested ones too: `Buttons/Small/dot`); the
 identifier is the hash of that full name. Other assets in folders, and
-other folder properties, are refused. Files that aren't assets (a README,
+other folder properties, are refused. Image sets named alike, in two
+catalogs or in folders without a namespace, compile to one, each warned of
+as "The image set name "X" is used by multiple image sets." (an allowed
+warning). Which one Xcode keeps follows no order of their paths: not the
+catalogs' order on the command line, not depth first or by depth, and not
+bytewise or case-insensitively by path (17 probes). It is likely the file
+system's own enumeration. So image sets named alike compile only when their
+files are identical, which makes the choice irrelevant (three probes and a
+corpus app's catalogs); otherwise they're refused, as are colour and data
+sets named alike (not probed). Files that aren't assets (a README,
 with or without an extension, at the top or in a folder) are ignored
 (three probes). So are image, colour and data sets without a
 `Contents.json` (three probes; an app icon set without one is an empty set,
