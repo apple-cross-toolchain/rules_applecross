@@ -264,7 +264,8 @@ fn collection_values(
 pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame) -> Result<Object, String> {
     only_attributes(n, &[
         ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("dataMode", None),
-        ("opaque", Some("NO")), ("pagingEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None), ("alwaysBounceVertical", Some("YES")), ("showsHorizontalScrollIndicator", Some("NO")),
+        ("opaque", Some("NO")), ("pagingEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None),
+        ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("alwaysBounceVertical", Some("YES")), ("showsHorizontalScrollIndicator", Some("NO")),
         ("showsVerticalScrollIndicator", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
     ])?;
     only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "collectionReusableView", "connections", "constraints"])?;
@@ -305,12 +306,19 @@ pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name
         return fail("constraints held by a collection view in a view are not supported by this ibtool");
     }
     let layout_name = format!("{name} layout");
-    let (values, estimated) = collection_values(nib, scene.module, n, f, &cells, 36, layout, &layout_name)?;
+    let (mut values, estimated) = collection_values(nib, scene.module, n, f, &cells, 36, layout, &layout_name)?;
     // The objects list its layout as its child.
     scene.subviews.push((Some(name.to_string()), layout_name.clone()));
     if estimated {
         let pair = estimated_item_size(nib, &layout_name);
         scene.pairs.push((layout_name, pair));
+    }
+    // A custom class swaps in for it, last (one probe).
+    if n.attribute("customClass").is_some() {
+        let class = runtime_class_name(n, scene.module, "UICollectionView")?;
+        values.push(("UIClassName", nib.string(&class)));
+        values.push(("UIOriginalClassName", nib.string("UICollectionView")));
+        return Ok(Object::new("UIClassSwapper", values));
     }
     Ok(Object::new("UICollectionView", values))
 }

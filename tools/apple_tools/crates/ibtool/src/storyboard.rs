@@ -3222,6 +3222,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_attributes(n, &[
                 ("opaque", Some("NO")), ("clearsContextBeforeDrawing", Some("NO")), ("contentMode", Some("scaleToFill")),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
+                ("customClass", None), ("customModule", None), ("customModuleProvider", None),
             ])?;
             only_children(n, &["rect", "items", "constraints"])?;
             if !scene.lists_toolbar_items {
@@ -3274,11 +3275,22 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIViewContentHuggingPriority", nib.string("{250, 250}")));
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
-            values.push(("UIItems", nib.array("NSArray", items)));
+            // Empty, its items are the nib's one empty array, where a tab bar's
+            // are an array of their own (a probe and three corpus storyboards).
+            let items = if items.is_empty() { nib.empty_array() } else { nib.array("NSArray", items) };
+            values.push(("UIItems", items));
             values.push(("UIBarPosition", Value::Int(1)));
             values.push(("UIBarTranslucence", Value::Int(1)));
             scene.toolbar_items.push((name.clone(), names));
-            Object::new("UIToolbar", values)
+            // A custom class swaps in for it, last (one probe).
+            if n.attribute("customClass").is_some() {
+                let class = runtime_class_name(n, scene.module, "UIToolbar")?;
+                values.push(("UIClassName", nib.string(&class)));
+                values.push(("UIOriginalClassName", nib.string("UIToolbar")));
+                Object::new("UIClassSwapper", values)
+            } else {
+                Object::new("UIToolbar", values)
+            }
         }
         "wkWebView" => {
             // A WKWebView with the default configuration (no media types
@@ -6245,6 +6257,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // A xib's top-level reusable view, as its controller's view
             // (xib.rs).
             _ if xib && children(vc, "collectionReusableView").next().is_some() => "collectionReusableView",
+            // A SceneKit view as the controller's view (Xcode's game
+            // templates).
+            _ if children(vc, "sceneKitView").next().is_some() => "sceneKitView",
             _ => "view",
         };
         let original_class = segue::original_class(vc);
@@ -6351,7 +6366,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // A document using safe areas gives every root view a safe-area
         // guide, the same whether or not its view lists one (three probes).
         // A xib's view has one only when it lists it (two of the corpus's).
-        let uses_safe_areas = !xib && view.document().root_element().attribute("useSafeAreas") == Some("YES");
+        // A SceneKit view has no layout guides at all (two corpus
+        // storyboards); one listing a guide or holding subviews is refused.
+        let scenekit = view.has_tag_name("sceneKitView");
+        if scenekit && (safe_area.is_some() || children(view, "subviews").next().is_some()) {
+            return fail("a root SceneKit view with a safe-area guide or subviews is not supported by this ibtool");
+        }
+        let uses_safe_areas = !xib && !scenekit && view.document().root_element().attribute("useSafeAreas") == Some("YES");
         // So does one with legacy guides, beside them, listed or not (three
         // probes: a launch screen with both, and with each alone).
         let has_safe_area = safe_area.is_some() || uses_safe_areas;
@@ -6360,7 +6381,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // corpus's), and none without (one of the corpus's).
         let autolayout = view.document().root_element().attribute("useAutolayout") == Some("YES");
         // A xib's view gets none (36 of the corpus's).
-        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout && !xib {
+        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout && !xib && !scenekit {
             scene.guides = vec![("implicit top guide", "top"), ("implicit bottom guide", "bottom")];
         }
         // Without Auto Layout a subview's default mask isn't the usual one
@@ -6650,6 +6671,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
             if let Some(background) = background {
                 values.push(("UIBackgroundColor", color(&mut nib, background)?));
+            } else if view.has_tag_name("sceneKitView") {
+                // A SceneKit view's is white unless the document gives one,
+                // as an ARSCNView's (a corpus storyboard).
+                values.push(("UIBackgroundColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             if view.attribute("opaque").is_none() {
@@ -6901,7 +6926,35 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             nib.large_content(&mut values);
             // A reusable view's identifier, even empty, after the large
             // content (three probes).
-            let root_class = if view.has_tag_name("collectionReusableView") { "UICollectionReusableView" } else { "UIView" };
+            let root_class = match view.tag_name().name() {
+                "collectionReusableView" => "UICollectionReusableView",
+                "sceneKitView" => "SCNView",
+                _ => "UIView",
+            };
+            // A SceneKit view's own keys follow, its `backgroundColor` the
+            // view's background or nil (two corpus storyboards, as an
+            // ARSCNView's).
+            if root_class == "SCNView" {
+                let shared = match child(view, "color", "backgroundColor") {
+                    Some(background) => color(&mut nib, background)?,
+                    None => Value::Nil,
+                };
+                if !matches!(shared, Value::Ref(_) | Value::Nil) {
+                    return fail("a root SceneKit view's background not shared with its view's is not supported by this ibtool");
+                }
+                values.extend([
+                    ("loops", Value::Bool(true)),
+                    ("playing", Value::Bool(false)),
+                    ("autoenablesDefaultLighting", Value::Bool(false)),
+                    ("jitteringEnabled", Value::Bool(false)),
+                    ("temporalAntialiasingEnabled", Value::Bool(false)),
+                    ("allowsCameraControl", Value::Bool(false)),
+                    ("backgroundColor", shared),
+                    ("ibSceneName", Value::Nil),
+                    ("ibWantsMultisampling", Value::Bool(false)),
+                    ("ibPreferredRenderingAPI", Value::Int(0)),
+                ]);
+            }
             if let Some(reuse) = view.attribute("reuseIdentifier") {
                 if root_class == "UIView" {
                     return fail("the reuseIdentifier attribute of <view> is not supported by this ibtool");
@@ -7031,11 +7084,14 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // Outlets, `view` among them, then actions, each in byte order of
             // their names.
             let mut connections = Vec::new();
-            let mut outlets: Vec<(&str, &str, &str)> = vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())).collect();
-            // A xib's `view` outlet is the owner's own, among the others.
+            // A xib's `view` outlet is the owner's own, among the others;
+            // a storyboard's comes before the controller's outlets, an
+            // explicit `view` among them (a corpus storyboard).
+            let mut outlets: Vec<(&str, &str, &str)> = Vec::new();
             if !xib {
                 outlets.push(("view", "owner", &root_name));
             }
+            outlets.extend(vc_outlets.iter().map(|(l, d)| (l.as_str(), "upstream", d.as_str())));
             outlets.extend(scene.containers.iter().map(|(p, v)| ("containerView", p.as_str(), v.as_str())));
             outlets.extend(scene.control_outlets.iter().map(|(l, v, d)| (l.as_str(), v.as_str(), d.as_str())));
             for (label, source, destination) in &scene.view_outlets {
