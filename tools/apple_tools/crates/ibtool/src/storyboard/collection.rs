@@ -430,12 +430,21 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
             return fail(format!("a cell's content view without {required} is not supported by this ibtool"));
         }
     }
-    only_children(content, &["rect", "autoresizingMask", "subviews", "constraints"])?;
+    // The old format's content view may have a background colour, which
+    // Xcode leaves out with the view (three probes).
+    if content.has_tag_name("view") {
+        only_children(content, &["rect", "autoresizingMask", "subviews", "constraints", "color"])?;
+        if children(content, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
+            return fail("an old-format content view's colours other than its background are not supported by this ibtool");
+        }
+    } else {
+        only_children(content, &["rect", "autoresizingMask", "subviews", "constraints"])?;
+    }
     // Its mask, when it has one, after `UIAutoresizeSubviews` (two probes).
     let mut mask = 0;
     for m in children(content, "autoresizingMask") {
         mask = autoresizing_mask(m)?;
-        if m.has_children() || (mask != 0 && content.has_tag_name("view")) {
+        if m.has_children() {
             return fail("a cell's content view with an autoresizing mask is not supported by this ibtool");
         }
     }
@@ -502,6 +511,14 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     if old {
         cv.push(("UIOpaque", Value::Bool(true)));
         cv.push(("UIAutoresizeSubviews", Value::Bool(true)));
+        // Without a mask in the document, Interface Builder's default one,
+        // flexible right and bottom margins (four corpus xibs); with one,
+        // that (two probes).
+        match children(content, "autoresizingMask").next() {
+            None => cv.push(("UIAutoresizingMask", Value::Int(36))),
+            Some(_) if mask != 0 => cv.push(("UIAutoresizingMask", Value::Int(mask))),
+            Some(_) => {}
+        }
         if pinned {
             cv.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
         }
@@ -577,7 +594,12 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
-    values.push(("UIReuseIdentifier", nib.string(attr(cell, "reuseIdentifier")?)));
+    // A xib's cell may have none (one probe); a prototype always has one.
+    match (cell.attribute("reuseIdentifier"), xib) {
+        (Some(reuse), _) => values.push(("UIReuseIdentifier", nib.string(reuse))),
+        (None, Some(_)) => {}
+        (None, None) => return fail("a prototype cell without a reuse identifier is not supported by this ibtool"),
+    }
     values.push(("UISystemBackgroundView", Value::Nil));
     values.push(("UIContentConfigurationView", Value::Nil));
     values.push(("UIContentView", reference(content_name.clone())));
