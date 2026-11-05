@@ -1017,7 +1017,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
 /// its content view, and keeps its colours exact.
 pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
     let mut nib = Nib::new(platform, color_matched, localizable);
-    nib.exact_colors = xib.is_some();
+    nib.xib = xib.is_some();
     let safe_area = xib == Some(true);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");

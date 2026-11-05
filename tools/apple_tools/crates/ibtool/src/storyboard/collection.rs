@@ -137,7 +137,10 @@ fn collection_values(
         values.push(("UIBackgroundColor", background));
     }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
-    values.push(("UIOpaque", Value::Bool(true)));
+    // Unless it says it isn't opaque (one probe).
+    if cv.attribute("opaque").is_none() {
+        values.push(("UIOpaque", Value::Bool(true)));
+    }
     if cv.attribute("multipleTouchEnabled").is_some() {
         values.push(("UIMultipleTouchEnabled", Value::Bool(true)));
     }
@@ -174,7 +177,17 @@ fn collection_values(
     if cv.attribute("alwaysBounceVertical").is_some() {
         values.push(("UIAlwaysBounceVertical", Value::Bool(true)));
     }
-    values.push(("UIDelegate", Value::Nil));
+    // Zoom scales when given, as a scroll view's (two probes).
+    for (a, key) in [("minimumZoomScale", "UIMinimumZoomScale"), ("maximumZoomScale", "UIMaximumZoomScale")] {
+        if let Some(z) = cv.attribute(a) {
+            values.push((key, Value::Float(number(z)? as f32)));
+        }
+    }
+    // A collection view without data (`dataMode="none"`) leaves its nil
+    // delegate out (one probe).
+    if cv.attribute("dataMode") != Some("none") {
+        values.push(("UIDelegate", Value::Nil));
+    }
     values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
     let (flow, estimated) = match child(cv, "collectionViewLayout", "collectionViewLayout") {
         Some(custom) => (custom_layout(nib, module, custom)?, false),
@@ -250,8 +263,8 @@ fn collection_values(
 /// not supported.
 pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Frame) -> Result<Object, String> {
     only_attributes(n, &[
-        ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("dataMode", Some("prototypes")),
-        ("pagingEnabled", Some("YES")), ("alwaysBounceVertical", Some("YES")), ("showsHorizontalScrollIndicator", Some("NO")),
+        ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("dataMode", None),
+        ("opaque", Some("NO")), ("pagingEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None), ("alwaysBounceVertical", Some("YES")), ("showsHorizontalScrollIndicator", Some("NO")),
         ("showsVerticalScrollIndicator", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
     ])?;
     only_children(n, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "collectionReusableView", "connections", "constraints"])?;
@@ -259,6 +272,9 @@ pub(super) fn subview_collection(nib: &mut Nib, scene: &mut Scene, n: Node, name
         if c.attribute("key") != Some("backgroundColor") {
             return fail(format!("a collection view's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("")));
         }
+    }
+    if !matches!(n.attribute("dataMode"), None | Some("prototypes" | "none")) {
+        return fail("a collection view's dataMode other than prototypes or none is not supported by this ibtool");
     }
     let (cells, segues) = prototypes(n)?;
     if !segues.is_empty() {
@@ -466,7 +482,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     };
 
     let mut nib = Nib::new(platform, color_matched, localizable);
-    nib.exact_colors = xib.is_some();
+    nib.xib = xib.is_some();
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     // A cell's segue is its placeholder's.

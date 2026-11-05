@@ -43,8 +43,10 @@ pub(super) fn nib_name(c: Node) -> Result<String, String> {
 
 /// The segues leaving a controller's scene other than relationships: its
 /// own and its controls'.
+/// A controller's segues, its scene's gesture recognizers' among them.
 fn outgoing<'a, 'i>(c: Node<'a, 'i>) -> impl Iterator<Item = Node<'a, 'i>> {
-    c.descendants().filter(|d| d.has_tag_name("segue") && d.attribute("kind") != Some("relationship"))
+    let recognizers = c.parent().into_iter().flat_map(|o| o.children().filter(|r| r.tag_name().name().ends_with("GestureRecognizer")));
+    c.descendants().chain(recognizers.flat_map(|r| r.descendants())).filter(|d| d.has_tag_name("segue") && d.attribute("kind") != Some("relationship"))
 }
 
 /// The controllers only segues make loadable: those a segue leads to from
