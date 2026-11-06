@@ -51,9 +51,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker build -t ported-tools -f tools/linux_vm/Containerfile tools/linux_vm
+      - name: Configure BuildBuddy cache
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          touch ~/.bazelrc
+          [ -n "$BUILDBUDDY_API_KEY" ] || exit 0
+          {
+            echo 'build --bes_results_url=https://app.buildbuddy.io/invocation/'
+            echo 'build --bes_backend=grpcs://app.buildbuddy.io'
+            echo 'common --remote_cache=grpcs://app.buildbuddy.io'
+            echo 'common --remote_cache_compression'
+            echo "common --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+          } > ~/.bazelrc
       - name: Build and test the ported tools
         run: >-
-          docker run --rm -v "$PWD:$PWD" -w "$PWD" ported-tools bash -c
+          docker run --rm -v "$PWD:$PWD" -v "$HOME/.bazelrc:/root/.bazelrc:ro" -w "$PWD" ported-tools bash -c
           'git config --global --add safe.directory "$PWD" &&
           tools/build-ported-tools.sh dist &&
           cd tools/apple_tools &&
