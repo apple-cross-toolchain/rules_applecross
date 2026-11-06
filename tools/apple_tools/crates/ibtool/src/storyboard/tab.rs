@@ -120,7 +120,11 @@ pub(super) fn tab_bar(nib: &mut Nib, tab: Node, items: Vec<Value>) -> Result<Val
     if children(bar, "color").any(|c| c.attribute("key") != Some("backgroundColor")) {
         return fail("tab bar colours other than the background are not supported by this ibtool");
     }
-    let f = frame(bar)?;
+    // Without a frame, at the origin (a corpus storyboard).
+    let f = match frame_node(bar) {
+        Some(_) => frame(bar)?,
+        None => Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+    };
     // 0x54, centred at its frame's x and 27 below its top (five probes).
     let mut values = vec![("UIBounds", doubles(&[0.0, 0.0, 0.0, 54.0])), ("UICenter", doubles(&[f.x, f.y + 27.0]))];
     if let Some(c) = child(bar, "color", "backgroundColor") {

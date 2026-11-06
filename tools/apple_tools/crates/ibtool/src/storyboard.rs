@@ -37,15 +37,20 @@ fn child<'a, 'i>(n: Node<'a, 'i>, tag: &'a str, key: &str) -> Option<Node<'a, 'i
 /// Interface Builder's own settings for how a controller is drawn while
 /// editing, which compiled storyboards don't record (five probes); a
 /// freeform size is another matter (see `compile`).
-const EDITOR_ONLY: [&str; 8] = [
+const EDITOR_ONLY: [&str; 9] = [
     "simulatedMetricsContainer", "simulatedNavigationBarMetrics", "simulatedStatusBarMetrics", "simulatedTabBarMetrics",
     "simulatedToolbarMetrics", "simulatedOrientationMetrics", "simulatedScreenMetrics", "freeformSimulatedSizeMetrics",
+    // A split view's master size (a corpus storyboard).
+    "splitViewMasterSimulatedSizeMetrics",
 ];
 
 fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
         let editor_only = matches!(n.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController" | "navigationController")
             && (EDITOR_ONLY.contains(&c.tag_name().name()) || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
+        // A view's simulated orientation too (one of the corpus's: a root
+        // view and a table view).
+        let editor_only = editor_only || c.has_tag_name("simulatedOrientationMetrics");
         // An empty list of gesture recognizers, or of animations (older
         // documents), is Interface Builder's alone (one probe).
         let empty_gestures = (c.has_tag_name("gestureRecognizers") || c.has_tag_name("animations")) && !c.children().any(|g| g.is_element());
@@ -54,7 +59,9 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
         // A view's variations go with its constraints, which compile them
         // (`excluded_constraints`).
         let variation = c.has_tag_name("variation") && allowed.contains(&"constraints");
-        if !allowed.contains(&c.tag_name().name()) && !editor_only && !empty_gestures && !variation {
+        // An older document's frame inset is a frame (`frame_node`).
+        let inset = c.has_tag_name("frame") && c.attribute("key") == Some("frameInset") && allowed.contains(&"rect");
+        if !allowed.contains(&c.tag_name().name()) && !editor_only && !empty_gestures && !variation && !inset {
             return fail(format!("<{}> inside <{}> is not supported by this ibtool", c.tag_name().name(), n.tag_name().name()));
         }
     }
@@ -258,6 +265,8 @@ struct Nib {
     variations: Option<Vec<Variation>>,
     /// The ids of the views whose variations were compiled.
     varied: Vec<String>,
+    /// Views' attributes varied by size class, where `variations` is.
+    attribute_variations: Vec<AttributeVariation>,
     /// Excluded constraints, encoded where the objects list them.
     withheld: Vec<Object>,
     /// A xib's: its colours keep their components as the document gives
@@ -267,6 +276,15 @@ struct Nib {
 }
 
 /// A view's constraints, some of which its default variation excludes.
+/// A view's attribute (`key_path`) with a value for size classes
+/// (`records`: their traits and the value) and its default.
+struct AttributeVariation {
+    view: String,
+    key_path: &'static str,
+    records: Vec<(Vec<(&'static str, i64)>, Value)>,
+    default: Value,
+}
+
 struct Variation {
     view: String,
     /// Its constraints in the objects' order, each with the names of the
@@ -277,7 +295,7 @@ struct Variation {
 
 impl Nib {
     fn new(platform: Platform, color_matched: bool, localizable: bool) -> Nib {
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), withheld: Vec::new(), xib: false }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false }
     }
 
     /// A colour's component as this nib keeps it.
@@ -628,7 +646,7 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         _ => return fail("<color> without a colour space is not supported by this ibtool"),
     };
     let c = match space {
-        "calibratedRGB" | "sRGB" => {
+        "calibratedRGB" | "sRGB" | "deviceRGB" => {
             only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None)])?;
             [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?]
         }
@@ -645,7 +663,8 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     // storyboard's rounded to 10 digits (18 probes, a xib and a
     // storyboard).
     let c = match space {
-        "sRGB" => {
+        // Device RGB is taken as sRGB (a corpus xib).
+        "sRGB" | "deviceRGB" => {
             let rgb = crate::colorsync::srgb_to_generic([c[0], c[1], c[2]])?;
             [rgb[0], rgb[1], rgb[2], c[3]]
         }
@@ -682,10 +701,16 @@ struct NavigationItem<'a, 'i> {
     responder_actions: Vec<(String, String)>,
     /// Its bar button items' (id, name).
     item_ids: Vec<(String, String)>,
+    /// Its bar button items' runtime attributes, as key-value pairs.
+    pairs: Vec<Value>,
 }
 
 fn navigation_item<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_id: &str) -> Result<NavigationItem<'a, 'i>, String> {
-    navigation_item_with(nib, n, name, vc_id, None)
+    let parts = navigation_item_with(nib, n, name, vc_id, None)?;
+    if !parts.pairs.is_empty() {
+        return fail("runtime attributes of a bar button item outside a controller's own navigation item are not supported by this ibtool");
+    }
+    Ok(parts)
 }
 
 /// A navigation item whose bar button items may also act on the first
@@ -730,6 +755,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
     let mut responder_actions = Vec::new();
     let mut segues = Vec::new();
     let mut item_ids = Vec::new();
+    let mut pairs = Vec::new();
     // Its back item, as any other, comes first, before the other items in
     // its values and the objects, wherever the document has it (six
     // probes); one with connections or a custom view is refused.
@@ -738,7 +764,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
             return fail("a back bar button item with connections or a custom view is not supported by this ibtool");
         }
         let back_name = format!("{name} backBarButtonItem");
-        let object = bar_button_item(nib, b, &back_name, vc_id, &mut Vec::new(), &mut Vec::new(), None, &mut Vec::new())?;
+        let object = bar_button_item(nib, b, &back_name, vc_id, &mut Vec::new(), &mut Vec::new(), None, &mut Vec::new(), None)?;
         values.push(("UIBackBarButtonItem", Value::New(object.named(back_name.clone()))));
         bar_items.push(back_name);
     }
@@ -758,7 +784,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
         let mut entries = Vec::new();
         for (i, b) in items.iter().enumerate() {
             let item_name = if i == 0 { format!("{name} {key}") } else { format!("{name} {key} {i}") };
-            let object = Value::New(bar_button_item(nib, *b, &item_name, vc_id, &mut actions, &mut segues, responder, &mut responder_actions)?.named(item_name.clone()));
+            let object = Value::New(bar_button_item(nib, *b, &item_name, vc_id, &mut actions, &mut segues, responder, &mut responder_actions, Some(&mut pairs))?.named(item_name.clone()));
             item_ids.push((attr(*b, "id")?.to_string(), item_name.clone()));
             if i == 0 {
                 values.push((single, object));
@@ -820,7 +846,12 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
         Some(other) => return fail(format!("largeTitleDisplayMode {other} is not supported by this ibtool")),
     };
     values.push(("UILargeTitleDisplayMode", Value::Int(mode)));
-    Ok(NavigationItem { value: Value::New(Object::new("UINavigationItem", values).named(name)), bar_items, actions, segues, responder_actions, item_ids })
+    // One item's, in its own order (a corpus storyboard); several items'
+    // order isn't established.
+    if children(n, "barButtonItem").chain(n.children().filter(|l| l.is_element()).flat_map(|l| children(l, "barButtonItem"))).filter(|b| children(*b, "userDefinedRuntimeAttributes").next().is_some()).count() > 1 {
+        return fail("runtime attributes of several bar button items are not supported by this ibtool");
+    }
+    Ok(NavigationItem { value: Value::New(Object::new("UINavigationItem", values).named(name)), bar_items, actions, segues, responder_actions, item_ids, pairs })
 }
 
 /// A bar button item with a title or a system item, and its actions on the
@@ -829,7 +860,7 @@ fn navigation_item_with<'a, 'i>(nib: &mut Nib, n: Node<'a, 'i>, name: &str, vc_i
 #[allow(clippy::too_many_arguments)]
 fn bar_button_item<'a, 'i>(
     nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String, i64)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
-    responder: Option<&str>, responder_actions: &mut Vec<(String, String)>,
+    responder: Option<&str>, responder_actions: &mut Vec<(String, String)>, pairs: Option<&mut Vec<Value>>,
 ) -> Result<Object, String> {
     only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("id", None)])?;
     // A custom view (a button, a segmented control...) is compiled as a
@@ -839,9 +870,14 @@ fn bar_button_item<'a, 'i>(
     // custom class is refused.
     let custom = custom_view(b);
     for c in b.children().filter(|c| c.is_element()) {
-        if !["connections", "color", "inset"].contains(&c.tag_name().name()) && Some(c) != custom {
+        let attributes = c.has_tag_name("userDefinedRuntimeAttributes") && pairs.is_some();
+        if !["connections", "color", "inset"].contains(&c.tag_name().name()) && Some(c) != custom && !attributes {
             return fail(format!("<{}> inside <barButtonItem> is not supported by this ibtool", c.tag_name().name()));
         }
+    }
+    let mut pairs = pairs;
+    if let Some(pairs) = &mut pairs {
+        pairs.extend(runtime_attributes(nib, b, name)?);
     }
     let mut values = Vec::new();
     if let Some(v) = custom {
@@ -851,8 +887,17 @@ fn bar_button_item<'a, 'i>(
         }
         let mut scene = Scene::new(vc_id, None, v, None);
         let object = subview(nib, &mut scene, v)?;
-        if !scene.pairs.is_empty() || !scene.accessibility.is_empty() || scene.subviews.len() > 1 {
-            return fail("a bar button item's custom view with runtime attributes or accessibility settings is not supported by this ibtool");
+        // Its pairs (a switch's frame) are its navigation item's, where its
+        // pairs go (a corpus storyboard); beside the item's own runtime
+        // attributes, their order isn't established.
+        if !scene.pairs.is_empty() {
+            match &mut pairs {
+                Some(pairs) if pairs.is_empty() => pairs.extend(std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1)),
+                _ => return fail("a bar button item's custom view with runtime attributes here is not supported by this ibtool"),
+            }
+        }
+        if !scene.accessibility.is_empty() || scene.subviews.len() > 1 {
+            return fail("a bar button item's custom view with accessibility settings is not supported by this ibtool");
         }
         for (selector, source, mask, target) in scene.actions {
             if target != "upstream" {
@@ -1029,6 +1074,27 @@ fn view_connections(scene: &mut Scene, n: Node, name: &str) -> Result<(), String
             }
         }
         for o in children(c, "outletCollection") {
+            // Of other views or constraints, as a controller's (a corpus
+            // xib).
+            if o.attribute("property") != Some("gestureRecognizers") {
+                only_attributes(o, &[("property", None), ("destination", None), ("collectionClass", None), ("id", None)])?;
+                let (label, class) = (attr(o, "property")?, o.attribute("collectionClass").unwrap_or("NSArray"));
+                if !matches!(class, "NSArray" | "NSMutableArray") {
+                    return fail(format!("an outlet collection of class {class} is not supported by this ibtool"));
+                }
+                let destination = attr(o, "destination")?;
+                let destination = match n.document().descendants().find(|d| d.has_tag_name("constraint") && d.attribute("id") == Some(destination)) {
+                    Some(c) if c.attribute("placeholder").is_some() => return fail("an outlet collection of a placeholder constraint is not supported by this ibtool"),
+                    Some(c) => constraint_name(c)?,
+                    None => view_name(destination),
+                };
+                match scene.view_collections.iter_mut().find(|v| v.0 == label && v.1 == name) {
+                    Some(v) if v.2 == class => v.3.push(destination),
+                    Some(_) => return fail("an outlet collection of two classes is not supported by this ibtool"),
+                    None => scene.view_collections.push((label.to_string(), name.to_string(), class.to_string(), vec![destination])),
+                }
+                continue;
+            }
             only_attributes(o, &[("property", Some("gestureRecognizers")), ("destination", None), ("appends", Some("YES")), ("id", None)])?;
             let destination = attr(o, "destination")?;
             if !scene.gestures.iter().any(|g| g == destination) {
@@ -1068,10 +1134,22 @@ fn gesture_recognizer(nib: &mut Nib, module: Option<&str>, r: Node, vc_id: &str)
             Some(v) => v.parse().map(Some).map_err(|_| format!("{key}=\"{v}\" is not supported by this ibtool")),
         }
     };
-    let mut values = vec![("UIGestureRecognizer.allowedTouchTypes", Value::Int(15)), ("UIGestureRecognizer.requiresExclusiveTouchType", Value::Bool(true))];
+    let mut values = Vec::new();
+    // Disabled, first (a probe of each kind), and delaying touches'
+    // beginning (a corpus storyboard); both together aren't established.
+    if r.attribute("enabled").is_some() {
+        if r.attribute("delaysTouchesBegan").is_some() {
+            return fail("a disabled gesture recognizer delaying touches is not supported by this ibtool");
+        }
+        values.push(("UIGestureRecognizer.disabled", Value::Bool(true)));
+    }
+    if r.attribute("delaysTouchesBegan").is_some() {
+        values.push(("UIGestureRecognizer.delaysTouchesBegan", Value::Bool(true)));
+    }
+    values.extend([("UIGestureRecognizer.allowedTouchTypes", Value::Int(15)), ("UIGestureRecognizer.requiresExclusiveTouchType", Value::Bool(true))]);
     let class = match r.tag_name().name() {
         "tapGestureRecognizer" => {
-            only_attributes(r, &[("numberOfTapsRequired", None), ("numberOfTouchesRequired", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+            only_attributes(r, &[("enabled", Some("NO")), ("delaysTouchesBegan", Some("YES")), ("numberOfTapsRequired", None), ("numberOfTouchesRequired", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
             let (taps, touches) = (count("numberOfTapsRequired")?, count("numberOfTouchesRequired")?);
             if taps.is_some() && touches.is_some() {
                 return fail("a tap gesture recognizer with both its taps and touches set is not supported by this ibtool");
@@ -1087,7 +1165,7 @@ fn gesture_recognizer(nib: &mut Nib, module: Option<&str>, r: Node, vc_id: &str)
             "UITapGestureRecognizer"
         }
         "panGestureRecognizer" => {
-            only_attributes(r, &[("minimumNumberOfTouches", None), ("maximumNumberOfTouches", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+            only_attributes(r, &[("enabled", Some("NO")), ("delaysTouchesBegan", Some("YES")), ("minimumNumberOfTouches", None), ("maximumNumberOfTouches", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
             if let Some(t) = count("minimumNumberOfTouches")? {
                 values.push(("UIPanGestureRecognizer.minimumNumberOfTouches", Value::Int(t)));
             }
@@ -1099,7 +1177,7 @@ fn gesture_recognizer(nib: &mut Nib, module: Option<&str>, r: Node, vc_id: &str)
             "UIPanGestureRecognizer"
         }
         "swipeGestureRecognizer" => {
-            only_attributes(r, &[("direction", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+            only_attributes(r, &[("enabled", Some("NO")), ("delaysTouchesBegan", Some("YES")), ("direction", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
             // UISwipeGestureRecognizerDirection; right, the default, is
             // left out.
             match r.attribute("direction") {
@@ -1465,8 +1543,21 @@ struct Frame {
 }
 
 fn frame(n: Node) -> Result<Frame, String> {
-    let r = child(n, "rect", "frame").ok_or_else(|| format!("<{}> without a frame", n.tag_name().name()))?;
+    let r = frame_node(n).ok_or_else(|| format!("<{}> without a frame", n.tag_name().name()))?;
+    if r.has_tag_name("frame") {
+        only_attributes(r, &[("key", Some("frameInset")), ("minX", None), ("minY", None), ("width", None), ("height", None)])?;
+        let min = |key: &str| r.attribute(key).map_or(Ok(0.0), number);
+        return Ok(Frame { x: min("minX")?, y: min("minY")?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? });
+    }
     Ok(Frame { x: number(attr(r, "x")?)?, y: number(attr(r, "y")?)?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? })
+}
+
+/// A view's frame: its `<rect key="frame">`, or in older documents a
+/// `<frame key="frameInset">`, which with only its minimum edges and size
+/// is the frame at those edges (a probe; inset from the other edges it is
+/// refused, by `frame`).
+fn frame_node<'a, 'i>(n: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    child(n, "rect", "frame").or_else(|| child(n, "frame", "frameInset"))
 }
 
 /// The frame Xcode gives a view without one (or with an all-zero one): 1000x1000
@@ -1486,7 +1577,7 @@ fn missing_frame(n: Node) -> Result<Frame, String> {
 /// `missing_frame`), or has no size if its frame is fixed (image views and
 /// segmented controls: four probes).
 fn subview_frame(n: Node) -> Result<Frame, String> {
-    if let Some(f) = child(n, "rect", "frame").map(|_| frame(n)).transpose()? {
+    if let Some(f) = frame_node(n).map(|_| frame(n)).transpose()? {
         if f.x != 0.0 || f.y != 0.0 || f.w != 0.0 || f.h != 0.0 {
             return Ok(f);
         }
@@ -1496,6 +1587,8 @@ fn subview_frame(n: Node) -> Result<Frame, String> {
         "label" | "view" | "button" | "imageView" | "segmentedControl" => missing_frame(n),
         // So is a table view's or navigation bar's (two probes).
         "tableView" | "navigationBar" if n.attribute("fixedFrame").is_none() => missing_frame(n),
+        // And a stack view's (a corpus storyboard).
+        "stackView" if n.attribute("fixedFrame").is_none() => missing_frame(n),
         other => fail(format!("<{other}> without a frame")),
     }
 }
@@ -2099,6 +2192,9 @@ struct Scene<'a> {
     gesture_views: Vec<(String, Vec<String>)>,
     /// Views' outlets to other views: (label, the view, the destination).
     view_outlets: Vec<(String, String, String)>,
+    /// Views' outlet collections other than their gesture recognizers:
+    /// (label, the view, its class, the destinations).
+    view_collections: Vec<(String, String, String, Vec<String>)>,
     /// Views' user-defined runtime attributes, as the nib's key-value
     /// pairs, and their accessibility configurations, each with the view's
     /// name: the nib lists them in the order of its objects.
@@ -2164,6 +2260,7 @@ impl<'a> Scene<'a> {
             gestures: Vec::new(),
             gesture_views: Vec::new(),
             view_outlets: Vec::new(),
+            view_collections: Vec::new(),
             pairs: Vec::new(),
             effect_contents: Vec::new(),
             effect_content_views: Vec::new(),
@@ -2268,6 +2365,10 @@ fn excluded_constraints<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
     let mut ids = Vec::new();
     for v in children(n, "variation") {
         if v.attribute("key") != Some("default") {
+            // A size class's attribute is its view's (`size_class_traits`).
+            if attribute_variation(v) {
+                continue;
+            }
             return fail("variations other than the default one are not supported by this ibtool");
         }
         only_attributes(v, &[("key", None)])?;
@@ -2281,10 +2382,91 @@ fn excluded_constraints<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
             }
         }
     }
-    if ids.is_empty() && children(n, "variation").next().is_some() {
+    if ids.is_empty() && children(n, "variation").any(|v| v.attribute("key") == Some("default")) {
         return fail("a variation that excludes no constraints is not supported by this ibtool");
     }
     Ok(ids)
+}
+
+/// Whether a size class's variation sets only an attribute its view
+/// compiles: a stack view's axis or a label's font.
+fn attribute_variation(v: Node) -> bool {
+    let attributes: Vec<&str> = v.attributes().map(|a| a.name()).collect();
+    let elements: Vec<Node> = v.children().filter(|c| c.is_element()).collect();
+    match v.parent().map(|p| p.tag_name().name()) {
+        Some("stackView") => attributes == ["key", "axis"] && elements.is_empty(),
+        Some("label") => attributes == ["key"] && elements.len() == 1 && elements[0].has_tag_name("fontDescription"),
+        _ => false,
+    }
+}
+
+/// A size class variation's traits, as a `UITraitCollection`'s built-in
+/// traits: the horizontal size class before the vertical, compact 1 and
+/// regular 2 (three corpus documents).
+fn size_class_traits(key: &str) -> Result<Vec<(&'static str, i64)>, String> {
+    let mut traits = Vec::new();
+    for part in key.split('-') {
+        let (name, value) = part.split_once('=').ok_or_else(|| format!("variation {key} is not supported by this ibtool"))?;
+        let trait_name = match name {
+            "widthClass" => "UITraitCollectionBuiltinTrait-_UITraitNameHorizontalSizeClass",
+            "heightClass" => "UITraitCollectionBuiltinTrait-_UITraitNameVerticalSizeClass",
+            _ => return fail(format!("variation {key} is not supported by this ibtool")),
+        };
+        let class = match value {
+            "compact" => 1,
+            "regular" => 2,
+            _ => return fail(format!("variation {key} is not supported by this ibtool")),
+        };
+        if traits.iter().any(|t: &(&str, i64)| t.0 == trait_name) {
+            return fail(format!("variation {key} is not supported by this ibtool"));
+        }
+        traits.push((trait_name, class));
+    }
+    traits.sort_by_key(|t| t.0 != "UITraitCollectionBuiltinTrait-_UITraitNameHorizontalSizeClass");
+    Ok(traits)
+}
+
+/// The size classes of a storyboard's device (horizontal, vertical:
+/// compact 1, regular 2), which pick the variation a view is archived
+/// with: an iPhone's compact and regular in portrait, a small one's both
+/// compact in landscape, an iPad's both regular; none without a device
+/// (seven probes). Other iPhones in landscape are refused. A xib's views
+/// are archived with their defaults, whatever its device (two probes).
+fn device_size_classes(nib: &Nib, n: Node) -> Result<Option<(i64, i64)>, String> {
+    if nib.xib {
+        return Ok(None);
+    }
+    let Some(device) = n.document().root_element().children().find(|c| c.has_tag_name("device")) else { return Ok(None) };
+    let id = attr(device, "id")?;
+    let landscape = device.attribute("orientation") == Some("landscape");
+    Ok(Some(match (id.starts_with("ipad"), landscape) {
+        (true, _) => (2, 2),
+        (false, false) => (1, 2),
+        (false, true) if ["retina3_5", "retina4_0", "retina4_7"].contains(&id) => (1, 1),
+        _ => return fail(format!("a size class variation on device {id} in landscape is not supported by this ibtool")),
+    }))
+}
+
+/// Whether a size class's traits (`size_class_traits`) hold on the
+/// document's device.
+fn traits_hold(traits: &[(&str, i64)], device: Option<(i64, i64)>) -> bool {
+    let Some((h, v)) = device else { return false };
+    traits.iter().all(|(name, class)| *class == if name.ends_with("HorizontalSizeClass") { h } else { v })
+}
+
+/// Records the view `name`'s attribute `key_path`, varied by size class
+/// (`records`), with its default value.
+fn record_attribute_variation(nib: &mut Nib, id: &str, name: &str, key_path: &'static str, records: Vec<(Vec<(&'static str, i64)>, Value)>, default: Value) -> Result<(), String> {
+    if nib.variations.is_none() {
+        return fail("a size class's variation of a view outside a controller's own view is not supported by this ibtool");
+    }
+    // Several size classes' records' order isn't established.
+    if records.len() != 1 {
+        return fail("variations of an attribute for several size classes are not supported by this ibtool");
+    }
+    nib.attribute_variations.push(AttributeVariation { view: name.to_string(), key_path, records, default });
+    nib.varied.push(id.to_string());
+    Ok(())
 }
 
 /// Records the variation of the view `name` (`id` in the document), whose
@@ -2408,8 +2590,46 @@ fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
 /// appear; a guide is its objects-list placeholder.
 fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
-    if variations.is_empty() {
+    let mut attributes = std::mem::take(&mut nib.attribute_variations);
+    if variations.is_empty() && attributes.is_empty() {
         return Ok(None);
+    }
+    // Attributes' storages: one per view, in the document's order (three
+    // corpus documents); beside constraints' or the root view's, or several
+    // of one view, their order isn't established.
+    if !attributes.is_empty() {
+        if !variations.is_empty() {
+            return fail("size class variations of attributes beside variations of constraints are not supported by this ibtool");
+        }
+        let place = |v: &AttributeVariation| order.iter().position(|o| *o == v.view);
+        if attributes.iter().any(|a| place(a).is_none() || a.view == root) {
+            return fail("a size class variation of the root view or a view outside it is not supported by this ibtool");
+        }
+        attributes.sort_by_key(place);
+        if attributes.windows(2).any(|w| w[0].view == w[1].view) {
+            return fail("size class variations of several attributes of a view are not supported by this ibtool");
+        }
+        let mut storages = Vec::new();
+        let mut descendants = Vec::new();
+        for a in attributes {
+            let mut records = Vec::new();
+            for (traits, value) in a.records {
+                let traits = Object::new("UITraitCollection", traits.into_iter().map(|(k, v)| (k, Value::Int(v))).collect());
+                records.push(Value::New(Object::new("_UIAttributeTraitStorageRecord", vec![("UITraitCollection", Value::New(traits)), ("UIValue", value)])));
+            }
+            let traits = nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new()));
+            records.push(Value::New(Object::new("_UIAttributeTraitStorageRecord", vec![("UITraitCollection", traits), ("UIValue", a.default)])));
+            let records = nib.array("NSMutableArray", records);
+            storages.push(Value::New(Object::new("_UIAttributeTraitStorage", vec![
+                ("UIObject", reference(a.view.clone())),
+                ("UIKeyPath", nib.string(a.key_path)),
+                ("UIRecords", records),
+            ])));
+            descendants.push(reference(a.view));
+        }
+        let storages = nib.array("NSArray", storages);
+        let descendants = nib.set("NSSet", descendants)?;
+        return Ok(Some(Value::New(Object::new("_UITraitStorageList", vec![("UITopLevelObject", reference(root.to_string())), ("UITraitStorages", storages), ("UIDescendants", descendants)]))));
     }
     let place = |v: &Variation| order.iter().position(|o| *o == v.view);
     if variations.iter().any(|v| place(v).is_none()) {
@@ -2510,6 +2730,10 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
             continue;
         };
         if first == second {
+            // A subview's own aspect ratio is that subview's (above).
+            if first != id && direct.iter().any(|v| v.attribute("id") == Some(first)) && matches!((a, attr(c, "secondAttribute")?), ("width", "height") | ("height", "width")) {
+                continue;
+            }
             // An aspect ratio: after the constant on its dimension.
             let rank = match (first == id, a, attr(c, "secondAttribute")?) {
                 (true, "width", "height") => 1,
@@ -2783,7 +3007,25 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("adjustsFontForContentSizeCategory").is_some() {
                 values.push(("UIAdjustsFontForContentSizeCategory", Value::Bool(true)));
             }
-            values.push(("UIFont", font(nib, child(n, "fontDescription", "fontDescription"), None)?));
+            // A font for a size class (a corpus xib), archived when the
+            // device has it (as a stack view's axis).
+            let default_font = child(n, "fontDescription", "fontDescription");
+            let mut archived_font = default_font;
+            let mut records = Vec::new();
+            for v in children(n, "variation").filter(|v| v.attribute("key") != Some("default")) {
+                let f = child(v, "fontDescription", "fontDescription").ok_or("a label's variation other than its font is not supported by this ibtool")?;
+                let traits = size_class_traits(attr(v, "key")?)?;
+                if traits_hold(&traits, device_size_classes(nib, n)?) {
+                    archived_font = Some(f);
+                }
+                records.push((traits, f));
+            }
+            values.push(("UIFont", font(nib, archived_font, None)?));
+            if !records.is_empty() {
+                let records = records.into_iter().map(|(t, f)| Ok((t, font(nib, Some(f), None)?))).collect::<Result<Vec<_>, String>>()?;
+                let default = font(nib, default_font, None)?;
+                record_attribute_variation(nib, id, &name, "font", records, default)?;
+            }
             // A declared text colour, even labelColor, stays as it is when
             // the trait collection changes.
             let text_color = match text_color {
@@ -3045,17 +3287,35 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         "collectionView" => collection::subview_collection(nib, scene, n, &name, &f)?,
         "visualEffectView" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")),
+                ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("contentMode", Some("scaleToFill")), ("fixedFrame", Some("YES")),
                 ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("userInteractionEnabled", Some("NO")),
                 ("id", None),
             ])?;
-            only_children(n, &["rect", "view", "blurEffect", "constraints", "userDefinedRuntimeAttributes"])?;
+            only_children(n, &["rect", "autoresizingMask", "view", "blurEffect", "vibrancyEffect", "constraints", "userDefinedRuntimeAttributes"])?;
+            // A mask beside a fixed frame: the flexible right and bottom
+            // margins it has anyway (one of the corpus's).
+            if let Some(m) = child(n, "autoresizingMask", "autoresizingMask") {
+                only_attributes(m, &[("key", None), ("flexibleMaxX", Some("YES")), ("flexibleMaxY", Some("YES"))])?;
+                if m.attribute("flexibleMaxX").is_none() || m.attribute("flexibleMaxY").is_none() {
+                    return fail("a visual effect view's autoresizing mask other than flexible right and bottom margins is not supported by this ibtool");
+                }
+            }
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             if n.attribute("opaque").is_none() {
                 return fail("an opaque visual effect view is not supported by this ibtool");
             }
-            let blur = children(n, "blurEffect").next().ok_or("a visual effect view without a blur effect is not supported by this ibtool")?;
+            // A vibrancy effect is its blur's, with its own keys (five
+            // probes).
+            let vibrancy = children(n, "vibrancyEffect").next();
+            if let Some(v) = vibrancy {
+                only_attributes(v, &[])?;
+                only_children(v, &["blurEffect"])?;
+                if children(n, "blurEffect").next().is_some() || children(v, "blurEffect").count() != 1 {
+                    return fail("a visual effect view's vibrancy effect beside a blur effect, or without one, is not supported by this ibtool");
+                }
+            }
+            let blur = children(vibrancy.unwrap_or(n), "blurEffect").next().ok_or("a visual effect view without a blur effect is not supported by this ibtool")?;
             only_attributes(blur, &[("style", None)])?;
             // UIBlurEffectStyle, and for the newer styles the automatic one.
             let (automatic, style) = match attr(blur, "style")? {
@@ -3105,6 +3365,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             cv.push(("UIShouldNotAdaptToMaterials", Value::Bool(true)));
             cv.push(("UIContentMode", Value::Int(4)));
             cv.push(("UIClipsToBounds", Value::Bool(true)));
+            // A vibrancy effect's tints it white (five probes).
+            if vibrancy.is_some() {
+                cv.push(("UITintColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))));
+            }
             // Its constraints with its subviews, as a container's, listed
             // after its subviews (one probe).
             if let Some(own) = own_constraints(nib, scene, content, &content_name)? {
@@ -3141,11 +3405,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             let mut effect = Vec::new();
+            let (class, automatic_key, style_key) = match vibrancy {
+                Some(_) => ("UIVibrancyEffect", "UIVibrancyEffectBlurAutomaticStyle", "UIVibrancyEffectBlurStyle"),
+                None => ("UIBlurEffect", "UIBlurEffectAutomaticStyle", "UIBlurEffectStyle"),
+            };
             if let Some(a) = automatic {
-                effect.push(("UIBlurEffectAutomaticStyle", Value::Int(a)));
+                effect.push((automatic_key, Value::Int(a)));
             }
-            effect.push(("UIBlurEffectStyle", Value::Int(style)));
-            values.push(("UIVisualEffectViewEffect", Value::New(Object::new("UIBlurEffect", effect))));
+            effect.push((style_key, Value::Int(style)));
+            values.push(("UIVisualEffectViewEffect", Value::New(Object::new(class, effect))));
             values.push(("UIVisualEffectViewGroupName", Value::Nil));
             values.push(("UIVisualEffectViewContentView", Value::New(Object::new("_UIVisualEffectContentView", cv).named(content_name))));
             Object::new("UIVisualEffectView", values)
@@ -3369,6 +3637,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                         return fail("a navigation bar's back bar button items and custom views are not supported by this ibtool");
                     }
                     let parts = navigation_item_with(nib, i, &item_name, scene.vc_id, first_responder(n))?;
+                    if !parts.pairs.is_empty() {
+                        return fail("runtime attributes of a navigation bar's bar button items are not supported by this ibtool");
+                    }
                     if !parts.segues.is_empty() {
                         return fail("a navigation bar's bar button items' segues are not supported by this ibtool");
                     }
@@ -3438,7 +3709,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     let (mut actions, mut segues) = (Vec::new(), Vec::new());
                     let item_name = format!("toolbar item {}", attr(b, "id")?);
                     let mut responder_actions = Vec::new();
-                    let object = bar_button_item(nib, b, &item_name, scene.vc_id, &mut actions, &mut segues, first_responder(n), &mut responder_actions)?;
+                    let object = bar_button_item(nib, b, &item_name, scene.vc_id, &mut actions, &mut segues, first_responder(n), &mut responder_actions, None)?;
                     if !segues.is_empty() {
                         return fail("a toolbar item's segues are not supported by this ibtool");
                     }
@@ -4247,11 +4518,8 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 stateful.push(nib.int_number(*value));
                 let mut content = Vec::new();
                 if let Some(title) = st.attribute("title") {
-                    // A localizable build's keys for other states' titles
-                    // aren't established.
-                    if nib.localizable && *value != 0 {
-                        return fail("a localizable button's title for a state other than normal is not supported by this ibtool");
-                    }
+                    // A localizable build's key is the state's, as normal's
+                    // (`<id>.highlightedTitle`: one probe of each state).
                     content.push(("UITitle", nib.text(id, &format!("{key}Title"), title)));
                 }
                 if let Some(image) = st.attribute("image") {
@@ -4356,7 +4624,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         }
         "stackView" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("contentMode", None), ("axis", None), ("distribution", None), ("alignment", None),
+                ("opaque", Some("NO")), ("contentMode", None), ("axis", None), ("distribution", None), ("alignment", None), ("key", None),
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
@@ -4364,6 +4632,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("tag", None), ("alpha", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
                 ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None), ("userInteractionEnabled", Some("NO")),
             ])?;
+            // As a table's header or footer view (one of the corpus's).
+            if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
+                return fail(format!("a stack view as {} is not supported by this ibtool", n.attribute("key").unwrap_or("")));
+            }
             only_children(n, &["rect", "autoresizingMask", "subviews", "edgeInsets", "directionalEdgeInsets", "color", "constraints", "userDefinedRuntimeAttributes"])?;
             // An explicit horizontal axis is the default (fuzzed storyboards).
             if !matches!(n.attribute("axis"), None | Some("vertical" | "horizontal")) {
@@ -4372,6 +4644,27 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
             let vertical = n.attribute("axis") == Some("vertical");
+            // An axis for a size class (two corpus storyboards), archived
+            // when the device has it.
+            let mut records = Vec::new();
+            let mut archived = vertical;
+            for v in children(n, "variation").filter(|v| v.attribute("key") != Some("default")) {
+                let axis = match v.attribute("axis") {
+                    Some("vertical") => true,
+                    Some("horizontal") => false,
+                    _ => return fail("a stack view's variation other than its axis is not supported by this ibtool"),
+                };
+                let traits = size_class_traits(attr(v, "key")?)?;
+                if traits_hold(&traits, device_size_classes(nib, n)?) {
+                    archived = axis;
+                }
+                records.push((traits, nib.int_number(i64::from(axis))));
+            }
+            if !records.is_empty() {
+                let default = nib.int_number(i64::from(vertical));
+                record_attribute_variation(nib, attr(n, "id")?, &name, "axis", records, default)?;
+            }
+            let vertical = archived;
             let distribution = match n.attribute("distribution") {
                 None | Some("fill") => 0,
                 Some("fillEqually") => 1,
@@ -4421,6 +4714,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIBackgroundColor", color(nib, c)?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            // Opaque unless it says otherwise (Interface Builder writes NO
+            // for one it adds: one of the corpus's).
+            if n.attribute("opaque").is_none() {
+                values.push(("UIOpaque", Value::Bool(true)));
+            }
             hidden_and_tag(&mut values, n)?;
             // Not interactive after its hidden flag and tag, as a plain view (one
             // probe).
@@ -4512,7 +4810,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 only_attributes(n, &[
                     ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
                     ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
-                    ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
+                    ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None), ("hidden", Some("YES")),
                 ])?;
                 only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections"])?;
                 let segues: Vec<Node> = children(n, "connections").flat_map(|c| c.children().filter(|c| c.is_element())).collect();
@@ -4715,7 +5013,20 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("fixedFrame", Some("YES")), ("catalog", Some("system")), ("id", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("autoresizesSubviews", Some("NO")),
             ])?;
-            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility"])?;
+            only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility", "imageReference"])?;
+            // An image reference naming only its image is the `image`
+            // attribute (one probe).
+            let image = match child(n, "imageReference", "image") {
+                Some(r) if n.attribute("image").is_none() && n.attribute("catalog").is_none() => {
+                    only_attributes(r, &[("key", Some("image")), ("image", None)])?;
+                    Some(attr(r, "image")?)
+                }
+                Some(_) => return fail("an image view's image reference beside its image or other references is not supported by this ibtool"),
+                None => n.attribute("image"),
+            };
+            if children(n, "imageReference").count() > usize::from(image.is_some() && n.attribute("image").is_none()) {
+                return fail("an image view's image reference beside its image or other references is not supported by this ibtool");
+            }
             view_connections(scene, n, &name)?;
             let pairs = runtime_attributes(nib, n, &name)?;
             scene.pairs.extend(pairs.into_iter().map(|p| (name.clone(), p)));
@@ -4781,7 +5092,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
-            if let Some(image) = n.attribute("image") {
+            if let Some(image) = image {
                 values.push(("UIImage", nib.image_in(image, n.attribute("catalog"))?));
             }
             // One probe.
@@ -4875,7 +5186,11 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
         "top" | "bottom" | "centerY" | "topMargin" | "bottomMargin" | "centerYWithinMargins" | "firstBaseline" | "baseline" => 1,
         _ => 2,
     };
-    if a1 != a2 && (axis(a1) != axis(a2) || axis(a1) == 2) {
+    // A subview's width and the root view's height (or the other way
+    // round), only that way: with the root view first, Xcode leaves the
+    // constraint out (twelve probes).
+    let sizes = axis(a1) == 2 && axis(a2) == 2 && second == root;
+    if a1 != a2 && (axis(a1) != axis(a2) || axis(a1) == 2) && !sizes {
         return fail(format!("constraints between {a1} and {a2} are not supported by this ibtool"));
     }
     // Xcode rewrites a left or right edge tied to a leading or trailing one.
@@ -5104,7 +5419,11 @@ fn with_root_key(a1: &str, a2: &str, root_first: bool) -> Result<[usize; 4], Str
         // Edges on one side tie whichever way round.
         let side = usize::from(trailing(a1) != trailing(a2) && !trailing(root_edge));
         [3, d1, d2, side]
-    } else if a1 == a2 || [a1, a2].iter().all(|a| ["topMargin", "bottomMargin", "bottom", "top"].contains(a)) {
+    } else if a1 == a2
+        || [a1, a2].iter().all(|a| ["topMargin", "bottomMargin", "bottom", "top"].contains(a))
+        || [a1, a2].iter().all(|a| ["width", "height"].contains(a))
+    {
+        // A width and a height among them by their ranks (six probes).
         [4, r1, r2, 0]
     } else {
         return fail(format!("constraints between {a1} and {a2} with a root view are not supported by this ibtool"));
@@ -5634,6 +5953,11 @@ struct Embedded {
     /// Its outlets to its navigation item's custom views, after its
     /// storyboard outlet.
     item_outlets: Vec<(String, String)>,
+    /// Its bar button items' key-value pairs (runtime attributes, a
+    /// switch's frame).
+    item_pairs: Vec<Value>,
+    /// Its gesture recognizers whose delegate it is.
+    gesture_delegates: Vec<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5664,9 +5988,11 @@ fn embedded_controller(
     let mut bar_items = Vec::new();
     let mut bar_actions = Vec::new();
     let mut bar_segues = Vec::new();
+    let mut item_pairs = Vec::new();
     let item = match (explicit_item, bar) {
         (Some(i), _) => {
-            let parts = navigation_item(nib, i, &item_name, attr(vc, "id")?)?;
+            let parts = navigation_item_with(nib, i, &item_name, attr(vc, "id")?, None)?;
+            item_pairs = parts.pairs;
             bar_items = parts.bar_items;
             bar_actions = parts.actions;
             bar_segues = parts.segues;
@@ -5703,6 +6029,7 @@ fn embedded_controller(
     // their placeholders' order (two probes).
     let mut gestures = Vec::new();
     let mut gesture_actions = Vec::new();
+    let mut gesture_delegates = Vec::new();
     if gesture_count > 0 {
         if (templates.array.is_some() && !only_gesture_segues) || !bar_items.is_empty() || extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
             return fail("an embedded controller's gesture recognizers beside segues, bar button items or these settings are not supported by this ibtool");
@@ -5710,8 +6037,14 @@ fn embedded_controller(
         let mut defined = Vec::new();
         for r in &root.recognizers {
             let id = attr(*r, "id")?;
+            // Its delegate, the controller, as a plain controller's (a
+            // corpus storyboard); several aren't established.
             if gesture_delegate(*r) {
-                return fail("an embedded controller's gesture recognizer's delegate is not supported by this ibtool");
+                let outlets: Vec<Node> = children(*r, "connections").flat_map(|c| children(c, "outlet")).collect();
+                if outlets.len() != 1 || outlets[0].attribute("property") != Some("delegate") || outlets[0].attribute("destination") != vc.attribute("id") || !gesture_delegates.is_empty() {
+                    return fail("an embedded controller's gesture recognizer's outlets other than one's delegate are not supported by this ibtool");
+                }
+                gesture_delegates.push(format!("{name} gesture {id}"));
             }
             if r.attribute("customClass").is_some() {
                 return fail("an embedded controller's gesture recognizer with a custom class is not supported by this ibtool");
@@ -5759,12 +6092,9 @@ fn embedded_controller(
         }
     }
     values.push(("UIParentViewController", reference(parent)));
-    // Not resizing its archived view, after its parent (a corpus
-    // storyboard's split view child).
+    // Not resizing its archived view, after its parent, before the
+    // recognizers kept alive (two corpus storyboards).
     if vc.attribute("autoresizesArchivedViewToFullSize").is_some() {
-        if gesture_count > 0 {
-            return fail("an embedded controller not resizing its archived view, beside gesture recognizers, is not supported by this ibtool");
-        }
         values.push(("UIAutoresizesArchivedViewToFullSize", Value::Bool(false)));
     }
     // The segue templates before the recognizers kept alive (two probes).
@@ -5793,6 +6123,8 @@ fn embedded_controller(
         Object::new(root.original_class, values)
     };
     Ok(Embedded {
+        item_pairs,
+        gesture_delegates,
         value: Value::New(controller.named(name)),
         templates,
         navigation_item: explicit_item.map(|_| item_name),
@@ -5834,7 +6166,7 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: Option<&str>, dele
         }
     }
     // Without a frame it is at the origin (one probe).
-    let f = if child(bar, "rect", "frame").is_some() { frame(bar)? } else { Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 } };
+    let f = if frame_node(bar).is_some() { frame(bar)? } else { Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 } };
     if f.x != 0.0 {
         return fail("navigation bars not at x 0 are not supported by this ibtool");
     }
@@ -6267,6 +6599,8 @@ fn navigation_controller_nib(
     }
     let root_tab = if root_tab_item { Some(tab::tab_bar_item(&mut nib, root.vc, "root tab bar item")?.0) } else { None };
     let mut embedded = embedded_controller(&mut nib, root, "root", "controller", Some("controller bar"), root_tab, nib_names)?;
+    let mut item_pairs = std::mem::take(&mut embedded.item_pairs);
+    let gesture_delegates = std::mem::take(&mut embedded.gesture_delegates);
     let explicit_item = embedded.navigation_item.clone();
     let templates_objects = std::mem::take(&mut embedded.templates.objects);
     let templates_outlets = std::mem::take(&mut embedded.templates.outlets);
@@ -6308,6 +6642,14 @@ fn navigation_controller_nib(
     for (property, view) in &item_outlets {
         connections.push(outlet(&mut nib, property, "root", view));
     }
+    // A recognizer's delegate outlet after the storyboard outlets (a corpus
+    // storyboard); beside outlets to custom views not established.
+    if !gesture_delegates.is_empty() && !item_outlets.is_empty() {
+        return fail("a navigation controller's root's gesture recognizer's delegate beside its outlets is not supported by this ibtool");
+    }
+    for g in &gesture_delegates {
+        connections.push(outlet(&mut nib, "delegate", g, "root"));
+    }
     connections.push(outlet(&mut nib, "sceneViewController", "owner", "controller"));
     for t in &templates_outlets {
         connections.push(outlet(&mut nib, "viewController", t, "root"));
@@ -6318,8 +6660,14 @@ fn navigation_controller_nib(
     }
     let mut top = vec![root_storyboard, owner, responder, storyboard, controller];
     top.extend(gestures.iter().map(|g| reference(g.clone())));
-    // The root's runtime attributes, as key-value pairs on it.
-    let pairs = runtime_attributes(&mut nib, root.vc, "root")?;
+    // The root's runtime attributes, as key-value pairs on it, or its bar
+    // button items' (a corpus storyboard); both together aren't
+    // established.
+    let mut pairs = runtime_attributes(&mut nib, root.vc, "root")?;
+    if !pairs.is_empty() && !item_pairs.is_empty() {
+        return fail("runtime attributes of both a navigation controller's root and its bar button items are not supported by this ibtool");
+    }
+    pairs.append(&mut item_pairs);
     Ok((name, nib::archive(root_object_with_pairs(&mut nib, top, objects, connections, pairs))?))
 }
 
@@ -6368,12 +6716,27 @@ pub fn compile_xib_cell(xml: &str, module: Option<&str>, localizable: bool, safe
     table::cell_nib(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable, module, cell, false, Some(safe_area))
 }
 
+/// Refuses a document deploying before iOS 8 (`<deployment version>`
+/// below 0x800): Xcode compiles a xib's into a nib directory for each
+/// idiom (`out~iphone.nib/runtime.nib` and `objects-8.0+.nib`), with or
+/// without size class variations (a probe and a corpus xib).
+pub fn refuse_before_ios8(root: Node) -> Result<(), String> {
+    let deployment = children(root, "dependencies").flat_map(|d| children(d, "deployment")).find_map(|d| d.attribute("version"));
+    if let Some(v) = deployment {
+        if v.parse::<u32>().map_err(|_| format!("deployment version {v} is not supported by this ibtool"))? < 0x800 {
+            return fail("a document deploying before iOS 8 is not supported by this ibtool");
+        }
+    }
+    Ok(())
+}
+
 fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, layout: Option<&XibLayout>) -> Result<Compiled, String> {
     let xib = layout.is_some();
     let responder_at = layout.map_or(0, |l| l.responder_at);
     let responder_last = responder_at > 0;
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
+    refuse_before_ios8(root)?;
     let platform = match root.attribute("type") {
         Some("com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB") => Platform::Ios,
         Some("com.apple.InterfaceBuilder.AppleTV.Storyboard") => Platform::Tvos,
@@ -6752,8 +7115,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // The gesture recognizers, which the view nib reaches through the
         // first placeholders.
         let recognizers: Vec<Node> = objects_node.children().filter(|c| c.tag_name().name().ends_with("GestureRecognizer")).collect();
-        if !recognizers.is_empty() && is_list {
-            return fail("a gesture recognizer in a table or collection view controller's scene is not supported by this ibtool");
+        // A collection view controller's are its collection view's (a
+        // corpus storyboard); a table view controller's aren't established.
+        if !recognizers.is_empty() && is_table {
+            return fail("a gesture recognizer in a table view controller's scene is not supported by this ibtool");
         }
         scene.gestures = recognizers.iter().map(|r| attr(*r, "id").map(str::to_string)).collect::<Result<_, _>>()?;
         // Custom objects (`<customObject>`), of a custom class, top-level
@@ -6943,7 +7308,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let f = match (generic_canvas, has_device, device_size, freeform) {
             // A xib's view keeps its frame, whatever the device (nine of
             // the corpus's).
-            _ if xib && child(view, "rect", "frame").is_some() => frame(view)?,
+            _ if xib && frame_node(view).is_some() => frame(view)?,
             (true, _, _, None) | (false, true, Some(_), None) if embedded.contains_key(vc_id) => {
                 let (w, h) = embedded[vc_id];
                 Frame { x: 0.0, y: 0.0, w, h }
@@ -6957,23 +7322,29 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             (true, _, _, Some(_)) => return fail("a freeform size without trait collections is not supported by this ibtool"),
             // On a device, the view keeps its frame's origin (three probes).
             (false, true, Some(_), Some((w, h))) | (false, true, Some((w, h)), None) => {
-                let origin = child(view, "rect", "frame").map(|_| frame(view)).transpose()?;
+                let origin = frame_node(view).map(|_| frame(view)).transpose()?;
                 Frame { x: origin.as_ref().map_or(0.0, |o| o.x), y: origin.as_ref().map_or(0.0, |o| o.y), w, h }
             }
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
             // Without a frame (and no device), the missing frame, as a
             // subview without one has (Flutter's accessibility launch
             // screen; two probes).
-            (false, false, _, _) if child(view, "rect", "frame").is_none() => missing_frame(view)?,
+            (false, false, _, _) if frame_node(view).is_none() => missing_frame(view)?,
             (false, _, _, _) => frame(view)?,
         };
         if is_list && !vc_collections.is_empty() {
             return fail("a table or collection view controller's outlet collections are not supported by this ibtool");
         }
-        if is_list && !gesture_outlets.is_empty() {
+        if is_table && !gesture_outlets.is_empty() {
             return fail("a table or collection view controller's outlets to gesture recognizers are not supported by this ibtool");
         }
         let controller_first = !referenced.is_empty() && (!vc_outlets.is_empty() || !vc_collections.is_empty());
+        // The controller's outlet collections' connections fall among the
+        // recognizers' in an order, and so their placeholders, that isn't
+        // their document's (four probes).
+        if !vc_collections.is_empty() && !attached.is_empty() {
+            return fail("outlet collections beside a gesture recognizer are not supported by this ibtool");
+        }
         let object_base = recognizers.len() + usize::from(controller_first);
         let controller_placeholder = if controller_first { recognizers.len() + 1 } else { gesture + 1 };
         let (view_root, upstream_used) = if is_table {
@@ -6982,15 +7353,28 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             scene.segue_listing = listing;
             (root, upstream_used)
         } else if is_collection {
-            let (root, upstream_used, segues) = collection::collection_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets)?;
+            // Its recognizers, all its collection view's, are listed by it
+            // as a root view's are (a corpus storyboard).
+            let gestures: Vec<String> = children(view, "connections")
+                .flat_map(|c| children(c, "outletCollection"))
+                .filter(|o| o.attribute("property") == Some("gestureRecognizers"))
+                .map(|o| attr(o, "destination").map(str::to_string))
+                .collect::<Result<_, _>>()?;
+            if gestures.len() != recognizers.len() || attached.len() != recognizers.len() {
+                return fail("a collection view controller's gesture recognizers other than its collection view's are not supported by this ibtool");
+            }
+            let (root, upstream_used, segues) = collection::collection_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets, &gestures)?;
             scene.segues = segues;
+            if !gestures.is_empty() {
+                scene.gesture_views.push((view_name(attr(view, "id")?), gestures));
+            }
             (root, upstream_used)
         } else {
             nib.variations = Some(Vec::new());
             // Laid out at another size than its frame's, the root view resizes
             // its autoresizing subviews: only those whose masks keep their
             // frames (fixed left and top margins, size) are established.
-            let document = if child(view, "rect", "frame").is_none() && !has_device { missing_frame(view)? } else { frame(view)? };
+            let document = if frame_node(view).is_none() && !has_device { missing_frame(view)? } else { frame(view)? };
             if (f.w, f.h) != (document.w, document.h) {
                 for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
                     if s.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
@@ -7023,9 +7407,6 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // The view's nib, in encoding order.
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
             let responder = proxy(&mut nib, "IBFirstResponder", "responder");
-            if !vc_collections.is_empty() && !scene.gesture_views.is_empty() {
-                return fail("outlet collections beside a gesture recognizer are not supported by this ibtool");
-            }
             let upstream_used = !vc_outlets.is_empty()
                 || !vc_collections.is_empty()
                 || view.descendants().any(|d| (d.has_tag_name("action") || d.has_tag_name("outlet")) && d.attribute("destination") == Some(vc_id));
@@ -7710,7 +8091,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // Then, between views of one class, in the order Xcode visits
             // them, as actions with one selector (two of the corpus's).
             let visit_of = |source: &str| visit.iter().position(|v| v == source);
-            outlets.sort_by_cached_key(|o| (o.0, class_of(o.1).unwrap_or_default(), visit_of(o.1)));
+            // A container's segue placeholder's before the controller's own
+            // of one name (a corpus storyboard).
+            outlets.sort_by_cached_key(|o| (o.0, class_of(o.1).unwrap_or_default(), o.1 == "upstream", visit_of(o.1)));
             // A view's gesture recognizers are an outlet collection, before
             // the outlets.
             // The root view's first, as the objects list it (one probe).
@@ -7733,6 +8116,25 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
                 let views = views.iter().map(|v| reference(v.clone())).collect();
                 connections.push(outlet_collection(&mut nib, label, "upstream", views, class, false));
+            }
+            // Views' own collections, in their document order, before the
+            // outlets (a corpus xib); beside the controller's or the
+            // recognizers', their order isn't established.
+            if !scene.view_collections.is_empty() && (!vc_collections.is_empty() || !scene.gesture_views.is_empty()) {
+                return fail("views' outlet collections beside the controller's or gesture recognizers' are not supported by this ibtool");
+            }
+            for (label, source, class, destinations) in std::mem::take(&mut scene.view_collections) {
+                let is_constraint = |v: &String| constraint_names.contains(v) || scene.own_constraints.iter().any(|c| c.1 == *v);
+                if destinations.len() > 1 && destinations.iter().any(is_constraint) {
+                    return fail("an outlet collection of several constraints is not supported by this ibtool");
+                }
+                for d in &destinations {
+                    if *d != root_name && !is_constraint(d) && !scene.subviews.iter().any(|s| s.1 == *d) {
+                        return fail("an outlet collection of anything but the nib's views and constraints is not supported by this ibtool");
+                    }
+                }
+                let destinations = destinations.into_iter().map(reference).collect();
+                connections.push(outlet_collection(&mut nib, &label, &source, destinations, &class, false));
             }
             for (label, source, destination) in outlets {
                 if label == "gestureRecognizers" {
@@ -7859,6 +8261,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let mut bar_segues = Vec::new();
         let mut bar_responder = Vec::new();
         let mut item_ids = Vec::new();
+        let mut item_pairs = Vec::new();
         if let Some(item) = child(vc, "navigationItem", "navigationItem") {
             let parts = navigation_item_with(&mut vnib, item, "navigation item", vc_id, first_responder(vc))?;
             swapper.push(("UINavigationItem", parts.value));
@@ -7867,6 +8270,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             bar_segues = parts.segues;
             bar_responder = parts.responder_actions;
             item_ids = parts.item_ids;
+            item_pairs = parts.pairs;
             // In its own nib only; a tab's child held by its parent alone
             // has none (one probe).
             if has_tab_item && !bar_items.is_empty() && (is_initial || identified || segue_destination) {
@@ -7895,7 +8299,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // A tab or split view controller's child nothing else loads has
             // them in its parent's nib (a corpus storyboard).
             let child_only = held_children.contains(vc_id) && !in_held_nav(vc_id) && !is_initial && !identified && !segue_destination;
-            if embedded_here && !(nav_root_only && !is_initial && !identified && !segue_destination) && !child_only {
+            // An identified one's too (a corpus storyboard's collection
+            // view controller).
+            let identified_root = nav_root_only && is_collection && identified && !is_initial && !segue_destination;
+            if embedded_here && !(nav_root_only && !is_initial && !identified && !segue_destination) && !child_only && !identified_root {
                 return fail("a gesture recognizer in an embedded controller's scene is not supported by this ibtool");
             }
             if extended_edges(vc)?.is_some() || vc.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
@@ -7916,7 +8323,14 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         }
         let mut placeholders = Vec::new();
         for (i, g) in gesture_order(&scene.gesture_views).iter().enumerate() {
-            placeholders.push((i + 1, reference(format!("gesture {g}"))));
+            // A collection view controller's, which follow it, are defined
+            // in its external objects (a corpus storyboard).
+            let defined = if is_list { gesture_objects.iter_mut().find(|o| o.1 == g.as_str()) } else { None };
+            let value = match defined {
+                Some(o) => std::mem::replace(&mut o.0, reference(format!("gesture {g}"))),
+                None => reference(format!("gesture {g}")),
+            };
+            placeholders.push((i + 1, value));
         }
         for (i, id) in referenced.iter().enumerate() {
             placeholders.push((object_base + i + 1, reference(format!("object {id}"))));
@@ -8114,7 +8528,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             top.push(Value::New(Object::new("UIClassSwapper", values).named(format!("object {id}"))));
             objects.push(reference(format!("object {id}")));
         }
+        // A collection view controller's follow it (a corpus storyboard).
+        let mut later_gestures = Vec::new();
         for (object, id, _) in gesture_objects {
+            if is_list {
+                later_gestures.push((object, id));
+                continue;
+            }
             top.push(object);
             objects.push(reference(format!("gesture {id}")));
         }
@@ -8140,6 +8560,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             connections.push(event_connection(&mut vnib, &selector, &source, &destination));
         }
         objects.push(reference("controller"));
+        objects.extend(later_gestures.iter().map(|(_, id)| reference(format!("gesture {id}"))));
         if child(vc, "navigationItem", "navigationItem").is_some() {
             objects.push(reference("navigation item"));
         }
@@ -8149,8 +8570,15 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         objects.extend(templates.objects);
         objects.extend(bar_items.iter().map(|b| reference(b.clone())));
         top.push(controller);
+        top.extend(later_gestures.into_iter().map(|(object, _)| object));
         // The controller's runtime attributes are its own nib's.
-        let pairs = runtime_attributes(&mut vnib, vc, "controller")?;
+        let mut pairs = runtime_attributes(&mut vnib, vc, "controller")?;
+        // Its bar button items' too (a corpus storyboard); beside the
+        // controller's own, their order isn't established.
+        if !pairs.is_empty() && !item_pairs.is_empty() {
+            return fail("runtime attributes of both a controller and its bar button items are not supported by this ibtool");
+        }
+        pairs.extend(item_pairs);
         // A navigation controller's root has them in that nib too (two
         // probes and a corpus storyboard); other parents' children's are
         // refused.

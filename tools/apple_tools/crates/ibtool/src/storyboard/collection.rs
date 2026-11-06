@@ -10,11 +10,11 @@ use super::*;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn collection_view_nib(
     platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, cv: Node, f: &Frame,
-    vc_outlets: &[(String, String)],
+    vc_outlets: &[(String, String)], gestures: &[String],
 ) -> Result<(Object, bool, Vec<String>), String> {
     only_attributes(cv, &[
         ("key", Some("view")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")),
-        ("dataMode", Some("prototypes")), ("id", None),
+        ("dataMode", Some("prototypes")), ("id", None), ("opaque", Some("NO")), ("minimumZoomScale", None), ("maximumZoomScale", None),
     ])?;
     only_children(cv, &["rect", "autoresizingMask", "color", "collectionViewFlowLayout", "collectionViewLayout", "cells", "collectionReusableView", "connections"])?;
     for c in children(cv, "color") {
@@ -28,7 +28,10 @@ pub(super) fn collection_view_nib(
     // The collection view's outlets, to its controller.
     let mut outlets: Vec<(String, &str, String)> = vc_outlets.iter().map(|(l, d)| (l.clone(), "upstream", d.clone())).collect();
     for c in children(cv, "connections") {
-        only_children(c, &["outlet"])?;
+        only_children(c, &["outlet", "outletCollection"])?;
+        for o in children(c, "outletCollection") {
+            only_attributes(o, &[("property", Some("gestureRecognizers")), ("destination", None), ("appends", Some("YES")), ("id", None)])?;
+        }
         for o in children(c, "outlet") {
             only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
             if attr(o, "destination")? != vc_id {
@@ -43,6 +46,11 @@ pub(super) fn collection_view_nib(
         }
     }
     let upstream_used = !outlets.is_empty();
+    // Its gesture recognizers' placeholders first, numbered from 1, then
+    // the controller's (a corpus storyboard).
+    if !gestures.is_empty() && !upstream_used {
+        return fail("a collection view's gesture recognizers without its outlets to its controller are not supported by this ibtool");
+    }
 
     let (cells, segues) = prototypes(cv)?;
 
@@ -51,13 +59,17 @@ pub(super) fn collection_view_nib(
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let mut top = vec![owner, responder];
     let mut objects = vec![reference("owner"), reference("responder")];
+    for (i, g) in gestures.iter().enumerate() {
+        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1), &format!("gesture {g}")));
+        objects.push(reference(format!("gesture {g}")));
+    }
     if upstream_used {
-        top.push(proxy(&mut nib, "UpstreamPlaceholder-1", "upstream"));
+        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", gestures.len() + 1), "upstream"));
         objects.push(reference("upstream"));
     }
     for i in 0..segues.len() {
         let name = format!("upstream segue {i}");
-        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1 + usize::from(upstream_used)), &name));
+        top.push(proxy(&mut nib, &format!("UpstreamPlaceholder-{}", gestures.len() + i + 1 + usize::from(upstream_used)), &name));
         objects.push(reference(name));
     }
 
@@ -70,6 +82,10 @@ pub(super) fn collection_view_nib(
     outlets.push(("view".to_string(), "owner", root_name.clone()));
     outlets.sort_by(|a, b| a.0.cmp(&b.0));
     let mut connections = Vec::new();
+    if !gestures.is_empty() {
+        let destinations = gestures.iter().map(|g| reference(format!("gesture {g}"))).collect();
+        connections.push(outlet_collection(&mut nib, "gestureRecognizers", &root_name, destinations, "NSArray", true));
+    }
     for (label, source, destination) in &outlets {
         let source = if *source == "collection" { root_name.as_str() } else { source };
         connections.push(outlet(&mut nib, label, source, destination));
@@ -424,6 +440,8 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         ("insetsLayoutMarginsFromSafeArea", Some("NO")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
         ("restorationIdentifier", None),
+        // Interface Builder's alone, as a view's (one of the corpus's).
+        ("fixedFrame", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
     ])?;
     only_children(cell, &["rect", "autoresizingMask", "collectionViewCellContentView", "view", "size", "color", "connections", "constraints", "userDefinedRuntimeAttributes", "edgeInsets"])?;
     if let Some(c) = children(cell, "color").find(|c| c.attribute("key") != Some("backgroundColor")) {
@@ -603,6 +621,10 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     if cell.attribute("clipsSubviews").is_some() {
         values.push(("UIClipsToBounds", Value::Bool(true)));
     }
+    // Not translating its mask, after clipping (one of the corpus's).
+    if cell.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+        values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
+    }
     if pinned {
         // Leading, trailing, top and bottom.
         let identifier = nib.string("UIIBSystemGenerated");
@@ -705,6 +727,9 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     // Its views' outlets to one another among the cell's, by name, the
     // cell's first where names are equal (two corpus xibs).
     let mut all: Vec<(&str, String, String)> = outlets.iter().map(|(l, d)| (*l, cell_name.clone(), d.clone())).collect();
+    if !scene.view_collections.is_empty() {
+        return fail("views' outlet collections here are not supported by this ibtool");
+    }
     for (label, source, destination) in &scene.view_outlets {
         if !scene.subviews.iter().any(|s| &s.1 == destination) || !scene.subviews.iter().any(|s| &s.1 == source) {
             return fail("a cell's views' outlets to anything but its content's views are not supported by this ibtool");
@@ -776,7 +801,7 @@ fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool,
     if !scene.unused_guides.is_empty() {
         return fail("a safe-area or scroll view guide in a cell, header or table is not supported by this ibtool");
     }
-    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() || !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
+    if !scene.actions.is_empty() || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || (!scene.view_outlets.is_empty() || !scene.view_collections.is_empty()) || !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
         return fail("actions, outlets, segues, runtime attributes and accessibility settings in a collection reusable view are not supported by this ibtool");
     }
     let f = frame(v)?;
