@@ -33,6 +33,9 @@ implementation.
     and private functions called on constructed inputs, Objective-C runtime
     introspection, our own process's memory and call stacks; never
     disassembled or decompiled (ibtool's [colour conversion](ibtool.md#colour-conversion)).
+    Each use is noted on the tool's page: what was called or read, on what
+    inputs, and what it established. The probe programs stay in the
+    repository with how to rerun them (`tools/vimage_pow_probe`).
 - Apple's public CreateML framework, called from small programs, to make test
   models of the types Create ML exports.
 
