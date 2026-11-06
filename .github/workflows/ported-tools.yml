@@ -63,6 +63,7 @@ jobs:
             echo 'common --remote_cache=grpcs://app.buildbuddy.io'
             echo 'common --remote_cache_compression'
             echo "common --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+            echo 'build --modify_execution_info=CcConfigureMakeRule=+no-remote-cache'
           } > ~/.bazelrc
       - name: Build and test the ported tools
         run: >-
