@@ -206,47 +206,11 @@ fn exact_color_components(names: &[(&'static str, &'static str)], values: &[f64]
 const RGB_KEYS: [(&str, &str); 4] = [("UIRed", "UIRed-Double"), ("UIGreen", "UIGreen-Double"), ("UIBlue", "UIBlue-Double"), ("UIAlpha", "UIAlpha-Double")];
 const GRAY_KEYS: [(&str, &str); 2] = [("UIWhite", "UIWhite-Double"), ("UIAlpha", "UIAlpha-Double")];
 
-/// Interface Builder's palette in calibrated white, as Xcode converts it to
-/// the gamma 2.2 grey: dark grey, grey and light grey (black and white are
-/// `color`'s own). A component matches at a float's precision, as Xcode
-/// converts it, so 1/3 to 10 digits is 1/3 (probes, in xibs and
-/// storyboards, opaque and not: alpha is kept).
-const CALIBRATED_WHITES: [(f32, f64); 3] = [(1.0 / 3.0, 0.40781933069229126), (0.5, 0.572306752204895), (2.0 / 3.0, 0.7233663201332092)];
-
-/// The palette in calibrated RGB, as Xcode converts it to extended sRGB:
-/// black, white, the primaries and secondaries, orange, purple, brown and
-/// the greys, matched as `CALIBRATED_WHITES`. The converted components are
-/// floats, archived as they are in storyboards too (the same probes).
-const CALIBRATED_RGBS: [([f32; 3], [f64; 3]); 14] = [
-    ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
-    ([1.0, 1.0, 1.0], [0.9999999403953552, 1.0000001192092896, 1.0000001192092896]),
-    ([1.0, 0.0, 0.0], [1.0110152959823608, 0.14910027384757996, -0.02276673913002014]),
-    ([0.0, 1.0, 0.0], [-0.17758449912071228, 0.9767891764640808, -0.018533367663621902]),
-    ([0.0, 0.0, 1.0], [0.016841866075992584, 0.19834142923355103, 1.001404047012329]),
-    ([0.0, 1.0, 1.0], [-0.17275553941726685, 0.9914230704307556, 1.0007742643356323]),
-    ([1.0, 1.0, 0.0], [0.9994266629219055, 0.9855353236198425, -0.04128071665763855]),
-    ([1.0, 0.0, 1.0], [1.0115798711776733, 0.2527676224708557, 1.0006303787231445]),
-    ([1.0, 0.5, 0.0], [1.007705569267273, 0.5763571262359619, -0.028089046478271484]),
-    ([0.5, 0.0, 0.5], [0.5791921019554138, 0.12799972295761108, 0.5726815462112427]),
-    ([0.6, 0.4, 0.2], [0.6679973006248474, 0.4751102924346924, 0.2586003243923187]),
-    ([1.0 / 3.0; 3], [0.40781933069229126, 0.40781930088996887, 0.40781933069229126]),
-    ([0.5; 3], [0.572306752204895, 0.572306752204895, 0.572306752204895]),
-    ([2.0 / 3.0; 3], [0.7233662605285645, 0.7233663201332092, 0.7233663201332092]),
-];
-
-/// Display P3's black and white, as Xcode converts them to extended sRGB:
-/// white as calibrated RGB's (probes, plain and named).
-const DISPLAY_P3S: [([f32; 3], [f64; 3]); 2] = [
-    ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
-    ([1.0, 1.0, 1.0], [0.9999999403953552, 1.0000001192092896, 1.0000001192092896]),
-];
-
 /// A colour's red, green and blue as Xcode converts them from `space`
-/// (`CALIBRATED_RGBS`, `DISPLAY_P3S`), else refused.
+/// (calibrated RGB or Display P3) to extended sRGB, in floats
+/// (`colorsync`).
 fn converted_rgb(space: &str, rgb: [f64; 3]) -> Result<[f64; 3], String> {
-    let table: &[([f32; 3], [f64; 3])] = if space == "calibratedRGB" { &CALIBRATED_RGBS } else { &DISPLAY_P3S };
-    let key = rgb.map(|x| x as f32);
-    table.iter().find(|(k, _)| *k == key).map(|(_, v)| *v).ok_or_else(|| format!("{space} colours other than Interface Builder's palette are converted by Xcode in a way not established for this ibtool"))
+    if space == "calibratedRGB" { crate::colorsync::calibrated_rgb(rgb) } else { crate::colorsync::display_p3(rgb) }
 }
 
 fn autoresizing_mask(n: Node) -> Result<i64, String> {
@@ -568,18 +532,16 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     // Equal colours are one object, compared at 10 significant digits. A
     // grey is archived as given (no conversion), named when it's exactly
     // black, white or clear.
-    // Calibrated white is converted to the gamma 2.2 grey: only black and
-    // white are established, white coming out a float's step above 1
-    // unless it's opaque (and so `whiteColor`).
+    // Calibrated white is converted to the gamma 2.2 grey (`colorsync`),
+    // the result a float, archived without rounding; white comes out a
+    // float's step above 1 unless it's opaque (and so `whiteColor`).
     let calibrated = n.attribute("colorSpace") == Some("calibratedWhite") || n.attribute("customColorSpace") == Some("calibratedWhite");
     if calibrated {
         only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", Some("calibratedWhite"))])?;
         let white = number(attr(n, "white")?)?;
         let alpha = nib.component(number(attr(n, "alpha")?)?);
         if white != 0.0 && white != 1.0 {
-            let Some(&(_, converted)) = CALIBRATED_WHITES.iter().find(|(w, _)| *w == white as f32) else {
-                return fail(format!("calibrated white {white} is converted by Xcode in a way not established for this ibtool"));
-            };
+            let converted = crate::colorsync::calibrated_white(white)?;
             let c = [converted, alpha];
             let key = format!("color:gray:{c:?}");
             if let Some(v) = nib.existing(&key) {
@@ -658,8 +620,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
 
 /// A colour in a document without `colorMatched`: archived as sRGB with
 /// the document's components when they are calibrated RGB or white, which
-/// aren't converted; colours in other spaces are, so only their neutral
-/// black and white (which convert to themselves) are established.
+/// aren't converted; sRGB and gamma 2.2 grey are converted to Generic RGB.
 fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     let space = match (n.attribute("colorSpace"), n.attribute("customColorSpace")) {
         (Some("custom"), Some(s)) => s,
@@ -679,11 +640,22 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         }
         other => return fail(format!("colour space {other} without colorMatched is not supported by this ibtool")),
     };
-    let calibrated = space.starts_with("calibrated");
-    if !calibrated && !(c[0] == c[1] && c[1] == c[2] && (c[0] == 0.0 || c[0] == 1.0)) {
-        return fail(format!("{space} colours other than black and white are converted without colorMatched, which is not supported by this ibtool"));
+    // sRGB and gamma 2.2 grey are converted to Generic RGB, clamped
+    // (`colorsync`), and then archived as any component is, a
+    // storyboard's rounded to 10 digits (18 probes, a xib and a
+    // storyboard).
+    let c = match space {
+        "sRGB" => {
+            let rgb = crate::colorsync::srgb_to_generic([c[0], c[1], c[2]])?;
+            [rgb[0], rgb[1], rgb[2], c[3]]
+        }
+        "genericGamma22GrayColorSpace" => {
+            let w = crate::colorsync::gamma22_grey_to_generic(number(attr(n, "white")?)?)?;
+            [w, w, w, c[3]]
+        }
+        _ => c,
     }
-    let c = c.map(|x| nib.component(x));
+    .map(|x| nib.component(x));
     let key = format!("color:rgb:{c:?}");
     if let Some(v) = nib.existing(&key) {
         return Ok(v);
@@ -7553,7 +7525,30 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 let v = view.document().descendants().find(|d| d.is_element() && d.attribute("id") == Some(id))?;
                 Some(uikit_class(v.tag_name().name()))
             };
-            outlets.sort_by_cached_key(|o| (o.0, class_of(o.1).unwrap_or_default()));
+            // The order Xcode visits the views, which orders actions with
+            // one selector and same-class views' outlets of one name: a
+            // storyboard's root view's subviews in document order, then,
+            // from the last visited, each one's own the same way (a stack);
+            // a xib's in document order, each view before its subviews
+            // (three probes, containers nested and not).
+            let mut visit: Vec<String> = Vec::new();
+            if xib {
+                for d in view.descendants().filter(|d| d.is_element() && d != &view && d.parent().is_some_and(|p| p.has_tag_name("subviews"))) {
+                    visit.push(view_name(attr(d, "id")?));
+                }
+            } else {
+                let mut stack = vec![view];
+                while let Some(v) = stack.pop() {
+                    for s in children(v, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
+                        visit.push(view_name(attr(s, "id")?));
+                        stack.push(s);
+                    }
+                }
+            }
+            // Then, between views of one class, in the order Xcode visits
+            // them, as actions with one selector (two of the corpus's).
+            let visit_of = |source: &str| visit.iter().position(|v| v == source);
+            outlets.sort_by_cached_key(|o| (o.0, class_of(o.1).unwrap_or_default(), visit_of(o.1)));
             // A view's gesture recognizers are an outlet collection, before
             // the outlets.
             // The root view's first, as the objects list it (one probe).
@@ -7587,25 +7582,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
             }
             // By event, then selector; those with one selector in the order
-            // Xcode visits their controls: the root view's subviews in
-            // document order, then, from the last visited, each one's own
-            // the same way (a stack).
-            // A xib's go in document order, each view before its
-            // subviews (three probes, containers nested and not).
-            let mut visit: Vec<String> = Vec::new();
-            if xib {
-                for d in view.descendants().filter(|d| d.is_element() && d != &view && d.parent().is_some_and(|p| p.has_tag_name("subviews"))) {
-                    visit.push(view_name(attr(d, "id")?));
-                }
-            } else {
-                let mut stack = vec![view];
-                while let Some(v) = stack.pop() {
-                    for s in children(v, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
-                        visit.push(view_name(attr(s, "id")?));
-                        stack.push(s);
-                    }
-                }
-            }
+            // Xcode visits their controls (above).
             let visited = |name: &String| visit.iter().position(|v| v == name);
             for (i, a) in scene.actions.iter().enumerate() {
                 if scene.actions[..i].iter().any(|b| (b.2, &b.0) == (a.2, &a.0)) && scene.actions[..=i].iter().any(|b| (b.2, &b.0) == (a.2, &a.0) && visited(&b.1).is_none()) {
