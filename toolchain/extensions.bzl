@@ -2,6 +2,7 @@
 
 load("@rules_swift//swift/internal/extensions:standalone_toolchain.bzl", "standalone_toolchain")
 load("//toolchain:apple_cross_toolchain.bzl", _apple_cross_toolchain_rule = "apple_cross_toolchain")
+load("//toolchain:system_sdk.bzl", "apple_cross_system_sdk")
 load("//toolchain:xcode_versions.bzl", "SWIFT_ARCHIVES", "XCODE_VERSIONS")
 
 def _xcode_swift(config):
@@ -94,6 +95,18 @@ def _apple_cross_toolchain_impl(module_ctx):
                 # docc, from the repositories swift_tools name.
                 "swift_docc": {cpu: tools.rpartition(":")[0] + ":usr/bin/docc" for cpu, tools in swift_tools.items()},
             }
+            if config.swift_system_modules:
+                system_sdk = config.name + "_system_sdk"
+                swiftc = {cpu: tools.rpartition(":")[0] + ":usr/bin/swiftc" for cpu, tools in swift_tools.items()}
+                if swift_tools_macos:
+                    swiftc["macos"] = swift_tools_macos.rpartition(":")[0] + ":usr/bin/swiftc"
+                apple_cross_system_sdk(
+                    name = system_sdk,
+                    exclude_modules = config.swift_system_modules_exclude,
+                    swiftc = swiftc,
+                    toolchain = "@{}//:BUILD".format(config.name),
+                )
+                kwargs["swift_system_sdk"] = system_sdk
 
             _apple_cross_toolchain_rule(**kwargs)
 
@@ -173,6 +186,20 @@ _configure_tag = tag_class(
             doc = "swift_package_configuration targets, as rules_swift " +
                   "toolchains' `package_configurations`; visible to the " +
                   "toolchain's repository (public).",
+        ),
+        "swift_system_modules": attr.bool(
+            doc = "Describe the Apple SDKs' modules as rules_swift's explicit " +
+                  "module targets, in a repository <name>_system_sdk shaped " +
+                  "like rules_swift's @system_sdk, and give them to the Swift " +
+                  "toolchains, as rules_swift's Xcode toolchain has @system_sdk's. " +
+                  "Needed for swift.use_c_modules (explicit modules). The SDKs " +
+                  "are scanned when the repository is first needed.",
+        ),
+        "swift_system_modules_exclude": attr.string_list_dict(
+            doc = "Modules to leave out of <name>_system_sdk, by SDK " +
+                  "(\"iPhoneOS\": [\"AssetsLibrary\"]), as rules_swift's " +
+                  "system_sdk.configure_sdks(exclude_modules), besides those " +
+                  "rules_swift's own MODULE.bazel leaves out.",
         ),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's " +

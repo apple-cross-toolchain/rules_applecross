@@ -257,6 +257,44 @@ rules_swift gives the rewriter no runfiles, so it must run as it is: a script
 or a self-contained binary. Like the targets above, it must be visible to the
 toolchain's repository.
 
+### Explicit modules
+
+`swift.use_c_modules` with `swift.emit_c_module` turns implicit modules off.
+The compiler then finds a module only when it is given one, the SDK's included,
+and SwiftShims too. rules_swift's Xcode toolchain gets the SDK's modules from
+its `system_sdk` extension, which reads the Mac's Xcode. Here the toolchain
+describes them from the staged SDKs itself when asked:
+
+```starlark
+apple_cross_toolchain.configure(
+    name = "apple_cross_toolchain",
+    # ...
+    swift_system_modules = True,
+    # Optional, by SDK, besides the modules rules_swift leaves out:
+    swift_system_modules_exclude = {"iPhoneOS": ["SomeModule"]},
+)
+```
+
+The first build that needs them scans the SDKs into a repository
+`<name>_system_sdk`, with rules_swift's own scanner run by swift.org's swiftc.
+It has the same targets as rules_swift's `@system_sdk` (`all_modules`,
+`implicit_modules`, `all_cross_import_overlays`, one per module), and the
+toolchains take them as rules_swift's Xcode toolchain takes those. Every Swift
+module is compiled from its interface, never from Xcode's prebuilt modules,
+and every Clang module is precompiled for the SDK's version, as Xcode does.
+Targets that name a module themselves (`deps = ["@apple_cross_toolchain_system_sdk//:UIKit"]`)
+need `use_repo(apple_cross_toolchain, "apple_cross_toolchain_system_sdk")`.
+Turn both features on where every C or Objective-C dependency of the Swift
+code builds too (`--features` or a package's `features`): a dependency's module
+is only precompiled where `swift.emit_c_module` is on. examples/ios/ExplicitModules
+builds that way.
+
+rules_swift asks its worker for `-hermetic-pcm` on every C module precompile.
+That needs a Swift whose resource directory is inside `DEVELOPER_DIR`, which
+swift.org's never is beside a staged Xcode, so these toolchains leave it out.
+The precompiles need no rewriting: every path they take is already the staged
+tree's, relative to the execution root.
+
 ## Layering check
 
 `--features=layering_check` (or a package's `features`) works as on a Mac:

@@ -827,9 +827,17 @@ _SWIFT_UNSUPPORTED_FEATURES = %{swift_default_unsupported_features}
 _SWIFT_FEATURE_ALLOWLISTS = %{swift_feature_allowlists}
 _SWIFT_PACKAGE_CONFIGURATIONS = %{swift_package_configurations}
 
+# configure()'s swift_system_modules: the SDKs' explicit module targets, for
+# swift.use_c_modules, as rules_swift's Xcode toolchain has @system_sdk's.
+# Those targets precompile with the toolchain of rules_swift's
+# sdk_toolchain_type, which can't have them itself: a second toolchain
+# without them (the -sdk ones below).
+_SWIFT_SYSTEM_SDK = %{swift_system_sdk}
+_SWIFT_VARIANTS = {"": _SWIFT_SYSTEM_SDK, "-sdk": None} if _SWIFT_SYSTEM_SDK else {"": None}
+
 [
     swift_toolchain(
-        name = "swift-compiler-" + arch,
+        name = "swift-compiler-" + arch + variant,
         copts = _SWIFT_COPTS,
         cpu = arch,
         default_enabled_features = _SWIFT_ENABLED_FEATURES,
@@ -842,22 +850,27 @@ _SWIFT_PACKAGE_CONFIGURATIONS = %{swift_package_configurations}
         swift_tools = "%{swift_tools}",
         toolchain_files = _SWIFT_TOOLCHAIN_FILES_BY_ARCH[arch],
         toolchain_path_prefix = "%{toolchain_path_prefix}",
+        cross_import_overlays = [system_sdk + "//:all_cross_import_overlays"] if system_sdk else [],
+        implicit_system_modules = system_sdk + "//:implicit_modules" if system_sdk else None,
+        system_modules = system_sdk + "//:all_modules" if system_sdk else None,
     )
     for arch in _APPLE_ARCHS
+    for variant, system_sdk in _SWIFT_VARIANTS.items()
 ]
 
 [
     toolchain(
-        name = "swift-toolchain-" + arch,
+        name = "swift-toolchain-" + arch + variant,
         exec_compatible_with = [
             "@platforms//os:linux",
             "@platforms//cpu:%{linux_exec_cpu}",
         ],
         target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
-        toolchain = ":swift-compiler-" + arch,
-        toolchain_type = "@rules_swift//toolchains:toolchain_type",
+        toolchain = ":swift-compiler-" + arch + variant,
+        toolchain_type = "@rules_swift//toolchains:" + ("sdk_toolchain_type" if variant else "toolchain_type"),
     )
     for arch in _APPLE_ARCHS
+    for variant in _SWIFT_VARIANTS
 ]
 
 _SWIFT_TOOLS_MACOS = "%{swift_tools_macos}"
@@ -867,7 +880,7 @@ _SWIFT_TOOLS_MACOS = "%{swift_tools_macos}"
 # built for macOS.
 [
     swift_toolchain(
-        name = "swift-compiler-" + arch + "-macos-exec",
+        name = "swift-compiler-" + arch + variant + "-macos-exec",
         copts = _SWIFT_COPTS,
         cpu = arch,
         default_enabled_features = _SWIFT_ENABLED_FEATURES,
@@ -880,23 +893,28 @@ _SWIFT_TOOLS_MACOS = "%{swift_tools_macos}"
         swift_tools = _SWIFT_TOOLS_MACOS,
         toolchain_files = _SWIFT_TOOLCHAIN_FILES_BY_ARCH[arch],
         toolchain_path_prefix = "%{toolchain_path_prefix}",
+        cross_import_overlays = [system_sdk + "//:all_cross_import_overlays"] if system_sdk else [],
+        implicit_system_modules = system_sdk + "//:implicit_modules" if system_sdk else None,
+        system_modules = system_sdk + "//:all_modules" if system_sdk else None,
     )
     for arch in _APPLE_ARCHS
+    for variant, system_sdk in _SWIFT_VARIANTS.items()
     if _SWIFT_TOOLS_MACOS
 ]
 
 [
     toolchain(
-        name = "swift-toolchain-" + arch + "-macos-exec",
+        name = "swift-toolchain-" + arch + variant + "-macos-exec",
         exec_compatible_with = [
             "@platforms//os:macos",
             "@platforms//cpu:arm64",
         ],
         target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
-        toolchain = ":swift-compiler-" + arch + "-macos-exec",
-        toolchain_type = "@rules_swift//toolchains:toolchain_type",
+        toolchain = ":swift-compiler-" + arch + variant + "-macos-exec",
+        toolchain_type = "@rules_swift//toolchains:" + ("sdk_toolchain_type" if variant else "toolchain_type"),
     )
     for arch in _APPLE_ARCHS
+    for variant in _SWIFT_VARIANTS
     if _SWIFT_TOOLS_MACOS
 ]
 
