@@ -35,6 +35,7 @@ bazel_dep(name = "rules_cc", version = "0.2.26")
 bazel_dep(name = "rules_python", version = "1.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "llvm", version = "0.8.25")
+bazel_dep(name = "bazel_linux_packages", version = "0.4.1")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "xctestrunner", version = "0.0.1", dev_dependency = True)
 
@@ -83,6 +84,20 @@ use_repo(
     llvm_prebuilt_aarch64 = "llvm-toolchain-minimal-linux-arm64",
     # For the macOS execution platform's toolchains.
     llvm_prebuilt_macos = "llvm-toolchain-minimal-darwin-arm64",
+)
+
+# The sysroots of rules_swift's C++ toolchains for Linux, which the standalone
+# Swift repositories below name (@apple_cross_toolchain//linux:cc_toolchain).
+# rules_swift's own tags make them; fetched only for a link that uses one.
+apt = use_extension("@bazel_linux_packages//apt:extensions.bzl", "apt")
+use_repo(
+    apt,
+    "swift_ubuntu22.04_amd64_sysroot",
+    "swift_ubuntu22.04_arm64_sysroot",
+    "swift_ubuntu24.04_amd64_sysroot",
+    "swift_ubuntu24.04_arm64_sysroot",
+    "swift_ubuntu26.04_amd64_sysroot",
+    "swift_ubuntu26.04_arm64_sysroot",
 )
 
 apple_cross_toolchain = use_extension(

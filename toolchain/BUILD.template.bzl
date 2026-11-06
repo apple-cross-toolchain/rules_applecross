@@ -873,6 +873,28 @@ _SWIFT_VARIANTS = {"": _SWIFT_SYSTEM_SDK, "-sdk": None} if _SWIFT_SYSTEM_SDK els
     for variant in _SWIFT_VARIANTS
 ]
 
+# A Swift toolchain for Linux itself, for what the build runs on the Linux
+# execution platform (Swift macro plugins and other host tools): rules_swift's
+# own toolchain from swift_tools' repository, the Swift that compiles for the
+# Apple platforms here. Only the Swift toolchain: C and C++ for Linux stay
+# with the project's C++ toolchain, which links the Swift binaries too. One
+# that can't (Swift's runtime needs libstdc++, libcurl and libxml2, which a
+# hermetic toolchain without a sysroot lacks) can be replaced for Linux by
+# //linux:cc_toolchain, registered first.
+toolchain(
+    name = "swift-toolchain-linux",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:%{linux_exec_cpu}",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:%{linux_exec_cpu}",
+    ],
+    toolchain = "%{swift_linux_toolchain}",
+    toolchain_type = "@rules_swift//toolchains:toolchain_type",
+)
+
 _SWIFT_TOOLS_MACOS = "%{swift_tools_macos}"
 
 # For Swift compiles pinned to a Mac. Xcode's swiftc rejects modules built by
