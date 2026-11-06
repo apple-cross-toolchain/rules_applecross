@@ -65,6 +65,9 @@ build:relax_app_intents_flexible_matching --action_env=RULES_APPLECROSS_RELAX_AP
 # know, recorded with the nearest known Xcode's (27.0's before 27.2, 27.2's
 # after; momc knows 27.2's only).
 build:relax_xcode_version --action_env=RULES_APPLECROSS_RELAX_XCODE_VERSION=1
+# Flags only Xcode's clang accepts (-fobjc-relative-method-lists and others),
+# dropped off a Mac, where LLVM's clang compiles.
+build:relax_clang_apple_flags --action_env=RULES_APPLECROSS_RELAX_APPLE_CLANG_FLAGS=1
 build:relaxed --config=relax_actool_icon_composer
 build:relaxed --config=relax_actool_tvos_radiosity
 build:relaxed --config=relax_actool_vector
@@ -79,6 +82,7 @@ build:relaxed --config=relax_xcstrings
 build:relaxed --config=relax_app_intents
 build:relaxed --config=relax_app_intents_flexible_matching
 build:relaxed --config=relax_xcode_version
+build:relaxed --config=relax_clang_apple_flags
 # Ported tools from before these configs read only this.
 build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
 

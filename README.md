@@ -296,6 +296,7 @@ draw the icon from its layers:
 | `relax_app_intents` | `RULES_APPLECROSS_RELAX_APP_INTENTS` | App Intents not yet reproduced, left out |
 | `relax_app_intents_flexible_matching` | `RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING` | App Shortcuts Flexible Matching's assets, left out |
 | `relax_xcode_version` | `RULES_APPLECROSS_RELAX_XCODE_VERSION` | an Xcode other than 27.0 and 27.2: actool and coremlc record the library versions of the nearest one (27.0's before 27.2, 27.2's after), momc 27.2's |
+| `relax_clang_apple_flags` | `RULES_APPLECROSS_RELAX_APPLE_CLANG_FLAGS` | C, C++ and Objective-C compiled off a Mac with flags only Xcode's clang accepts (`-fobjc-relative-method-lists` and 97 others, listed in `toolchain/wrapped_clang.cc`), dropped with a warning: LLVM's clang compiles there and rejects them, so the code may compile otherwise (Objective-C method lists absolute rather than relative, say) |
 
 `--config=relaxed` accepts all of them, and so does
 `RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed`, which it also sets for

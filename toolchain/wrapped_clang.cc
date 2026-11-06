@@ -406,6 +406,130 @@ void ProcessArgument(const std::string arg, const std::string developer_dir,
   consumer(new_arg);
 }
 
+// Driver flags Xcode's clang accepts and LLVM's doesn't: those of Xcode
+// 27.2's clang (Apple clang 21) that LLVM 23.1.2's clang rejects as unknown
+// (tools/apple_clang_flags.py lists them again). Off a Mac, where this runs
+// LLVM's clang, a build with one fails here, since dropping it can change
+// the output from Xcode's (-fobjc-relative-method-lists, Objective-C method
+// lists' layout); --config=relax_clang_apple_flags
+// (RULES_APPLECROSS_RELAX_APPLE_CLANG_FLAGS=1) drops them with a warning.
+enum AppleFlagKind { kFlag, kJoined, kSeparate };
+struct AppleFlag {
+  const char *name;
+  AppleFlagKind kind;  // kJoined: a prefix with its value; kSeparate: values follow.
+  int values;          // kSeparate's: how many arguments follow.
+};
+const AppleFlag kAppleOnlyFlags[] = {
+    {"--emit-source-metadata=", kJoined, 0},
+    {"--source-metadata-list=", kJoined, 0},
+    {"-fapinotes-cache-path=", kJoined, 0},
+    {"-fbounds-safety", kFlag, 0},
+    {"-fbounds-safety-adoption-mode", kFlag, 0},
+    {"-fbounds-safety-bringup-missing-checks", kFlag, 0},
+    {"-fbounds-safety-bringup-missing-checks=", kJoined, 0},
+    {"-fbounds-safety-debug-trap-reasons=", kJoined, 0},
+    {"-fbounds-safety-internal-default-to-legacy-checks", kFlag, 0},
+    {"-fbounds-safety-relaxed-system-headers", kFlag, 0},
+    {"-fbounds-safety-soft-traps=", kJoined, 0},
+    {"-fbounds-safety-unique-traps", kFlag, 0},
+    {"-fbranch-target-identification", kFlag, 0},
+    {"-fbranch-target-identification-enhanced", kFlag, 0},
+    {"-fchecked-pointer-arithmetic", kFlag, 0},
+    {"-fchecked-pointer-arithmetic=", kJoined, 0},
+    {"-fdepscan", kFlag, 0},
+    {"-fdepscan-daemon=", kJoined, 0},
+    {"-fdepscan-prefix-map", kSeparate, 2},
+    {"-fdepscan-prefix-map-sdk=", kJoined, 0},
+    {"-fdepscan-prefix-map-toolchain=", kJoined, 0},
+    {"-fdepscan-prefix-map=", kJoined, 0},
+    {"-fdepscan-share-identifier", kSeparate, 1},
+    {"-fdepscan-share-parent", kFlag, 0},
+    {"-fdepscan-share-parent=", kJoined, 0},
+    {"-fdepscan-share-stop=", kJoined, 0},
+    {"-fdepscan-share=", kJoined, 0},
+    {"-fdepscan=", kJoined, 0},
+    {"-fdiagnostics-add-output=", kJoined, 0},
+    {"-fdisable-objc-method-tracing", kFlag, 0},
+    {"-fdisable-system-symbol-reference-tracing", kFlag, 0},
+    {"-fexperimental-bounds-safety-attributes", kFlag, 0},
+    {"-fgeneric-block-helpers", kFlag, 0},
+    {"-fgeneric-block-helpers-use-extended-layout", kFlag, 0},
+    {"-fin-descriptor-block-flags", kFlag, 0},
+    {"-finit-global-zero", kFlag, 0},
+    {"-flto-override-mcpu-no-error", kFlag, 0},
+    {"-flto-override-mcpu=", kJoined, 0},
+    {"-flto-override-mtune=", kJoined, 0},
+    {"-fmodule-related-to-pch", kFlag, 0},
+    {"-fno-bounds-safety", kFlag, 0},
+    {"-fno-bounds-safety-adoption-mode", kFlag, 0},
+    {"-fno-bounds-safety-bringup-missing-checks", kFlag, 0},
+    {"-fno-bounds-safety-bringup-missing-checks=", kJoined, 0},
+    {"-fno-bounds-safety-internal-default-to-legacy-checks", kFlag, 0},
+    {"-fno-bounds-safety-relaxed-system-headers", kFlag, 0},
+    {"-fno-bounds-safety-unique-traps", kFlag, 0},
+    {"-fno-checked-pointer-arithmetic", kFlag, 0},
+    {"-fno-depscan-share", kFlag, 0},
+    {"-fno-experimental-bounds-safety-attributes", kFlag, 0},
+    {"-fno-generic-block-helpers", kFlag, 0},
+    {"-fno-generic-block-helpers-use-extended-layout", kFlag, 0},
+    {"-fno-in-descriptor-block-flags", kFlag, 0},
+    {"-fno-init-global-zero", kFlag, 0},
+    {"-fno-modules-check-relocated", kFlag, 0},
+    {"-fno-ptrauth-abi-version", kFlag, 0},
+    {"-fno-ptrauth-kernel-abi-version", kFlag, 0},
+    {"-fno-target-arch-variant-auto-multi-arch", kFlag, 0},
+    {"-fno-trap-function-returns", kFlag, 0},
+    {"-fno-typed-cxx-delete", kFlag, 0},
+    {"-fno-typed-cxx-new-delete", kFlag, 0},
+    {"-fno-typed-memory-operations-experimental", kFlag, 0},
+    {"-fno-unique-traps", kFlag, 0},
+    {"-fobjc-relative-method-lists", kFlag, 0},
+    {"-fptrauth-abi-version=", kJoined, 0},
+    {"-fptrauth-kernel-abi-version", kFlag, 0},
+    {"-fptrauth-objc-isa-masking", kFlag, 0},
+    {"-fptrauth-objc-isa-mode=", kJoined, 0},
+    {"-fptrauth-returns=", kJoined, 0},
+    {"-fptrauth-soft", kFlag, 0},
+    {"-fsmall-block-descriptors", kFlag, 0},
+    {"-fsuppress-conflicting-types", kFlag, 0},
+    {"-ftarget-arch-variant-auto-multi-arch", kFlag, 0},
+    {"-ftarget-arch-variant-mode=", kJoined, 0},
+    {"-ftarget-variant-availability-checks", kFlag, 0},
+    {"-ftrap-function-returns", kFlag, 0},
+    {"-ftrivial-auto-var-init-skip-cpp-obj", kFlag, 0},
+    {"-ftrivial-auto-var-init-skip-non-pod", kFlag, 0},
+    {"-ftrivial-auto-var-init-skip-non-ptr-array", kFlag, 0},
+    {"-ftrivial-auto-var-init-skip-stl", kFlag, 0},
+    {"-ftrivial-auto-var-zero-init-max-size=", kJoined, 0},
+    {"-ftyped-cxx-delete", kFlag, 0},
+    {"-ftyped-cxx-new-delete", kFlag, 0},
+    {"-ftyped-memory-operations-experimental", kFlag, 0},
+    {"-funique-traps", kFlag, 0},
+    {"-greproducible", kFlag, 0},
+    {"-iapinotes-path", kSeparate, 1},
+    {"-index-ignore-macros", kFlag, 0},
+    {"-index-ignore-pcms", kFlag, 0},
+    {"-index-ignore-system-symbols", kFlag, 0},
+    {"-index-record-codegen-name", kFlag, 0},
+    {"-index-store-compress", kFlag, 0},
+    {"-index-store-path", kSeparate, 1},
+    {"-index-unit-output-path", kSeparate, 1},
+    {"-ivfsstatcache", kSeparate, 1},
+    {"-iworkdir=", kJoined, 0},
+    {"-mno-implicit-sme", kFlag, 0},
+    {"-target-arch-variant", kSeparate, 1},
+};
+
+// The Apple-only flag `arg` is, if any.
+const AppleFlag *AppleOnlyFlag(const std::string &arg) {
+  for (const AppleFlag &flag : kAppleOnlyFlags) {
+    if (flag.kind == kJoined ? StartsWith(arg, flag.name) : arg == flag.name) {
+      return &flag;
+    }
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 int main(int argc, char *argv[]) {
@@ -497,7 +621,28 @@ int main(int argc, char *argv[]) {
   std::vector<std::string> processed_args = {};
 
   bool relative_ast_path = getenv("RELATIVE_AST_PATH") != nullptr;
+  bool relax_apple_flags =
+      GetEnvVar("RULES_APPLECROSS_RELAX_APPLE_CLANG_FLAGS") == "1";
+  std::vector<std::string> refused_flags;
+  int skip_values = 0;
   auto consumer = [&](const std::string &arg) {
+    if (skip_values > 0) {
+      --skip_values;
+      return;
+    }
+    if (!use_xcrun) {
+      if (const AppleFlag *flag = AppleOnlyFlag(arg)) {
+        if (!relax_apple_flags) {
+          refused_flags.push_back(arg);
+          return;
+        }
+        std::cerr << "warning: dropping " << arg
+                  << ", which only Xcode's clang accepts; the output may "
+                     "differ from Xcode's (--config=relax_clang_apple_flags)\n";
+        skip_values = flag->kind == kSeparate ? flag->values : 0;
+        return;
+      }
+    }
     processed_args.push_back(arg);
   };
   for (int i = 1; i < argc; i++) {
@@ -505,6 +650,17 @@ int main(int argc, char *argv[]) {
 
     ProcessArgument(arg, developer_dir, sdk_root, cwd, relative_ast_path,
                     strip_debug_symbols, linked_binary, dsym_path, consumer);
+  }
+
+  if (!refused_flags.empty()) {
+    for (const std::string &flag : refused_flags) {
+      std::cerr << "error: " << flag
+                << " is a flag only Xcode's clang accepts, which LLVM's clang "
+                   "off a Mac rejects; build with "
+                   "--config=relax_clang_apple_flags to drop it (the output "
+                   "may then differ from Xcode's)\n";
+    }
+    return 1;
   }
 
   if (!use_xcrun) {
