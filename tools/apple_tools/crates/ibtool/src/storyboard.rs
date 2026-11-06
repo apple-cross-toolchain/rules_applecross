@@ -2467,7 +2467,7 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     for c in own.into_iter().chain(held) {
         only_attributes(c, &[
             ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
-            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("identifier", None), ("placeholder", Some("YES")), ("id", None),
+            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("identifier", None), ("placeholder", Some("YES")), ("type", None), ("id", None),
         ])?;
         // A placeholder constraint is removed at build time, though its view
         // still doesn't translate its mask.
@@ -2538,7 +2538,11 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     };
     sizes.sort_by_key(|f| (f.0, relation(f.1), f.1.attribute("id")));
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
-    order_ties(&mut others, |o| (o.1, o.2), &direct, &[])?;
+    // The view's own safe-area guide measures as an empty rectangle at its
+    // origin, as the root view's does (a corpus storyboard).
+    let own_guides: Vec<(&str, Frame)> = scene.safe_areas.iter().filter(|g| g.1 == name)
+        .map(|g| (g.0.as_str(), Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 })).collect();
+    order_ties(&mut others, |o| (o.1, o.2), &direct, &own_guides)?;
     for (_, key, _, _, second) in &others {
         if key.1 == 0 {
             let view = view_name(second);
@@ -2848,6 +2852,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("verticalCompressionResistancePriority", None), ("usesAttributedText", Some("YES")),
                 // `fixedFrame` changes nothing beside a frame (one probe).
                 ("fixedFrame", Some("YES")),
+                ("userInteractionEnabled", Some("NO")), ("adjustsFontSizeToFit", Some("NO")),
             ])?;
             // Empty attributed text: no font or text colour, the empty
             // attributed string and text after the alignment, and the text
@@ -2928,6 +2933,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIBackgroundColor", color(nib, c)?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
+            // Interaction disabled after it, as a label's (a corpus
+            // storyboard).
+            if n.attribute("userInteractionEnabled").is_some() {
+                values.push(("UIUserInteractionDisabled", Value::Bool(true)));
+            }
             hidden_and_tag(&mut values, n)?;
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.extend(mask_key(nib, scene, n)?);
@@ -2987,7 +2997,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(border) = border {
                 values.push(("UIBorderStyle", Value::Int(border)));
             }
-            values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
+            // Not when the document turns it off (a corpus storyboard).
+            if n.attribute("adjustsFontSizeToFit").is_none() {
+                values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
+            }
             values.push(("UIMinimumFontSize", Value::Float(number(attr(n, "minimumFontSize")?)? as f32)));
             if let Some(mode) = clear_button_mode {
                 values.push(("UIClearButtonMode", Value::Int(mode)));
@@ -3991,11 +4004,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UITextColor", color(nib, c)?));
             }
             values.push(("UITextAlignment", Value::Int(alignment)));
-            if detectors != 0 {
-                values.push(("UIDataDetectorTypes", Value::Int(detectors)));
-            }
+            // Not editable before its data detectors (a corpus storyboard).
             if n.attribute("editable").is_some() {
                 values.push(("UIEditable", Value::Bool(false)));
+            }
+            if detectors != 0 {
+                values.push(("UIDataDetectorTypes", Value::Int(detectors)));
             }
             if n.attribute("selectable").is_some() {
                 values.push(("UISelectable", Value::Bool(false)));
@@ -4031,6 +4045,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None),
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("id", None),
                 ("showsTouchWhenHighlighted", Some("YES")), ("userInteractionEnabled", Some("NO")),
+                ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")), ("adjustsImageWhenHighlighted", Some("NO")),
             ])?;
             // UIControlContentHorizontalAlignment and its vertical one,
             // the centre left out.
@@ -4263,8 +4278,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 values.push(("UIShowsTouchWhenHighlighted", Value::Bool(true)));
             }
-            values.push(("UIAdjustsImageWhenHighlighted", Value::Bool(true)));
+            // Turning off adjusting the image when highlighted leaves the
+            // key out; adjusting its size for accessibility follows the
+            // disabled one (one probe).
+            if n.attribute("adjustsImageWhenHighlighted").is_none() {
+                values.push(("UIAdjustsImageWhenHighlighted", Value::Bool(true)));
+            }
             values.push(("UIAdjustsImageWhenDisabled", Value::Bool(true)));
+            if n.attribute("adjustsImageSizeForAccessibilityContentSizeCategory").is_some() {
+                values.push(("UIAdjustsImageSizeForAccessibilityContentSizeCategory", Value::Bool(true)));
+            }
             if let Some(t) = button_type {
                 values.push(("UIButtonType", Value::Int(t)));
             }
@@ -4311,7 +4334,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
         }
         "stackView" => {
             only_attributes(n, &[
-                ("opaque", Some("NO")), ("contentMode", Some("scaleToFill")), ("axis", None), ("distribution", None), ("alignment", None),
+                ("opaque", Some("NO")), ("contentMode", None), ("axis", None), ("distribution", None), ("alignment", None),
                 ("spacing", None), ("spacingType", None), ("baselineRelativeArrangement", Some("YES")), ("layoutMarginsRelativeArrangement", Some("YES")),
                 ("layoutMarginsFollowReadableWidth", Some("YES")), ("hidden", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None),
@@ -4384,6 +4407,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.extend(mask_key(nib, scene, n)?);
+            // A content mode other than scale to fill after its mask (a
+            // corpus storyboard's bottom).
+            let mode = content_mode(n.attribute("contentMode").unwrap_or("scaleToFill"))?;
+            if mode != 0 {
+                values.push(("UIContentMode", Value::Int(mode)));
+            }
             alpha(&mut values, n)?;
             if does_not_translate(scene, n) {
                 values.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
@@ -4882,7 +4911,30 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
         if let Some((_, f)) = guides.iter().find(|g| g.0 == id) {
             return Ok(Some(*f));
         }
-        siblings.iter().find(|s| s.attribute("id") == Some(id)).map(|s| subview_frame(*s)).transpose()
+        if let Some(s) = siblings.iter().find(|s| s.attribute("id") == Some(id)) {
+            return subview_frame(*s).map(Some);
+        }
+        // A view nested in one: its frame in their parent's coordinates,
+        // the frames between added up (a corpus storyboard).
+        for s in siblings {
+            let Some(leaf) = s.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id) && d.parent().is_some_and(|p| p.has_tag_name("subviews"))) else { continue };
+            let mut f = frame(leaf)?;
+            let mut v = leaf.parent().and_then(|p| p.parent());
+            while let Some(p) = v {
+                if p == *s {
+                    let o = subview_frame(*s)?;
+                    (f.x, f.y) = (f.x + o.x, f.y + o.y);
+                    return Ok(Some(f));
+                }
+                if !p.parent().is_some_and(|q| q.has_tag_name("subviews")) {
+                    return Ok(None);
+                }
+                let o = frame(p)?;
+                (f.x, f.y) = (f.x + o.x, f.y + o.y);
+                v = p.parent().and_then(|q| q.parent());
+            }
+        }
+        Ok(None)
     };
     let mut start = 0;
     while start < v.len() {
@@ -4892,7 +4944,10 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
             let mut run = Vec::new();
             for t in &v[start..end] {
                 let c = of(t).1;
-                if c.attribute("multiplier").is_some() {
+                // Multipliers don't move a size's line (three probes); others'
+                // weren't probed.
+                let sized = c.attribute("firstAttribute") == c.attribute("secondAttribute") && matches!(c.attribute("firstAttribute"), Some("width" | "height"));
+                if c.attribute("multiplier").is_some() && !sized {
                     return unstable();
                 }
                 let priority = c.attribute("priority").map_or(Ok(1000.0), str::parse::<f64>).map_err(|_| "a constraint's priority is not a number")?;
@@ -4906,13 +4961,17 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
                 let (a1, a2) = (c.attribute("firstAttribute").unwrap_or(""), c.attribute("secondAttribute").unwrap_or(""));
                 let id = c.attribute("id").unwrap_or("");
                 let (Some(f), Some(s)) = (item(c.attribute("firstItem"))?, item(c.attribute("secondItem"))?) else {
-                    // The same two items again, with the same constant: by
-                    // id, whatever their frames (three corpus files).
-                    let first = of(&v[start]).1;
-                    let again = v[start..end].iter().all(|t| {
-                        let o = of(t).1;
-                        ["firstItem", "secondItem", "constant"].into_iter().all(|k| o.attribute(k) == first.attribute(k))
-                    });
+                    // The same two items again, either way round (the
+                    // holding view an absent item), with the same constant:
+                    // by id, whatever their frames (four corpus files).
+                    let pair = |o: Node<'a, 'i>| {
+                        let holder = o.parent().and_then(|p| p.parent()).and_then(|h| h.attribute("id"));
+                        let mut items = [o.attribute("firstItem").or(holder), o.attribute("secondItem").or(holder)];
+                        items.sort();
+                        (items, o.attribute("constant"))
+                    };
+                    let first = pair(of(&v[start]).1);
+                    let again = v[start..end].iter().all(|t| pair(of(t).1) == first);
                     if !again {
                         return unstable();
                     }
@@ -4946,7 +5005,8 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
                 } else {
                     return unstable();
                 };
-                run.push(Tied { priority, relation, length, line, across, id, frame: s });
+                // Lengths compare rounded up to a whole point (twelve probes).
+                run.push(Tied { priority, relation, length: length.ceil(), line, across, id, frame: s });
             }
             let c = of(&v[start]).1;
             let centres = ["centerX", "centerY"].contains(&c.attribute("firstAttribute").unwrap_or("")) && c.attribute("firstAttribute") == c.attribute("secondAttribute");
@@ -4957,7 +5017,7 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
                     let level = (a.priority, a.relation) == (b.priority, b.relation);
                     // Lines of one kind, both placed or both not.
                     let placed = !centres && a.across == b.across && a.line.is_some() == b.line.is_some();
-                    if level && (a.length - b.length).abs() < 1.0 && !(a.length == b.length && (same || placed || (centres && (fa.x, fa.y) != (fb.x, fb.y)))) {
+                    if level && a.length == b.length && !(same || placed || (centres && (fa.x, fa.y) != (fb.x, fb.y))) {
                         return unstable();
                     }
                 }
@@ -7117,7 +7177,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
                 // A view nested in plain views: its origin in the root view's
                 // coordinates (four probes; a label or text field as a plain
-                // view, two; plain views in stack and scroll views, their
+                // view, two; any other view as the leaf, its origin alone
+                // counting: buttons, image, text and collection views, four
+                // corpus files; plain views in stack and scroll views, their
                 // document frames summed the same way, whatever the scroll
                 // view's content, five).
                 let nested = || format!("root view constraints on a view nested in other than plain views ({id}) are not supported by this ibtool");
@@ -7125,7 +7187,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 let mut v = leaf;
                 let (mut x, mut y) = (0.0, 0.0);
                 while v != view {
-                    let kind = if v == leaf { ["view", "label", "textField", "containerView", "stackView"].iter().any(|t| v.has_tag_name(*t)) } else { ["view", "stackView", "scrollView"].iter().any(|t| v.has_tag_name(*t)) };
+                    let kind = if v == leaf { true } else { ["view", "stackView", "scrollView"].iter().any(|t| v.has_tag_name(*t)) };
                     if !kind || v.parent().is_none_or(|p| !p.has_tag_name("subviews")) {
                         return fail(nested());
                     }
@@ -7151,7 +7213,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 for c in children(cs, "constraint") {
                     only_attributes(c, &[
             ("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("multiplier", None),
-            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("identifier", None), ("placeholder", Some("YES")), ("id", None),
+            ("constant", None), ("symbolic", Some("YES")), ("priority", None), ("identifier", None), ("placeholder", Some("YES")), ("type", None), ("id", None),
         ])?;
                     if c.attribute("placeholder").is_some() {
                         continue;

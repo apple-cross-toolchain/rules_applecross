@@ -17,8 +17,8 @@ collection view cell, or a reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 304 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 138 cases written for this, checked
+Interface Builder 3 to 27), 306 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 143 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -398,6 +398,8 @@ other values of the attributes these use, is refused. Observed:
   the root view as its constraint's other item either way round, goes by
   its origin in the root view's coordinates (four probes; a label or text
   field nested so goes the same way, two probes and one of the corpus's,
+  as does any other view, its origin alone counting: buttons, image, text
+  and collection views in four of the corpus's,
   and so do views in stack and scroll views, their document frames summed
   whatever the scroll view's content, five probes and one of the corpus's;
   one whose root subview is resized where it is laid out is refused). A
@@ -458,15 +460,21 @@ other values of the attributes these use, is refused. Observed:
     gap by the middle of where the two frames overlap; equal places, and
     gaps whose frames don't overlap (the safe-area guide's among them), go
     by id. Centres go the lower one first, then the one further right (19
-    probes). Lines of different kinds that tie are refused, as are lengths
-    within a point of each other and edges less than a point apart (a
-    centre half a point from another was drawn along the edge). Twelve
-    probes and 19 corpus files, whose orders were read by compiling each
-    order of the tied constraints against Xcode's output.
+    probes). Lengths compare rounded up to a whole point: a gap of 49.4 to
+    49.6 ties with one of 50, and 50.4 to 50.6 comes before it; an edge's
+    line a quarter or half a point longer comes first (twelve probes).
+    Lines of different kinds that tie are refused, as are edges less than
+    a point apart (a centre half a point from another was drawn along the
+    edge). Twelve probes and 19 corpus files, whose orders were read by
+    compiling each order of the tied constraints against Xcode's output.
+    In a subview's own constraints its safe-area guide measures as the
+    root view's does, an empty rectangle at the origin, and a view nested
+    in a subview by its frames added up (two of the corpus's).
   - Equal widths or heights are drawn between the two views' centres: the
-    farthest first, equal distances by id (three corpus files and a
-    probe). The same two items twice with the same constant, whatever
-    their frames, go by id (three corpus files and a probe).
+    farthest first, equal distances by id, multipliers changing nothing
+    (three corpus files and four probes). The same two items twice with
+    the same constant, either way round, whatever their frames, go by id
+    (four corpus files and two probes).
 
   - Before the length come the priority, lowest first (required ones
     last), and the relation: less than or equal, greater than or equal,
@@ -504,7 +512,8 @@ other values of the attributes these use, is refused. Observed:
   subview). A centre within uneven margins is refused: Xcode moved one
   by 2 where half the difference was 1.5. `relation` is
   `NSRelation` (greaterThanOrEqual 1, lessThanOrEqual -1) after the first
-  attribute, before `NSMultiplier`; a `symbolic` constant is
+  attribute, before `NSMultiplier` (an old document's `type`, `user` or
+  `default`, changes nothing: one of the corpus's); a `symbolic` constant is
   `NSSymbolicConstant` `NSSpace` before `NSShouldBeArchived`, the constant
   itself counting as 0; `priority` is `NSPriority` after
   `NSShouldBeArchived` and before the legacy constant. Xcode compiles
@@ -807,7 +816,8 @@ other values of the attributes these use, is refused. Observed:
   refer to them. Text views of the same colour, font and alignment in one
   nib share that attributes dictionary (a fuzzed storyboard). Then `UIAdjustsFontForContentSizeCategory`, `UIFont`,
   `UITextColor` (none for a nil colour), `UITextAlignment`, `UIEditable`
-  and `UISelectable` (false when turned off), the text input traits,
+  (false when turned off, before any data detectors: one probe and one of
+  the corpus's) and `UISelectable` (false when turned off), the text input traits,
   `UITextHighlightAttributes` (`NSColor` system blue,
   `NSTextHighlightOutlineColor` secondary system fill) and
   `UITextAllowsNumberPadPopover`. A text view's autocapitalization
@@ -901,6 +911,12 @@ other values of the attributes these use, is refused. Observed:
 
 - A stack view's `userInteractionEnabled="NO"` is
   `UIUserInteractionDisabled` after its hidden flag and tag (one probe).
+  A content mode other than scale to fill is `UIContentMode` after its
+  mask (one probe and one of the corpus's).
+- A text field's `userInteractionEnabled="NO"` is
+  `UIUserInteractionDisabled` right after `UIDeepDrawRect`, and
+  `adjustsFontSizeToFit="NO"` leaves its `UIAdjustsFontSizeToFit` out (a
+  probe and two of the corpus's).
 - A stack view's `axis` is `UIStackViewAxis` (horizontal 0, vertical 1),
   `distribution` `UIStackViewDistribution` (fill 0, fillEqually 1,
   fillProportionally 2, equalSpacing 3, equalCentering 4), `alignment`
@@ -1615,6 +1631,10 @@ content mode other than scale to fill is `UIContentMode` after its mask
 `UIShowsTouchWhenHighlighted` after its stateful content, before
 `UIAdjustsImageWhenHighlighted` (two probes; beside a line break mode it is
 refused, and an info button differs in its hugging and font).
+`adjustsImageWhenHighlighted="NO"` leaves `UIAdjustsImageWhenHighlighted`
+out, and adjusting the image size for accessibility is
+`UIAdjustsImageSizeForAccessibilityContentSizeCategory` after
+`UIAdjustsImageWhenDisabled` (one probe).
 
 A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
