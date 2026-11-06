@@ -514,12 +514,13 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
             subviews.push(subview(&mut nib, &mut scene, c)?);
         }
     }
-    // These nibs don't list placeholder guides: a subview's own safe-area
-    // guide or a scroll view's guides are refused here.
-    if !scene.unused_guides.is_empty() {
+    // A subview's own safe-area guide is a placeholder first in its turn
+    // among the objects, as in a view's nib (two corpus xibs); a scroll
+    // view's guides aren't established here.
+    if !scene.scroll_guides.is_empty() {
         return fail("a safe-area or scroll view guide in a cell, header or table is not supported by this ibtool");
     }
-    if scene.actions.iter().any(|a| a.3 != "upstream") || scene.actions.len() > 1 || !scene.segues.is_empty() || !scene.control_outlets.is_empty() || !scene.view_outlets.is_empty() {
+    if scene.actions.iter().any(|a| a.3 != "upstream") || scene.actions.len() > 1 || !scene.segues.is_empty() || !scene.control_outlets.is_empty() {
         return fail("actions other than one on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
     // A cell's nib holds its views' runtime attributes as key-value pairs,
@@ -660,6 +661,9 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     while let Some(v) = queue.pop_front() {
         let constraints = || scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone()));
         let subviews_first = old && v == &content_name;
+        for _ in scene.unused_guides.iter().filter(|g| *g == v) {
+            objects.push(super::table::cell_safe_area(&mut nib));
+        }
         if !subviews_first {
             objects.extend(constraints());
         }
@@ -698,8 +702,17 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
             outlets.push((attr(o, "property")?, destination));
         }
     }
-    outlets.sort_by(|a, b| a.0.cmp(b.0));
-    let mut connections: Vec<Value> = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &cell_name, destination)).collect();
+    // Its views' outlets to one another among the cell's, by name, the
+    // cell's first where names are equal (two corpus xibs).
+    let mut all: Vec<(&str, String, String)> = outlets.iter().map(|(l, d)| (*l, cell_name.clone(), d.clone())).collect();
+    for (label, source, destination) in &scene.view_outlets {
+        if !scene.subviews.iter().any(|s| &s.1 == destination) || !scene.subviews.iter().any(|s| &s.1 == source) {
+            return fail("a cell's views' outlets to anything but its content's views are not supported by this ibtool");
+        }
+        all.push((label.as_str(), source.clone(), destination.clone()));
+    }
+    all.sort_by(|a, b| a.0.cmp(b.0).then((a.1 != cell_name).cmp(&(b.1 != cell_name))));
+    let mut connections: Vec<Value> = all.iter().map(|(label, source, destination)| outlet(&mut nib, label, source, destination)).collect();
     // A control's action on the cell after its outlets (one probe).
     for (selector, source, mask, _) in &scene.actions {
         let label = nib.string(selector);

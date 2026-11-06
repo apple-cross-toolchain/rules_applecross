@@ -17,7 +17,7 @@ collection view cell, or a reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 306 compile byte-identical to Xcode's and the
+Interface Builder 3 to 27), 310 compile byte-identical to Xcode's and the
 rest are refused; none compile differently. `tests/ibtool_xib` holds 143 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
@@ -60,7 +60,10 @@ any other (one probe).
   likewise (two corpus xibs).
 - **A collection view cell.** A top-level `<collectionViewCell>` compiles
   as a collection view's prototype cell does (Collection views, below),
-  with three differences:
+  with three differences (and a subview's own safe-area guide is a
+  placeholder first in its turn among the objects, as in a view's nib;
+  its views' outlets to one another are among the cell's, by name, the
+  cell's first where names are equal: two of the corpus's):
   - Its content view is always pinned to the cell by the four
     `UIIBSystemGenerated` constraints, as a prototype's is only when it holds
     constraints.
@@ -360,7 +363,9 @@ other values of the attributes these use, is refused. Observed:
   name (`STHeitiSC-Light` as `PingFangSC-Light`), with the descriptor's
   `NSFontNameAttribute` and `NSFontSizeAttribute`, options 0x80000000,
   `UISystemFont` false, and its traits (italic 1, bold 2: `Avenir-Black` is
-  bold); fonts.rs has them all, measured from one storyboard labelling
+  bold; Courier, missed by that measure, is found as in one of the
+  corpus's); `.AppleSystemUIFont` is the regular system font (one of the
+  corpus's); fonts.rs has them all, measured from one storyboard labelling
   each. A name it doesn't find is archived without the scaling keys and
   with options 0, its traits 0 and `UISystemFont` false (seven corpus
   files: OpenSans, OpenSans-Bold, Inter-Regular, Montserrat-Regular; one
@@ -535,7 +540,10 @@ other values of the attributes these use, is refused. Observed:
 - A constraint a view's default variation excludes (`<variation
   key="default"><mask key="constraints"><exclude reference=…/>`,
   Interface Builder's Installed unchecked) is left out of the view's
-  `UIViewAutolayoutConstraints` (none if it was the only one) but keeps
+  `UIViewAutolayoutConstraints` (none if it was the only one; excluding
+  an item's own aspect ratio that the view holds changes nothing, it being
+  the item's, and with nothing else excluded there is no variation: two
+  of the corpus's) but keeps
   its place in the objects, where it is archived; an outlet to it is as to
   any constraint. The safe-area guide is then archived where an installed
   constraint first uses it, or else in the view's `UIViewLayoutGuides`.
@@ -1373,7 +1381,11 @@ probes:
   separator colour, a section index background and a separator inset go
   together in that order (five probes, plain and static tables). A picker
   view may be the header or footer view too, its outlets to the
-  controller as a search bar's (two probes).
+  controller as a search bar's (two probes). The header's and footer's
+  controls' actions on the controller follow the outlets, by event mask
+  then selector, and their runtime attributes are the nib's key-value
+  pairs (three of the corpus's; beside the cells' or a refresh control's
+  they're refused).
 - Left out, the row height is 44, a plain table's section heights 22, and
   the estimates 0.
 - A table without user interaction has `UIUserInteractionDisabled` after
@@ -1818,8 +1830,9 @@ directional layout margins, semantic content and large content
 properties, then `UIItems` (an `NSMutableArray` of its navigation items,
 each as a controller's with `UINavigationBar` referring back to the bar),
 `UIBarPosition` 2 and `UIBarTranslucence` 2. The objects list each item
-and then its bar button items in the bar's turn (two probes and two of the
-corpus's). Its items' actions, on the controller or the first responder,
+in the bar's turn, and its bar button items in the item's own turn, after
+the views beside the bar (two probes and three of the corpus's: the
+probes and two had nothing after the bar to tell the two apart). Its items' actions, on the controller or the first responder,
 and a toolbar's, are event connections without a mask (two probes).
 
 A web view is a `WKWebView`: a background colour if any, opaque unless it
@@ -1870,7 +1883,9 @@ content view as a `_UIVisualEffectContentView` (its subviews, mask 18,
 with its subviews as a container's, then
 `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off), listed as its
 child; the objects list its subviews before its constraints (one probe)
-(seven probes; material styles are refused). Constraints it holds
+(seven probes; material styles are refused). The objects list its content
+view's subviews right after the content view, in its own turn, before the
+constraints it holds (one of the corpus's). Constraints it holds
 itself follow its not-translating key, and the objects list them after
 its content view (one probe).
 

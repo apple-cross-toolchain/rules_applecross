@@ -100,6 +100,7 @@ pub const FONTS: &[(&str, i64)] = &[
     ("Copperplate", 0),
     ("Copperplate-Bold", 2),
     ("Copperplate-Light", 0),
+    ("Courier", 0),
     ("CourierNewPS-BoldItalicMT", 3),
     ("CourierNewPS-BoldMT", 2),
     ("CourierNewPS-ItalicMT", 1),

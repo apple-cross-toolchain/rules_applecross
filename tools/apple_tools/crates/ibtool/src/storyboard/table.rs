@@ -546,7 +546,13 @@ pub(super) fn table_view_nib(
     if scene.segues != header_segues {
         return fail("segues in a table's header or footer other than its containers' are not supported by this ibtool");
     }
-    if !scene.actions.is_empty() || !scene.gesture_views.is_empty() {
+    // Its header's and footer's controls' actions on the controller (three
+    // corpus storyboards); others aren't established.
+    let mut header_actions = std::mem::take(&mut scene.actions);
+    if header_actions.iter().any(|a| a.3 != "upstream") {
+        return fail("actions in a table's header or footer on anything but its controller are not supported by this ibtool");
+    }
+    if !scene.gesture_views.is_empty() {
         return fail("actions, gestures and segues in a table's header or footer are not supported by this ibtool");
     }
     // A header or footer view's outlets to the controller (a search bar's
@@ -558,7 +564,10 @@ pub(super) fn table_view_nib(
     let header_outlets = std::mem::take(&mut scene.control_outlets);
     let at = vc_outlets.len();
     outlets.splice(at..at, header_outlets);
-    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() {
+    // Its header's and footer's runtime attributes, the nib's key-value
+    // pairs (two corpus storyboards); beside its cells' not established.
+    let header_pairs: Vec<Value> = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
+    if !scene.accessibility.is_empty() {
         return fail("runtime attributes, switches and accessibility settings in a table's header or footer are not supported by this ibtool");
     }
     top.push(Value::New(swapped_table(&mut nib, table, module, values)?.named(root_name.clone())));
@@ -711,6 +720,27 @@ pub(super) fn table_view_nib(
     for (label, source, destination) in &outlets {
         connections.push(outlet(&mut nib, label, source, destination));
     }
+    // The header's and footer's actions after the outlets, by mask then
+    // selector, as a static table's cells' (three corpus storyboards);
+    // beside those or the refresh control's not established.
+    if !header_actions.is_empty() {
+        if !refresh_actions.is_empty() || !cell_actions.is_empty() {
+            return fail("actions in a table's header or footer beside its cells' or refresh control's are not supported by this ibtool");
+        }
+        header_actions.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
+        if header_actions.windows(2).any(|w| (w[0].2, &w[0].0) == (w[1].2, &w[1].0)) {
+            return fail("actions in a table's header or footer sharing a selector are not supported by this ibtool");
+        }
+        for (selector, source, mask, _) in &header_actions {
+            let label = nib.string(selector);
+            connections.push(Value::New(Object::new("UIRuntimeEventConnection", vec![
+                ("UILabel", label),
+                ("UISource", reference(source.clone())),
+                ("UIDestination", reference("upstream")),
+                ("UIEventMask", Value::Int(*mask)),
+            ])));
+        }
+    }
     // The refresh control's value-changed actions, after the outlets.
     for selector in refresh_actions {
         let label = nib.string(&selector);
@@ -736,6 +766,12 @@ pub(super) fn table_view_nib(
             ("UIDestination", reference("upstream")),
             ("UIEventMask", Value::Int(*mask)),
         ])));
+    }
+    if !header_pairs.is_empty() {
+        if !cell_pairs.is_empty() {
+            return fail("runtime attributes in a table's header or footer beside its cells' are not supported by this ibtool");
+        }
+        cell_pairs = header_pairs;
     }
     Ok((root_object_with_pairs(&mut nib, top, objects, connections, cell_pairs), upstream_used, segues, listing))
 }
