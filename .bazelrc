@@ -68,6 +68,10 @@ build:relax_xcode_version --action_env=RULES_APPLECROSS_RELAX_XCODE_VERSION=1
 # Flags only Xcode's clang accepts (-fobjc-relative-method-lists and others),
 # dropped off a Mac, where LLVM's clang compiles.
 build:relax_clang_apple_flags --action_env=RULES_APPLECROSS_RELAX_APPLE_CLANG_FLAGS=1
+# Another build of xcode_version's Xcode than the pinned one (27B48 for 27.2's
+# 27B52), when the same Swift built its SDKs; the bundling tools still match
+# the pinned build's output. Read when the toolchain repository is fetched.
+build:relax_xcode_build --repo_env=RULES_APPLECROSS_RELAX_XCODE_BUILD=1
 build:relaxed --config=relax_actool_icon_composer
 build:relaxed --config=relax_actool_tvos_radiosity
 build:relaxed --config=relax_actool_vector
@@ -83,6 +87,7 @@ build:relaxed --config=relax_app_intents
 build:relaxed --config=relax_app_intents_flexible_matching
 build:relaxed --config=relax_xcode_version
 build:relaxed --config=relax_clang_apple_flags
+build:relaxed --config=relax_xcode_build
 # Ported tools from before these configs read only this.
 build:relaxed --action_env=RULES_APPLECROSS_RESOURCE_OUTPUT_MODE=relaxed
 

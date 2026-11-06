@@ -5,15 +5,21 @@ Emits one `key value` pair per line:
 
     xcode 26.6
     build 17F42
+    swift 6.3.1
     sdk iPhoneOS 26.5
     ...
+
+`swift` is the Swift that built the SDKs: the compiler version the macOS
+SDK's standard library interface records.
 
 Platforms without an SDK are omitted, so callers must tolerate missing keys.
 """
 
+import glob
 import json
 import os
 import plistlib
+import re
 import sys
 
 PLATFORMS = [
@@ -51,6 +57,20 @@ def _sdk_version(developer_dir: str, platform: str) -> str:
     return ""
 
 
+def _sdk_swift_version(developer_dir: str) -> str:
+    interfaces = sorted(glob.glob(os.path.join(
+        developer_dir, "Platforms", "MacOSX.platform", "Developer", "SDKs",
+        "MacOSX.sdk", "usr", "lib", "swift", "Swift.swiftmodule", "*.swiftinterface",
+    )))
+    for interface in interfaces:
+        with open(interface, "r", errors="replace") as f:
+            header = f.read(4096)
+        match = re.search(r"^// swift-compiler-version: Apple Swift version ([0-9.]+)", header, re.M)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: read_xcode_versions.py <Xcode.app>", file=sys.stderr)
@@ -65,6 +85,9 @@ def main() -> int:
         print("build", version_info["ProductBuildVersion"])
 
     developer_dir = os.path.join(xcode_app, "Contents", "Developer")
+    swift = _sdk_swift_version(developer_dir)
+    if swift:
+        print("swift", swift)
     for platform in PLATFORMS:
         version = _sdk_version(developer_dir, platform)
         if version:
