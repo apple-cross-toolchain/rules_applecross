@@ -89,6 +89,7 @@ def _apple_cross_toolchain_impl(module_ctx):
                 # Canonical, so the toolchain repository's BUILD file names
                 # the module's own targets.
                 "swift_feature_allowlists": [str(label) for label in config.swift_feature_allowlists],
+                "swift_generated_header_rewriter": str(config.swift_generated_header_rewriter) if config.swift_generated_header_rewriter else "",
                 "swift_package_configurations": [str(label) for label in config.swift_package_configurations],
                 # docc, from the repositories swift_tools name.
                 "swift_docc": {cpu: tools.rpartition(":")[0] + ":usr/bin/docc" for cpu, tools in swift_tools.items()},
@@ -160,6 +161,13 @@ _configure_tag = tag_class(
             doc = "swift_feature_allowlist targets, as rules_swift " +
                   "toolchains' `feature_allowlists`; visible to the " +
                   "toolchain's repository (public).",
+        ),
+        "swift_generated_header_rewriter": attr.label(
+            doc = "An executable that rewrites the Objective-C header each " +
+                  "Swift compile generates, as rules_swift's Xcode toolchain's " +
+                  "`generated_header_rewriter`: run after the compile, with " +
+                  "the compile's command line after a `--` argument; " +
+                  "visible to the toolchain's repository (public).",
         ),
         "swift_package_configurations": attr.label_list(
             doc = "swift_package_configuration targets, as rules_swift " +
