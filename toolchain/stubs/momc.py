@@ -5,14 +5,14 @@
 docs/clean-room/momc.md.
 
 Each model version compiles to the `.mom` Xcode 27.2's momc writes, a
-keyed archive of the model. What `VersionInfo.plist` records besides the
-current version, each entity's version hash and each version's checksum,
-isn't established, so the compile is refused unless
-RULES_APPLECROSS_RELAX_MOMC=1 (--config=relax_momc, or all of
---config=relaxed), which writes VersionInfo.plist without them and leaves
-out the `.omo` Xcode adds beside a versioned model's current version: Core
-Data loads, saves and migrates stores from the `.mom` and computes the
-hashes itself. `--action generate` writes the Swift classes Xcode's does
+keyed archive of the model, and a single version's `VersionInfo.plist` to
+Xcode's, with each entity's version hash and the version's checksum. A
+model with several versions (whose current one Xcode gives an `.omo` too)
+or a derived attribute is refused unless RULES_APPLECROSS_RELAX_MOMC=1
+(--config=relax_momc, or all of --config=relaxed), which writes
+VersionInfo.plist without the hashes and leaves out the `.omo`: Core Data
+loads, saves and migrates stores from the `.mom` and computes the hashes
+itself. `--action generate` writes the Swift classes Xcode's does
 but for the header's line naming the user and the date, which no build
 reproduces, so it too needs RULES_APPLECROSS_RELAX_MOMC=1. A model using
 anything not established against Xcode
@@ -20,6 +20,8 @@ anything not established against Xcode
 established syntax, among others) is refused either way.
 """
 
+import base64
+import hashlib
 import math
 import os
 import plistlib
@@ -1479,14 +1481,100 @@ class Writer:
 
 
 def compile_version(path, versions):
-    """One .xcdatamodel's .mom."""
+    """One .xcdatamodel's .mom, and its Model."""
     contents = os.path.join(path, "contents")
     try:
         root = ET.parse(contents).getroot()
     except (OSError, ET.ParseError) as e:
         raise Invalid("can't read %s: %s" % (contents, e))
     model = Model(root, versions)
-    return Writer().to_bytes(Archiver().archive(model))
+    return Writer().to_bytes(Archiver().archive(model)), model
+
+
+# --- Version hashes (docs/clean-room/momc.md) ---------------------------------
+# What Core Data hashes, read in a process of our own: a model built with
+# Core Data's public API, its versionHash and versionChecksum asked for, and
+# CommonCrypto's SHA-256 functions interposed there to log their input.
+
+def _sha256(*parts):
+    return hashlib.sha256(b"".join(parts)).digest()
+
+
+def _le32(n):
+    return (n & 0xFFFFFFFF).to_bytes(4, "little")
+
+
+def property_hash(p):
+    """A property's version hash: the SHA-256 of its name, a flags byte
+    (optional 1, transient 2, read-only 4), a zero byte and its version hash
+    modifier; then, for an attribute or a relationship, the SHA-256 of that
+    and what it adds."""
+    flags = (1 if p.optional else 0) | (2 if p.transient else 0) | (4 if p.read_only else 0)
+    common = _sha256(p.name.value.encode(), bytes([flags, 0]), p.modifier.value.encode() if p.modifier else b"")
+    if isinstance(p, DerivedAttribute):
+        # Its derivation expression's description follows, as NSExpression
+        # describes it (`count:(title)`), which isn't reproduced.
+        unestablished("a derived attribute's version hash")
+    if isinstance(p, Attribute):
+        # The type, then a byte for each of external storage and preserving
+        # the value in history on deletion.
+        return _sha256(common, _le32(p.type), b"\x01" if p.flags & 4 else b"", b"\x01" if p.flags & 16 else b"")
+    if isinstance(p, Relationship):
+        # The destination's and the inverse's names, the maximum and minimum
+        # counts, and two bytes for an ordered one (not the deletion rule).
+        return _sha256(common, p.destination.name.value.encode(), p.inverse.name.value.encode() if p.inverse else b"",
+                       _le32(p.max_count), _le32(p.min_count), b"\x01\x00" if p.ordered else b"")
+    return common
+
+
+def entity_hash(e):
+    """An entity's version hash: the SHA-256 of its name, whether it's
+    abstract, its parent's hash, the hashes of all its properties but
+    transient ones (fetched ones among them; inherited ones too) in byte
+    order of their names, and its version hash modifier."""
+    properties = []
+    p = e
+    while p is not None:
+        properties.extend(x for x in p.properties if not x.transient)
+        p = p.parent
+    parts = [e.name.value.encode(), bytes([1 if e.abstract else 0])]
+    if e.parent is not None:
+        parts.append(entity_hash(e.parent))
+    parts.extend(property_hash(x) for x in sorted(properties, key=lambda x: x.name.value.encode()))
+    if e.modifier:
+        parts.append(e.modifier.value.encode())
+    # Then each uniqueness constraint, its items joined by dots.
+    parts.extend(".".join(x.value for x in c).encode() for c in e.unique)
+    return _sha256(*parts)
+
+
+def version_hashes(model):
+    """{entity name: hash}, and the model's version checksum: the base64
+    SHA-256 of its entities' hashes in byte order of their names."""
+    hashes = {e.name.value: entity_hash(e) for e in model.entities}
+    checksum = base64.b64encode(_sha256(*(hashes[n] for n in sorted(hashes, key=str.encode)))).decode()
+    return hashes, checksum
+
+
+def version_info(name, model):
+    """A single version's VersionInfo.plist, as Xcode's momc writes it: its
+    entities' hashes and its checksum, in CoreFoundation dictionaries, the
+    version's name a string of its own in each (106 test models)."""
+    hashes, checksum = version_hashes(model)
+    if name in hashes:
+        unestablished("an entity named as its model version")
+    # The entities' table as the .mom's (filled in name order), filled again
+    # from it, then copied twice, each copy created from the last's order:
+    # the order of all 100 test models' tables (a single filled copy fits
+    # 98).
+    order = cf_dictionary_order(cf_dictionary_order(sorted(hashes, key=natural_key)))
+    order = cf_created_order(cf_created_order(order))
+    entities = Dict([(Str(n), Data(hashes[n])) for n in order])
+    tables = {
+        "NSManagedObjectModel_VersionHashes": Dict([(Str(name, fresh()), entities)]),
+        "NSManagedObjectModel_VersionChecksums": Dict([(Str(name, fresh()), Str(checksum, fresh()))]),
+    }
+    return Writer().to_bytes(Dict([(Str(k), tables[k]) for k in cf_dictionary_order(sorted(tables))]))
 
 
 def version_name(path):
@@ -1497,7 +1585,7 @@ def compile_models(source, output, versions):
     source = source.rstrip("/")
     if source.endswith(".xcdatamodel"):
         out = output if output.endswith(".mom") else os.path.join(output, version_name(source) + ".mom")
-        mom = compile_version(source, versions)
+        mom, _ = compile_version(source, versions)
         os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
         with open(out, "wb") as f:
             f.write(mom)
@@ -1522,17 +1610,32 @@ def compile_models(source, output, versions):
         unestablished("a versioned model without a current version")
     if current is not None and current not in models:
         unestablished("the current version %s" % current)
-    moms = {version_name(m): compile_version(os.path.join(source, m), versions) for m in models}
+    compiled = {version_name(m): compile_version(os.path.join(source, m), versions) for m in models}
+    moms = {name: mom for name, (mom, _) in compiled.items()}
+    # A single version's VersionInfo.plist is Xcode's; several versions'
+    # also need the .omo beside the current one, which isn't reproduced.
+    info_bytes = None
+    if len(models) == 1:
+        try:
+            (name, (_, model)), = compiled.items()
+            info_bytes = version_info(name, model)
+        except Unestablished:
+            if not RELAXED:
+                raise
+    elif not RELAXED:
+        unestablished("a model with several versions (the .omo beside its current one)")
     out = output if output.endswith(".momd") else os.path.join(output, version_name(source) + ".momd")
     os.makedirs(out, exist_ok=True)
     for name, mom in moms.items():
         with open(os.path.join(out, name + ".mom"), "wb") as f:
             f.write(mom)
-    info = {}
-    if len(models) > 1:
-        info["NSManagedObjectModel_CurrentVersionName"] = version_name(current)
+    if info_bytes is None:
+        info = {}
+        if len(models) > 1:
+            info["NSManagedObjectModel_CurrentVersionName"] = version_name(current)
+        info_bytes = plistlib.dumps(info, fmt=plistlib.FMT_BINARY)
     with open(os.path.join(out, "VersionInfo.plist"), "wb") as f:
-        plistlib.dump(info, f, fmt=plistlib.FMT_BINARY)
+        f.write(info_bytes)
 
 
 # --- Generated classes (momc --action generate) -------------------------------
@@ -1751,14 +1854,11 @@ def main(argv):
             print("error: momc: %s: %s" % (source, e), file=sys.stderr)
             return 1
         return 0
-    if not RELAXED:
-        print("error: momc: %s: VersionInfo.plist's entity version hashes aren't reproduced off a Mac; "
-              "--config=relax_momc writes the model without them (Core Data computes them itself)" % source, file=sys.stderr)
-        return 1
     try:
         compile_models(source, output, MOMC_VERSIONS[xcode_version()])
     except Unestablished as e:
-        print("error: momc: %s: %s is not compiled as Xcode compiles it" % (source, e), file=sys.stderr)
+        print("error: momc: %s: %s is not compiled as Xcode compiles it%s" % (
+            source, e, "" if RELAXED else "; --config=relax_momc compiles it without what isn't reproduced"), file=sys.stderr)
         return 1
     except Invalid as e:
         print("error: momc: %s: %s" % (source, e), file=sys.stderr)

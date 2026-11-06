@@ -46,28 +46,41 @@ def model(directory):
 class MomcTest(unittest.TestCase):
 
     def test_models_match_xcode(self):
+        # Strict where Xcode's VersionInfo.plist is reproduced (one version,
+        # no derived attribute): the .moms and it, as Xcode writes them.
+        # Otherwise refused unless relaxed, and the .moms are Xcode's.
         cases = sorted(os.listdir(os.path.join(HERE, "cases")))
+        strict = 0
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
                 out = os.path.join(tmp, "Model.momd")
-                result = run("--iphonesimulator-deployment-target", "18.0", "--module", "App",
-                             model(os.path.join(HERE, "cases", case)), out, env=RELAXED)
-                self.assertEqual(result.returncode, 0, result.stderr)
+                args = ["--iphonesimulator-deployment-target", "18.0", "--module", "App", model(os.path.join(HERE, "cases", case)), out]
                 expected = os.path.join(HERE, "expected", case)
-                self.assertEqual(sorted(n for n in os.listdir(out) if n.endswith(".mom")), sorted(os.listdir(expected)))
+                result = run(*args)
+                if "VersionInfo.plist" in os.listdir(expected):
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    strict += 1
+                else:
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertRegex(result.stderr, "several versions|derived attribute")
+                    self.assertIn("--config=relax_momc", result.stderr)
+                    result = run(*args, env=RELAXED)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                names = sorted(n for n in os.listdir(out) if n.endswith(".mom") or "VersionInfo.plist" in os.listdir(expected) and n == "VersionInfo.plist")
+                self.assertEqual(names, sorted(os.listdir(expected)))
                 for name in os.listdir(expected):
                     with open(os.path.join(expected, name), "rb") as f, open(os.path.join(out, name), "rb") as g:
                         self.assertTrue(f.read() == g.read(), "%s/%s differs from Xcode's" % (case, name))
         self.assertGreater(len(cases), 70)
+        self.assertGreater(strict, 90)
 
-    def test_version_info_names_only_the_current_version(self):
+    def test_relaxed_version_info_names_only_the_current_version(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for case, info in (("versioned", {"NSManagedObjectModel_CurrentVersionName": "Model2"}), ("two_entities", {})):
-                out = os.path.join(tmp, case + ".momd")
-                result = run(model(os.path.join(HERE, "cases", case)), out, env=RELAXED)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                with open(os.path.join(out, "VersionInfo.plist"), "rb") as f:
-                    self.assertEqual(plistlib.load(f), info)
+            out = os.path.join(tmp, "versioned.momd")
+            result = run(model(os.path.join(HERE, "cases", "versioned")), out, env=RELAXED)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with open(os.path.join(out, "VersionInfo.plist"), "rb") as f:
+                self.assertEqual(plistlib.load(f), {"NSManagedObjectModel_CurrentVersionName": "Model2"})
 
     def test_one_version_compiles_to_a_mom(self):
         version = os.path.join(model(os.path.join(HERE, "cases", "two_entities")), "Model.xcdatamodel")
@@ -80,7 +93,7 @@ class MomcTest(unittest.TestCase):
 
     def test_refused_without_relax_momc(self):
         with tempfile.TemporaryDirectory() as tmp:
-            result = run(model(os.path.join(HERE, "cases", "two_entities")), os.path.join(tmp, "Model.momd"))
+            result = run(model(os.path.join(HERE, "cases", "versioned")), os.path.join(tmp, "Model.momd"))
             self.assertEqual(result.returncode, 1)
             self.assertIn("--config=relax_momc", result.stderr)
             self.assertEqual(os.listdir(tmp), [])

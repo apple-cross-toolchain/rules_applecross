@@ -32,7 +32,8 @@ implementation.
   - Apple's frameworks probed at runtime in our own process: their public
     and private functions called on constructed inputs, Objective-C runtime
     introspection, our own process's memory and call stacks; never
-    disassembled or decompiled (ibtool's [colour conversion](ibtool.md#colour-conversion)).
+    disassembled or decompiled (ibtool's [colour conversion](ibtool.md#colour-conversion),
+    momc's [version hashes](momc.md#versioninfoplist)).
     Each use is noted on the tool's page: what was called or read, on what
     inputs, and what it established. The probe programs stay in the
     repository with how to rerun them (`tools/vimage_pow_probe`).

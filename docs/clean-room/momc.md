@@ -1,11 +1,14 @@
 # momc and mapc
 
-Core Data models (`.xcdatamodeld`, `.xcdatamodel`) compile off a Mac with
-`--config=relax_momc`: each model version to the `.mom` Xcode 27.2's
-`momc` writes, byte for byte, with a `VersionInfo.plist` that leaves out what
-isn't established (below). `toolchain/stubs/momc.py` is the implementation,
-pure Python; `tests/momc` compares it with Xcode's own output for 106 models,
-and refuses 7 more. Generated classes (`momc --action generate`) are Xcode's
+Core Data models (`.xcdatamodeld`, `.xcdatamodel`) compile off a Mac: each
+model version to the `.mom` Xcode 27.2's `momc` writes, byte for byte, and a
+model with one version to Xcode's `VersionInfo.plist` too, its entities'
+version hashes and checksum included (below). A model with several versions,
+whose current version also gets an `.omo`, or with a derived attribute,
+compiles with `--config=relax_momc`, with a `VersionInfo.plist` that leaves
+out what isn't established. `toolchain/stubs/momc.py` is the implementation,
+pure Python; `tests/momc` compares it with Xcode's own output for 106 models
+(100 of their `VersionInfo.plist`s), and refuses 7 more. Generated classes (`momc --action generate`) are Xcode's
 but for their header's dated line, with `--config=relax_momc`; mapping models
 (`mapc`) aren't reproduced.
 
@@ -192,42 +195,55 @@ Compiling refuses these, relaxed or not:
 `VersionInfo.plist` holds the current version's name (for a versioned
 model), each entity's version hash (`NSManagedObjectModel_VersionHashes`,
 32 bytes) and a checksum of each version (`NSManagedObjectModel_VersionChecksums`,
-a base64 SHA-256). The hashes are SHA-256 digests whose input isn't
-established, so without `--config=relax_momc` compiling is refused.
-Relaxed, `VersionInfo.plist` holds only the current version's name, and no
-`.omo` is written.
+a base64 SHA-256).
 
-Core Data computes the hashes from the model itself. On a Mac, a store
-created with either side's version 1 opened, migrated lightweight and read
-with either side's `.momd` (this one's `VersionInfo.plist`, no `.omo`)
-exactly as with Xcode's.
+What Core Data hashes was read in a process of our own
+(`tools/coredata_hash_probe`): models built with Core Data's public API,
+their `versionHash` and `versionChecksum` asked for, and CommonCrypto's
+public `CC_SHA256_Init`, `_Update` and `_Final` interposed there
+(`DYLD_INSERT_LIBRARIES` on our own program) to log their input. Each hash
+is a SHA-256 of:
 
-Probing `NSAttributeDescription.versionHash` through Core Data's public API
-shows that an attribute's hash depends on:
-- its name, type, optionality and transience;
-- its version hash modifier (an empty modifier counts as none);
-- one more input, which `allowsExternalBinaryDataStorage` and
-  `preservesValueInHistoryOnDeletion` set identically.
+- **A property, first:** its name (UTF-8), a flags byte (optional 1,
+  transient 2, read-only 4: a fetched property's is 7), a zero byte, and
+  its version hash modifier if it has one. A fetched property's hash is
+  that.
+- **An attribute:** that digest, its type as a 32-bit little-endian
+  integer, then a byte 1 for external binary storage and another for
+  preserving its value in history on deletion. Not its default value,
+  renaming identifier, user info, Spotlight indexing, value class or
+  transformer, or cloud encryption.
+- **A derived attribute:** that again, then a hash of its derivation
+  expression's description as NSExpression gives it (`count:(title)`),
+  which isn't reproduced: refused unless relaxed.
+- **A relationship:** that first digest, the destination entity's name,
+  the inverse's name if any, the maximum and minimum counts as 32-bit
+  little-endian integers, and the bytes 1 0 if ordered. Not its deletion
+  rule.
+- **An entity:** its name, a byte 1 if abstract (else 0), its parent's
+  hash, the hashes of its properties but transient ones (inherited ones
+  too) in byte order of their names, its version hash modifier, and each
+  uniqueness constraint, its items joined by dots.
+- **A version's checksum:** its entities' hashes, in byte order of their
+  names; base64.
 
-It doesn't depend on the default value, renaming identifier, user info,
-Spotlight indexing, value class name, value transformer name or cloud
-encryption. These inputs were tried, all without a match:
+A single version's `VersionInfo.plist` is a binary property list of two
+CoreFoundation dictionaries, the hashes' and the checksums', each keyed by
+the version's name (a string of its own each time). The entities' table is
+in the order of the `.mom`'s, filled again from it and copied twice (a table
+created from the last one's order each time): all 100 test models' orders,
+where filling once fits 98. A versioned model's tables share some names
+between them in a way not established, and its current version's `.omo` (a
+`momv2` binary Core Data reads instead of the `.mom`) isn't reproduced: it
+is refused unless relaxed. Relaxed, its `VersionInfo.plist` holds only the
+current version's name, and no `.omo` is written, as for a derived
+attribute's model, which Core Data handles the same way: it computes the
+hashes from the model itself. On a Mac, a store created with either side's
+version 1 opened, migrated lightweight and read with either side's `.momd`
+(this one's `VersionInfo.plist`, no `.omo`) exactly as with Xcode's.
 
-- the UTF-8, UTF-8 with a NUL, and UTF-16 name, followed or preceded by
-  the type and flags as 1-, 2-, 4- and 8-byte integers in either byte
-  order, in every order of up to five components;
-- one flags word holding optionality, transience and that third input at
-  any of the first sixteen bit positions, with the type in any width;
-- text forms (`1`/`0`, `YES`/`NO`, `true`/`false`, `Y`/`N`) joined by
-  any of ten separators, with the type as a number and its value class
-  name, in every order of up to six components;
-- Foundation's binary and XML property lists, keyed archives,
-  descriptions and joined strings of arrays and dictionaries of those
-  fields.
-
-A mapping model (`mapc`) records its models' hashes too. The input could
-still be found by more probing, or, in the private fork, by reading the
-implementation.
+A mapping model (`mapc`) records its models' hashes too, which are now
+known; it isn't reproduced yet.
 
 ## Generated classes
 
