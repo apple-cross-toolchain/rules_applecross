@@ -793,7 +793,8 @@ toolchain(
         _install_executable(rctx, "stubs/coremlc_ops.json", xcode_toolchain_bindir + "coremlc_ops.json")
         _install_executable(rctx, "stubs/corefoundation.py", xcode_toolchain_bindir + "corefoundation.py")
 
-    # Core Data models: compiled with --config=relax_momc.
+    # Core Data models: a single version's as Xcode compiles them, others with
+    # --config=relax_momc.
     _momc_path = xcode_toolchain_bindir + "momc"
     result = rctx.execute(["test", "-e", _momc_path])
     if result.return_code != 0:

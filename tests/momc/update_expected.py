@@ -4,9 +4,11 @@ tests are against): each model version's .mom, as `momc` compiles
 cases/<case>/Model.xcdatamodeld for the iOS simulator; and
 generate_expected/<case>/, the Swift classes `momc --action generate`
 writes for generate/<case>/Model.xcdatamodeld, with the header's line
-naming the user and the date replaced by the one this momc writes. VersionInfo.plist and
-the .omo beside a versioned model's current version aren't kept: off a Mac
-they're written without what isn't established (docs/clean-room/momc.md).
+naming the user and the date replaced by the one this momc writes. A single
+version's VersionInfo.plist is kept, but not one with a derived attribute
+(whose version hash isn't reproduced); several versions' VersionInfo.plist
+and the .omo beside the current one aren't: off a Mac they're refused, or
+written without what isn't established (docs/clean-room/momc.md).
 Run from anywhere:
 
     python3 tests/momc/update_expected.py
@@ -38,6 +40,10 @@ def main():
                 sys.exit("%s: Xcode's momc failed:\n%s" % (case, result.stderr))
             for mom in glob.glob(os.path.join(tmp, "*.momd", "*.mom")):
                 shutil.copy(mom, expected)
+            versions = glob.glob(os.path.join(model, "*.xcdatamodel"))
+            derived = any('derived="YES"' in open(os.path.join(v, "contents")).read() for v in versions)
+            if len(versions) == 1 and not derived:
+                shutil.copy(glob.glob(os.path.join(tmp, "*.momd", "VersionInfo.plist"))[0], expected)
     for case in sorted(os.listdir(os.path.join(HERE, "generate"))):
         model = os.path.join(HERE, "generate", case, "Model.xcdatamodeld")
         expected = os.path.join(HERE, "generate_expected", case)
