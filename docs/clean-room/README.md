@@ -29,6 +29,10 @@ implementation.
     - the Security project's `libsecurity_codesigning`;
     - the Swift standard library's hashing (`Hasher`, SipHash-1-3), `Dictionary` layout and string escaping;
     - Apple's Core ML model specification and coremltools (which build test models).
+  - Apple's frameworks probed at runtime in our own process: their public
+    and private functions called on constructed inputs, Objective-C runtime
+    introspection, our own process's memory and call stacks; never
+    disassembled or decompiled (ibtool's [colour conversion](ibtool.md#colour-conversion)).
 - Apple's public CreateML framework, called from small programs, to make test
   models of the types Create ML exports.
 

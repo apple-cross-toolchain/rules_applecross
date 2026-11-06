@@ -1005,14 +1005,16 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         values.push(("UIAccessoryType", Value::Int(a)));
     }
     values.push(("UIIndentationWidth", Value::Float(number(attr(cell, "indentationWidth")?)? as f32)));
+    // A background colour is flagged before the separator inset (two
+    // probes).
+    if background.is_some() {
+        values.push(("UITableCellBackgroundColorSet", Value::Bool(true)));
+    }
     // Its separator inset, top, left, bottom and right, as a table's, even
     // when zero (two probes).
     if let Some(i) = child(cell, "inset", "separatorInset") {
         let [top, left, bottom, right] = ["minY", "minX", "maxY", "maxX"].map(|e| attr(i, e).and_then(number));
         values.push(("UISeparatorInset", doubles(&[top?, left?, bottom?, right?])));
-    }
-    if background.is_some() {
-        values.push(("UITableCellBackgroundColorSet", Value::Bool(true)));
     }
     if system_background {
         values.push(("UISystemBackgroundView", system_background_view(nib, &f)));

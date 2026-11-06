@@ -17,8 +17,8 @@ collection view cell, or a reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 261 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 128 cases written for this, checked
+Interface Builder 3 to 27), 289 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 131 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -182,6 +182,66 @@ filled with keys in depth-first first-use order reproduced all ten nibs
 examined (five storyboards); CoreFoundation's CFSet and CFDictionary did
 not. foundation-hashing.md describes that set's layout.
 
+## Colour conversion
+
+Xcode converts a colour in single precision through ColorSync, which
+CoreGraphics evaluates with vImage (`crates/ibtool/src/colorsync.rs`):
+- calibrated RGB to Display P3, then to extended sRGB;
+- Display P3 to extended sRGB;
+- calibrated white to the gamma 2.2 grey;
+- without `colorMatched`, sRGB and gamma 2.2 grey to Generic RGB, clamped
+  to 0 to 1.
+
+Each step is a curve per channel, a 3×3 matrix and a curve per channel.
+
+- **The parameters.** ColorSync describes each step's curves and matrix as
+  float parameters (`ColorSyncTransformCopyProperty` with
+  `kColorSyncTransformParametricConversionData`). The curves are ICC
+  parametric curves with signed reflection:
+  - Generic RGB's and Generic Gray's decoding is gamma 1.8 with a linear
+    toe of slope 1/16 below 1/32;
+  - Display P3's and sRGB's decoding is the sRGB curve;
+  - the encodings are their inverses, the sRGB one as
+    `(1.137119·x)^(1/2.4) − 0.055`.
+- **The curves.** Each is `vImageSymmetricPiecewiseGamma_PlanarF`'s:
+  `(a·|x| + b)^g + e` (a·|x| + b fused) from the boundary up, `c·|x| + f`
+  below it, with x's sign. This matches vImage for every float from
+  −1.25 to 1.25 on each of the curves above.
+- **The matrices.** Each row is its middle product, then the first and
+  last terms added with fused multiply-adds. This matches CoreGraphics'
+  conversions on 20,000 random colours in both steps.
+- **The power function.** vImage computes `x^g` as `exp2(g·log2 x)` in
+  floats, values below the smallest normal float flushed to zero.
+  - exp2 of t is 2^⌊t⌋ times a degree-6 polynomial of the fraction: fused
+    Horner steps, the last product rounded before adding 1.
+  - log2 of x is its exponent plus, added in floats, log2 of its mantissa
+    reduced to [√2/2, √2). That is r·q(r) with r = m − 1, where q is the
+    fused sum of its even and odd parts, each fused Horner steps in r².
+    Mantissas from 1 up and below 1 have coefficient sets of their own.
+  - The polynomials match vImage's exp2 at all but 9,973 of the
+    1,065,353,215 floats in [0, 1), and its log2 at all but 1,050 and
+    9,768 of the 8,388,607 mantissas. Those exceptions are recorded as
+    vImage gives them (`vimage_pow.bin`, 166 KB). With them, the power
+    function matched vImage on 16 million random bases and exponents.
+
+The whole conversion matched CoreGraphics on 20,000 random calibrated RGB
+colours and 20,000 greys (CoreGraphics gives opaque white 1, which ibtool
+archives by name). Interface Builder's palette, 32 random colours and 36
+components without `colorMatched` match Xcode's archived values, in xibs
+and storyboards (`tests/ibtool_xib`: `converted-colors`,
+`unmatched-converted-colors`, `palette-colors`).
+
+**Provenance.** The parameters and curves come from public APIs:
+ColorSync's conversion data and vImage's piecewise gamma. Sampling our own
+process's call stack while CoreGraphics converted showed that vImage does
+the work. The power function's polynomials were fitted, and its exceptions
+recorded, by calling vImage's public functions on constructed inputs in
+our own process: exp2 through `2^t` for every float fraction t, log2
+recovered from `x^(2^k)` for every mantissa. No Apple binary was
+disassembled or decompiled. This runtime probing is in
+[README.md](README.md#how-they-were-made)'s allowed sources on this fork
+only.
+
 ## Supported elements
 
 Scenes whose view controller (with or without a custom class) has a root
@@ -236,28 +296,27 @@ other values of the attributes these use, is refused. Observed:
   (`UISystemColorName` first) when, at 10 digits, it is white 0, 1 or 0
   with alpha 1, 1 or 0; other greys, including 0.5, 1/3, 2/3 and white
   with alpha 0, have no name (17 probes, as text and background colours).
-  Calibrated and device spaces and Display P3 are converted (calibrated
-  white 0.5 is archived as 0.572), so they are refused, except calibrated
-  white 0 and 1 (most of the corpus's): 0 is archived as 0; 1 as
-  `whiteColor` when opaque and otherwise as the float after 1
-  (1.0000001192092896, no `-Double`, text `1`), named as the grey would
-  be (eight probes); and Interface Builder's palette, whose conversions
-  are established by probe: calibrated white 1/3, 1/2 and 2/3 (0.408,
-  0.572, 0.723), and in calibrated RGB black, white, red, green, blue,
-  cyan, yellow, magenta, orange, purple, brown and the three greys.
-  Components match at a float's precision, as Xcode converts them (1/3
-  to 10 digits is 1/3), alpha is kept, and the converted components are
-  floats, archived without `-Double` in storyboards too (84 components,
-  opaque and not, in a xib and a storyboard). `colorSpace="custom"
-  customColorSpace="calibratedRGB"` is the same space.
-- A document without `colorMatched="YES"` (older ones) takes colours'
-  components as they are instead of converting them: calibrated RGB is
-  archived as sRGB with the document's values, calibrated white as sRGB
-  grey (the grey as a float, the alpha not), gamma 2.2 grey and sRGB
-  converted (sRGB 1, 0.5, 0.25 as 0.989, 0.413, 0.195), none named.
-  Without it, calibrated colours, system colours and neutral black and
-  white in the other spaces (which convert to themselves) are compiled;
-  the rest are refused (18 probes; the corpus's 16 such storyboards).
+  Calibrated white, calibrated RGB and Display P3 are converted, as
+  [Colour conversion](#colour-conversion) describes: calibrated white
+  to the gamma 2.2 grey (0.5 is archived as 0.572), calibrated RGB and
+  Display P3 to extended sRGB. The converted components are floats,
+  archived without `-Double` in storyboards too, and alpha is kept (84
+  components of Interface Builder's palette, opaque and not, in a xib
+  and a storyboard, and 32 random colours). Calibrated white 0 is
+  archived as 0; 1 as `whiteColor` when opaque and otherwise as the float
+  after 1 (1.0000001192092896, text `1`), named as the grey would be
+  (eight probes). `colorSpace="custom" customColorSpace="calibratedRGB"`
+  is the same space. Device spaces are refused.
+- A document without `colorMatched="YES"` (older ones) takes calibrated
+  colours' components as they are instead of converting them:
+  calibrated RGB is archived as sRGB with the document's values,
+  calibrated white as sRGB grey (the grey as a float, the alpha not).
+  sRGB and gamma 2.2 grey are converted to Generic RGB and clamped to 0
+  to 1 (sRGB 1, 0.5, 0.25 as 0.989, 0.413, 0.195; [Colour
+  conversion](#colour-conversion)), then archived as sRGB with those
+  components, a storyboard's rounded to 10 digits as the document's
+  are; none are named (36 probes, a xib and a storyboard; the corpus's
+  16 such storyboards).
 - Equal colours are one object, compared after rounding to 10 digits
   (0.18039215686 and 0.1803921568627451 share), sRGB and grey alike; a
   named colour is shared only by name (`whiteColor` and a white
@@ -784,7 +843,9 @@ other values of the attributes these use, is refused. Observed:
   the containers (three probes, two of the corpus's). Outlets of one
   name from several views (two `delegate`s) go by the views' UIKit
   classes, whatever their custom classes: a picker's before a text
-  field's, a text field's before a text view's (six probes).
+  field's, a text field's before a text view's (six probes); views of one
+  class in the order Xcode visits them, as for actions (a probe and a
+  corpus storyboard).
   Actions on other
   events sort by event mask first (valueChanged 4096,
   primaryActionTriggered 8192, editingDidBegin 65536, editingChanged
@@ -854,29 +915,9 @@ other values of the attributes these use, is refused. Observed:
 - A named colour (`<color name=...>`, defined by a `<namedColor>` in the
   document's resources) is `UIDynamicCatalogName`,
   `UIDynamicCatalogUseNibBundle` and its definition's components, unrounded
-  (sRGB and grey; three probes and one corpus storyboard); Display P3
-  black and white, plain or named, convert as calibrated RGB's (white to
-  0.99999994, 1.0000001, 1.0000001: four probes). Other colours in
-  Display P3 and calibrated RGB are converted to extended sRGB in floats,
-  through a matrix this ibtool doesn't reproduce exactly (it fits 24
-  colours to 2e-7): refused. For calibrated RGB, 148 colours fit a
-  linearisation of gamma 1.8 with a linear toe of slope 1/16 below 1/32,
-  a matrix whose rows sum to 1, and the sRGB encoding (sign kept for
-  values outside 0 to 1), to within a few float ulps (5e-7) but exactly
-  for only a quarter of the components, which points at single-precision
-  arithmetic or tables not established here. Xcode's values are those of
-  CoreGraphics' public conversion from generic RGB to Display P3 and on to
-  extended sRGB (`CGColor.converted(to:intent:options:)`, 900 of 900
-  components on this Mac; directly to extended sRGB gives 380). Each
-  conversion is single precision, per channel where the primaries agree,
-  and off the exact curves by up to about 8 ulps, without a table's
-  interpolation or a fixed-point grid; that arithmetic isn't reproduced
-  here. Its power function behaves as `exp2(g·log2 x)` in floats; for
-  `exp2` alone (x = 1/2 through a parametric curve, 65,535 gammas) a
-  degree-6 polynomial on the fraction's floor domain, evaluated by
-  Horner's rule in floats, matches 94.6% at best, and neither
-  round-to-nearest reduction, even and odd halves, power sums nor
-  `exp(r·ln 2)` does better.
+  (sRGB and grey; three probes and one corpus storyboard); a Display P3
+  definition's are converted to extended sRGB as a plain Display P3
+  colour's are (four probes).
 - A scene's gesture recognizer whose delegate is the controller has a
   `delegate` outlet to it in the controller's nib, after the controller's
   storyboard outlet (one probe; several, or one in an embedded controller,
@@ -1343,7 +1384,8 @@ probes:
   `UIIndentationLevel` when not 0, `UISelectionStyle` (none 0, blue 1,
   gray 2; left out for default), `UIAccessoryType` (disclosureIndicator 1,
   checkmark 3, detailButton 4), `UIIndentationWidth` as a float,
-  `UITableCellBackgroundColorSet` with a background colour,
+  `UITableCellBackgroundColorSet` with a background colour (before the
+  separator inset: two probes),
   `UISystemBackgroundView`, `UIContentConfigurationView` nil,
   `UIContentView`, and nil text, detail text and image labels.
 - A cell with a background colour archives it with
