@@ -1,0 +1,15 @@
+bazel_dep(name = "rules_swift", version = "4.2.2")
+bazel_dep(name = "swift-syntax", version = "604.0.0")
+
+swift = use_extension("@rules_swift//swift:extensions.bzl", "swift")
+swift.toolchain(
+    name = "swift_toolchain",
+    platform_sha256 = {
+        "ubuntu24.04": "2e9ebec040ad459dd89a6d093a02d8314939135104850fae4d5c0f174fb3ba8c",
+        "ubuntu24.04-aarch64": "307772afcc0b9501faa4797eb4197076facf5768593a0d8d2b83615c95b0040e",
+    },
+    swift_version = "6.4.2",
+)
+use_repo(swift, "swift_toolchain")
+
+register_toolchains("@swift_toolchain//:all")

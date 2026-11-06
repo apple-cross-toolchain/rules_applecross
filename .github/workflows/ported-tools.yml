@@ -75,7 +75,9 @@ jobs:
           python3 ../../tests/actool_catalog/actool_catalog_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
           python3 ../../tests/actool_vector/actool_vector_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
           python3 ../../tests/ibtool_xib/ibtool_xib_test.py "$(bazel cquery -c opt --output=files //crates/ibtool 2>/dev/null)" &&
-          python3 ../../tests/pngcrush/pngcrush_test.py "$(bazel cquery -c opt --output=files //crates/pngcrush 2>/dev/null)"'
+          python3 ../../tests/pngcrush/pngcrush_test.py "$(bazel cquery -c opt --output=files //crates/pngcrush 2>/dev/null)" &&
+          cd swiftui_macros &&
+          bazel test //...'
       - uses: actions/upload-artifact@v7
         with:
           name: ported-tools-linux-${{ matrix.arch }}
