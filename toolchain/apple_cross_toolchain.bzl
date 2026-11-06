@@ -614,6 +614,7 @@ def _apple_cross_toolchain_impl(rctx):
         "%{swift_feature_allowlists}": repr(rctx.attr.swift_feature_allowlists),
         "%{swift_generated_header_rewriter}": repr(rctx.attr.swift_generated_header_rewriter or None),
         "%{swift_package_configurations}": repr(rctx.attr.swift_package_configurations),
+        "%{swift_system_sdk}": repr("@" + rctx.attr.swift_system_sdk if rctx.attr.swift_system_sdk else None),
         "%{toolchain_path_prefix}": toolchain_path_prefix,
     }
 
@@ -918,6 +919,7 @@ repository's release. A content-addressed server takes
         "swift_feature_allowlists": attr.string_list(doc = "configure()'s swift_feature_allowlists, as canonical labels."),
         "swift_generated_header_rewriter": attr.string(doc = "configure()'s swift_generated_header_rewriter, as a canonical label."),
         "swift_package_configurations": attr.string_list(doc = "configure()'s swift_package_configurations, as canonical labels."),
+        "swift_system_sdk": attr.string(doc = "The apple_cross_system_sdk repository with the SDKs' explicit module targets, if any."),
         "swift_tools_macos": attr.string(
             doc = "Label of a rules_swift swift_tools target from swift.org's macOS Swift, used by Swift toolchains for macOS execution platforms.",
         ),

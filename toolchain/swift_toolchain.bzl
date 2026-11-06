@@ -22,6 +22,7 @@ load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
     "@rules_swift//swift:providers.bzl",
     "SwiftFeatureAllowlistInfo",
+    "SwiftInfo",
     "SwiftPackageConfigurationInfo",
     "SwiftToolsInfo",
 )
@@ -43,6 +44,7 @@ load(
     "SWIFT_FEATURE_REWRITE_GENERATED_HEADER",
     "SWIFT_FEATURE_REMAP_XCODE_PATH",
     "SWIFT_FEATURE_STATIC_STDLIB",
+    "SWIFT_FEATURE_USE_C_MODULES",
     "SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR",
     "SWIFT_FEATURE__SUPPORTS_HERMETIC_SWIFTMODULE",
 )
@@ -61,6 +63,8 @@ load(
 )
 load(
     "@rules_swift//swift/internal:utils.bzl",
+    "collect_cross_import_overlays",
+    "collect_implicit_deps_providers",
     "is_exec_config",
 )
 load(
@@ -193,6 +197,34 @@ def _make_resource_directory_configurator(developer_dir):
 
     return _resource_directory_configurator
 
+def _is_hermetic_pcm_config(action_config):
+    """Whether an action config is rules_swift's `-hermetic-pcm` request.
+
+    rules_swift has the worker rewrite each C module precompile so its
+    resource directory sits inside DEVELOPER_DIR, taking that directory from
+    the frontend's own location. That holds for Xcode's Swift, not for
+    swift.org's beside a staged Xcode, on either execution platform: the
+    worker fails, and would otherwise replace the toolchain's -resource-dir
+    (Xcode's, with the Apple platforms' Swift modules) with swift.org's.
+    Without it the precompiles are as hermetic: every path they take is the
+    staged tree's, relative to the execution root. The config is recognised
+    by the one flag it adds, read by running its configurator if that is one
+    of add_arg's (the only lambdas in rules_swift's action_config.bzl, which
+    take no prerequisites).
+    """
+    if action_config.actions != [_SWIFT_ACTION_PRECOMPILE_C_MODULE]:
+        return False
+    if action_config.features or len(action_config.configurators) != 1:
+        return False
+    configurator = action_config.configurators[0]
+    if not (str(configurator).startswith("<function lambda from ") and
+            str(configurator).endswith("//swift/toolchains/config:action_config.bzl>")):
+        return False
+    added = []
+    recorder = struct(add = lambda *args, **kwargs: added.extend(args))
+    configurator(None, recorder)
+    return added == ["-Xwrapped-swift=-hermetic-pcm"]
+
 def _make_tool_configs(additional_tools, swift_tools, synthesize_interface, developer_dir, toolchain_path, xcode_env):
     """Creates tool configurations for Swift actions."""
 
@@ -236,12 +268,24 @@ def _make_tool_configs(additional_tools, swift_tools, synthesize_interface, deve
         worker_mode = "wrap",
     )
 
+    # The frontend itself, as rules_swift's toolchains compile module
+    # interfaces: their flags for it (-explicit-swift-module-map-file among
+    # them) are the frontend's.
+    frontend_tool_config = ToolConfigInfo(
+        additional_tools = additional_tools,
+        args = ["-frontend"],
+        env = env,
+        executable = swift_tools.swift_driver,
+        use_param_file = True,
+        worker_mode = "wrap",
+    )
+
     tool_configs = {
         _SWIFT_ACTION_COMPILE: persistent_tool_config,
         _SWIFT_ACTION_DERIVE_FILES: persistent_tool_config,
         _SWIFT_ACTION_DUMP_AST: persistent_tool_config,
         _SWIFT_ACTION_PRECOMPILE_C_MODULE: wrap_tool_config,
-        _SWIFT_ACTION_COMPILE_MODULE_INTERFACE: wrap_tool_config,
+        _SWIFT_ACTION_COMPILE_MODULE_INTERFACE: frontend_tool_config,
         _SWIFT_ACTION_SYMBOL_GRAPH_EXTRACT: ToolConfigInfo(
             additional_tools = additional_tools,
             env = env,
@@ -415,6 +459,21 @@ def _swift_toolchain_impl(ctx):
         environment = environment,
     )
 
+    # The same at the SDK's version, as rules_swift's Xcode toolchain targets
+    # Clang modules: every module precompiles for it, so one precompile serves
+    # every deployment target.
+    if info.platform_type == "macos":
+        apple_platform = apple_common.platform.macos
+    else:
+        apple_platform = getattr(apple_common.platform, info.platform_type + ("_simulator" if is_simulator else "_device"))
+    sdk_version = str(xcode_config.sdk_version_for_platform(apple_platform))
+    sdk_version_triple = "{arch}-apple-{os}{version}{environment}".format(
+        arch = arch,
+        os = info.os_name,
+        version = sdk_version,
+        environment = environment,
+    )
+
     # Compute SDK path. The version-neutral symlink is used rather than a
     # versioned directory name so the toolchain works with whatever Xcode
     # produced the SDK tree.
@@ -455,8 +514,35 @@ def _swift_toolchain_impl(ctx):
     action_configs = [
         # Target triple
         ActionConfigInfo(
-            actions = all_compile_actions,
+            actions = [a for a in all_compile_actions if a != _SWIFT_ACTION_PRECOMPILE_C_MODULE],
             configurators = [add_arg("-target", target_triple)],
+        ),
+        # As rules_swift's Xcode toolchain (and Xcode) precompile Clang
+        # modules: for the SDK's version, which compiles that import them
+        # name as their -clang-target under explicit modules.
+        ActionConfigInfo(
+            actions = [_SWIFT_ACTION_PRECOMPILE_C_MODULE],
+            configurators = [add_arg("-target", sdk_version_triple)],
+        ),
+        ActionConfigInfo(
+            actions = [
+                _SWIFT_ACTION_COMPILE,
+                _SWIFT_ACTION_DERIVE_FILES,
+                _SWIFT_ACTION_DUMP_AST,
+                _SWIFT_ACTION_PRECOMPILE_C_MODULE,
+                _SWIFT_ACTION_SYNTHESIZE_INTERFACE,
+            ],
+            configurators = [add_arg("-Xfrontend", "-clang-target"), add_arg("-Xfrontend", sdk_version_triple)],
+            features = [SWIFT_FEATURE_USE_C_MODULES],
+        ),
+        ActionConfigInfo(
+            # Run as the frontend itself, which takes no -Xfrontend.
+            actions = [
+                _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
+                _SWIFT_ACTION_SYMBOL_GRAPH_EXTRACT,
+            ],
+            configurators = [add_arg("-clang-target", sdk_version_triple)],
+            features = [SWIFT_FEATURE_USE_C_MODULES],
         ),
         # SDK path (now includes module interface compilation)
         ActionConfigInfo(
@@ -547,11 +633,14 @@ def _swift_toolchain_impl(ctx):
     action_configs.append(ActionConfigInfo(
         actions = [
             _SWIFT_ACTION_COMPILE,
-            _SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
             _SWIFT_ACTION_DERIVE_FILES,
             _SWIFT_ACTION_DUMP_AST,
         ],
         configurators = [add_arg("-Xfrontend", "-enable-cross-import-overlays")],
+    ))
+    action_configs.append(ActionConfigInfo(
+        actions = [_SWIFT_ACTION_COMPILE_MODULE_INTERFACE],
+        configurators = [add_arg("-enable-cross-import-overlays")],
     ))
 
     # --@rules_swift//swift:copt (and its exec twin, for an exec build), as
@@ -574,6 +663,7 @@ def _swift_toolchain_impl(ctx):
         additional_swiftc_copts = swiftcopts,
         generated_header_rewriter = ctx.executable.generated_header_rewriter,
     ))
+    action_configs = [c for c in action_configs if not _is_hermetic_pcm_config(c)]
     action_configs.extend(modulewrap_action_configs())
     action_configs.extend(symbol_graph_action_configs())
     action_configs.extend(compile_module_interface_action_configs())
@@ -668,7 +758,7 @@ def _swift_toolchain_impl(ctx):
             swift_infos = [],
         ),
         const_protocols_to_gather = ctx.file._const_protocols_to_gather,
-        cross_import_overlays = [],
+        cross_import_overlays = collect_cross_import_overlays(ctx.attr.cross_import_overlays),
         debug_outputs_provider = None,
         developer_dirs = [],
         # Like rules_swift's Xcode toolchain, the runtime comes from the SDK.
@@ -692,13 +782,13 @@ def _swift_toolchain_impl(ctx):
         root_dir = toolchain_root,
         static_runtime_cc_info = None,
         swift_worker = ctx.attr._worker[DefaultInfo].files_to_run,
-        system_modules = struct(
-            cc_infos = [],
-            swift_infos = [],
+        # The SDKs' explicit module targets (configure()'s
+        # swift_system_modules), as rules_swift's Xcode toolchain has them.
+        system_modules = collect_implicit_deps_providers(
+            [ctx.attr.system_modules] if ctx.attr.system_modules else [],
         ),
-        implicit_system_modules = struct(
-            cc_infos = [],
-            swift_infos = [],
+        implicit_system_modules = collect_implicit_deps_providers(
+            [ctx.attr.implicit_system_modules] if ctx.attr.implicit_system_modules else [],
         ),
         test_configuration = struct(
             binary_name = "{name}",
@@ -726,6 +816,10 @@ swift_toolchain = rule(
         "copts": attr.string_list(
             doc = "Swift flags for every compile with this toolchain, before --@rules_swift//swift:copt's.",
         ),
+        "cross_import_overlays": attr.label_list(
+            doc = "The SDKs' cross-import overlays, as rules_swift's Xcode toolchain's " +
+                  "`cross_import_overlays`.",
+        ),
         "cpu": attr.string(
             mandatory = True,
             doc = "The target CPU (e.g. ios_arm64, darwin_arm64).",
@@ -748,6 +842,17 @@ swift_toolchain = rule(
                   "toolchain's `generated_header_rewriter`: the compile's " +
                   "command line follows its `--` argument.",
             executable = True,
+        ),
+        "implicit_system_modules": attr.label(
+            providers = [[CcInfo, SwiftInfo]],
+            doc = "The system modules every Swift compile needs (Swift, SwiftShims and " +
+                  "others), as rules_swift's Xcode toolchain's `implicit_system_modules`.",
+        ),
+        "system_modules": attr.label(
+            providers = [[CcInfo, SwiftInfo]],
+            doc = "All of the SDK's system modules, implicit dependencies under " +
+                  "swift.add_default_precompiled_modules, as rules_swift's Xcode " +
+                  "toolchain's `system_modules`.",
         ),
         "package_configurations": attr.label_list(
             providers = [[SwiftPackageConfigurationInfo]],
