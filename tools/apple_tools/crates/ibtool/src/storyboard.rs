@@ -1326,6 +1326,9 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
         }
         None => (None, None, default_size.ok_or("a font is required")?, "regular"),
     };
+    // The system font's own name is the regular system font (one of the
+    // corpus's).
+    let name = name.filter(|n| *n != ".AppleSystemUIFont");
     // Xcode archives a font it finds under its own name.
     let name = name.map(|name| fonts::ALIASES.iter().find(|(a, _)| *a == name).map_or(name, |(_, to)| to));
     let key = format!("font:{style:?}:{name:?}:{size}:{face}");
@@ -2103,6 +2106,9 @@ struct Scene<'a> {
     /// Visual effect views and their content views, whose subviews the
     /// objects list before their constraints.
     effect_contents: Vec<String>,
+    /// Visual effect views' content views, whose subviews are listed with
+    /// them in their effect view's turn.
+    effect_content_views: Vec<String>,
     /// Subviews with a safe-area guide no constraint uses, once per
     /// placeholder guide the objects list in their turn.
     unused_guides: Vec<String>,
@@ -2160,6 +2166,7 @@ impl<'a> Scene<'a> {
             view_outlets: Vec::new(),
             pairs: Vec::new(),
             effect_contents: Vec::new(),
+            effect_content_views: Vec::new(),
             unused_guides: Vec::new(),
             safe_areas: Vec::new(),
             layout_guides: Vec::new(),
@@ -2293,10 +2300,22 @@ fn record_variation(nib: &mut Nib, id: &str, name: &str, excluded: &[&str], cand
     };
     let mut names = Vec::new();
     for e in excluded {
+        // An item's own aspect ratio held by this view is the item's, and
+        // excluding it here changes nothing (two corpus xibs).
+        let moved = candidates.first().and_then(|c| c.0.document().descendants().find(|d| d.has_tag_name("constraint") && d.attribute("id") == Some(*e)))
+            .is_some_and(|d| d.attribute("firstItem").is_some() && d.attribute("firstItem") == d.attribute("secondItem"));
+        if moved {
+            continue;
+        }
         match candidates.iter().find(|c| c.0.attribute("id") == Some(*e)) {
             Some(c) => names.push(c.1.clone()),
             None => return fail(format!("a variation excluding {e}, which isn't one of the view's own constraints, is not supported by this ibtool")),
         }
+    }
+    // Nothing left excluded is no variation at all (a corpus xib).
+    if names.is_empty() {
+        nib.varied.push(id.to_string());
+        return Ok(());
     }
     variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names });
     nib.varied.push(id.to_string());
@@ -3066,6 +3085,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // Its content view is its child, holding its subviews.
             let content_name = view_name(attr(content, "id")?);
             scene.subviews.push((Some(name.clone()), content_name.clone()));
+            scene.effect_content_views.push(content_name.clone());
             let mut cv = Vec::new();
             geometry(&mut cv, &frame(content)?);
             let mut inner = Vec::new();
@@ -3355,8 +3375,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     let Value::New(mut o) = parts.value else { unreachable!() };
                     o.values.push(("UINavigationBar", reference(name.clone())));
                     items.push(Value::New(o));
+                    // Its bar button items in its own turn, after the
+                    // views' beside the bar (a corpus storyboard).
+                    scene.toolbar_items.push((item_name.clone(), parts.bar_items));
                     names.push(item_name);
-                    names.extend(parts.bar_items);
                     for (selector, source, _) in parts.actions {
                         scene.actions.push((selector, source, 0, "upstream".into()));
                     }
@@ -7485,10 +7507,22 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 if let Some((_, view)) = v.and_then(|v| scene.item_views.iter().find(|t| &t.0 == v)) {
                     objects.push(reference(view.clone()));
                 }
-                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !pulled.contains(&s.1) && !held_pulled.iter().any(|p| p.1 == s.1) && Some(&s.1) != layout_child.as_ref()) {
+                let inlined = v.is_some_and(|v| scene.effect_content_views.contains(v));
+                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !inlined && !pulled.contains(&s.1) && !held_pulled.iter().any(|p| p.1 == s.1) && Some(&s.1) != layout_child.as_ref()) {
                     objects.push(reference(s.clone()));
                     order.push(s.clone());
                     queue.push_back((depth + 1, Some(s)));
+                    // A visual effect view's content view's subviews follow
+                    // it, before the effect view's own constraints (a
+                    // corpus storyboard; a probe of one with the content's
+                    // constraints fits either way).
+                    if scene.effect_content_views.contains(s) {
+                        for (_, c) in scene.subviews.iter().filter(|c| c.0.as_ref() == Some(s)) {
+                            objects.push(reference(c.clone()));
+                            order.push(c.clone());
+                            queue.push_back((depth + 2, Some(c)));
+                        }
+                    }
                 }
                 if let Some(v) = v.filter(|_| subviews_first) {
                     objects.extend(constraints(v));

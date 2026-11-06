@@ -2410,7 +2410,6 @@ ComicSansMS
 ComicSansMS-Bold
 CorsivaHebrew
 CorsivaHebrew-Bold
-Courier
 Courier-Bold
 Courier-BoldOblique
 Courier-Oblique
