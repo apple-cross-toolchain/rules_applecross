@@ -115,6 +115,7 @@ apple_cross_toolchain.configure(
     swift_tools_macos = "@applecross_swift_xcode//:tools",
     # Checked by tests/swift_toolchain_attrs.
     swift_copts = ["-DAPPLECROSS_SWIFT_COPTS"],
+    swift_generated_header_rewriter = "//tests/swift_toolchain_attrs:header_rewriter.py",
     swift_package_configurations = ["//tests/swift_toolchain_attrs:warnings_as_errors"],
 )
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")

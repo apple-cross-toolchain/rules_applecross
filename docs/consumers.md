@@ -238,6 +238,7 @@ apple_cross_toolchain.configure(
     swift_default_enabled_features = ["swift.emit_symbol_graph"],
     swift_default_unsupported_features = [],
     swift_feature_allowlists = ["//build:swift_allowlist"],
+    swift_generated_header_rewriter = "//build:rewrite_generated_header",
     swift_package_configurations = ["//build:strict_packages"],
 )
 ```
@@ -245,6 +246,16 @@ apple_cross_toolchain.configure(
 `swift_copts` come before `--@rules_swift//swift:copt`'s. The
 `swift_feature_allowlist` and `swift_package_configuration` targets must be
 visible to the toolchain's repository (`//visibility:public`).
+
+`swift_generated_header_rewriter` is rules_swift's Xcode toolchain's
+`generated_header_rewriter`: an executable that rewrites the Objective-C header
+a Swift compile generates (`<module>-Swift.h`), run after that compile with the
+compile's command line after a `--` argument. Setting it enables
+`swift.rewrite_generated_header`, the feature under which rules_swift runs it,
+for every Swift target (a target's `features` can still turn it off).
+rules_swift gives the rewriter no runfiles, so it must run as it is: a script
+or a self-contained binary. Like the targets above, it must be visible to the
+toolchain's repository.
 
 ## Layering check
 

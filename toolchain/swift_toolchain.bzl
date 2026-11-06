@@ -40,6 +40,7 @@ load(
     "SWIFT_FEATURE_MODULE_HOME_IS_CWD",
     "SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD",
     "SWIFT_FEATURE_MODULE_MAP_NO_PRIVATE_HEADERS",
+    "SWIFT_FEATURE_REWRITE_GENERATED_HEADER",
     "SWIFT_FEATURE_REMAP_XCODE_PATH",
     "SWIFT_FEATURE_STATIC_STDLIB",
     "SWIFT_FEATURE__SUPPORTS_DEVELOPER_DIR",
@@ -571,6 +572,7 @@ def _swift_toolchain_impl(ctx):
             ctx.fragments.objc,
         ),
         additional_swiftc_copts = swiftcopts,
+        generated_header_rewriter = ctx.executable.generated_header_rewriter,
     ))
     action_configs.extend(modulewrap_action_configs())
     action_configs.extend(symbol_graph_action_configs())
@@ -604,6 +606,10 @@ def _swift_toolchain_impl(ctx):
             SWIFT_FEATURE__SUPPORTS_CONST_GATHER_PROTOCOLS_LIST,
         ])
     requested_features.extend(ctx.attr.default_enabled_features)
+    # A rewriter is only run under its feature (rules_swift's Xcode toolchain
+    # leaves enabling it to the user); one given here is meant to run.
+    if ctx.attr.generated_header_rewriter:
+        requested_features.append(SWIFT_FEATURE_REWRITE_GENERATED_HEADER)
     if ctx.attr.exec_os == "macos":
         # As in rules_swift's Xcode toolchain: the compiler cannot run macro
         # plugins in its own sandbox from inside Bazel's.
@@ -733,6 +739,15 @@ swift_toolchain = rule(
         "feature_allowlists": attr.label_list(
             providers = [[SwiftFeatureAllowlistInfo]],
             doc = "swift_feature_allowlist targets: the packages that may enable or disable their features.",
+        ),
+        "generated_header_rewriter": attr.label(
+            allow_files = True,
+            cfg = "exec",
+            doc = "An executable run after each compile that generates an " +
+                  "Objective-C header, to rewrite it, as rules_swift's Xcode " +
+                  "toolchain's `generated_header_rewriter`: the compile's " +
+                  "command line follows its `--` argument.",
+            executable = True,
         ),
         "package_configurations": attr.label_list(
             providers = [[SwiftPackageConfigurationInfo]],
