@@ -1,0 +1,11 @@
+[package]
+name = "xcsdk"
+description = "A developer directory's platforms, SDKs and toolchains, as xcrun finds them."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+plist.workspace = true
+plist-formats.workspace = true
+thiserror.workspace = true

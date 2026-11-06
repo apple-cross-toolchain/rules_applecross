@@ -1,0 +1,13 @@
+[package]
+name = "xcrun"
+description = "Finds and runs developer tools and SDKs, like Xcode's xcrun."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+xcsdk.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["process"] }

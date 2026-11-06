@@ -1,0 +1,18 @@
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+rust_library(
+    name = "acdriver",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//crates/plist-formats",
+        "//crates/xcassets",
+        "@crates//:plist",
+    ],
+)
+
+rust_test(
+    name = "test",
+    crate = ":acdriver",
+)

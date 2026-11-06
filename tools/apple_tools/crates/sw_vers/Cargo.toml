@@ -1,0 +1,10 @@
+[package]
+name = "sw_vers"
+description = "Reports the macOS SDK's version, like macOS's sw_vers."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+xcsdk.workspace = true

@@ -14,9 +14,9 @@ rust_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":deflate_parts",
+        "//crates/acdriver",
         "//crates/cf",
         "//crates/lzfse",
-        "//xcbuild/crates/xcbuild-acdriver",
         "@crates//:hayro",
         "@crates//:libz-sys",
         "@crates//:png",

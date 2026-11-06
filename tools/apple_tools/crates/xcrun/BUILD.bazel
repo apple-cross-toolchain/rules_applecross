@@ -1,0 +1,13 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+
+rust_binary(
+    name = "xcrun",
+    srcs = ["src/main.rs"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//crates/xcsdk",
+        "@crates//:anyhow",
+        "@crates//:clap",
+        "@crates//:nix",
+    ],
+)

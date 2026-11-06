@@ -7,7 +7,10 @@ while bundling.
 
 ## How they were made
 
-Every tool here was developed clean-room, as a black box. Each one was
+Every tool here was developed clean-room, as a black box, except
+`PlistBuddy`, `plutil`, `sw_vers`, `xcrun` and actool's fallback
+(`acdriver`), which with the crates they use come from an earlier Rust port
+of an open-source reimplementation of Xcode's tools. Each clean-room tool was
 derived from what an unmodified Xcode 27.0 tool does with inputs written for
 the purpose, and from published material, and checked again against Xcode
 27.2's (tests/*/update_expected.py record each suite's expected outputs
@@ -70,8 +73,8 @@ top-level [README.md](../../README.md#byte-identical-output):
   that may round apart from Xcode's; images stored as it chooses where
   Xcode's choice isn't established (atlas splits, dmp2 streams, bitmap key
   order: [actool.md](actool.md#storage-xcodes-choice-isnt-established-for));
-  catalogs it can't reproduce handed to xcbuild's actool
-  (`tools/apple_tools/xcbuild`);
+  catalogs it can't reproduce, their images and data copied uncompiled,
+  with no `Assets.car` (`tools/apple_tools/crates/acdriver`);
 - `ibtool`: files it can't compile left uncompiled, as the stub it replaced
   did;
 - `pngcrush`: PNGs other than 8-bit RGB and RGBA copied as they are;

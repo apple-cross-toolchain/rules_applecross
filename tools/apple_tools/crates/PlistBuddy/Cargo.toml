@@ -1,0 +1,15 @@
+[package]
+name = "plist-buddy"
+description = "Reads and edits property lists, like macOS's PlistBuddy."
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "PlistBuddy"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+plist.workspace = true
+plist-formats.workspace = true
+rustyline.workspace = true

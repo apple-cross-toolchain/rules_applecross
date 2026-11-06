@@ -1,0 +1,12 @@
+[package]
+name = "plist-formats"
+description = "Property lists in XML, binary, OpenStep and JSON, for plutil and PlistBuddy."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+plist.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

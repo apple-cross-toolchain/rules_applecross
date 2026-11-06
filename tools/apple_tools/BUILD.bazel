@@ -1,14 +1,14 @@
 filegroup(
     name = "tools",
     srcs = [
+        "//crates/PlistBuddy",
         "//crates/actool",
         "//crates/codesign",
         "//crates/ibtool",
+        "//crates/plutil",
         "//crates/pngcrush",
+        "//crates/sw_vers",
         "//crates/swift-stdlib-tool",
-        "//xcbuild/tools/PlistBuddy",
-        "//xcbuild/tools/plutil",
-        "//xcbuild/tools/sw_vers",
-        "//xcbuild/tools/xcrun",
+        "//crates/xcrun",
     ],
 )

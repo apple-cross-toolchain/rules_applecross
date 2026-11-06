@@ -39,8 +39,9 @@ build:relax_actool_vector --action_env=RULES_APPLECROSS_RELAX_ACTOOL_VECTOR=1
 # atlases split next-fit, dmp2 streams near a margin or tied, bitmap keys in
 # CoreFoundation's order for an identifier count whose growth isn't pinned.
 build:relax_actool_storage --action_env=RULES_APPLECROSS_RELAX_ACTOOL_STORAGE=1
-# Asset catalogs this actool can't reproduce, handed to xcbuild's actool.
-build:relax_actool_xcbuild --action_env=RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD=1
+# Asset catalogs this actool can't reproduce, their images and data copied
+# uncompiled, with no Assets.car.
+build:relax_actool_uncompiled --action_env=RULES_APPLECROSS_RELAX_ACTOOL_UNCOMPILED=1
 # DocC archives without Xcode's render template (an SDK archive packaged
 # before it was kept), with swift.org's.
 build:relax_docc --action_env=RULES_APPLECROSS_RELAX_DOCC=1
@@ -76,7 +77,7 @@ build:relaxed --config=relax_actool_icon_composer
 build:relaxed --config=relax_actool_tvos_radiosity
 build:relaxed --config=relax_actool_vector
 build:relaxed --config=relax_actool_storage
-build:relaxed --config=relax_actool_xcbuild
+build:relaxed --config=relax_actool_uncompiled
 build:relaxed --config=relax_docc
 build:relaxed --config=relax_ibtool
 build:relaxed --config=relax_momc

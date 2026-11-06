@@ -1,0 +1,10 @@
+[package]
+name = "plutil"
+description = "Checks, converts and edits property lists, like macOS's plutil."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+plist.workspace = true
+plist-formats.workspace = true

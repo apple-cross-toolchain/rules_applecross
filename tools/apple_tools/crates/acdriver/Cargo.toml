@@ -1,0 +1,10 @@
+[package]
+name = "acdriver"
+description = "Copies the images and data of asset catalogs actool can't compile, with no Assets.car."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+plist.workspace = true
+plist-formats.workspace = true
+xcassets.workspace = true

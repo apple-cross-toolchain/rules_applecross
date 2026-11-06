@@ -2,7 +2,7 @@
 //! default: its output is Xcode's byte for byte, or the build fails. Each
 //! deviation can be accepted on its own (see [`relaxed`]): Icon Composer
 //! documents rendered flat, tvOS radiosity images that may round apart from
-//! Xcode's, and catalogs handed to xcbuild's actool.
+//! Xcode's, and catalogs copied uncompiled.
 
 mod bom;
 mod car;
@@ -1155,14 +1155,14 @@ fn main() -> ExitCode {
     }
 }
 
-/// An input this actool can't compile as Xcode would: an error, or
-/// xcbuild's actool when that deviation is accepted.
+/// An input this actool can't compile as Xcode would: an error, or its
+/// catalogs copied uncompiled when that deviation is accepted.
 fn refuse(args: &[String], reason: &str) -> ExitCode {
-    if !relaxed("ACTOOL_XCBUILD") {
+    if !relaxed("ACTOOL_UNCOMPILED") {
         eprintln!("error: {reason}");
-        eprintln!("note: strict output must be byte-identical to Xcode's; --config=relax_actool_xcbuild hands such input to xcbuild's actool");
+        eprintln!("note: strict output must be byte-identical to Xcode's; --config=relax_actool_uncompiled copies such catalogs' images and data uncompiled");
         return ExitCode::FAILURE;
     }
-    eprintln!("note: {reason}; compiling with xcbuild's actool instead");
-    ExitCode::from(xcbuild_acdriver::run(args).clamp(0, 255) as u8)
+    eprintln!("note: {reason}; copying the catalogs' images and data uncompiled instead");
+    ExitCode::from(acdriver::run(args).clamp(0, 255) as u8)
 }

@@ -1,25 +1,22 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/PlistBuddy",
+    "crates/acdriver",
     "crates/actool",
     "crates/cf",
     "crates/codesign",
     "crates/ibtool",
     "crates/lzfse",
     "crates/macho",
+    "crates/plist-formats",
+    "crates/plutil",
     "crates/pngcrush",
+    "crates/sw_vers",
     "crates/swift-stdlib-tool",
-    "xcbuild/crates/xcbuild-acdriver",
-    "xcbuild/crates/xcbuild-bom",
-    "xcbuild/crates/xcbuild-car",
-    "xcbuild/crates/xcbuild-pbxsetting",
-    "xcbuild/crates/xcbuild-plist",
-    "xcbuild/crates/xcbuild-sdk",
-    "xcbuild/crates/xcbuild-xcassets",
-    "xcbuild/tools/PlistBuddy",
-    "xcbuild/tools/plutil",
-    "xcbuild/tools/sw_vers",
-    "xcbuild/tools/xcrun",
+    "crates/xcassets",
+    "crates/xcrun",
+    "crates/xcsdk",
 ]
 
 [workspace.package]
@@ -28,21 +25,23 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
+acdriver = { path = "crates/acdriver" }
 anyhow = "1"
-byteorder = "1"
 cf = { path = "crates/cf" }
 clap = { version = "4", features = ["derive"] }
 flate2 = "1"
 lzfse = { path = "crates/lzfse" }
 macho = { path = "crates/macho" }
 plist = "1"
+plist-formats = { path = "crates/plist-formats" }
 rsa = { version = "0.9", features = ["sha2", "pem"] }
 rustyline = "15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 x509-cert = { version = "0.2", features = ["pem"] }
-xcbuild-acdriver = { path = "xcbuild/crates/xcbuild-acdriver" }
+xcassets = { path = "crates/xcassets" }
+xcsdk = { path = "crates/xcsdk" }
 
 [profile.release]
 codegen-units = 1

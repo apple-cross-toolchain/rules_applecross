@@ -1,0 +1,11 @@
+[package]
+name = "xcassets"
+description = "Asset catalogs' folders and their Contents.json."
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

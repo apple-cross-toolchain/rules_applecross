@@ -9,9 +9,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
+name = "acdriver"
+version = "0.1.0"
+dependencies = [
+ "plist",
+ "plist-formats",
+ "xcassets",
+]
+
+[[package]]
 name = "actool"
 version = "0.1.0"
 dependencies = [
+ "acdriver",
  "cc",
  "cf",
  "hayro",
@@ -24,7 +34,6 @@ dependencies = [
  "svgtypes",
  "tiny-skia",
  "usvg",
- "xcbuild-acdriver",
 ]
 
 [[package]]
@@ -174,12 +183,6 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
-
-[[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "byteorder-lite"
@@ -1051,8 +1054,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "plist",
+ "plist-formats",
  "rustyline",
- "xcbuild-plist",
+]
+
+[[package]]
+name = "plist-formats"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "plist",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1061,7 +1075,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "plist",
- "xcbuild-plist",
+ "plist-formats",
 ]
 
 [[package]]
@@ -1530,7 +1544,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "xcbuild-sdk",
+ "xcsdk",
 ]
 
 [[package]]
@@ -1870,65 +1884,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "xcbuild-acdriver"
-version = "0.1.0"
-dependencies = [
- "plist",
- "xcbuild-car",
- "xcbuild-plist",
- "xcbuild-xcassets",
-]
-
-[[package]]
-name = "xcbuild-bom"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "thiserror",
-]
-
-[[package]]
-name = "xcbuild-car"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "flate2",
- "thiserror",
- "xcbuild-bom",
-]
-
-[[package]]
-name = "xcbuild-pbxsetting"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "thiserror",
- "xcbuild-plist",
-]
-
-[[package]]
-name = "xcbuild-plist"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "plist",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "xcbuild-sdk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "plist",
- "thiserror",
- "xcbuild-plist",
-]
-
-[[package]]
-name = "xcbuild-xcassets"
+name = "xcassets"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1944,8 +1900,17 @@ dependencies = [
  "anyhow",
  "clap",
  "nix",
- "xcbuild-pbxsetting",
- "xcbuild-sdk",
+ "xcsdk",
+]
+
+[[package]]
+name = "xcsdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "plist",
+ "plist-formats",
+ "thiserror",
 ]
 
 [[package]]
