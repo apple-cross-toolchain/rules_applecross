@@ -1333,6 +1333,7 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
         return Ok(v);
     }
     let mut values = Vec::new();
+    let mut scaling = true;
     let (font_name, traits, ns_size, system) = match (style, name) {
         (Some(style), _) => {
             let (name, traits, ns_size) = text_style(nib.platform, style)?;
@@ -1342,11 +1343,15 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
             (name, traits, ns_size, true)
         }
         (None, Some(name)) => {
-            // One Xcode doesn't find is archived differently (see ibtool.md).
-            let traits = match fonts::FONTS.binary_search_by(|(n, _)| n.cmp(&name)) {
-                Ok(i) => fonts::FONTS[i].1,
-                Err(_) => return fail(format!("font {name} is not one Xcode's ibtool finds for iOS, which is not supported by this ibtool")),
-            };
+            // One Xcode doesn't find is archived differently (see ibtool.md):
+            // without the scaling keys, with options 0. One
+            // installed on the Mac or in a simulator that Xcode still doesn't
+            // find (Courier) is archived some other way, as are the
+            // system's own hidden names (`.AppleSystemUIFont`): refused.
+            let found = fonts::FONTS.binary_search_by(|(n, _)| n.cmp(&name)).ok().map(|i| fonts::FONTS[i].1);
+            if found.is_none() && (name.starts_with('.') || fonts::installed(name)) {
+                return fail(format!("font {name} is not one Xcode's ibtool finds for iOS, which is not supported by this ibtool"));
+            }
             values.push(("UIFontName", nib.string(name)));
             let name_key = nib.string("NSFontNameAttribute");
             let name_value = nib.string(name);
@@ -1355,9 +1360,10 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
             let attributes = nib.array("NSDictionary", vec![name_key, name_value, size_key, size_value]);
             values.push(("UIFontDescriptor", Value::New(Object::new("UIFontDescriptor", vec![
                 ("UIFontDescriptorAttributes", attributes),
-                ("UIFontDescriptorOptions", Value::Int(0x8000_0000)),
+                ("UIFontDescriptorOptions", Value::Int(if found.is_some() { 0x8000_0000 } else { 0 })),
             ]))));
-            (name, traits, size, false)
+            scaling = found.is_some();
+            (name, found.unwrap_or(0), size, false)
         }
         (None, None) => {
             // The system font's faces: its name, CoreText usage and traits.
@@ -1401,9 +1407,11 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
         }
     };
     values.push(("UIFontPointSize", Value::Double(size)));
-    values.push(("UIFontTextStyleForScaling", Value::Nil));
-    values.push(("UIFontPointSizeForScaling", Value::Double(0.0)));
-    values.push(("UIFontMaximumPointSizeAfterScaling", Value::Double(0.0)));
+    if scaling {
+        values.push(("UIFontTextStyleForScaling", Value::Nil));
+        values.push(("UIFontPointSizeForScaling", Value::Double(0.0)));
+        values.push(("UIFontMaximumPointSizeAfterScaling", Value::Double(0.0)));
+    }
     values.push(("UIFontTraits", Value::Int(traits)));
     values.push(("UISystemFont", Value::Bool(system)));
     values.push(("NSName", nib.string(font_name)));
@@ -1535,8 +1543,22 @@ fn runtime_attributes(nib: &mut Nib, n: Node, name: &str) -> Result<Vec<Value>, 
                 "size" => {
                     only_attributes(a, &[("type", None), ("keyPath", None)])?;
                     let s = child(a, "size", "value").ok_or("a runtime attribute's size without a value")?;
-                    let size = nib.string(&format!("{{{}, {}}}", number(attr(s, "width")?)?, number(attr(s, "height")?)?));
-                    Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", size)]))
+                    // The zero size is one object wherever it is used, as
+                    // UIKit's is (a corpus storyboard and a probe); any other
+                    // is one each (one probe).
+                    let text = format!("{{{}, {}}}", number(attr(s, "width")?)?, number(attr(s, "height")?)?);
+                    let make = |nib: &mut Nib| {
+                        let size = nib.string(&text);
+                        Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", size)])
+                    };
+                    if text != "{0, 0}" {
+                        Value::New(make(nib))
+                    } else if let Some(v) = nib.existing("size:{0, 0}") {
+                        v
+                    } else {
+                        let value = make(nib);
+                        nib.shared("size:{0, 0}".into(), || value)
+                    }
                 }
                 other => return fail(format!("a runtime attribute of type {other} is not supported by this ibtool")),
             };
@@ -4788,8 +4810,7 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
 /// between a leading and a trailing edge the one whose root view's edge is
 /// trailing first (a 272-constraint probe and 40 random ones). Those to
 /// deeper views and between siblings go by first and second attribute in
-/// another order. Equal keys are refused: Xcode leaves them in the
-/// document's order, which it doesn't keep stably.
+/// another order. Equal keys are ordered by `order_ties`.
 fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: bool) -> Result<(&'a str, u8, [usize; 4]), String> {
     // The last baseline (`baseline`) after the first (three probes).
     const SIBLINGS: [&str; 20] = [
@@ -4823,22 +4844,25 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
 /// Puts constraints of the same key (the same first item and attributes,
 /// differing in their second items, all siblings or the `guides`, as their
 /// ties measure them) in Xcode's order: by the length of the line Interface
-/// Builder draws for each, the longest first.
+/// Builder draws for each, the longest first (docs/clean-room/ibtool.md).
 /// An alignment (both attributes the same edge or centre) without a constant,
 /// or any constraint whose edges meet in the frames, is drawn along the edge
 /// across both views, as long as their frames' span across it; any other
 /// constraint between the two edges, as long as the distance between them
-/// (whatever its constant). Probes of 380 scenes, with random frames and
-/// constants, ids and document and subview orders, and edges 0 to 10 apart.
-/// Equal lengths are ordered by id where the second items' frames are the
-/// same, and centres by those frames from the bottom, then from the right
-/// (19 probes); other equal lengths depend on the ids and the geometry in a
-/// way not established, and one centre half a point from another was drawn
-/// along the edge: refused, as are lengths within a point of each other,
-/// edges less than a point apart, and multipliers and margins, which
-/// weren't probed. Before the length come the priority, lowest first, and
-/// the relation: less than or equal, greater than or equal, then equal
-/// (100 probe scenes), and so for the same items twice or more (100 more).
+/// (whatever its constant); equal widths or heights between the two views'
+/// centres. Probes of 380 scenes, with random frames and constants, ids and
+/// document and subview orders, and edges 0 to 10 apart.
+/// Equal lengths go by where the line is, further down or right first (an
+/// edge's line by its middle, a gap's by the middle of where the frames
+/// overlap), then by id, as do gaps whose frames don't overlap and equal
+/// widths or heights at equal distances; centres by those frames from the
+/// bottom, then from the right (19 probes). Twelve probes and 19 corpus
+/// files. Lines of different kinds that tie, lengths within a point of each
+/// other, edges less than a point apart, multipliers and margins are
+/// refused. Before the length come the priority, lowest first, and the
+/// relation: less than or equal, greater than or equal, then equal (100
+/// probe scenes), and so for the same items twice or more (100 more); the
+/// same two items with the same constant, whatever their frames, by id.
 fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 4]), Node<'a, 'i>), siblings: &[Node<'a, 'i>], guides: &[(&str, Frame)]) -> Result<(), String> {
     let unstable = || fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
     // An attribute's axis (0 horizontal, 1 vertical) and where along it
@@ -4879,23 +4903,50 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
                     Some(other) => return fail(format!("the constraint relation {other} is not supported by this ibtool")),
                 };
                 let constant = c.attribute("constant").map_or(Ok(0.0), str::parse::<f64>).map_err(|_| "a constraint's constant is not a number")?;
-                let (Some(f), Some(s)) = (item(c.attribute("firstItem"))?, item(c.attribute("secondItem"))?) else { return unstable() };
                 let (a1, a2) = (c.attribute("firstAttribute").unwrap_or(""), c.attribute("secondAttribute").unwrap_or(""));
+                let id = c.attribute("id").unwrap_or("");
+                let (Some(f), Some(s)) = (item(c.attribute("firstItem"))?, item(c.attribute("secondItem"))?) else {
+                    // The same two items again, with the same constant: by
+                    // id, whatever their frames (three corpus files).
+                    let first = of(&v[start]).1;
+                    let again = v[start..end].iter().all(|t| {
+                        let o = of(t).1;
+                        ["firstItem", "secondItem", "constant"].into_iter().all(|k| o.attribute(k) == first.attribute(k))
+                    });
+                    if !again {
+                        return unstable();
+                    }
+                    run.push(Tied { priority, relation, length: 0.0, line: None, across: false, id, frame: Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 } });
+                    continue;
+                };
+                // Equal widths or heights: drawn between the two views'
+                // centres, the farthest first (three corpus files).
+                if a1 == a2 && (a1 == "width" || a1 == "height") && constant == 0.0 {
+                    let centre = |f: &Frame| (f.x + f.w / 2.0, f.y + f.h / 2.0);
+                    let ((x1, y1), (x2, y2)) = (centre(&f), centre(&s));
+                    run.push(Tied { priority, relation, length: ((x1 - x2).powi(2) + (y1 - y2).powi(2)).sqrt(), line: None, across: false, id, frame: s });
+                    continue;
+                }
                 let (Some((axis, p1)), Some((axis2, p2))) = (edge(a1), edge(a2)) else { return unstable() };
                 if axis != axis2 {
                     return unstable();
                 }
                 let ((a, al), (b, bl)) = (along(&f, axis), along(&s, axis));
                 let gap = (a + p1 * al - (b + p2 * bl)).abs();
-                let length = if (a1 == a2 && constant == 0.0) || gap == 0.0 {
-                    let ((a, al), (b, bl)) = (along(&f, 1 - axis), along(&s, 1 - axis));
-                    (a + al).max(b + bl) - a.min(b)
+                let ((ca, cal), (cb, cbl)) = (along(&f, 1 - axis), along(&s, 1 - axis));
+                let (length, line, across) = if (a1 == a2 && constant == 0.0) || gap == 0.0 {
+                    // Drawn along the edge, across both frames: where its
+                    // middle is.
+                    let (lo, hi) = (ca.min(cb), (ca + cal).max(cb + cbl));
+                    (hi - lo, Some((lo + hi) / 2.0), false)
                 } else if gap >= 1.0 {
-                    gap
+                    // Drawn across the middle of where the two frames overlap.
+                    let (lo, hi) = (ca.max(cb), (ca + cal).min(cb + cbl));
+                    (gap, (hi > lo).then_some((lo + hi) / 2.0), true)
                 } else {
                     return unstable();
                 };
-                run.push(Tied { priority, relation, length, id: c.attribute("id").unwrap_or(""), frame: s });
+                run.push(Tied { priority, relation, length, line, across, id, frame: s });
             }
             let c = of(&v[start]).1;
             let centres = ["centerX", "centerY"].contains(&c.attribute("firstAttribute").unwrap_or("")) && c.attribute("firstAttribute") == c.attribute("secondAttribute");
@@ -4904,7 +4955,9 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
                     let (fa, fb) = (a.frame, b.frame);
                     let same = (fa.x, fa.y, fa.w, fa.h) == (fb.x, fb.y, fb.w, fb.h);
                     let level = (a.priority, a.relation) == (b.priority, b.relation);
-                    if level && (a.length - b.length).abs() < 1.0 && !(a.length == b.length && (same || (centres && (fa.x, fa.y) != (fb.x, fb.y)))) {
+                    // Lines of one kind, both placed or both not.
+                    let placed = !centres && a.across == b.across && a.line.is_some() == b.line.is_some();
+                    if level && (a.length - b.length).abs() < 1.0 && !(a.length == b.length && (same || placed || (centres && (fa.x, fa.y) != (fb.x, fb.y)))) {
                         return unstable();
                     }
                 }
@@ -4912,7 +4965,12 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
             let mut order: Vec<usize> = (0..run.len()).collect();
             order.sort_by(|&i, &j| {
                 let (a, b) = (&run[i], &run[j]);
-                a.priority.total_cmp(&b.priority).then(a.relation.cmp(&b.relation)).then(b.length.total_cmp(&a.length)).then(b.frame.y.total_cmp(&a.frame.y)).then(b.frame.x.total_cmp(&a.frame.x)).then(a.id.cmp(b.id))
+                let base = a.priority.total_cmp(&b.priority).then(a.relation.cmp(&b.relation)).then(b.length.total_cmp(&a.length));
+                match (a.line, b.line) {
+                    (Some(la), Some(lb)) => base.then(lb.total_cmp(&la)).then(a.id.cmp(b.id)),
+                    _ if centres => base.then(b.frame.y.total_cmp(&a.frame.y)).then(b.frame.x.total_cmp(&a.frame.x)).then(a.id.cmp(b.id)),
+                    _ => base.then(a.id.cmp(b.id)),
+                }
             });
             let rank: Vec<&str> = order.iter().map(|&i| run[i].id).collect();
             v[start..end].sort_by_key(|t| rank.iter().position(|id| of(t).1.attribute("id") == Some(*id)));
@@ -4928,6 +4986,11 @@ struct Tied<'a> {
     /// Less than or equal 0, greater than or equal 1, equal 2.
     relation: u8,
     length: f64,
+    /// Where its line is, along the other axis: the middle of where a gap's
+    /// frames overlap (none where they don't), or of an edge's line.
+    line: Option<f64>,
+    /// Drawn across a gap rather than along an edge.
+    across: bool,
     id: &'a str,
     frame: Frame,
 }
@@ -6340,8 +6403,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     // Each scene's files and Info.plist entry, by scene.
     let mut outputs: Vec<(usize, Vec<(String, Vec<u8>)>, Option<(String, bool, bool)>)> = Vec::new();
     let mut roots: HashMap<&str, RootController> = HashMap::new();
-    // Storyboard references by nib name, with what they refer to.
+    // Storyboard references by nib name, with what they refer to, and
+    // their placeholders' ids.
     let mut references: Vec<(String, cf::Value)> = Vec::new();
+    let mut reference_ids: Vec<&str> = Vec::new();
     for (index, scene_node) in scene_nodes.iter().enumerate() {
         let scene_node = *scene_node;
         only_children(scene_node, &["objects", "point"])?;
@@ -6520,6 +6585,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
             target.push(("UIReferencedStoryboardName", cf::Value::string(attr(placeholder, "storyboardName")?)));
             references.push((name, cf::Value::dict(target)));
+            reference_ids.push(id);
             continue;
         }
         if ["navigationController", "tabBarController", "splitViewController"].iter().any(|t| children(objects_node, t).next().is_some()) {
@@ -8114,14 +8180,21 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     }
     info.push(("UIStoryboardVersion", cf::Value::Integer(1)));
     // The identifiers' table is filled in document order (31 identifiers,
-    // and a corpus storyboard's with a reference). The order Xcode adds
-    // storyboard references in isn't established (RxSwift's example, 15
-    // references): where their hashes collide so that it would matter, it is
-    // refused.
+    // and a corpus storyboard's with a reference). Storyboard references are
+    // added in the order their placeholders load, as the Info.plist lists
+    // the controllers (four corpus storyboards, RxSwift's example's 15
+    // references among them); one that doesn't load is refused where the
+    // order would matter.
+    let loaded: Vec<Option<usize>> = reference_ids.iter().map(|id| order.iter().position(|o| o == id)).collect();
+    if loaded.iter().all(Option::is_some) {
+        let mut paired: Vec<_> = loaded.into_iter().zip(references).collect();
+        paired.sort_by_key(|p| p.0);
+        references = paired.into_iter().map(|p| p.1).collect();
+    }
     let keys: Vec<&str> = references.iter().map(|(n, _)| n.as_str()).collect();
     let reversed: Vec<&str> = keys.iter().rev().copied().collect();
     let in_order: Vec<&str> = cf::hash::table_order(&keys).into_iter().map(|i| keys[i]).collect();
-    if in_order != cf::hash::table_order(&reversed).into_iter().map(|i| reversed[i]).collect::<Vec<_>>() {
+    if !reference_ids.iter().all(|id| order.contains(id)) && in_order != cf::hash::table_order(&reversed).into_iter().map(|i| reversed[i]).collect::<Vec<_>>() {
         return fail("storyboard references whose Info.plist table's order would depend on the order Xcode adds them in are not supported by this ibtool");
     }
     info.push(("UIViewControllerIdentifiersToNibNames", cf::Value::dict(identifiers.iter().map(|(n, ..)| (n.clone(), cf::Value::string(n.clone()))))));
