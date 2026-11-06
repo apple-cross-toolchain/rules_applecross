@@ -1,0 +1,3 @@
+import LinuxGreeting
+
+print(greeting())

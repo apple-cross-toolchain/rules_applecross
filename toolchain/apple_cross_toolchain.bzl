@@ -607,6 +607,9 @@ def _apple_cross_toolchain_impl(rctx):
         # The same repository's files (rules_swift's standalone toolchains
         # have them as `:files`).
         "%{swift_files}": swift_tools.rpartition(":")[0] + ":files",
+        # rules_swift's toolchain for its own platform (Linux), beside the
+        # tools in a standalone Swift repository.
+        "%{swift_linux_toolchain}": swift_tools.rpartition(":")[0] + ":swift_toolchain_exec",
         "%{swift_tools_macos}": rctx.attr.swift_tools_macos,
         "%{swift_copts}": repr(rctx.attr.swift_copts),
         "%{swift_default_enabled_features}": repr(rctx.attr.swift_default_enabled_features),
@@ -692,6 +695,26 @@ def _apple_cross_toolchain_impl(rctx):
         _stage_macos_llvm(rctx)
 
     rctx.template("BUILD", build_tpl, substitutions)
+
+    # Outside :all, for a project to register in place of its own C++
+    # toolchain for Linux: rules_swift's, from swift_tools' repository, with
+    # Ubuntu's libraries for Swift's runtime as its sysroot.
+    rctx.file("linux/BUILD.bazel", """\
+toolchain(
+    name = "cc_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:{cpu}",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:{cpu}",
+    ],
+    toolchain = "{toolchain}",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+    visibility = ["//visibility:public"],
+)
+""".format(cpu = cpu, toolchain = swift_tools.rpartition(":")[0] + ":cc_toolchain_exec"))
 
     # layering_check's `crosstool` module: every header of the developer
     # directory, as apple_support generates it on a Mac.

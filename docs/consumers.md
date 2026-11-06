@@ -223,6 +223,25 @@ simulators. rules_apple alone would choose x86_64 there, which a Mac without
 Rosetta refuses to open and its simulators refuse to install, so
 rules_applecross patches the default (patches/rules_apple_arm64_default.patch).
 
+### Swift for Linux itself
+
+Swift that runs on the Linux host (macro plugins, code generators and other
+tools the build runs) compiles with the Swift toolchain
+`@apple_cross_toolchain//:all` registers for Linux: rules_swift's own, from the
+`swift_tools` repository. The project's C++ toolchain for Linux links it.
+Swift's runtime needs libstdc++, libcurl and libxml2, which a hermetic toolchain
+without a sysroot (the `llvm` module's) can't find. Such a project can register
+rules_swift's C++ toolchain for Linux, which has Ubuntu's libraries as its
+sysroot, ahead of its own:
+
+```starlark
+register_toolchains("@apple_cross_toolchain//linux:cc_toolchain")
+```
+
+It then compiles and links all C and C++ for Linux too. Its sysroot is
+rules_swift's, which fetches Ubuntu's packages, and their index, from
+snapshot.ubuntu.com alone.
+
 ## Swift toolchain settings
 
 rules_swift's own toolchains take flags, features and package
