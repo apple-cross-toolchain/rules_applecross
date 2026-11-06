@@ -17,8 +17,8 @@ collection view cell, or a reusable view (below, "Xibs").
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
-Interface Builder 3 to 27), 289 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 131 cases written for this, checked
+Interface Builder 3 to 27), 304 compile byte-identical to Xcode's and the
+rest are refused; none compile differently. `tests/ibtool_xib` holds 138 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -56,7 +56,8 @@ any other (one probe).
   to the cell or its content's views, are the nib's connections, from the
   `IBFilesOwner` proxy, by name (two probes); beside the cell's own
   connections they are refused. The cell's outlets may go to its views'
-  constraints too, as a view's (one probe).
+  constraints too, as a view's (one probe), a collection view cell's
+  likewise (two corpus xibs).
 - **A collection view cell.** A top-level `<collectionViewCell>` compiles
   as a collection view's prototype cell does (Collection views, below),
   with three differences:
@@ -170,7 +171,9 @@ trailer. Observed from Xcode's nibs:
   end, refers back to the 0 a later button's states are keyed by (one
   probe); an integer and a double of one value are one number, of the
   type encoded first (a runtime attribute's `<integer value="16">` is a
-  font size's 16.0 encoded earlier; five probes);
+  font size's 16.0 encoded earlier; five probes); a runtime attribute's
+  zero size is one `NSValue` wherever it is used, any other size one each
+  (a corpus storyboard and a probe);
 - classes are listed in first use, then the fallback classes not already
   listed (UIColor's NSColor, UIFont's NSFont), which the class entry
   references, in byte order: NSColor, NSFont, then UIView for a table
@@ -359,9 +362,19 @@ other values of the attributes these use, is refused. Observed:
   `UISystemFont` false, and its traits (italic 1, bold 2: `Avenir-Black` is
   bold); fonts.rs has them all, measured from one storyboard labelling
   each. A name it doesn't find is archived without the scaling keys and
-  with options 0; since whether it finds a name can't be told from the name,
-  names outside the table are refused. `--auto-activate-custom-fonts`
-  doesn't find a font file beside the storyboard (Rubik-Bold).
+  with options 0, its traits 0 and `UISystemFont` false (seven corpus
+  files: OpenSans, OpenSans-Bold, Inter-Regular, Montserrat-Regular; one
+  probe). A name installed nowhere is one it doesn't find; one installed on
+  the Mac or in a simulator that it doesn't find is archived otherwise
+  (Courier, in the simulators, keeps the scaling keys and options
+  0x80000000; `.AppleSystemUIFont` is the system font) and is refused, as
+  are names starting with a dot. Installed means in the list of every font
+  of macOS 27 (its downloadable system fonts included, 1,605 names) and the
+  iOS 18.4, 18.6, 27.0 and 27.2 simulator runtimes' font files, read with
+  CoreText (`CTFontCollectionCreateFromAvailableFonts`,
+  `CTFontManagerCreateFontDescriptorsFromURL`): fonts.rs's
+  `installed_fonts.txt`. `--auto-activate-custom-fonts` doesn't find a
+  font file beside the storyboard (Rubik-Bold).
 - Legacy layout guides become hidden `_UILayoutGuide` subviews, after the
   others, each with a `_UILayoutSupportConstraint` (width, priority 999),
   `_UIViewControllerTop`/`Bottom` and three constraints pinning it (top:
@@ -440,13 +453,20 @@ other values of the attributes these use, is refused. Observed:
     foot (240 probe scenes on three devices, placed to a quarter point).
   - A view without a frame measures by its laid-out frame (1000x1000 at
     the origin, see subviews: Xcode's Action Extension template).
-  - Equal lengths are left to the earlier rules: second items with the
-    same frame in id order (three of the corpus's), and centres the lower
-    one first, then the one further right (19 probes). Otherwise they
-    depend on the ids and the frames in a way not settled (120 probe
-    scenes), and are refused, as are lengths within a point of each other
-    and edges less than a point apart (a centre half a point from another
-    was drawn along the edge).
+  - Equal lengths go by where the line is, the one further down or right
+    first: a line along an edge by the middle of its span, one across a
+    gap by the middle of where the two frames overlap; equal places, and
+    gaps whose frames don't overlap (the safe-area guide's among them), go
+    by id. Centres go the lower one first, then the one further right (19
+    probes). Lines of different kinds that tie are refused, as are lengths
+    within a point of each other and edges less than a point apart (a
+    centre half a point from another was drawn along the edge). Twelve
+    probes and 19 corpus files, whose orders were read by compiling each
+    order of the tied constraints against Xcode's output.
+  - Equal widths or heights are drawn between the two views' centres: the
+    farthest first, equal distances by id (three corpus files and a
+    probe). The same two items twice with the same constant, whatever
+    their frames, go by id (three corpus files and a probe).
 
   - Before the length come the priority, lowest first (required ones
     last), and the relation: less than or equal, greater than or equal,
@@ -454,8 +474,8 @@ other values of the attributes these use, is refused. Observed:
     more tie as any others do: second items with the same frame, so equal
     lengths go by id (100 more).
 
-  Multipliers, margins and baselines in such ties weren't probed and are
-  refused, as are constraints from a legacy guide (but the bottom guide as the first
+  Multipliers, margins, baselines and widths or heights against another
+  dimension in such ties weren't probed and are refused, as are constraints from a legacy guide (but the bottom guide as the first
   item of a sibling constraint, placed at the root view's foot, three
   probes) or between one and the root view
   (their frames aren't in the document), constraints between the root
@@ -2001,7 +2021,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
   `UICollectionReusableView` (geometry, subviews, `UIDeepDrawRect`,
   multiple touch, `UIAutoresizeSubviews`, `UIContentMode` 4, clipping,
   semantic content and large content properties, `UIReuseIdentifier`), its
-  objects listing an unowned safe-area guide after it, then its subviews
+  objects listing an unowned safe-area guide after it where the document
+  uses safe areas (none without: a corpus storyboard), then its subviews
   breadth first. The flow layout's non-zero `headerReferenceSize` and
   `footerReferenceSize` are `UIHeaderReferenceSize` and
   `UIFooterReferenceSize` after its item size (five probes). A header's
@@ -2195,10 +2216,12 @@ equal keys and values in those are one string each. A reference nothing
 leads to compiles to nothing. Observed with ten probes. A reference's
 empty navigation item is a `UINavigationItem` (an empty
 `UICenterItemGroups`, `UILargeTitleDisplayMode` 0) after the placeholder
-in its nib's objects; anything else inside a reference is refused. The
-order Xcode adds the references' Info.plist table entries in isn't
-established (RxSwift's example, 15 references, fits none tried): where
-their hashes collide so that the order would matter, it is refused. The
+in its nib's objects; anything else inside a reference is refused. Xcode
+adds the references' Info.plist table entries in the order their
+placeholders load, as the controllers are listed (four corpus storyboards,
+RxSwift's example's 15 references among them: document order, its reverse
+and name order don't fit); where one doesn't load and the hashes collide
+so that the order would matter, it is refused. The
 identifiers' table beside them is filled as without references (a corpus
 storyboard with one reference, and RxSwift's 16 identifiers).
 

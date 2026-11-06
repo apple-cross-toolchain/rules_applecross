@@ -3,7 +3,10 @@ load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 rust_binary(
     name = "ibtool",
     srcs = glob(["src/**/*.rs"]),
-    compile_data = ["src/vimage_pow.bin"],
+    compile_data = [
+        "src/installed_fonts.txt",
+        "src/vimage_pow.bin",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//crates/cf",

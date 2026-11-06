@@ -308,4 +308,17 @@ pub const FONTS: &[(&str, i64)] = &[
 ];
 
 /// Names ibtool archives as another font's.
+/// The PostScript names of every other font installed on macOS 27 (its
+/// downloadable system fonts too) or in the iOS 18.4, 18.6, 27.0 and 27.2
+/// simulator runtimes, one per line in byte order, read from their font files
+/// with CoreText: names Xcode archives some other way (Courier, in the
+/// simulator, as neither form), and so refuses. A name in no list is one
+/// Xcode doesn't find (docs/clean-room/ibtool.md).
+pub const INSTALLED: &str = include_str!("installed_fonts.txt");
+
+/// Whether `name` is in `INSTALLED`.
+pub fn installed(name: &str) -> bool {
+    INSTALLED.lines().collect::<Vec<_>>().binary_search(&name).is_ok()
+}
+
 pub const ALIASES: &[(&str, &str)] = &[("STHeitiSC-Light", "PingFangSC-Light")];

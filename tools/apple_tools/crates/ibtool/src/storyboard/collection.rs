@@ -685,9 +685,15 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         }
         for o in children(c, "outlet") {
             only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
-            let destination = view_name(attr(o, "destination")?);
-            if !scene.subviews.iter().any(|s| s.1 == destination) {
-                return fail("a cell's outlets to anything but its content's views are not supported by this ibtool");
+            // One to a constraint of its views as to a view, as a table
+            // view cell's (two corpus xibs).
+            let id = attr(o, "destination")?;
+            let destination = match cell.descendants().find(|d| d.has_tag_name("constraint") && d.attribute("id") == Some(id)) {
+                Some(c) => constraint_name(c)?,
+                None => view_name(id),
+            };
+            if !scene.subviews.iter().any(|s| s.1 == destination) && !scene.own_constraints.iter().any(|c| c.1 == destination) {
+                return fail("a cell's outlets to anything but its content's views and their constraints are not supported by this ibtool");
             }
             outlets.push((attr(o, "property")?, destination));
         }
@@ -797,15 +803,19 @@ fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool,
         Object::new("UICollectionReusableView", values)
     };
     let top = vec![owner, responder, Value::New(object.named(name.clone()))];
-    let identifier = nib.string("");
-    let guide = Value::New(Object::new("UILayoutGuide", vec![
-        ("UILayoutGuideOwningView", Value::Nil),
-        ("UILayoutGuideIdentifier", identifier),
-        ("UILayoutGuideOwningViewIsLocked", Value::Bool(false)),
-        ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
-        ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
-    ]));
-    let mut objects = vec![reference("owner"), reference("responder"), reference(name.clone()), guide];
+    let mut objects = vec![reference("owner"), reference("responder"), reference(name.clone())];
+    // An unowned safe-area guide, in a document that uses safe areas only
+    // (a corpus storyboard without them).
+    if v.document().root_element().attribute("useSafeAreas") == Some("YES") {
+        let identifier = nib.string("");
+        objects.push(Value::New(Object::new("UILayoutGuide", vec![
+            ("UILayoutGuideOwningView", Value::Nil),
+            ("UILayoutGuideIdentifier", identifier),
+            ("UILayoutGuideOwningViewIsLocked", Value::Bool(false)),
+            ("UILayoutGuideShouldBeArchived", Value::Bool(false)),
+            ("UILayoutGuideAllowsNegativeDimensions", Value::Bool(false)),
+        ])));
+    }
     let mut queue: std::collections::VecDeque<String> = [name.clone()].into();
     while let Some(view) = queue.pop_front() {
         objects.extend(scene.own_constraints.iter().filter(|c| c.0 == view).map(|c| reference(c.1.clone())));
