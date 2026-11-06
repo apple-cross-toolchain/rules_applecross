@@ -1,4 +1,5 @@
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "read_netrc", "read_user_netrc", "use_netrc")
+load(":xcode_pin.bzl", "check_xcode_pin")
 load(":xcode_versions.bzl", "XCODE_VERSIONS")
 
 def _download_auth(rctx, urls):
@@ -274,21 +275,25 @@ def _stage_xcode_xip(rctx, cpu):
             ))
     rctx.delete("_xip")
 
-def _check_pinned_xcode(rctx, xcode_version, xcode_build):
-    """Fails unless the staged tree is the Xcode xcode_version pins."""
+def _check_pinned_xcode(rctx, xcode_version, xcode_build, sdk_swift_version):
+    """Fails unless the staged tree satisfies xcode_version's pin (check_xcode_pin)."""
     pinned = _pinned_xcode(rctx)
     if not pinned:
         return
-    if xcode_version != rctx.attr.xcode_version or xcode_build != pinned.build:
-        fail(("xcode_version is {} ({}), but the Apple SDKs staged for @{} are from Xcode {} ({}). " +
-              "On a Mac with another Xcode, --repo_env=RULES_APPLECROSS_LOCAL_XCODE=0 " +
-              "stages the pinned one instead.").format(
-            rctx.attr.xcode_version,
-            pinned.build,
-            rctx.name,
-            xcode_version,
-            xcode_build,
-        ))
+    error, warning = check_xcode_pin(
+        repo = rctx.name,
+        wanted_version = rctx.attr.xcode_version,
+        pinned = pinned,
+        xcode_version = xcode_version,
+        xcode_build = xcode_build,
+        sdk_swift_version = sdk_swift_version,
+        relax_build = rctx.os.environ.get("RULES_APPLECROSS_RELAX_XCODE_BUILD") == "1",
+    )
+    if error:
+        fail(error)
+    if warning:
+        # buildifier: disable=print
+        print(warning)
 
 def _link_local_xcode(rctx, developer_dir, cpu):
     """Links a cross-compilable SDK tree to a locally installed Xcode."""
@@ -322,7 +327,7 @@ def _link_local_xcode(rctx, developer_dir, cpu):
         ))
 
 def _read_xcode_versions(rctx):
-    """Returns (xcode_version, xcode_build, {sdk platform: sdk version}) for the staged tree."""
+    """Returns (xcode_version, xcode_build, SDKs' Swift version, {sdk platform: sdk version}) for the staged tree."""
     result = rctx.execute([
         _python3(rctx),
         str(_toolchain_path(rctx, "repo_tools/read_xcode_versions.py")),
@@ -333,6 +338,7 @@ def _read_xcode_versions(rctx):
 
     xcode_version = ""
     xcode_build = ""
+    swift_version = ""
     sdk_versions = {}
     for line in result.stdout.splitlines():
         fields = line.split(" ")
@@ -340,12 +346,14 @@ def _read_xcode_versions(rctx):
             xcode_version = fields[1]
         elif fields[0] == "build":
             xcode_build = fields[1]
+        elif fields[0] == "swift":
+            swift_version = fields[1]
         elif fields[0] == "sdk":
             sdk_versions[fields[1]] = fields[2]
 
     if not xcode_version:
         fail("Failed to read the Xcode version from the Apple SDK tree")
-    return xcode_version, xcode_build, sdk_versions
+    return xcode_version, xcode_build, swift_version, sdk_versions
 
 def _xcode_version_and_aliases(version, build):
     """Returns the version xcode-locator would report and its aliases, e.g.
@@ -683,8 +691,8 @@ def _apple_cross_toolchain_impl(rctx):
 
     # Describe the Xcode that produced this tree, so the generated xcode_config
     # reports the versions the SDKs actually have rather than a pinned guess.
-    _xcode_version, _xcode_build, _sdk_versions = _read_xcode_versions(rctx)
-    _check_pinned_xcode(rctx, _xcode_version, _xcode_build)
+    _xcode_version, _xcode_build, _sdk_swift_version, _sdk_versions = _read_xcode_versions(rctx)
+    _check_pinned_xcode(rctx, _xcode_version, _xcode_build, _sdk_swift_version)
     substitutions["%{xcode_version}"], substitutions["%{xcode_aliases}"] = _xcode_version_and_aliases(_xcode_version, _xcode_build)
     for _os_name, _sdk_name in _SDK_PLATFORM_FOR_OS.items():
         _sdk_version = _sdk_versions.get(_sdk_name)
@@ -958,6 +966,7 @@ repository's release. A content-addressed server takes
         "RULES_APPLECROSS_CODESIGN_CERTIFICATES",
         "RULES_APPLECROSS_CODESIGN_KEY",
         "RULES_APPLECROSS_LOCAL_XCODE",
+        "RULES_APPLECROSS_RELAX_XCODE_BUILD",
     ],
     implementation = _apple_cross_toolchain_impl,
 )

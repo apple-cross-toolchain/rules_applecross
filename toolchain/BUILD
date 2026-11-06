@@ -3,10 +3,12 @@ load("//toolchain:apple_bundling_toolchain.bzl", "apple_bundling_toolchain")
 
 package(default_visibility = ["//visibility:public"])
 
-# For //tools:package_sdks, which stages the SDKs as the repository rule does.
+# For //tools:package_sdks, which stages the SDKs as the repository rule does,
+# and the tests.
 exports_files([
     "repo_tools/extract_xip.py",
     "repo_tools/link_local_xcode.py",
+    "repo_tools/read_xcode_versions.py",
     "stubs/appintentsmetadataprocessor.py",
     "stubs/corefoundation.py",
     "stubs/coremlc.py",

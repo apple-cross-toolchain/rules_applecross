@@ -37,7 +37,18 @@ matches the pinned SHA-256 whoever runs it. Both give the same tree.
 Whatever the source, a pinned `xcode_version` fails the build when the staged
 SDKs are from another Xcode release, a local Xcode included:
 `--repo_env=RULES_APPLECROSS_LOCAL_XCODE=0` makes a Mac with another Xcode
-use the pinned one.
+use the pinned one. Another build of the same version (27.2 build 27B48
+rather than the pinned 27B52, say) is accepted with
+`--config=relax_xcode_build` (`--repo_env=RULES_APPLECROSS_RELAX_XCODE_BUILD=1`)
+when its SDKs were built by the same Swift, which the toolchain reads from the
+macOS SDK's standard library interface; the pin still selects the Swift.
+
+What the strict tools check against is the Xcode version, not its build:
+actool, coremlc and momc reproduce Xcode 27.0's and 27.2's output and record
+those releases' library versions, so an unpinned Xcode of another version
+needs `--config=relax_xcode_version`, and another build of 27.0 or 27.2 gets
+the pinned build's output. Without `xcode_version` nothing checks the staged
+Xcode's build, and `swift_tools` must name the Swift that built its SDKs.
 
 ### Where the copy is, kept out of the repository
 
