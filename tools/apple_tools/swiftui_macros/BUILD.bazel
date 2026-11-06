@@ -1,0 +1,22 @@
+load("@rules_swift//swift:swift_compiler_plugin.bzl", "swift_compiler_plugin")
+load("@rules_swift//swift:swift_test.bzl", "swift_test")
+
+swift_compiler_plugin(
+    name = "SwiftUIMacros",
+    srcs = glob(["Sources/SwiftUIMacros/*.swift"]),
+    deps = [
+        "@swift-syntax//:SwiftCompilerPlugin",
+        "@swift-syntax//:SwiftDiagnostics",
+        "@swift-syntax//:SwiftSyntax",
+        "@swift-syntax//:SwiftSyntaxMacros",
+    ],
+)
+
+swift_test(
+    name = "SwiftUIMacrosTests",
+    srcs = glob(["Tests/SwiftUIMacrosTests/*.swift"]),
+    deps = [
+        ":SwiftUIMacros",
+        "@swift-syntax//:SwiftSyntaxMacrosTestSupport",
+    ],
+)

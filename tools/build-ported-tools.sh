@@ -16,8 +16,10 @@ bazel build -c opt //:tools
 bazel cquery -c opt --output=files //:tools 2>/dev/null | while read -r tool; do
   install -m 755 "$tool" "$OUT/bin/"
 done
-swift build -c release --static-swift-stdlib --package-path swiftui_macros --scratch-path "$WORK/swiftui_macros"
-install -m 755 "$WORK/swiftui_macros/release/SwiftUIMacros" "$OUT/bin/SwiftUIMacros"
+
+cd "$ROOT/tools/apple_tools/swiftui_macros"
+bazel build -c opt //:SwiftUIMacros
+install -m 755 "$(bazel cquery -c opt --output=files //:SwiftUIMacros 2>/dev/null)" "$OUT/bin/"
 
 cd "$ROOT/tools/system_tools"
 bazel build "${MUSL[@]}" //:tools
