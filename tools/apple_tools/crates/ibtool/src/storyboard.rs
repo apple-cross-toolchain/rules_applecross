@@ -291,12 +291,65 @@ struct AttributeVariation {
     constants: Option<(Vec<(Vec<(&'static str, i64)>, f64)>, f64)>,
 }
 
+#[derive(Clone)]
 struct Variation {
     view: String,
     /// Its constraints in the objects' order, each with the names of the
     /// items it relates.
     candidates: Vec<(String, Vec<String>)>,
     excluded: Vec<String>,
+    /// Its size classes' records, sorted by their variations' keys: the
+    /// traits, the constraints added and those removed.
+    classes: Vec<(Vec<(&'static str, i64)>, Vec<String>, Vec<String>)>,
+    /// Its subviews, when a size class leaves some out: the candidates in
+    /// document order, and each size class's traits and removed subviews.
+    subviews: Option<(Vec<String>, Vec<(Vec<(&'static str, i64)>, Vec<String>)>)>,
+}
+
+/// A size class's variation of a view's constraints and subviews
+/// (`<variation key="heightClass=compact"><mask key="constraints">`): the
+/// constraints it includes and excludes and the subviews it leaves out.
+struct SizeMask<'a> {
+    key: &'a str,
+    traits: Vec<(&'static str, i64)>,
+    include: Vec<&'a str>,
+    exclude: Vec<&'a str>,
+    subviews: Vec<&'a str>,
+}
+
+/// A view's size classes' masks (`SizeMask`), its attributes' variations
+/// aside.
+fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
+    let mut masks = Vec::new();
+    for v in children(n, "variation").filter(|v| v.attribute("key") != Some("default") && !attribute_variation(*v)) {
+        only_attributes(v, &[("key", None)])?;
+        only_children(v, &["mask"])?;
+        let key = attr(v, "key")?;
+        let mut mask = SizeMask { key, traits: size_class_traits(key)?, include: Vec::new(), exclude: Vec::new(), subviews: Vec::new() };
+        for m in children(v, "mask") {
+            only_attributes(m, &[("key", None)])?;
+            match attr(m, "key")? {
+                "constraints" => {
+                    only_children(m, &["include", "exclude"])?;
+                    for e in m.children().filter(|e| e.is_element()) {
+                        only_attributes(e, &[("reference", None)])?;
+                        let r = attr(e, "reference")?;
+                        if e.has_tag_name("include") { mask.include.push(r) } else { mask.exclude.push(r) }
+                    }
+                }
+                "subviews" => {
+                    only_children(m, &["exclude"])?;
+                    for e in children(m, "exclude") {
+                        only_attributes(e, &[("reference", None)])?;
+                        mask.subviews.push(attr(e, "reference")?);
+                    }
+                }
+                other => return fail(format!("a size class's variation of {other} is not supported by this ibtool")),
+            }
+        }
+        masks.push(mask);
+    }
+    Ok(masks)
 }
 
 impl Nib {
@@ -1660,8 +1713,20 @@ fn frame(n: Node) -> Result<Frame, String> {
     let r = frame_node(n).ok_or_else(|| format!("<{}> without a frame", n.tag_name().name()))?;
     if r.has_tag_name("frame") {
         only_attributes(r, &[("key", Some("frameInset")), ("minX", None), ("minY", None), ("width", None), ("height", None)])?;
-        let min = |key: &str| r.attribute(key).map_or(Ok(0.0), number);
-        return Ok(Frame { x: min("minX")?, y: min("minY")?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? });
+        let (w, h) = (number(attr(r, "width")?)?, number(attr(r, "height")?)?);
+        // A percentage is that share of the room its superview leaves it
+        // (a corpus storyboard's `minX="50.00%" minY="50.12%"`).
+        let superview = || n.parent().filter(|p| p.has_tag_name("subviews")).and_then(|p| p.parent()).ok_or("a frame in percentages without a superview".to_string());
+        let min = |key: &str, size: f64, along: fn(&Frame) -> f64| -> Result<f64, String> {
+            match r.attribute(key) {
+                None => Ok(0.0),
+                Some(v) => match v.strip_suffix('%') {
+                    Some(pct) => Ok((along(&frame(superview()?)?) - size) * (number(pct)? / 100.0)),
+                    None => number(v),
+                },
+            }
+        };
+        return Ok(Frame { x: min("minX", w, |f| f.w)?, y: min("minY", h, |f| f.h)?, w, h });
     }
     Ok(Frame { x: number(attr(r, "x")?)?, y: number(attr(r, "y")?)?, w: number(attr(r, "width")?)?, h: number(attr(r, "height")?)? })
 }
@@ -2543,16 +2608,12 @@ fn constrained_views<'a>(view: Node<'a, '_>) -> Vec<&'a str> {
 
 /// The ids of the constraints `n` holds that its default variation
 /// excludes: those Interface Builder doesn't install (Installed unchecked).
-/// Variations for size classes are refused.
+/// Size classes' variations are `size_masks`.
 fn excluded_constraints<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
     let mut ids = Vec::new();
     for v in children(n, "variation") {
         if v.attribute("key") != Some("default") {
-            // A size class's attribute is its view's (`size_class_traits`).
-            if attribute_variation(v) {
-                continue;
-            }
-            return fail("variations other than the default one are not supported by this ibtool");
+            continue;
         }
         only_attributes(v, &[("key", None)])?;
         only_children(v, &["mask"])?;
@@ -2652,11 +2713,28 @@ fn record_attribute_variation(nib: &mut Nib, id: &str, name: &str, key_path: &'s
     Ok(())
 }
 
-/// Records the variation of the view `name` (`id` in the document), whose
+/// Records the variation of the view `name` (`n` in the document), whose
 /// constraints are `candidates` in the objects' order with their items;
 /// the excluded ones are withheld from the view, to be encoded where the
-/// objects list them.
-fn record_variation(nib: &mut Nib, id: &str, name: &str, excluded: &[&str], candidates: Vec<(Node, String, Vec<String>)>) -> Result<(), String> {
+/// objects list them. Its size classes' records (eleven probes and two
+/// corpus storyboards): those its masks give, for each size class sorted
+/// by key, adding the constraints it includes and removing those it
+/// excludes, those on the subviews it leaves out, and all of its own in
+/// the size classes its superview leaves it out; and its subviews' when it
+/// leaves some out. A size class the device has, whose archived state
+/// isn't established, is refused.
+fn record_variation(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], candidates: Vec<(Node, String, Vec<String>)>) -> Result<(), String> {
+    let id = attr(n, "id")?;
+    let masks = size_masks(n)?;
+    let superview = n.parent().filter(|p| p.has_tag_name("subviews")).and_then(|p| p.parent());
+    let superview_masks = match superview {
+        Some(p) => size_masks(p)?,
+        None => Vec::new(),
+    };
+    let left_out: Vec<&SizeMask> = superview_masks.iter().filter(|m| m.subviews.contains(&id)).collect();
+    if !masks.is_empty() || !left_out.is_empty() {
+        return record_size_classes(nib, n, name, excluded, candidates, &masks, &left_out);
+    }
     if excluded.is_empty() {
         return Ok(());
     }
@@ -2682,8 +2760,99 @@ fn record_variation(nib: &mut Nib, id: &str, name: &str, excluded: &[&str], cand
         nib.varied.push(id.to_string());
         return Ok(());
     }
-    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names });
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names, classes: Vec::new(), subviews: None });
     nib.varied.push(id.to_string());
+    Ok(())
+}
+
+/// `record_variation` for a view with size classes' masks, or one its
+/// superview leaves out for some.
+fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], candidates: Vec<(Node, String, Vec<String>)>, masks: &[SizeMask], left_out: &[&SizeMask]) -> Result<(), String> {
+    let id = attr(n, "id")?;
+    let device = device_size_classes(nib, n)?;
+    if masks.iter().chain(left_out.iter().copied()).any(|m| traits_hold(&m.traits, device)) {
+        return fail("a size class's variation of constraints or subviews for the device's size class is not supported by this ibtool");
+    }
+    if nib.variations.is_none() {
+        return fail("a variation of a view outside a controller's own view is not supported by this ibtool");
+    }
+    // A placeholder constraint, removed at build time, is in no record.
+    let placeholder = |c: &str| n.document().descendants().any(|d| d.has_tag_name("constraint") && d.attribute("id") == Some(c) && d.attribute("placeholder").is_some());
+    let named = |c: &str| -> Result<String, String> {
+        candidates.iter().find(|k| k.0.attribute("id") == Some(c)).map(|k| k.1.clone()).ok_or_else(|| format!("a variation of {c}, which isn't one of the view's own constraints, is not supported by this ibtool"))
+    };
+    let mut default = Vec::new();
+    for e in excluded {
+        default.push(named(e)?);
+    }
+    // A left-out subview's: without subviews of its own, and its
+    // constraints all its own or this view's.
+    for m in masks {
+        for s in &m.subviews {
+            let leaf = n.descendants().find(|d| d.is_element() && d.attribute("id") == Some(*s) && d.parent().and_then(|p| p.parent()) == Some(n));
+            let Some(leaf) = leaf else { return fail("a size class leaving out anything but a subview is not supported by this ibtool") };
+            if children(leaf, "subviews").next().is_some() {
+                return fail("a size class leaving out a subview with subviews is not supported by this ibtool");
+            }
+            let elsewhere = n.document().descendants().filter(|d| d.has_tag_name("constraint")).any(|c| {
+                let holder = c.parent().and_then(|cs| cs.parent());
+                (c.attribute("firstItem") == Some(*s) || c.attribute("secondItem") == Some(*s)) && holder != Some(n) && holder != Some(leaf)
+            });
+            if elsewhere {
+                return fail("a size class leaving out a subview other views' constraints name is not supported by this ibtool");
+            }
+        }
+    }
+    let mut keys: Vec<&str> = masks.iter().map(|m| m.key).chain(left_out.iter().map(|m| m.key)).collect();
+    keys.sort();
+    keys.dedup();
+    let mut classes = Vec::new();
+    for key in keys {
+        let own = masks.iter().find(|m| m.key == key);
+        let traits = size_class_traits(key)?;
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        if let Some(m) = own {
+            for c in m.include.iter().filter(|c| !placeholder(c)) {
+                added.push(named(c)?);
+            }
+            for c in m.exclude.iter().filter(|c| !placeholder(c)) {
+                removed.push(named(c)?);
+            }
+            for s in &m.subviews {
+                let view = view_name(s);
+                removed.extend(candidates.iter().filter(|k| k.2.contains(&view)).map(|k| k.1.clone()));
+            }
+        }
+        if left_out.iter().any(|m| m.key == key) {
+            removed = candidates.iter().map(|k| k.1.clone()).collect();
+        }
+        let mut unique = Vec::new();
+        for r in removed {
+            if !unique.contains(&r) {
+                unique.push(r);
+            }
+        }
+        let removed = unique;
+        if !added.is_empty() || !removed.is_empty() {
+            classes.push((traits, added, removed));
+        }
+    }
+    let subview_classes: Vec<(Vec<(&'static str, i64)>, Vec<String>)> = {
+        let mut sorted: Vec<&SizeMask> = masks.iter().filter(|m| !m.subviews.is_empty()).collect();
+        sorted.sort_by_key(|m| m.key);
+        sorted.into_iter().map(|m| (m.traits.clone(), m.subviews.iter().map(|s| view_name(s)).collect())).collect()
+    };
+    let subviews = (!subview_classes.is_empty()).then(|| {
+        let all = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter_map(|c| c.attribute("id")).map(view_name).collect();
+        (all, subview_classes)
+    });
+    nib.varied.push(id.to_string());
+    if default.is_empty() && classes.is_empty() && subviews.is_none() {
+        return Ok(());
+    }
+    let variations = nib.variations.as_mut().expect("checked above");
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: default, classes, subviews });
     Ok(())
 }
 
@@ -2771,7 +2940,11 @@ fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
 /// order. Its descendants are the items
 /// those constraints relate, but the root view, in the order they first
 /// appear; a guide is its objects-list placeholder.
-fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, repeated: &[String]) -> Result<Option<Value>, String> {
+///
+/// A size class's records rank the constraints the default installs by
+/// their own places in the objects (`places`), as decimal strings too (a
+/// probe), and the withheld ones by `ranks`.
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, places: &HashMap<String, usize>, repeated: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
     if variations.is_empty() && attributes.is_empty() {
@@ -2860,8 +3033,53 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
             return fail("a variation after a visual effect view's content's subviews' is not supported by this ibtool");
         }
     }
-    let again: Vec<Variation> = first_repeated.map(|at| variations[at..].iter().map(|v| Variation { view: v.view.clone(), candidates: v.candidates.clone(), excluded: v.excluded.clone() }).collect()).unwrap_or_default();
+    let again: Vec<Variation> = first_repeated.map(|at| variations[at..].to_vec()).unwrap_or_default();
+    // A record's traits: the default's shared, a size class's its own.
+    let record = |nib: &mut Nib, traits: Option<&Vec<(&'static str, i64)>>, added: &[String], removed: &[String], withheld: &[String]| -> Result<Value, String> {
+        let traits = match traits {
+            None => nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new())),
+            Some(t) => Value::New(Object::new("UITraitCollection", t.iter().map(|(k, v)| (*k, Value::Int(*v))).collect())),
+        };
+        let sorted = |names: &[String]| {
+            let mut names: Vec<&String> = names.iter().collect();
+            names.sort_by_key(|c| if withheld.contains(*c) { ranks.get(*c) } else { places.get(*c) }.map(usize::to_string));
+            names.into_iter().map(|c| reference(c.clone())).collect::<Vec<Value>>()
+        };
+        let (added, removed) = (sorted(added), sorted(removed));
+        let added = nib.set("NSSet", added)?;
+        let removed = nib.set("NSSet", removed)?;
+        Ok(Value::New(Object::new("_UIRelationshipTraitStorageRecord", vec![("UITraitCollection", traits), ("UIAddedObjects", added), ("UIRemovedObjects", removed)])))
+    };
     for v in variations.into_iter().chain(again) {
+        // The view itself among the descendants first, but the root (a
+        // corpus storyboard's prototype's content view).
+        if v.subviews.is_some() && v.view != root && !descendants.contains(&v.view) {
+            descendants.push(v.view.clone());
+        }
+        // Its subviews' storage first (four probes and a corpus
+        // storyboard).
+        if let Some((all, classes)) = &v.subviews {
+            for s in all {
+                if !descendants.contains(s) {
+                    descendants.push(s.clone());
+                }
+            }
+            let mut records = Vec::new();
+            for (traits, removed) in classes {
+                records.push(record(nib, Some(traits), &[], removed, &[])?);
+            }
+            let records = nib.array("NSMutableArray", records);
+            let candidates = nib.set("NSOrderedSet", all.iter().map(|s| reference(s.clone())).collect())?;
+            storages.push(Value::New(Object::new("_UIRelationshipTraitStorage", vec![
+                ("UIObject", reference(v.view.clone())),
+                ("UIKeyPath", nib.string("traitStorageSubviews")),
+                ("UIRecords", records),
+                ("UIRelationshipCandidates", candidates),
+            ])));
+        }
+        if v.excluded.is_empty() && v.classes.is_empty() {
+            continue;
+        }
         for (_, items) in &v.candidates {
             for item in items {
                 if item != root && !descendants.contains(item) {
@@ -2869,13 +3087,15 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
                 }
             }
         }
-        let traits = nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new()));
-        let added = nib.set("NSSet", Vec::new())?;
-        let mut removed: Vec<&String> = v.candidates.iter().map(|c| &c.0).filter(|c| v.excluded.contains(c)).collect();
-        removed.sort_by_key(|c| ranks.get(*c).map(usize::to_string));
-        let removed = nib.set("NSSet", removed.into_iter().map(|c| reference(c.clone())).collect())?;
-        let record = Object::new("_UIRelationshipTraitStorageRecord", vec![("UITraitCollection", traits), ("UIAddedObjects", added), ("UIRemovedObjects", removed)]);
-        let records = nib.array("NSMutableArray", vec![Value::New(record)]);
+        let mut records = Vec::new();
+        if !v.excluded.is_empty() {
+            let removed: Vec<String> = v.candidates.iter().map(|c| c.0.clone()).filter(|c| v.excluded.contains(c)).collect();
+            records.push(record(nib, None, &[], &removed, &v.excluded)?);
+        }
+        for (traits, added, removed) in &v.classes {
+            records.push(record(nib, Some(traits), added, removed, &v.excluded)?);
+        }
+        let records = nib.array("NSMutableArray", records);
         let candidates = nib.set("NSOrderedSet", v.candidates.iter().map(|c| reference(c.0.clone())).collect())?;
         storages.push(Value::New(Object::new("_UIRelationshipTraitStorage", vec![
             ("UIObject", reference(v.view.clone())),
@@ -2914,7 +3134,7 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     let own: Vec<Node> = children(n, "constraints").flat_map(|cs| children(cs, "constraint")).collect();
     let excluded = excluded_constraints(n)?;
     if own.is_empty() && held.is_empty() {
-        record_variation(nib, id, name, &excluded, Vec::new())?;
+        record_variation(nib, n, name, &excluded, Vec::new())?;
         return Ok(None);
     }
     if !excluded.is_empty() && n != container {
@@ -3104,7 +3324,7 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
             values.push(Value::New(o.named(constraint_name)));
         }
     }
-    record_variation(nib, id, name, &excluded, candidates)?;
+    record_variation(nib, n, name, &excluded, candidates)?;
     // An empty list writes nothing (one corpus storyboard).
     if values.is_empty() {
         return Ok(None);
@@ -4383,6 +4603,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("text", None), ("editable", Some("NO")), ("selectable", Some("NO")), ("scrollEnabled", Some("NO")), ("bounces", Some("NO")),
                 ("bouncesZoom", Some("NO")), ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")),
                 ("indicatorStyle", None), ("alwaysBounceVertical", Some("YES")),
+                ("clearsContextBeforeDrawing", Some("NO")), ("contentInsetAdjustmentBehavior", None),
                 ("adjustsFontForContentSizeCategory", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
                 // `fixedFrame` changes nothing, nor does Interface Builder's
@@ -4452,6 +4673,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             values.extend(mask_key(nib, scene, n)?);
+            // Not clearing its context after its mask, before its clipping
+            // (a corpus storyboard); beside an alpha it isn't established.
+            if n.attribute("clearsContextBeforeDrawing").is_some() {
+                if n.attribute("alpha").is_some() {
+                    return fail("a text view not clearing its context beside an alpha is not supported by this ibtool");
+                }
+                values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+            }
             alpha(&mut values, n)?;
             // A text view that doesn't scroll doesn't clip either.
             if n.attribute("clipsSubviews").is_some() && scrolls {
@@ -4508,7 +4737,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some("interactive") => values.push(("UIKeyboardDismissMode", Value::Int(2))),
                 Some(other) => return fail(format!("keyboardDismissMode {other} is not supported by this ibtool")),
             }
-            values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
+            // UIScrollViewContentInsetAdjustmentBehavior: automatic unless
+            // never (2: a corpus storyboard).
+            let insets = match n.attribute("contentInsetAdjustmentBehavior") {
+                None => 0,
+                Some("never") => 2,
+                Some(other) => return fail(format!("contentInsetAdjustmentBehavior {other} is not supported by this ibtool")),
+            };
+            values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(insets)));
             let alignment = text_alignment(n.attribute("textAlignment"))?;
             let font_node = Some(child(n, "fontDescription", "fontDescription").ok_or("a text view without a font")?);
             // The text is attributed with its colour, font and alignment
@@ -4917,7 +5153,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("preservesSuperviewLayoutMargins", Some("YES")), ("id", None),
                 ("tag", None), ("alpha", None), ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None),
                 ("horizontalCompressionResistancePriority", None), ("verticalCompressionResistancePriority", None), ("userInteractionEnabled", Some("NO")),
+                ("fixedFrame", Some("YES")),
             ])?;
+            // A fixed frame changes nothing when it has one (a corpus
+            // storyboard), as other views'.
+            if n.attribute("fixedFrame").is_some() && frame_node(n).is_none() {
+                return fail("a stack view's fixed frame without a frame is not supported by this ibtool");
+            }
             // As a table's header or footer view (one of the corpus's).
             if !matches!(n.attribute("key"), None | Some("tableHeaderView" | "tableFooterView")) {
                 return fail(format!("a stack view as {} is not supported by this ibtool", n.attribute("key").unwrap_or("")));
@@ -8234,7 +8476,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     constraint_values.push(Value::New(o.named(name)));
                 }
             }
-            record_variation(&mut nib, view_id, &root_name, &excluded, candidates)?;
+            record_variation(&mut nib, view, &root_name, &excluded, candidates)?;
             if !constraint_values.is_empty() {
                 values.push(("UIViewAutolayoutConstraints", nib.array("NSMutableArray", constraint_values)));
             }
@@ -8774,7 +9016,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 .filter_map(|d| d.attribute("id"))
                 .map(view_name)
                 .collect();
-            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &repeated)?;
+            let places: HashMap<String, usize> = objects.iter().enumerate().filter_map(|(i, o)| if let Value::Ref(r) = o { Some((r.clone(), i + 1)) } else { None }).collect();
+            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &places, &repeated)?;
             // An ARSCNView comes before the placeholders, top-level and in
             // the objects (a corpus storyboard, and as a SceneKit view it
             // doesn't: a probe).

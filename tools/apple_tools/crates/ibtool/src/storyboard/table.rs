@@ -301,7 +301,8 @@ fn table_values(
     if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
-            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, scene.module, *c, placeholder.is_some(), None)?;
+            let (bytes, mut varied) = cell_nib_varied(nib.platform, nib.color_matched, nib.localizable, scene.module, *c, placeholder.is_some(), None)?;
+            nib.varied.append(&mut varied);
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -1095,11 +1096,19 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
 /// cell (`xib`: whether it has a safe-area guide) lists its guide after
 /// its content view, and keeps its colours exact.
 pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
+    Ok(cell_nib_varied(platform, color_matched, localizable, module, cell, has_segue, xib)?.0)
+}
+
+/// `cell_nib`, with the ids of the views whose variations it compiled.
+fn cell_nib_varied(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<(Vec<u8>, Vec<String>), String> {
     let mut nib = Nib::new(platform, color_matched, localizable);
     nib.xib = xib.is_some();
     // A xib's cell's default variations, as a view nib's (three corpus
     // xibs).
-    if xib.is_some() {
+    // A prototype's size classes' variations of its constraints and
+    // subviews too (a corpus storyboard).
+    let size_classes = cell.descendants().any(|d| d.has_tag_name("variation") && d.attribute("key") != Some("default") && d.children().any(|m| m.has_tag_name("mask")));
+    if xib.is_some() || size_classes {
         nib.variations = Some(Vec::new());
     }
     let safe_area = xib == Some(true);
@@ -1236,13 +1245,13 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     }
     let mut order = vec![content_name.clone()];
     order.extend(scene.subviews.iter().map(|s| s.1.clone()));
-    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &[])?;
+    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &HashMap::new(), &[])?;
     let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
     if let Some(list) = traits {
         let lists = nib.array("NSArray", vec![list]);
         root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
     }
-    nib::archive(root)
+    Ok((nib::archive(root)?, std::mem::take(&mut nib.varied)))
 }
 
 /// A table view cell beside a xib's view, in the view's nib: its object,
