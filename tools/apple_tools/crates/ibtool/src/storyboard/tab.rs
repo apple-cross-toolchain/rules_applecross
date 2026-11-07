@@ -97,7 +97,7 @@ pub(super) fn tab_bar_item(nib: &mut Nib, controller: Node, name: &str) -> Resul
 }
 
 /// The tab bar: at the height Xcode gives it whatever the document says.
-pub(super) fn tab_bar(nib: &mut Nib, tab: Node, items: Vec<Value>) -> Result<Value, String> {
+pub(super) fn tab_bar(nib: &mut Nib, tab: Node, items: Vec<Value>, delegate: &str) -> Result<Value, String> {
     let bar = children(tab, "tabBar").next().ok_or("a tab bar controller without a tab bar")?;
     only_attributes(
         bar,
@@ -106,6 +106,7 @@ pub(super) fn tab_bar(nib: &mut Nib, tab: Node, items: Vec<Value>) -> Result<Val
             ("contentMode", Some("scaleToFill")),
             ("insetsLayoutMarginsFromSafeArea", Some("NO")),
             ("translucent", Some("NO")),
+            ("clearsContextBeforeDrawing", Some("NO")),
             ("id", None),
         ],
     )?;
@@ -136,14 +137,18 @@ pub(super) fn tab_bar(nib: &mut Nib, tab: Node, items: Vec<Value>) -> Result<Val
         ("UIOpaque", Value::Bool(true)),
         ("UIAutoresizeSubviews", Value::Bool(true)),
         ("UIAutoresizingMask", Value::Int(10)),
-        ("UIViewContentHuggingPriority", hugging),
     ]);
+    // Not clearing its context right after its mask (a corpus xib).
+    if bar.attribute("clearsContextBeforeDrawing").is_some() {
+        values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+    }
+    values.push(("UIViewContentHuggingPriority", hugging));
     if bar.attribute("insetsLayoutMarginsFromSafeArea").is_some() {
         values.push(("UIViewInsetsLayoutMarginsFromSafeArea", Value::Int(0)));
     }
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
-    values.push(("UIDelegate", reference("controller")));
+    values.push(("UIDelegate", reference(delegate)));
     values.push(("UIItems", nib.array("NSArray", items)));
     values.push(("UIBarTranslucence", Value::Int(if bar.attribute("translucent").is_some() { 2 } else { 1 })));
     Ok(Value::New(Object::new("UITabBar", values).named("tab bar")))

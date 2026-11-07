@@ -26,7 +26,7 @@ Xcode compiles an iOS xib to one nib file, whatever the deployment target
 (iOS 12 to 26, one probe each). Of 328 distinct iOS xibs found on one
 machine that Xcode 27.2 compiles (old projects, examples and libraries,
 Interface Builder 3 to 27), 310 compile byte-identical to Xcode's and the
-rest are refused; none compile differently. `tests/ibtool_xib` holds 143 cases written for this, checked
+rest are refused; none compile differently. `tests/ibtool_xib` holds 165 cases written for this, checked
 against Xcode's digests. An iPad xib (`CocoaTouch.iPad.XIB`) compiles as
 any other (one probe).
 
@@ -137,9 +137,44 @@ any other (one probe).
   compiles as a top-level view does, a `UICollectionReusableView` (or
   swapped in for one), with its `reuseIdentifier`, even an empty one, as
   `UIReuseIdentifier` after its large content (three probes).
-- Refused: other top-level objects (custom objects, gesture recognizers,
-  windows and controllers, a cell or view before the view), an owner's connections
-  beside a cell alone,
+- **Gesture recognizers beside the view.** Top-level recognizers after a
+  view are its nib's own top-level objects, after the view in document
+  order and listed right after it, with no placeholders: the views'
+  `gestureRecognizers` collections hold them, and their actions on the
+  owner are event connections without a mask after the outlets, by
+  selector (a corpus xib's three, one probe). Beside segues, with outlets
+  or segues of their own, or beside controls' actions, they are refused.
+- **A lone view controller.** A plain `<viewController>` alone (a launch
+  screen's) is a `UIViewController` holding its view as `UIView`, top-level
+  after the placeholders and listed right before its view, which compiles
+  as a top-level view does; its unused legacy layout guides are the
+  editor's (a corpus xib, one probe). One with attributes or connections,
+  or beside other objects, is refused.
+- **A main window.** A xib with a `<window>` (an old MainWindow.xib) holds
+  its window, its custom objects (the app delegate, each a class swapper
+  for `UICustomObject`) and one navigation, tab bar or split view
+  controller, all top-level after the placeholders in document order and
+  listed so. The window is a `UIWindow`: its geometry and background, then
+  `UIDeepDrawRect`, `UIAutoresizeSubviews`, its mask,
+  `UIShouldNotAdaptToMaterials` true, `UIClearsContextBeforeDrawing` false
+  when the document says so, its semantic content and large content
+  properties, and `UIResizesToFullScreen` true. The container holds its
+  children inline, as a storyboard's container nib does, but each child
+  loads its view from its `nibName` (`UINibName`) with no external objects
+  or storyboard placeholders: a child's title, tab bar item and navigation
+  item (with the bar it is on) come first, then `UINibName`,
+  `UIParentViewController`, `UIKeyEdgesForExtendedLayout` (0 for an empty
+  `<extendedEdge>`, as on the containers, after their children), and a
+  table view controller's `UIClearsSelectionOnViewWillAppear`. The objects
+  list each container's parts breadth first as a storyboard's (a split view
+  controller's children by relationship, detail first). The connections
+  are the controllers' outlets first, then the other outlets in byte order
+  of their labels, whatever the labels (four corpus xibs: navigation on
+  iPhone and iPad, tab bar, split view; three probes renaming outlets; two
+  cases of this repository's). A tab bar's `clearsContextBeforeDrawing="NO"`
+  is `UIClearsContextBeforeDrawing` false after its mask (a corpus xib).
+- Refused: other top-level objects (a controller beside a view, a cell or
+  view before the view), an owner's connections beside a cell alone,
   macOS xibs, and xibs in the archive format of Interface Builder before
   Xcode 5.
 
@@ -2232,7 +2267,8 @@ follow it too, with hidden, tag and alpha in a view's usual places
 field's `borderStyle="none"` and a stack view's `axis="horizontal"` are
 the defaults they name (one probe each, and 260 random storyboards of
 these views, all byte-identical or refused for several switches). A system font with `size="button"` (older
-documents) is 18 points (one probe). A system font of size 0, regular or bold, is 12
+documents) is 18 points (one probe), with `size="system"` 14 points,
+its minimum scale factor relative to that (a corpus xib). A system font of size 0, regular or bold, is 12
 points (14 probes).
 
 ## Collection view controllers

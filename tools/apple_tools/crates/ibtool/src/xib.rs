@@ -47,6 +47,11 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         return fail(format!("an object with id {CONTROLLER} is not supported by this ibtool"));
     }
     let objects = elements(root).find(|c| c.has_tag_name("objects")).ok_or("a xib in the archive format before Xcode 5 is not supported by this ibtool")?;
+    // A main window xib, its window beside the app delegate and a
+    // container controller, is compiled on its own.
+    if elements(objects).any(|o| o.has_tag_name("window")) {
+        return crate::storyboard::compile_xib_window(xml, module, localizable);
+    }
     let mut owner = None;
     let mut responder = None;
     let mut view = None;
@@ -56,6 +61,10 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     // Or one of those views alone, compiled beside a placeholder view the
     // nib then leaves out.
     let mut lone = None;
+    // Gesture recognizers beside a view, its nib's own top-level objects.
+    let mut recognizers: Vec<Node> = Vec::new();
+    // Or a view controller alone, its view the xib's, archived inside it.
+    let mut controller_node = None;
     for o in elements(objects) {
         match (o.tag_name().name(), o.attribute("placeholderIdentifier")) {
             ("placeholder", Some("IBFilesOwner")) if owner.is_none() => owner = Some(o),
@@ -69,10 +78,43 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
             (tag, _) if view.is_none() && lone.is_none() && BESIDE_VIEWS.contains(&tag) => lone = Some(o),
             // Beside a lone view too: the placeholder view's then (below).
             (tag, _) if (view.is_some_and(|v| v.has_tag_name("view")) || lone.is_some()) && (tag == "tableViewCell" || tag == "customObject" || BESIDE_VIEWS.contains(&tag)) => cells.push(o),
+            (tag, _) if view.is_some_and(|v| v.has_tag_name("view")) && lone.is_none() && tag.ends_with("GestureRecognizer") => recognizers.push(o),
+            ("viewController", _) if view.is_none() && lone.is_none() && controller_node.is_none() => controller_node = Some(o),
             (tag, _) => return fail(format!("a xib's top-level {tag} beside its one view is not supported by this ibtool")),
         }
     }
     let owner = owner.ok_or("a xib without a File's Owner is not supported by this ibtool")?;
+    // A plain view controller alone is a `UIViewController` holding its
+    // view as `UIView`, top-level after the placeholders and listed before
+    // the view (a corpus launch screen); its legacy layout guides, unused,
+    // are Interface Builder's alone.
+    let mut in_controller = false;
+    if let Some(vc) = controller_node {
+        if view.is_some() || lone.is_some() || !cells.is_empty() || !recognizers.is_empty() {
+            return fail("a xib's top-level viewController beside its one view is not supported by this ibtool");
+        }
+        if vc.attributes().any(|a| a.name() != "id") || elements(owner).next().is_some() {
+            return fail("a xib's top-level viewController with attributes or an owner with connections is not supported by this ibtool");
+        }
+        let mut controller_view = None;
+        for c in elements(vc) {
+            match c.tag_name().name() {
+                "view" if c.attribute("key") == Some("view") && controller_view.is_none() => controller_view = Some(c),
+                "point" if canvas(&c) => {}
+                "layoutGuides" => {
+                    for g in elements(c) {
+                        let id = g.attribute("id").ok_or("a layout guide without an id")?;
+                        if !g.has_tag_name("viewControllerLayoutGuide") || doc.descendants().any(|d| d != g && d.attributes().any(|a| a.value() == id)) {
+                            return fail("a xib's top-level viewController's layout guides in use are not supported by this ibtool");
+                        }
+                    }
+                }
+                other => return fail(format!("<{other}> inside a xib's top-level viewController is not supported by this ibtool")),
+            }
+        }
+        view = Some(controller_view.ok_or("a xib's top-level viewController without a view")?);
+        in_controller = true;
+    }
     // A lone view (a table view controller's template, say) is the root
     // beside a placeholder view, which the nib leaves out: its values,
     // objects and outlets are as beside a view (three probes).
@@ -110,7 +152,7 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         };
     }
     let owner_id = owner.attribute("id").ok_or("a File's Owner without an id")?;
-    if view.attribute("key").is_some() {
+    if view.attribute("key").is_some() && !in_controller {
         return fail("a keyed top-level view is not supported by this ibtool");
     }
 
@@ -143,7 +185,8 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     let retarget = |text: &str| text.replace(&format!("destination=\"{owner_id}\""), &format!("destination=\"{CONTROLLER}\""));
     let text = without(xml, view, canvas);
     let tag = format!("<{}", view.tag_name().name());
-    controller.push_str(&retarget(&text.replacen(&tag, &format!("{tag} key=\"view\""), 1)));
+    let keyed = if in_controller { text } else { text.replacen(&tag, &format!("{tag} key=\"view\""), 1) };
+    controller.push_str(&retarget(&keyed));
     controller.push('\n');
     if !outlets.is_empty() {
         controller.push_str(&format!("<connections>\n{}</connections>\n", retarget(&outlets)));
@@ -156,7 +199,8 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     let safe_area = |c: &Node| c.has_tag_name("viewLayoutGuide") && c.attribute("key") == Some("safeArea");
     let cell_text: String = cells.iter().map(|c| retarget(&without(xml, *c, |d| canvas(d) || safe_area(d))) + "\n").collect();
     let cell_guides = cells.iter().filter(|c| elements(**c).any(|d| safe_area(&d))).filter_map(|c| c.attribute("id").map(str::to_string)).collect();
-    let scene = format!("<scenes>\n<scene sceneID=\"{CONTROLLER}-scene\">\n<objects>\n{controller}{responder}{cell_text}</objects>\n</scene>\n</scenes>");
+    let recognizer_text: String = recognizers.iter().map(|r| retarget(&without(xml, *r, canvas)) + "\n").collect();
+    let scene = format!("<scenes>\n<scene sceneID=\"{CONTROLLER}-scene\">\n<objects>\n{controller}{responder}{cell_text}{recognizer_text}</objects>\n</scene>\n</scenes>");
 
     // The document's own attributes, as a storyboard's, with the scene as
     // its initial controller.
@@ -176,7 +220,7 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         Some(r) => roots.iter().filter(|o| elements(objects).position(|e| e == **o) < Some(r)).count(),
         None => 0,
     };
-    let layout = crate::storyboard::XibLayout { responder_at, cell_guides, placeholder };
+    let layout = crate::storyboard::XibLayout { responder_at, cell_guides, placeholder, in_controller };
     let compiled = crate::storyboard::compile_xib(&storyboard, minimum_deployment_target, module, localizable, &layout)?;
     let name = format!("{CONTROLLER}-view-{view_id}.nib");
     compiled.files.into_iter().find(|f| f.0 == name).map(|f| f.1).ok_or_else(|| "the xib's view compiled to no nib".to_string())
