@@ -12,6 +12,14 @@ runs it, is reproduced for iOS xibs holding a view (and table view cells
 or other views beside it), a lone table, collection or web view, a table or
 collection view cell, or a reusable view (below, "Xibs").
 
+Byte-identical is the measure wherever Xcode's own output is. Where it
+isn't, Xcode differing from run to run on the same document, this ibtool
+makes one fixed output with Xcode's shape: the same objects, classes and
+keys, differing only in values Xcode's own runs disagree on (a
+compile-time date), or only in the order of arrays Xcode's own runs order
+differently (a hash table's order). Two corpus storyboards are matched
+this way; the cases are under date pickers and outlet collections.
+
 ## Xibs
 
 Xcode compiles an iOS xib to one nib file, whatever the deployment target
@@ -1699,13 +1707,19 @@ A controller's outlet collections (`<outletCollection>`, `collectionClass`
 NSArray by default or NSMutableArray) are `UIRuntimeOutletCollectionConnection`s
 from its placeholder, before its outlets, each property's in the order of
 its first entry: the views (or a single constraint, as an outlet's: one
-probe; several constraints aren't in document order in a corpus
-storyboard, and are refused) in a mutable array in document order,
-`runtimeCollectionClassName` the class and `addsContentToExistingCollection`
-false. Those of table and collection view controllers, and beside a gesture
-recognizer, are refused (six probes): beside recognizers, where the
-collections' connections fall among the recognizers', and so their
-placeholders' numbers, changes with the document's order (six probes).
+probe) in a mutable array in document order, `runtimeCollectionClassName`
+the class and `addsContentToExistingCollection` false. Those of table and
+collection view controllers are refused. Beside gesture recognizers, Xcode
+orders several collections' connections among the recognizers', and so
+numbers their placeholders, and orders several constraints in one
+collection, as a hash table iterates: three or four different outputs in
+four to six runs of one document (four probes and a corpus storyboard's
+two runs). This ibtool always puts the collections first, the
+controller's placeholder numbered 1 and the recognizers' after it, one of
+the orders Xcode makes. With a single collection Xcode's order is stable
+from run to run but not established (two probes, ten runs each), and it
+is refused, as are collections beside recognizers and custom objects or
+in an embedded controller.
 
 A view's own outlet collections (other than `gestureRecognizers`) are
 connections from the view in the same form, after the controller's, in
@@ -1923,9 +1937,14 @@ timer 3), `UIPickerStyle` 3 for inline, `UIMinuteInterval` (0 unless
 given, left out at 1, UIDatePicker's default: three probes) and, for a
 count-down timer, `UIDatePickerUseCurrentDateDuringDecoding` false (eight
 probes; Xcode lays the wheels style out at its own width, so it is
-refused). A xib archives the document's date as `UIDate`, and a storyboard
-with a `<deployment>` naming a version (iOS 8 on) the time it is compiled,
-which no build can repeat; both are refused (twelve probes).
+refused). A xib archives the document's date as `UIDate` (an `NSDate`,
+`NS.time` the document's `timeIntervalSinceReferenceDate`), after the mode
+and before the interval, none for a count-down timer (three probes). A
+storyboard with a `<deployment>` naming a version (iOS 8 on) archives one
+in the same place, but the time it is compiled, which differs on every
+run (fifteen probes): this ibtool archives the document's date there too,
+so its output is reproducible and has Xcode's shape, differing only in a
+value Xcode's own runs disagree on (a corpus storyboard).
 
 A controller's view may be a SceneKit view (`<sceneKitView key="view">`,
 Xcode's game templates): an `SCNView` with a root view's keys (white,

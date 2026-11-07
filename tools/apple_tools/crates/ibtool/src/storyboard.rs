@@ -3612,13 +3612,20 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("datePickerMode", None), ("minuteInterval", None), ("style", None), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
             ])?;
             only_children(n, &["rect", "date", "constraints"])?;
-            // A xib archives the document's date (`UIDate`, its place
-            // beside the mode not established), and a storyboard naming
-            // its deployment target (a `<deployment>` with a version, iOS 8
-            // on) the time it's compiled (twelve probes): refused.
-            if child(n, "date", "date").is_some() && (nib.xib || n.document().descendants().any(|d| d.has_tag_name("deployment") && d.attribute("version").is_some())) {
-                return fail("a date picker's date in a xib, or in a storyboard naming its deployment target, is not supported by this ibtool");
-            }
+            // A xib archives the document's date as `UIDate`, after the
+            // mode, and so does a storyboard naming its deployment target (a
+            // `<deployment>` with a version, iOS 8 on), where Xcode archives
+            // the time it compiles instead: there this ibtool archives the
+            // document's date, Xcode's own output differing from run to run
+            // (fifteen probes). A countdown timer has none (two probes).
+            let dated = nib.xib || n.document().descendants().any(|d| d.has_tag_name("deployment") && d.attribute("version").is_some());
+            let date = match child(n, "date", "date").filter(|_| dated) {
+                Some(d) => {
+                    only_attributes(d, &[("key", Some("date")), ("timeIntervalSinceReferenceDate", None)])?;
+                    Some(number(attr(d, "timeIntervalSinceReferenceDate")?)?)
+                }
+                None => None,
+            };
             let mode = match n.attribute("datePickerMode").unwrap_or("dateAndTime") {
                 "time" => Some(0),
                 "date" => Some(1),
@@ -3647,6 +3654,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             nib.large_content(&mut values);
             if let Some(m) = mode {
                 values.push(("UIDatePickerMode", Value::Int(m)));
+            }
+            if let Some(t) = date.filter(|_| mode != Some(3)) {
+                if style.is_some() {
+                    return fail("a date picker's date beside a style is not supported by this ibtool");
+                }
+                values.push(("UIDate", Value::New(Object::new("NSDate", vec![("NS.time", Value::Double(t))]))));
             }
             if let Some(s) = style {
                 values.push(("UIPickerStyle", Value::Int(s)));
@@ -7631,14 +7644,27 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             return fail("a table or collection view controller's outlets to gesture recognizers are not supported by this ibtool");
         }
         let controller_first = !referenced.is_empty() && (!vc_outlets.is_empty() || !vc_collections.is_empty());
-        // The controller's outlet collections' connections fall among the
-        // recognizers' in an order, and so their placeholders, that isn't
-        // their document's (four probes).
-        if !vc_collections.is_empty() && !attached.is_empty() {
-            return fail("outlet collections beside a gesture recognizer are not supported by this ibtool");
+        // Beside recognizers, Xcode orders the controller's outlet
+        // collections' connections among theirs at random from run to run
+        // (a hash table's order: six probes and a corpus storyboard's two
+        // runs), numbering the placeholders in that order. This ibtool puts
+        // the collections first, so the controller's placeholder is the
+        // first and the recognizers' follow, one order Xcode makes (a probe).
+        // With one collection Xcode's order is stable, but which comes
+        // first isn't established (two probes, ten runs each): refused.
+        let collections_first = !vc_collections.is_empty() && !attached.is_empty();
+        if collections_first && (vc_collections.len() == 1 || !referenced.is_empty()) {
+            return fail("one outlet collection, or collections beside custom objects, beside gesture recognizers are not supported by this ibtool");
         }
+        let gesture_base = usize::from(collections_first);
         let object_base = recognizers.len() + usize::from(controller_first);
-        let controller_placeholder = if controller_first { recognizers.len() + 1 } else { gesture + 1 };
+        let controller_placeholder = if collections_first {
+            1
+        } else if controller_first {
+            recognizers.len() + 1
+        } else {
+            gesture + 1
+        };
         let (view_root, upstream_used) = if is_table {
             let (root, upstream_used, segues, listing) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets, child(vc, "refreshControl", "refreshControl"))?;
             scene.segues = segues;
@@ -7763,12 +7789,12 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 scene.segue_listing = Some((0..placed.len()).map(new_index).collect());
             }
             let gesture_proxies: Vec<Value> =
-                numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", i + 1), &format!("gesture {g}"))).collect();
+                numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", gesture_base + i + 1), &format!("gesture {g}"))).collect();
             // Where they go with the first responder last isn't established.
             if responder_last && (!gesture_proxies.is_empty() || !referenced.is_empty()) {
                 return fail("gesture recognizers or custom objects in a xib whose first responder follows its view are not supported by this ibtool");
             }
-            let lead = if responder_last { 1 } else { 2 };
+            let lead = (if responder_last { 1 } else { 2 }) + gesture_base;
             top.splice(lead..lead, gesture_proxies);
             objects.splice(lead..lead, numbered.iter().map(|g| reference(format!("gesture {g}"))));
             let object_proxies: Vec<Value> =
@@ -8408,12 +8434,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             outlets.splice(0..0, gesture_sources.into_iter().map(|v| ("gestureRecognizers", v, "")));
             // The controller's outlet collections, before its outlets.
             for (label, class, views) in &vc_collections {
-                // Several constraints' order isn't their document order
-                // (a corpus storyboard).
+                // Several constraints' order varies from run to run in Xcode
+                // (a hash table's order: a corpus storyboard's two runs);
+                // this ibtool keeps the document's.
                 let is_constraint = |v: &String| constraint_names.contains(v) || scene.own_constraints.iter().any(|c| c.1 == *v);
-                if views.len() > 1 && views.iter().any(is_constraint) {
-                    return fail("an outlet collection of several constraints is not supported by this ibtool");
-                }
                 for v in views {
                     let constraint = is_constraint(v);
                     if *v != root_name && !constraint && !scene.subviews.iter().any(|s| s.1 == *v) {
@@ -8567,6 +8591,11 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let segue_destination = reached.contains(vc_id);
         let embedded = navs.iter().any(|n| n.2 == vc_id && n.3) || held_children.contains(vc_id) || in_held_nav(vc_id);
         let embedded_here = embedded;
+        // A parent's nib numbers an embedded controller's recognizers from 1
+        // (`embedded_controller`): beside collections it isn't established.
+        if embedded && collections_first {
+            return fail("an embedded controller's outlet collections beside gesture recognizers are not supported by this ibtool");
+        }
         let swapped = is_initial || identified || vc.attribute("customClass").is_some();
         let view_segues = listed_segues(&scene, vc);
 
@@ -8659,7 +8688,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 Some(o) => std::mem::replace(&mut o.0, reference(format!("gesture {g}"))),
                 None => reference(format!("gesture {g}")),
             };
-            placeholders.push((i + 1, value));
+            placeholders.push((gesture_base + i + 1, value));
         }
         for (i, id) in referenced.iter().enumerate() {
             placeholders.push((object_base + i + 1, reference(format!("object {id}"))));
