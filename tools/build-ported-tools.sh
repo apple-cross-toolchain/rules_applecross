@@ -18,8 +18,10 @@ bazel cquery -c opt --output=files //:tools 2>/dev/null | while read -r tool; do
 done
 
 cd "$ROOT/tools/apple_tools/swiftui_macros"
-bazel build -c opt //:SwiftUIMacros
-install -m 755 "$(bazel cquery -c opt --output=files //:SwiftUIMacros 2>/dev/null)" "$OUT/bin/"
+for plugin in SwiftUIMacros AppIntentsMacros PreviewsMacros; do
+  bazel build -c opt "//:$plugin"
+  install -m 755 "$(bazel cquery -c opt --output=files "//:$plugin" 2>/dev/null)" "$OUT/bin/"
+done
 
 cd "$ROOT/tools/system_tools"
 bazel build "${MUSL[@]}" //:tools

@@ -319,10 +319,10 @@ filegroup(
     srcs = glob([_XCODE_TOOLCHAIN_BIN + "/*"]),
 )
 
-# Clean-room SwiftUIMacros plugin, if the ported tools include it.
+# Clean-room SwiftUIMacros, AppIntentsMacros and PreviewsMacros plugins, if the ported tools include them.
 filegroup(
     name = "macro_plugins",
-    srcs = glob([_XCODE_TOOLCHAIN_BIN + "/SwiftUIMacros"], allow_empty = True),
+    srcs = glob([_XCODE_TOOLCHAIN_BIN + "/" + plugin for plugin in ["AppIntentsMacros", "PreviewsMacros", "SwiftUIMacros"]], allow_empty = True),
 )
 
 filegroup(
