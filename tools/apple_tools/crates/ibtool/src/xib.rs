@@ -102,9 +102,9 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         let safe_area = |c: &Node| c.has_tag_name("viewLayoutGuide") && c.attribute("key") == Some("safeArea");
         let cell = without(xml, view, |c| canvas(c) || safe_area(c));
         let document = format!("{}{cell}{}", &xml[..view.range().start], &xml[view.range().end..]);
-        let guide = elements(view).any(|c| safe_area(&c));
+        let guide = elements(view).find(|c| safe_area(c)).map(|c| c.attribute("id").ok_or("a safe-area guide without an id")).transpose()?;
         return if view.has_tag_name("tableViewCell") {
-            crate::storyboard::compile_xib_cell(&document, module, localizable, guide)
+            crate::storyboard::compile_xib_cell(&document, module, localizable, guide.is_some())
         } else {
             crate::storyboard::compile_xib_collection_cell(&document, module, localizable, guide)
         };
