@@ -54,7 +54,7 @@ the Xcode build rules_apple passes either way.
   - an `Int`'s `inclusiveRange`;
   - a `String`'s `inputOptions`.
 - **Parameter summaries:** `Summary` with interpolated parameters and other parameters, and `When(..., .equalTo, Bool)` with `otherwise`.
-- **`AppEnum`:** type and case display representations (title, subtitle, SF Symbol image), and a type's numeric format.
+- **`AppEnum`:** type and case display representations (title, subtitle, SF Symbol image), and a type's numeric format. An instance property of the enum's own, computed, changes nothing (Xcode 27.1, one probe).
 - **`AppEntity`:** its default query, `@Property`s of the primitive types and their optionals, and parameters and results of entity type.
   - Such a parameter's `dynamicOptionsSupport` is 1 when the entity's query is an `EntityQuery` and 2 when it is an `EntityStringQuery`.
 - **Queries:** `EntityQuery` (capabilities 66) and `EntityStringQuery` (70), each as its entity's default query.
