@@ -549,7 +549,10 @@ other values of the attributes these use, is refused. Observed:
   before and after, views of other branches between, two holders side by
   side, plain or stack views; and two corpus storyboards). Twelve of those
   fit the earlier reading, after the last turn of the holder's level,
-  which two holders side by side disprove. A deeper first item is refused.
+  which two holders side by side disprove. A deeper first item is refused,
+  and so are a root view's constraints from its safe-area guide to several
+  views deeper than its subviews: their order fits neither the views'
+  places nor their depth (two probes and a corpus storyboard).
 - A constraint a view's default variation excludes (`<variation
   key="default"><mask key="constraints"><exclude reference=…/>`,
   Interface Builder's Installed unchecked) is left out of the view's
@@ -610,7 +613,14 @@ other values of the attributes these use, is refused. Observed:
   nothing without a device: seven probes); a xib the default, whatever its
   device (two probes). Several size classes of one attribute, several
   attributes of one view, the root view's, other iPhones in landscape and
-  attributes beside constraints' variations are refused.
+  attributes beside constraints' variations are refused. A constraint's
+  constant for a size class (`<variation key=… constant=…/>` inside it) is
+  an `_UIAttributeTraitStorage` of the constraint, `UIKeyPath`
+  `encodedConstant`, its values `_NSLayoutConstraintConstant`s
+  (`UISymbolicConstant` nil, `UINumericConstant` a double); Xcode lists
+  that storage twice, each with objects of its own, and the descendants
+  hold the constraint (a corpus storyboard). When the device has the size
+  class, for several, or beside other variations it is refused.
 - A document deploying before iOS 8 (`<deployment version>` below 0x800)
   is refused: Xcode compiles such a xib into a nib directory for each
   idiom (`out~iphone.nib/runtime.nib` and `objects-8.0+.nib`), with or
@@ -1027,7 +1037,11 @@ other values of the attributes these use, is refused. Observed:
   together are refused), then a tap's `_imp` `UITapRecognizer`
   (taps or touches when not 1), a pan's minimum and maximum touches and
   `allowedScrollTypesMask` 0, a swipe's direction (left 2, up 4, down 8,
-  right left out); with a custom class, a `UIClassSwapper` of those values
+  right left out), a long press's (`<pongPressGestureRecognizer>`, as
+  Interface Builder spells it) `_imp` `UITapRecognizer` of its taps (0
+  unless given, left out when 1) and touches (unless 1), then its touches,
+  `minimumPressDuration` and `allowableMovement` as floats unless 1, 0.5
+  and 10 (three probes and a corpus storyboard); with a custom class, a `UIClassSwapper` of those values
   and the class names, as a view's (two probes). The controller's external objects map
   `UpstreamPlaceholder-1` to it, before the controller's own placeholder
   and the segues', which move up by one; `UITopLevelObjectsToKeepAliveFromStoryboard`
@@ -1121,10 +1135,11 @@ other values of the attributes these use, is refused. Observed:
   toolbar items, then its bar button items). The controller's outlets
   into them are by name with those to its custom views, their controls'
   actions on it follow the bar items', and their runtime attributes are
-  the nib's pairs (four corpus storyboards). An embedded controller's
-  (which lists the view after itself: a corpus storyboard), a table or
-  collection view controller's, and ones beside recognizers or custom
-  objects, are refused.
+  the nib's pairs (four corpus storyboards). A table view controller's
+  come after the controller instead, top-level and in the objects, defined
+  where its keep-alive list names them (a corpus storyboard). An embedded
+  controller's, a collection view controller's, and ones beside
+  recognizers or custom objects, are refused.
 
 ## Navigation controllers
 
@@ -1191,6 +1206,9 @@ is refused. Observed with 25 probes:
   `UIDelegate` the controller, `UIBarPosition` 2, `UIBarTranslucence` 1;
   `largeTitles` is `UIBarPrefersLargeTitles` after the large content
   properties, the layout the same (two probes).
+- A navigation controller's hidden bar (`navigationBarHidden="YES"`) is
+  `UINavigationBarHidden` true right after its `UINavigationBar` (a corpus
+  storyboard); beside a toolbar it is refused.
 - A navigation controller's shown toolbar (`toolbarHidden="NO"` and a
   `<toolbar key="toolbar">`) is `UIToolbar` after its `UINavigationBar`,
   then `UIToolbarShown` true, listed after the bar: a `UIToolbar` 54
@@ -1712,8 +1730,10 @@ in a view may page (`UIPagingEnabled`, after
 A scroll view is compiled as a plain view, `UIScrollView` (or swapped for its custom
 class), then after its large content properties
 `UIScrollViewIndicatorInsetAdjustmentBehavior` 1, `UIShowsHorizontalScrollIndicator`
-and `UIShowsVerticalScrollIndicator` false when hidden, `UIBouncesZoom`,
-`UIAlwaysBounceVertical`, `UIDirectionalLockEnabled`, the minimum and maximum
+and `UIShowsVerticalScrollIndicator` false when hidden, `UIPagingEnabled`
+when paging, `UIBouncesZoom` (left out for `bouncesZoom="NO"`),
+`UIAlwaysBounceHorizontal` (three probes; with a vertical bounce too it is
+refused), `UIAlwaysBounceVertical`, `UIDirectionalLockEnabled`, the minimum and maximum
 zoom scales (floats) and `UIScrollViewContentInsetAdjustmentBehavior` 0
 (eight probes). Its content and frame layout guides are each a
 placeholder `UILayoutGuide` at the start of its turn in the objects,
@@ -1924,8 +1944,19 @@ keys, semantic and large content properties, then SceneKit's defaults
 `allowsCameraControl` false, `backgroundColor` the document's background
 or nil, `ibSceneName` nil, `ibWantsMultisampling` false,
 `ibPreferredRenderingAPI` 0): two probes and API-Examples' ARKit
-storyboard. One as a controller's root view, which Xcode lists before the
-nib's placeholders, is refused.
+storyboard. One as a controller's root view compiles as a SceneKit view
+does, but comes before the nib's placeholders, top-level and in the
+objects (a corpus storyboard; the same document with a plain SceneKit
+view doesn't: a probe).
+
+An ARKit SpriteKit view (`<arskView>`) is an `ARSKView`: a plain view's
+values, then SpriteKit's: `_version` 1, `_frame` (0, 0, its width and
+height), an empty mutable `_info` dictionary, `_scene` nil,
+`_preferredFramesPerSecond` 60, `_paused` false, `_asynchronous` true,
+`_allowsTransparency` and `_ignoresSiblingOrder` false,
+`_shouldCullNonVisibleNodes` true (a corpus storyboard). With subviews,
+or away from its superview's origin (whether `_frame` is its frame or
+its bounds isn't established), it is refused.
 
 A map view is an `MKMapView`: opaque, multiple touch, mask 36, clipping,
 its constraint keys, zero `UIViewLayoutMargins`, then MapKit's keys

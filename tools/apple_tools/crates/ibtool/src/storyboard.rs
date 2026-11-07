@@ -285,6 +285,9 @@ struct AttributeVariation {
     key_path: &'static str,
     records: Vec<(Vec<(&'static str, i64)>, Value)>,
     default: Value,
+    /// A constraint's constant: its size classes' and its default, each
+    /// archived as a fresh `_NSLayoutConstraintConstant` (`records` empty).
+    constants: Option<(Vec<(Vec<(&'static str, i64)>, f64)>, f64)>,
 }
 
 struct Variation {
@@ -1195,6 +1198,38 @@ fn gesture_recognizer(nib: &mut Nib, module: Option<&str>, r: Node, vc_id: &str)
             }
             values.push(("UITapGestureRecognizer._imp", Value::New(Object::new("UITapRecognizer", imp))));
             "UITapGestureRecognizer"
+        }
+        // Interface Builder's long press (its element misspelled): a tap
+        // recognizer of its taps (0 unless given) and touches, then its
+        // touches, minimum duration and allowable movement unless 1, 0.5
+        // and 10 (three probes and a corpus storyboard).
+        "pongPressGestureRecognizer" => {
+            only_attributes(r, &[
+                ("enabled", Some("NO")), ("delaysTouchesBegan", Some("YES")), ("allowableMovement", None), ("minimumPressDuration", None),
+                ("numberOfTapsRequired", None), ("numberOfTouchesRequired", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None),
+            ])?;
+            let taps = r.attribute("numberOfTapsRequired").map_or(Ok(0), str::parse::<i64>).map_err(|_| "a long press's taps aren't a number")?;
+            let touches = count("numberOfTouchesRequired")?;
+            let mut imp = Vec::new();
+            if taps != 1 {
+                imp.push(("UITapRecognizer.numberOfTapsRequired", Value::Int(taps)));
+            }
+            if let Some(t) = touches {
+                imp.push(("UITapRecognizer.numberOfTouchesRequired", Value::Int(t)));
+            }
+            values.push(("UILongPressGestureRecognizer._imp", Value::New(Object::new("UITapRecognizer", imp))));
+            if let Some(t) = touches {
+                values.push(("UILongPressGestureRecognizer.numberOfTouchesRequired", Value::Int(t)));
+            }
+            let duration = number(r.attribute("minimumPressDuration").unwrap_or("0.5"))?;
+            if duration != 0.5 {
+                values.push(("UILongPressGestureRecognizer.minimumPressDuration", Value::Float(duration as f32)));
+            }
+            let movement = number(r.attribute("allowableMovement").unwrap_or("10"))?;
+            if movement != 10.0 {
+                values.push(("UILongPressGestureRecognizer.allowableMovement", Value::Float(movement as f32)));
+            }
+            "UILongPressGestureRecognizer"
         }
         "panGestureRecognizer" => {
             only_attributes(r, &[("enabled", Some("NO")), ("delaysTouchesBegan", Some("YES")), ("minimumNumberOfTouches", None), ("maximumNumberOfTouches", None), ("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
@@ -2194,6 +2229,8 @@ fn uikit_class(tag: &str) -> String {
         "wkWebView" => "WKWebView".into(),
         "mapView" => "MKMapView".into(),
         "sceneKitView" => "SCNView".into(),
+        "arscnView" => "ARSCNView".into(),
+        "arskView" => "ARSKView".into(),
         "activityIndicatorView" => "UIActivityIndicatorView".into(),
         _ => {
             let mut c = tag.chars();
@@ -2513,7 +2550,7 @@ fn record_attribute_variation(nib: &mut Nib, id: &str, name: &str, key_path: &'s
     if records.len() != 1 {
         return fail("variations of an attribute for several size classes are not supported by this ibtool");
     }
-    nib.attribute_variations.push(AttributeVariation { view: name.to_string(), key_path, records, default });
+    nib.attribute_variations.push(AttributeVariation { view: name.to_string(), key_path, records, default, constants: None });
     nib.varied.push(id.to_string());
     Ok(())
 }
@@ -2646,6 +2683,36 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
     // Attributes' storages: one per view, in the document's order (three
     // corpus documents); beside constraints' or the root view's, or several
     // of one view, their order isn't established.
+    // A constraint's constant: an `encodedConstant` storage, twice, its
+    // descendants the constraint (a corpus storyboard); several, or beside
+    // other variations, aren't established.
+    if attributes.iter().any(|a| a.constants.is_some()) {
+        if attributes.len() > 1 || !variations.is_empty() {
+            return fail("size class variations of several constraints' constants, or beside other variations, are not supported by this ibtool");
+        }
+        let a = attributes.remove(0);
+        let (classes, default) = a.constants.expect("checked");
+        let constant = |n: f64| Value::New(Object::new("_NSLayoutConstraintConstant", vec![("UISymbolicConstant", Value::Nil), ("UINumericConstant", Value::Double(n))]));
+        let mut storages = Vec::new();
+        for _ in 0..2 {
+            let mut records = Vec::new();
+            for (traits, n) in &classes {
+                let traits = Object::new("UITraitCollection", traits.iter().map(|(k, v)| (*k, Value::Int(*v))).collect());
+                records.push(Value::New(Object::new("_UIAttributeTraitStorageRecord", vec![("UITraitCollection", Value::New(traits)), ("UIValue", constant(*n))])));
+            }
+            let traits = nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new()));
+            records.push(Value::New(Object::new("_UIAttributeTraitStorageRecord", vec![("UITraitCollection", traits), ("UIValue", constant(default))])));
+            let records = nib.array("NSMutableArray", records);
+            storages.push(Value::New(Object::new("_UIAttributeTraitStorage", vec![
+                ("UIObject", reference(a.view.clone())),
+                ("UIKeyPath", nib.string(a.key_path)),
+                ("UIRecords", records),
+            ])));
+        }
+        let storages = nib.array("NSArray", storages);
+        let descendants = nib.set("NSSet", vec![reference(a.view)])?;
+        return Ok(Some(Value::New(Object::new("_UITraitStorageList", vec![("UITopLevelObject", reference(root.to_string())), ("UITraitStorages", storages), ("UIDescendants", descendants)]))));
+    }
     if !attributes.is_empty() {
         if !variations.is_empty() {
             return fail("size class variations of attributes beside variations of constraints are not supported by this ibtool");
@@ -2898,6 +2965,26 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     }
     for (c, m) in made {
         let constraint_name = constraint_name(c)?;
+        // Its constant for a size class (a corpus storyboard), when the
+        // device doesn't have it (archived as the default).
+        let mut classes = Vec::new();
+        for v in children(c, "variation") {
+            only_attributes(v, &[("key", None), ("constant", None)])?;
+            only_children(v, &[])?;
+            let traits = size_class_traits(attr(v, "key")?)?;
+            if traits_hold(&traits, device_size_classes(nib, c)?) {
+                return fail("a constraint's constant for the device's size class is not supported by this ibtool");
+            }
+            classes.push((traits, number(attr(v, "constant")?)?));
+        }
+        if !classes.is_empty() {
+            if nib.variations.is_none() || classes.len() > 1 || c.attribute("symbolic").is_some() {
+                return fail("a constraint's constant for several size classes, or outside a controller's own view, is not supported by this ibtool");
+            }
+            let default = number(c.attribute("constant").unwrap_or("0"))?;
+            nib.attribute_variations.push(AttributeVariation { view: constraint_name.clone(), key_path: "encodedConstant", records: Vec::new(), default: Value::Nil, constants: Some((classes, default)) });
+            nib.varied.push(attr(c, "id")?.to_string());
+        }
         scene.own_constraints.push((name.to_string(), constraint_name.clone()));
         let Value::New(o) = m else { unreachable!() };
         if excluded.contains(&attr(c, "id")?) {
@@ -4857,13 +4944,21 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Object::new("UIStackView", values)
             }
         }
-        "view" | "containerView" | "scrollView" => {
+        "view" | "containerView" | "scrollView" | "arskView" => {
             // A container view is a plain view its embed segue fills; a
-            // scroll view one with the scrolling values tables have.
+            // scroll view one with the scrolling values tables have; ARKit's
+            // SpriteKit view one with SKView's (a corpus storyboard).
             let container = n.has_tag_name("containerView");
             let scroll = n.has_tag_name("scrollView");
+            let arsk = n.has_tag_name("arskView");
+            if arsk && (children(n, "subviews").next().is_some() || f.x != 0.0 || f.y != 0.0) {
+                return fail("an ARSKView with subviews or away from its superview's origin is not supported by this ibtool");
+            }
             const SCROLLING: [&str; 6] =
                 ["showsHorizontalScrollIndicator", "showsVerticalScrollIndicator", "alwaysBounceVertical", "directionalLockEnabled", "minimumZoomScale", "maximumZoomScale"];
+            if !scroll && ["alwaysBounceHorizontal", "pagingEnabled", "bouncesZoom"].iter().any(|a| n.attribute(*a).is_some()) {
+                return fail("scrolling attributes on a <view> are not supported by this ibtool");
+            }
             if !scroll && SCROLLING.iter().any(|a| n.attribute(*a).is_some()) {
                 return fail("scrolling attributes on a <view> are not supported by this ibtool");
             }
@@ -4896,6 +4991,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     ("preservesSuperviewLayoutMargins", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("restorationIdentifier", None),
                     ("layoutMarginsFollowReadableWidth", Some("YES")), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
                     ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")), ("alwaysBounceVertical", Some("YES")),
+                    ("alwaysBounceHorizontal", Some("YES")), ("pagingEnabled", Some("YES")), ("bouncesZoom", Some("NO")),
                     ("directionalLockEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None), ("autoresizesSubviews", Some("NO")),
                     // Its placeholder intrinsic size is Interface Builder's
                     // alone (one probe).
@@ -5036,7 +5132,22 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if n.attribute("showsVerticalScrollIndicator").is_some() {
                     values.push(("UIShowsVerticalScrollIndicator", Value::Bool(false)));
                 }
-                values.push(("UIBouncesZoom", Value::Bool(true)));
+                // Paging after the indicators, not bouncing zoom leaving
+                // `UIBouncesZoom` out, then a horizontal bounce (a corpus
+                // storyboard, as a collection view's); both bounces aren't
+                // established.
+                if n.attribute("pagingEnabled").is_some() {
+                    values.push(("UIPagingEnabled", Value::Bool(true)));
+                }
+                if n.attribute("bouncesZoom").is_none() {
+                    values.push(("UIBouncesZoom", Value::Bool(true)));
+                }
+                if n.attribute("alwaysBounceHorizontal").is_some() {
+                    if n.attribute("alwaysBounceVertical").is_some() {
+                        return fail("a scroll view bouncing both ways is not supported by this ibtool");
+                    }
+                    values.push(("UIAlwaysBounceHorizontal", Value::Bool(true)));
+                }
                 if n.attribute("alwaysBounceVertical").is_some() {
                     values.push(("UIAlwaysBounceVertical", Value::Bool(true)));
                 }
@@ -5050,7 +5161,26 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 }
                 values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
             }
-            let original = if scroll { "UIScrollView" } else { "UIView" };
+            // SKView's own values: its frame (at the origin: whether it is
+            // the frame or the bounds isn't established), an empty info
+            // dictionary, no scene, 60 frames a second, asynchronous,
+            // culling nodes it doesn't show.
+            if arsk {
+                let info = nib.array("NSMutableDictionary", Vec::new());
+                values.extend([
+                    ("_version", Value::Int(1)),
+                    ("_frame", doubles(&[0.0, 0.0, f.w, f.h])),
+                    ("_info", info),
+                    ("_scene", Value::Nil),
+                    ("_preferredFramesPerSecond", Value::Int(60)),
+                    ("_paused", Value::Bool(false)),
+                    ("_asynchronous", Value::Bool(true)),
+                    ("_allowsTransparency", Value::Bool(false)),
+                    ("_ignoresSiblingOrder", Value::Bool(false)),
+                    ("_shouldCullNonVisibleNodes", Value::Bool(true)),
+                ]);
+            }
+            let original = if scroll { "UIScrollView" } else if arsk { "ARSKView" } else { "UIView" };
             // A custom class is swapped in for the view when it loads.
             if n.attribute("customClass").is_some() {
                 let class = runtime_class_name(n, scene.module, original)?;
@@ -5986,6 +6116,9 @@ fn rootless_navigation_controller_nib(platform: Platform, color_matched: bool, l
         }
     }
     values.push(("UINavigationBar", navigation_bar(&mut nib, nav, "controller bar", None, "controller")?));
+    if nav.attribute("navigationBarHidden").is_some() {
+        values.push(("UINavigationBarHidden", Value::Bool(true)));
+    }
     let controller = if swapped || nav.attribute("customClass").is_some() {
         let class = runtime_class_name(nav, module, "UINavigationController")?;
         values.push(("UIClassName", nib.string(&class)));
@@ -6471,6 +6604,7 @@ fn check_navigation_controller(nav: Node) -> Result<(), String> {
             ("title", None),
             ("automaticallyAdjustsScrollViewInsets", Some("NO")),
             ("toolbarHidden", Some("NO")),
+            ("navigationBarHidden", Some("YES")),
             ("modalPresentationStyle", None),
             ("extendedLayoutIncludesOpaqueBars", Some("YES")),
             ("definesPresentationContext", Some("YES")),
@@ -6570,6 +6704,14 @@ fn navigation_controller(
     }
     values.push(("UIViewControllers", nib.array("NSMutableArray", vec![reference(root_name)])));
     values.push(("UINavigationBar", navigation_bar(nib, nav, &bar_name, Some(&item), name)?));
+    // A hidden bar right after it (a corpus storyboard); beside a toolbar
+    // it isn't established.
+    if nav.attribute("navigationBarHidden").is_some() {
+        if child(nav, "toolbar", "toolbar").is_some() {
+            return fail("a navigation controller's hidden bar beside a toolbar is not supported by this ibtool");
+        }
+        values.push(("UINavigationBarHidden", Value::Bool(true)));
+    }
     // Its shown toolbar after its bar (a corpus launch screen); hidden, or
     // beside a parent or its own navigation item, it isn't established.
     match (child(nav, "toolbar", "toolbar"), nav.attribute("toolbarHidden")) {
@@ -6939,7 +7081,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let objects_node = children(scene_node, "objects").next().ok_or("scene without objects")?;
         only_children(objects_node, &[
             "viewController", "tableViewController", "collectionViewController", "navigationController", "tabBarController", "splitViewController", "placeholder",
-            "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer", "pageViewController",
+            "exit", "viewControllerPlaceholder", "tapGestureRecognizer", "panGestureRecognizer", "swipeGestureRecognizer", "pongPressGestureRecognizer", "pageViewController",
             "hostingController", "customObject", "tableViewCell", "view", "label", "button", "textField", "imageView", "tableView",
             "collectionView", "webView", "wkWebView",
         ])?;
@@ -7186,6 +7328,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // A SceneKit view as the controller's view (Xcode's game
             // templates).
             _ if children(vc, "sceneKitView").next().is_some() => "sceneKitView",
+            // ARKit's, an SCNView compiled as one (a corpus storyboard).
+            _ if children(vc, "arscnView").next().is_some() => "arscnView",
             _ => "view",
         };
         let original_class = segue::original_class(vc);
@@ -7305,7 +7449,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // A xib's view has one only when it lists it (two of the corpus's).
         // A SceneKit view has no layout guides at all (two corpus
         // storyboards); one listing a guide or holding subviews is refused.
-        let scenekit = view.has_tag_name("sceneKitView");
+        let scenekit = view.has_tag_name("sceneKitView") || view.has_tag_name("arscnView");
         if scenekit && (safe_area.is_some() || children(view, "subviews").next().is_some()) {
             return fail("a root SceneKit view with a safe-area guide or subviews is not supported by this ibtool");
         }
@@ -7650,7 +7794,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
             if let Some(background) = background {
                 values.push(("UIBackgroundColor", color(&mut nib, background)?));
-            } else if view.has_tag_name("sceneKitView") {
+            } else if scenekit {
                 // A SceneKit view's is white unless the document gives one,
                 // as an ARSCNView's (a corpus storyboard).
                 values.push(("UIBackgroundColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))));
@@ -7760,6 +7904,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 Ok((x * x + y * y, x))
             };
             let mut xml_constraints: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, Option<&str>)> = Vec::new();
+            let mut safe_area_nested = 0;
             for cs in children(view, "constraints") {
                 for c in children(cs, "constraint") {
                     only_attributes(c, &[
@@ -7795,6 +7940,16 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         }
                     }
                     let nested = second != view_id && Some(second) != safe_area_id && !legacy(second) && !direct.iter().any(|v| v.attribute("id") == Some(second));
+                    // From the safe-area guide to deeper views, several are
+                    // ordered as neither the views' places nor their depth
+                    // say (four probes and a corpus storyboard); one is as
+                    // others (a corpus storyboard).
+                    if nested && Some(first) == safe_area_id {
+                        safe_area_nested += 1;
+                        if safe_area_nested > 1 {
+                            return fail("a root view's constraints from its safe-area guide to several views deeper than its subviews are not supported by this ibtool");
+                        }
+                    }
                     let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?, nested)?;
                     xml_constraints.push((place(key.0)?, key, c, first, Some(second)));
                 }
@@ -7908,12 +8063,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             let root_class = match view.tag_name().name() {
                 "collectionReusableView" => "UICollectionReusableView",
                 "sceneKitView" => "SCNView",
+                "arscnView" => "ARSCNView",
                 _ => "UIView",
             };
             // A SceneKit view's own keys follow, its `backgroundColor` the
             // view's background or nil (two corpus storyboards, as an
             // ARSCNView's).
-            if root_class == "SCNView" {
+            if scenekit {
                 let shared = match child(view, "color", "backgroundColor") {
                     Some(background) => color(&mut nib, background)?,
                     None => Value::Nil,
@@ -8366,6 +8522,18 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 .map(view_name)
                 .collect();
             let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &repeated)?;
+            // An ARSCNView comes before the placeholders, top-level and in
+            // the objects (a corpus storyboard, and as a SceneKit view it
+            // doesn't: a probe).
+            let (mut top, mut objects) = (top, objects);
+            if view.has_tag_name("arscnView") {
+                let at = top.iter().position(|v| matches!(v, Value::New(o) if o.name.as_deref() == Some(root_name.as_str()))).ok_or("the root view among the top-level objects")?;
+                let v = top.remove(at);
+                top.insert(0, v);
+                let at = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == root_name)).ok_or("the root view among the objects")?;
+                let v = objects.remove(at);
+                objects.insert(0, v);
+            }
             let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
             if xib {
                 rename_references(&mut root, "upstream", "owner");
@@ -8639,7 +8807,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         } else {
             Object::new(original_class, swapper)
         };
-        let controller = Value::New(controller.named("controller"));
+        let mut controller = Value::New(controller.named("controller"));
         let mut connections = vec![outlet(&mut vnib, "storyboard", "controller", "storyboard")];
         if !object_outlets.is_empty() && (!gesture_outlets.is_empty() || !item_outlets.is_empty()) {
             return fail("outlets to custom objects beside outlets to gesture recognizers or custom views are not supported by this ibtool");
@@ -8745,8 +8913,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let mut beside_events: Vec<(String, String, i64)> = Vec::new();
         let mut beside_pairs = Vec::new();
         if !scene_roots.is_empty() {
-            if is_list || embedded || !recognizers.is_empty() || !custom_objects.is_empty() {
-                return fail("views beside a controller with recognizers, custom objects or segues, or in an embedded or table or collection view controller, are not supported by this ibtool");
+            if embedded || is_collection || !recognizers.is_empty() || !custom_objects.is_empty() {
+                return fail("views beside a controller with recognizers or custom objects, or in an embedded or collection view controller, are not supported by this ibtool");
             }
             for r in &scene_roots {
                 let mut xs = Scene::new(vc_id, module, *r, None);
@@ -8795,10 +8963,32 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         }
         let mut top = vec![owner, responder, storyboard];
         let mut objects = vec![reference("owner"), reference("responder"), reference("storyboard")];
-        for r in &scene_roots {
-            objects.push(reference(view_name(attr(*r, "id")?)));
+        let beside_names: Vec<String> = scene_roots.iter().map(|r| attr(*r, "id").map(view_name)).collect::<Result<_, _>>()?;
+        // A table view controller's follow it, top-level and in the objects,
+        // defined where its keep-alive list names them (a corpus
+        // storyboard).
+        if is_list {
+            let mut slots: Vec<Option<Value>> = beside_values.into_iter().map(Some).collect();
+            if let Value::New(c) = &mut controller {
+                if let Some((_, Value::New(alive))) = c.values.iter_mut().find(|v| v.0 == "UITopLevelObjectsToKeepAliveFromStoryboard") {
+                    for (_, v) in alive.values.iter_mut() {
+                        let at = match v {
+                            Value::Ref(r) => beside_names.iter().position(|n| n == r),
+                            _ => None,
+                        };
+                        if let Some(value) = at.and_then(|at| slots[at].take()) {
+                            *v = value;
+                        }
+                    }
+                }
+            }
+            if slots.iter().any(Option::is_some) {
+                return fail("a view beside a table view controller its keep-alive list doesn't name is not supported by this ibtool");
+            }
+        } else {
+            objects.extend(beside_names.iter().map(|n| reference(n.clone())));
+            top.extend(beside_values);
         }
-        top.extend(beside_values);
         // Their actions by selector, those with one selector in document
         // order (two probes).
         let mut gesture_actions: Vec<(String, &str)> =
@@ -8855,6 +9045,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         }
         let mut beside_levels = beside_levels.into_iter();
         objects.push(reference("controller"));
+        if is_list {
+            objects.extend(beside_names.iter().map(|n| reference(n.clone())));
+        }
         objects.extend(later_gestures.iter().map(|(_, id)| reference(format!("gesture {id}"))));
         objects.extend(beside_levels.next().unwrap_or_default());
         if child(vc, "navigationItem", "navigationItem").is_some() {
@@ -8870,6 +9063,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         objects.extend(toolbar_views.iter().map(|b| reference(b.clone())));
         objects.extend(beside_levels.flatten());
         top.push(controller);
+        if is_list {
+            top.extend(beside_names.iter().map(|n| reference(n.clone())));
+        }
         top.extend(later_gestures.into_iter().map(|(object, _)| object));
         // The controller's runtime attributes are its own nib's.
         let mut pairs = runtime_attributes(&mut vnib, vc, "controller")?;
