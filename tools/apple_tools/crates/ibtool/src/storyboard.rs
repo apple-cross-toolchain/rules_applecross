@@ -12,6 +12,7 @@ mod segue;
 mod split;
 mod tab;
 mod table;
+mod window;
 
 pub struct Compiled {
     /// (file name, contents) inside the .storyboardc directory.
@@ -7072,6 +7073,12 @@ pub struct XibLayout {
 /// cells beside its view in the scene's objects after the controller.
 pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, layout: &XibLayout) -> Result<Compiled, String> {
     compile_document(xml, minimum_deployment_target, module, localizable, Some(layout))
+}
+
+/// A main window xib (xib.rs): its window, custom objects and container
+/// controller.
+pub fn compile_xib_window(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+    window::compile(xml, module, localizable)
 }
 
 /// A xib's top-level table view cell (xib.rs), its canvas location and

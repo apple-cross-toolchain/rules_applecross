@@ -296,7 +296,7 @@ pub(super) fn parent_controller_nib(
     }
     match kind {
         Kind::Tab => {
-            values.push(("UITabBar", tab::tab_bar(&mut nib, node, items)?));
+            values.push(("UITabBar", tab::tab_bar(&mut nib, node, items, "controller")?));
             values.push(("UICustomizableViewControllers", nib.array("NSMutableArray", child_refs())));
             values.push(("UIViewControllers", nib.array("NSMutableArray", child_refs())));
         }

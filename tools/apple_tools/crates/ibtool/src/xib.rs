@@ -47,6 +47,11 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         return fail(format!("an object with id {CONTROLLER} is not supported by this ibtool"));
     }
     let objects = elements(root).find(|c| c.has_tag_name("objects")).ok_or("a xib in the archive format before Xcode 5 is not supported by this ibtool")?;
+    // A main window xib, its window beside the app delegate and a
+    // container controller, is compiled on its own.
+    if elements(objects).any(|o| o.has_tag_name("window")) {
+        return crate::storyboard::compile_xib_window(xml, module, localizable);
+    }
     let mut owner = None;
     let mut responder = None;
     let mut view = None;
