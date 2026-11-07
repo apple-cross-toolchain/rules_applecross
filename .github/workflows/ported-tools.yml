@@ -122,11 +122,18 @@ jobs:
             --latest=false \
             -- *.tar.zst SHA256.txt
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+  # One pin PR, on one branch, moved to each new release: its build runs by
+  # dispatch (a PR GitHub's token opens starts no pull_request run), and it
+  # merges itself when that passes (build.yml's merge_pin).
   pin:
     needs: release
     if: needs.release.outputs.tag != ''
     runs-on: ubuntu-24.04
+    concurrency:
+      group: pin-ported-tools
+      cancel-in-progress: false
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     env:
@@ -137,13 +144,19 @@ jobs:
         with:
           ref: main
       - run: |
-          branch="pin-$TAG"
+          branch=pin-ported-tools
           title="Use ported tools ${TAG#ported-tools-}"
+          body="Moves \`_PORTED_TOOLS_URL\` to \`$TAG\`, built from $GITHUB_SHA, and \`toolchain/ported_tools.sha256\` to that release's \`SHA256.txt\`. Merges itself once its build passes."
           gh release download "$TAG" --pattern SHA256.txt --output toolchain/ported_tools.sha256 --clobber
           sed -i "s|/download/ported-tools-[0-9.]*/|/download/$TAG/|" toolchain/apple_cross_toolchain.bzl
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git switch -c "$branch"
           git commit -am "$title"
-          git push origin "$branch"
-          gh pr create --head "$branch" --title "$title" --body "Moves \`_PORTED_TOOLS_URL\` to \`$TAG\`, built from $GITHUB_SHA, and \`toolchain/ported_tools.sha256\` to that release's \`SHA256.txt\`."
+          git push --force origin "$branch"
+          if gh pr view "$branch" --json state --jq 'select(.state == "OPEN")' | grep -q .; then
+            gh pr edit "$branch" --title "$title" --body "$body"
+          else
+            gh pr create --head "$branch" --title "$title" --body "$body"
+          fi
+          gh workflow run build.yml --ref "$branch"
