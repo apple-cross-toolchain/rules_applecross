@@ -7411,6 +7411,12 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or(if platform == Platform::Tvos { "landscape" } else { "portrait" }))?,
         None => None,
     };
+    // A document Xcode 5 saved in the iOS 6 format (`variant="6xAndEarlier"`)
+    // compiles with quirks of its own: buttons' title colours and some
+    // subviews left out (two corpus storyboards); refused.
+    if root.attribute("variant").is_some() {
+        return fail("a document saved for iOS 6 and earlier (variant) is not supported by this ibtool");
+    }
     let generic_canvas = if has_device {
         false
     } else if platform == Platform::Tvos {
@@ -7418,7 +7424,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     } else {
         let target = minimum_deployment_target.ok_or("a storyboard without a device needs --minimum-deployment-target for this ibtool")?;
         let major: u32 = target.split('.').next().and_then(|m| m.parse().ok()).ok_or_else(|| format!("not a deployment target: {target}"))?;
-        major < 17
+        // An Xcode 4 document's views are on it whatever the target (a
+        // corpus storyboard).
+        major < 17 || root.attribute("version") == Some("2.0")
     };
     let color_matched = root.attribute("colorMatched") == Some("YES");
     let initial = root.attribute("initialViewController");

@@ -698,6 +698,14 @@ other values of the attributes these use, is refused. Observed:
 - An older document's frame inset in percentages (`minX="50.00%"`) puts
   the view at that share of the room its superview leaves it, `(superview
   − size) × percentage` (a corpus storyboard's centred stack view).
+- An Xcode 4 document (`version="2.0"`) without a device is on the generic
+  canvas whatever the deployment target (393x852 without trait
+  collections), and its table view cells' content view is a `<view
+  key="contentView">` without an id, compiled as a content view whose
+  background colour Xcode leaves out (a corpus storyboard); with
+  constraints it is refused. A document Xcode 5 saved for iOS 6 and
+  earlier (`variant="6xAndEarlier"`) is refused: its buttons' title
+  colours and some subviews are left out (two corpus storyboards).
 - A document deploying before iOS 8 (`<deployment version>` below 0x800)
   is refused: Xcode compiles such a xib into a nib directory for each
   idiom (`out~iphone.nib/runtime.nib` and `objects-8.0+.nib`), with or

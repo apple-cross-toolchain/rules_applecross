@@ -816,7 +816,15 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         ("customModuleProvider", None), ("userLabel", None), ("textLabel", None), ("detailTextLabel", None), ("style", None), ("restorationIdentifier", None),
         ("insetsLayoutMarginsFromSafeArea", Some("NO")), ("userInteractionEnabled", Some("NO")), ("id", None),
     ])?;
-    only_children(cell, &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections", "accessibility", "inset", "userDefinedRuntimeAttributes"])?;
+    // An Xcode 4 document's content view is a `<view key="contentView">`
+    // without an id (a corpus storyboard).
+    let xcode4 = cell.document().root_element().attribute("version") == Some("2.0");
+    let allowed: &[&str] = if xcode4 {
+        &["rect", "autoresizingMask", "tableViewCellContentView", "view", "color", "connections", "accessibility", "inset", "userDefinedRuntimeAttributes"]
+    } else {
+        &["rect", "autoresizingMask", "tableViewCellContentView", "color", "connections", "accessibility", "inset", "userDefinedRuntimeAttributes"]
+    };
+    only_children(cell, allowed)?;
     for i in children(cell, "inset") {
         only_attributes(i, &[("key", Some("separatorInset")), ("minX", None), ("minY", None), ("maxX", None), ("maxY", None)])?;
     }
@@ -849,7 +857,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     }
     let cell_id = attr(cell, "id")?;
     let cell_name = view_name(cell_id);
-    let content = child(cell, "tableViewCellContentView", "contentView").ok_or("a cell without a content view")?;
+    let content = child(cell, "tableViewCellContentView", "contentView").or_else(|| child(cell, "view", "contentView").filter(|_| xcode4)).ok_or("a cell without a content view")?;
     only_attributes(content, &[
         ("key", Some("contentView")), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")),
         ("contentMode", Some("center")), ("preservesSuperviewLayoutMargins", Some("YES")), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
@@ -869,8 +877,16 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
             return fail("a cell's content view with an autoresizing mask is not supported by this ibtool");
         }
     }
-    let content_id = attr(content, "id")?;
-    let content_name = view_name(content_id);
+    // The old content view has no id: Xcode makes one, and drops its
+    // background colour (a corpus storyboard).
+    let old_content = content.has_tag_name("view");
+    if old_content && content.attribute("id").is_some() {
+        return fail("an old-format table view cell content view with an id is not supported by this ibtool");
+    }
+    let content_name = match content.attribute("id") {
+        Some(id) => view_name(id),
+        None => format!("{cell_name} content"),
+    };
 
     // The content view and its subviews, compiled as a container's are.
     let mut scene = Scene::new(target, module, content, Some(content_name.clone()));
@@ -935,7 +951,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     }
     // A background colour after its subviews, layout margins after its
     // constraints (two probes).
-    if let Some(c) = child(content, "color", "backgroundColor") {
+    if let Some(c) = child(content, "color", "backgroundColor").filter(|_| !old_content) {
         cv.push(("UIBackgroundColor", color(nib, c)?));
     }
     cv.push(("UIDeepDrawRect", Value::Bool(true)));
@@ -945,8 +961,13 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     if content.attribute("clipsSubviews").is_some() {
         cv.push(("UIClipsToBounds", Value::Bool(true)));
     }
-    if let Some(own) = own_constraints(nib, &mut scene, content, &content_name)? {
-        cv.push(("UIViewAutolayoutConstraints", own));
+    if old_content && children(content, "constraints").next().is_some() {
+        return fail("an old-format table view cell content view with constraints is not supported by this ibtool");
+    }
+    if !old_content {
+        if let Some(own) = own_constraints(nib, &mut scene, content, &content_name)? {
+            cv.push(("UIViewAutolayoutConstraints", own));
+        }
     }
     if let Some((m, directional)) = layout_margins(content)? {
         cv.push(("UIViewLayoutMargins", doubles(&m)));
