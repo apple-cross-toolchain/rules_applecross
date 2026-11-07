@@ -540,11 +540,14 @@ other values of the attributes these use, is refused. Observed:
 - A subview's constraints may name, as their second item, a view deeper
   than its own subviews (in plain, stack or scroll views): ordered as the
   root view's nested ones are, first in their group. The objects list such
-  views not under their own superviews but after the last turn of their
-  holder's level of the breadth-first walk, in their constraints' order,
-  and they join the queue there; the root view's are its level's, as
-  above (twelve probes: depths two to four, siblings before and after,
-  views of other branches between). A deeper first item is refused.
+  views not under their own superviews but right before the turn of their
+  holder's first subview in the breadth-first walk, in their
+  constraints' order, and they join the queue there; the root view's are
+  its level's, as above (seventeen probes: depths two to four, siblings
+  before and after, views of other branches between, two holders side by
+  side, plain or stack views; and two corpus storyboards). Twelve of those
+  fit the earlier reading, after the last turn of the holder's level,
+  which two holders side by side disprove. A deeper first item is refused.
 - A constraint a view's default variation excludes (`<variation
   key="default"><mask key="constraints"><exclude reference=…/>`,
   Interface Builder's Installed unchecked) is left out of the view's
@@ -781,7 +784,7 @@ other values of the attributes these use, is refused. Observed:
   or has no size when the document says `fixedFrame="YES"` (18 probes,
   three corpus storyboards); so is an image view or a segmented control
   (four probes, one corpus storyboard), and a table view, navigation bar
-  or stack view (a corpus storyboard) without `fixedFrame` (two probes), an image view's `fixedFrame`
+  or stack view or page control (corpus storyboards) without `fixedFrame` (two probes), an image view's `fixedFrame`
   otherwise changing nothing. An image view's `UIAutoresizingMask` is a
   label's (below). An older document's `<frame key="frameInset">` with
   only `minX`, `minY`, `width` and `height` is the frame at (minX, minY)
@@ -1096,6 +1099,21 @@ other values of the attributes these use, is refused. Observed:
   class, beside segues, insets or edge settings, in table or collection
   view controllers' scenes or in an embedded controller's, and beside
   outlets to recognizers or custom views, are refused.
+- A scene's views beside its controller (a `<view>`, `<label>` or other
+  view in its objects) are the controller's nib's: top-level after the
+  storyboard placeholder, kept alive with the recognizers and custom
+  objects in document order, each compiled as a plain subview. The
+  objects list them after the placeholders and then, level by level
+  after the controller, each level's views' turns (an unused safe-area
+  guide's placeholder, constraints, subviews) before the controller's own
+  objects of that level (its navigation item, tab bar item, templates and
+  toolbar items, then its bar button items). The controller's outlets
+  into them are by name with those to its custom views, their controls'
+  actions on it follow the bar items', and their runtime attributes are
+  the nib's pairs (four corpus storyboards). An embedded controller's
+  (which lists the view after itself: a corpus storyboard), a table or
+  collection view controller's, and ones beside recognizers or custom
+  objects, are refused.
 
 ## Navigation controllers
 
@@ -1229,10 +1247,21 @@ objects (its own nib's, or its navigation controller's).
   switch's frame), are key-value pairs in the nib holding the item: the
   controller's, or the navigation controller's for its root (two corpus
   storyboards); several items', or beside the controller's own, are
-  refused. Custom views with subviews, constraints, outlets, segues, a
-  custom class or accessibility settings are refused, as are
-  two actions with one mask and selector, several outlets, and custom
-  views in a navigation bar in a view.
+  refused. Custom views with subviews, constraints, outlets, segues or
+  accessibility settings are refused, as are two actions with one mask
+  and selector, and custom views in a navigation bar in a view. A custom
+  view of a custom class is swapped in as a subview is, and several
+  outlets to custom views are sorted by name (two corpus storyboards).
+- **Toolbar items.** An identified controller's `<toolbarItems>` are
+  `UIToolbarItems` after its `UIStoryboardIdentifier`: bar button items
+  (plain ones without `UIStyle`, a flexible space with `UIHidesSharedBG`),
+  listed after its navigation item, then the item's bar button items,
+  then their custom views. Their custom views' outlets (several, by
+  name), actions (with the navigation item's) and key-value pairs are as
+  the navigation item's (two corpus storyboards' toolbar scenes). In
+  unidentified, embedded, table or collection view controllers, beside a
+  navigation item's custom views, segues, recognizers or later settings
+  they are refused.
 
 A child navigation controller's root may have segues (Xcode's
 master-detail template): its templates follow that child's deeper parts
@@ -1281,14 +1310,21 @@ name, or `UIPageViewController`), with `UIStoryboardIdentifier`,
 (horizontal 0, vertical 1), `UISpineLocation` (none 0, min 1, mid 2, max 3)
 and `UIPageSpacing` as a whole number (12.5 is 12), then its storyboard and
 `sceneViewController` outlets; the Info.plist lists it as a controller
-(seven probes). Fractional spacing, an unidentified or initial one,
+(seven probes). Its navigation item comes first in the controller's
+values, listed after the controller with its title view and bar button
+items (then the title view's constraints and subviews, one level deep),
+the controller's outlets to those views by name after its storyboard
+outlet, the items' actions after `sceneViewController` (two corpus
+storyboards). Fractional spacing, an unidentified or initial one,
 children and segues to one are refused.
 
 A SwiftUI `<hostingController>` a segue leads to compiles to a nib named
 `UIHostingController-<id>` (so its segue templates' destination), listed
 in the Info.plist: the owner, first responder and storyboard placeholders
 and a plain `UIViewController` with no view nib, swapped in for a custom
-class (`UIOriginalClassName` `UIViewController`), its empty navigation
+class (`UIOriginalClassName` `UIViewController`) or when a segue to it
+names a `destinationCreationSelector` (`UIClassName` `UIViewController`
+too: two probes), its empty navigation
 item (`UICenterItemGroups`, `UILargeTitleDisplayMode` 0) its only value
 and after it in the objects, then its storyboard and `sceneViewController`
 outlets (three probes, Kingfisher's demo). Initial, identified or
@@ -1315,9 +1351,10 @@ rest are refused for other elements):
   it right after the item, before the item's bar button items and their
   custom views. `<nil key="title"/>` is as no title (eight probes: beside
   left and right items and custom views, as a root controller's item and
-  in its own nib too). Beside a back item, and with connections,
-  subviews, constraints, runtime attributes or accessibility, it is
-  refused.
+  in its own nib too). Beside a back item, and with connections, runtime
+  attributes or accessibility, it is refused; with subviews or
+  constraints it is refused but in a page view controller's item (Page
+  view controllers).
 - Top-level objects: a storyboard placeholder per controller the nib holds,
   in reverse: the last child's first, a navigation child's root before the
   child itself. Then the owner, the first responder, the scene's own
@@ -2010,9 +2047,12 @@ controls (42 probes):
   destination (one probe, as a xib's view's); one on another scene's
   object, which Interface Builder no longer makes, is dropped without a
   warning (three probes).
-- **A switch.** `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
+- **A switch.** `UISelected` when selected (a corpus storyboard),
+  `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
   `UISwitchOnTintColor`. Its frame is also a key-value pair, `frame`
-  (`NS.special` 3, `{{x, y}, {w, h}}`), however it is laid out.
+  (`NS.special` 3, `{{x, y}, {w, h}}`), however it is laid out, before its
+  runtime attributes' pairs; the other controls' runtime attributes are
+  pairs as any view's (a corpus storyboard).
 - **A slider.** `UIValue` (a float) unless 0 or not given, `UIMinValue`
   and `UIMaxValue` unless 0 and 1, `UIContinuous` false, the minimum, maximum and thumb tint
   colours, and `UIBehavioralStyle` 0.
@@ -2037,7 +2077,9 @@ controls (42 probes):
   the frame's top. Its hugging is left out when it is 250 across and 750
   down, its default. Then `UIProgress` (a float) unless 0, the progress and
   track tint colours (`UIProgressProgressTintColor`,
-  `UIProgressTrackTintColor`), and `UIProgressViewStyle` 1 for a bar.
+  `UIProgressTrackTintColor`), and `UIProgressViewStyle` 1 for a bar; its
+  tint colour is `UITintColor` after its mask, as a stepper's (a corpus
+  storyboard).
   Opaque ones, a bar under 4 points or with colours, and actions are
   refused.
 - **A page control** (`UIPageControl`, five probes). Its hugging is always
