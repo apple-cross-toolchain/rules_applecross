@@ -395,9 +395,6 @@ fn perform_adjustment(
             let value = adjustment.value.as_ref().expect("replace requires value");
             match (last_part, parent) {
                 (PathPart::Key(key), Value::Dictionary(dict)) => {
-                    if !dict.contains_key(key.as_str()) {
-                        bail!("key '{}' does not exist", key);
-                    }
                     dict.insert(key.clone(), value.clone());
                 }
                 (PathPart::Index(idx), Value::Array(arr)) => {
