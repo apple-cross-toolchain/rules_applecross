@@ -5603,6 +5603,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 // Its placeholder's intrinsic size is Interface Builder's
                 // alone (a corpus storyboard, with and without it).
                 ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
+                ("clearsContextBeforeDrawing", Some("NO")),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility", "imageReference"])?;
             // An image reference naming only its image is the `image`
@@ -5651,6 +5652,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIAutoresizeSubviews", Value::Bool(true)));
             }
             values.extend(mask_key(nib, scene, n)?);
+            // After the autoresizing keys, as a toolbar's (one probe).
+            if n.attribute("clearsContextBeforeDrawing").is_some() {
+                values.push(("UIClearsContextBeforeDrawing", Value::Bool(false)));
+            }
             alpha(&mut values, n)?;
             if content_mode != 0 {
                 values.push(("UIContentMode", Value::Int(content_mode)));
