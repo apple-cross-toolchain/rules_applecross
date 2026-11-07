@@ -9,6 +9,9 @@ on:
   push:
     branches:
       - main
+  # The ported-tools workflow's pin PRs, which GitHub's token can't start a
+  # pull_request run for, and main after merging one (see merge_pin).
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
@@ -63,7 +66,7 @@ jobs:
     strategy: &macos_strategy
       fail-fast: false
       matrix:
-        bazel: ${{ fromJSON(github.event_name == 'push' && '[8, 9, 10]' || '[9]') }}
+        bazel: ${{ fromJSON(github.event_name != 'pull_request' && '[8, 9, 10]' || '[9]') }}
     runs-on: macos-26
     env:
       USE_BAZEL_VERSION: ${{ matrix.bazel }}.*
@@ -89,7 +92,7 @@ jobs:
     name: rbe_smoke_tests (bazel_${{ matrix.bazel }})
     # The all-remote build, reading the runner's own Xcode.
     if: >-
-      github.event_name == 'push' ||
+      github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     strategy: *macos_strategy
     runs-on: macos-26
@@ -149,7 +152,7 @@ jobs:
     # manual and named explicitly, since xcarchive shells out to
     # /usr/bin/codesign and so cannot be built by the all-remote job at all.
     if: >-
-      github.event_name == 'push' ||
+      github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     strategy: *macos_strategy
     runs-on: macos-26
@@ -195,3 +198,31 @@ jobs:
           --repo_env=DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
           --ios_multi_cpus=sim_arm64
           //tests/xcframework_import:Probe
+  # A pin PR (ported-tools.yml) merges itself once every job above passed on
+  # it, then runs this workflow on main, which a merge by GitHub's token
+  # doesn't start.
+  merge_pin:
+    needs:
+      - stub_sdk_tests
+      - local_smoke_tests
+      - rbe_smoke_tests
+      - multi-platform_rbe_smoke_tests
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'pin-ported-tools'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - run: |
+          # Only the commit this run tested.
+          head=$(gh pr view pin-ported-tools --json headRefOid,state --jq 'select(.state == "OPEN") | .headRefOid' || true)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "The pin PR is closed or moved on from $GITHUB_SHA; not merging."
+            exit 0
+          fi
+          gh pr merge pin-ported-tools --squash --delete-branch --match-head-commit "$GITHUB_SHA"
+          gh workflow run build.yml --ref main
