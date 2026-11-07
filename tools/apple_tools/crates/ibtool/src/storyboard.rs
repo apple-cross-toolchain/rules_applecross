@@ -7499,6 +7499,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             parents.push((index, kind, node, kids, loadable));
         }
     }
+    // A loadable navigation controller's root container is loaded with it.
+    for p in parents.iter_mut() {
+        let id = p.2.attribute("id");
+        if navs.iter().any(|n| Some(n.2) == id && n.3) {
+            p.4 = true;
+        }
+    }
     // A loadable tab bar or split view controller holds its children, and
     // the roots of those that are navigation controllers.
     let held_children: HashSet<&str> = parents.iter().filter(|p| p.4).flat_map(|p| p.3.iter().map(|k| k.1)).collect();
@@ -9648,6 +9655,24 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         }
         outputs.push((index, scene_files, entry));
     }
+    // Each container's children, as `parent_controller_nib` takes them.
+    let mut held_by: HashMap<usize, Vec<(&str, parent::Child)>> = HashMap::new();
+    for (index, _, _, kids, _) in &parents {
+        let mut held = Vec::new();
+        for &(relationship, id) in kids {
+            if let Some(&(_, nav, root_id, _)) = navs.iter().find(|n| attr(n.1, "id").ok() == Some(id)) {
+                let Some(root) = roots.get(root_id) else { continue };
+                held.push((relationship, parent::Child::Navigation(nav, root)));
+            } else {
+                let Some(root) = roots.get(id) else { continue };
+                held.push((relationship, parent::Child::Controller(root)));
+            }
+        }
+        if held.len() == kids.len() {
+            held_by.insert(*index, held);
+        }
+    }
+    let held_kids = |index: &usize| held_by.get(index).ok_or("a container's child is not in a supported scene".to_string());
     for &(index, nav, root_id, loadable) in &navs {
         if !loadable && held_children.contains(attr(nav, "id")?) {
             // Held by its parent's nib alone.
@@ -9666,8 +9691,16 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         if held_children.contains(attr(nav, "id")?) && initial == Some(attr(nav, "id")?) {
             return fail("a child navigation controller that is loaded on its own too is not supported by this ibtool");
         }
-        let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
         let swapped = initial == Some(attr(nav, "id")?) || nav.attribute("storyboardIdentifier").is_some();
+        // A tab bar controller as its root, held in its nib.
+        if let Some((parent_index, kind, node, _, _)) = parents.iter().find(|p| p.2.attribute("id") == Some(root_id)) {
+            let held = held_kids(parent_index)?;
+            let (name, bytes) = parent::parent_controller_nib(platform, color_matched, localizable, module, *kind, *node, held, swapped, &nib_names, Some(nav))?;
+            let entry = (name.clone(), initial == Some(attr(nav, "id")?), nav.attribute("storyboardIdentifier").is_some());
+            outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
+            continue;
+        }
+        let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
         let (name, bytes) = navigation_controller_nib(platform, color_matched, localizable, module, nav, root, swapped, &nib_names)?;
         let entry = (name.clone(), initial == Some(attr(nav, "id")?), nav.attribute("storyboardIdentifier").is_some());
         outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
@@ -9685,23 +9718,22 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let entry = (name.clone(), initial == Some(id), nav.attribute("storyboardIdentifier").is_some());
         outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }
-    for (index, kind, node, kids, loadable) in &parents {
+    for (index, kind, node, _, loadable) in &parents {
+        let id = attr(*node, "id")?;
+        // A navigation controller's root is in its nib alone (a corpus
+        // storyboard); loaded on its own too it isn't established.
+        if navs.iter().any(|n| n.2 == id && n.3) {
+            if initial == Some(id) || node.attribute("storyboardIdentifier").is_some() {
+                return fail("a navigation controller's root tab bar controller that is loaded on its own too is not supported by this ibtool");
+            }
+            continue;
+        }
         if !loadable {
             return fail(format!("a {} nothing loads is not supported by this ibtool", kind.class()));
         }
-        let mut held = Vec::new();
-        for &(relationship, id) in kids {
-            if let Some(&(_, nav, root_id, _)) = navs.iter().find(|n| attr(n.1, "id").ok() == Some(id)) {
-                let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
-                held.push((relationship, parent::Child::Navigation(nav, root)));
-            } else {
-                let root = roots.get(id).ok_or("a child controller is not in a supported scene")?;
-                held.push((relationship, parent::Child::Controller(root)));
-            }
-        }
-        let id = attr(*node, "id")?;
+        let held = held_kids(index)?;
         let swapped = initial == Some(id) || node.attribute("storyboardIdentifier").is_some();
-        let (name, bytes) = parent::parent_controller_nib(platform, color_matched, localizable, module, *kind, *node, &held, swapped, &nib_names)?;
+        let (name, bytes) = parent::parent_controller_nib(platform, color_matched, localizable, module, *kind, *node, held, swapped, &nib_names, None)?;
         let entry = (name.clone(), initial == Some(id), node.attribute("storyboardIdentifier").is_some());
         outputs.push((*index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }

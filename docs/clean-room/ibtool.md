@@ -1536,6 +1536,16 @@ rest are refused for other elements):
   and the items' `perform:` after all the outlets, both in the children's
   order (a corpus storyboard's three children, a probe of two in reverse
   document order); beside the items' actions they are refused.
+- A navigation controller's root may be a plain tab bar controller with an
+  empty navigation item of its own: the navigation controller's nib holds
+  it as its root, as a held controller, its placeholder before its
+  children's and its storyboard outlet first among theirs; its navigation
+  item is on the navigation bar, `UIParentViewController` the navigation
+  controller after that item; the objects list the navigation controller
+  and its bar before it, then its parts as in its own nib; it has no nib
+  of its own (a corpus storyboard, a probe). With navigation children it
+  is refused (their placeholders' outlets go otherwise: a probe), as is
+  one loaded on its own too.
 - A custom object in the tab bar controller's scene, of a custom class,
   is top-level and listed after the storyboard placeholder, before the
   controller, which keeps it alive (`UITopLevelObjectsToKeepAliveFromStoryboard`
