@@ -906,7 +906,7 @@ fn bar_button_item<'a, 'i>(
     }
     let mut values = Vec::new();
     if let Some(v) = custom {
-        let other = |d: &Node| matches!(d.tag_name().name(), "subviews" | "constraints" | "outlet" | "outletCollection" | "segue");
+        let other = |d: &Node| matches!(d.tag_name().name(), "subviews" | "constraints" | "outlet" | "outletCollection");
         // Of a custom class, swapped in as a subview is (a corpus
         // storyboard's button).
         if v.descendants().any(|d| other(&d)) {
@@ -926,9 +926,24 @@ fn bar_button_item<'a, 'i>(
         if !scene.accessibility.is_empty() || scene.subviews.len() > 1 {
             return fail("a bar button item's custom view with accessibility settings is not supported by this ibtool");
         }
+        // A control's segue is templated as an item's is, the control
+        // performing it on its own event (a corpus storyboard's button);
+        // beside other actions of custom views, their order isn't
+        // established.
         for (selector, source, mask, target) in scene.actions {
+            if let Some(i) = target.strip_prefix("upstream segue ").and_then(|i| i.parse::<usize>().ok()) {
+                let sg = v.descendants().find(|d| d.has_tag_name("segue") && d.attribute("id") == Some(scene.segues[i].as_str())).ok_or("a custom view's segue")?;
+                if mask != 64 || sg.attribute("popoverAnchorView").is_some() || actions.iter().any(|a| a.2 != 0) {
+                    return fail("a bar button item's custom view's segue beside other actions of custom views is not supported by this ibtool");
+                }
+                segues.push((sg, source));
+                continue;
+            }
             if target != "upstream" {
                 return fail("a bar button item's custom view's actions on anything but its controller are not supported by this ibtool");
+            }
+            if segues.iter().any(|s| s.1 != name) && mask != 0 {
+                return fail("a bar button item's custom view's segue beside other actions of custom views is not supported by this ibtool");
             }
             actions.push((selector, source, mask));
         }
@@ -1151,6 +1166,27 @@ fn view_connections(scene: &mut Scene, n: Node, name: &str) -> Result<(), String
 /// only delegate `gesture_recognizer` accepts).
 fn gesture_delegate(r: Node) -> bool {
     children(r, "connections").flat_map(|c| children(c, "outlet")).next().is_some()
+}
+
+/// The order a nib lists a scene's gesture recognizers in, as indices into
+/// `recognizers` (in document order): by class name (UIKit's, long press,
+/// pan, swipe, tap), each class's in reverse document order (eleven probes
+/// of two to six recognizers of up to four classes, and a corpus
+/// storyboard). Custom classes beside other classes are refused.
+fn gesture_listing(recognizers: &[Node]) -> Result<Vec<usize>, String> {
+    let class = |r: Node| match r.tag_name().name() {
+        "pongPressGestureRecognizer" => "UILongPressGestureRecognizer",
+        "panGestureRecognizer" => "UIPanGestureRecognizer",
+        "swipeGestureRecognizer" => "UISwipeGestureRecognizer",
+        _ => "UITapGestureRecognizer",
+    };
+    let mut order: Vec<usize> = (0..recognizers.len()).rev().collect();
+    order.sort_by_key(|i| class(recognizers[*i]));
+    let classes: std::collections::BTreeSet<&str> = recognizers.iter().map(|r| class(*r)).collect();
+    if classes.len() > 1 && recognizers.iter().any(|r| r.attribute("customClass").is_some()) {
+        return fail("gesture recognizers of a custom class beside other classes are not supported by this ibtool");
+    }
+    Ok(order)
 }
 
 /// The scene's gesture recognizers in their placeholders' order: the views
@@ -1917,8 +1953,11 @@ fn simple_control(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str, f: &Fra
             if let Some(c) = child(n, "color", "onTintColor") {
                 values.push(("UISwitchOnTintColor", color(nib, c)?));
             }
-            // Its fixed size is set back to its frame as the nib loads.
-            let rect = nib.string(&format!("{{{{{}, {}}}, {{{}, {}}}}}", f.x, f.y, f.w, f.h));
+            // Its fixed size is set back to its frame as the nib loads, the
+            // numbers as NSStringFromCGRect writes them, to 17 significant
+            // digits (a corpus storyboard's laid-out third of a point).
+            let g = cf::xml::format_real;
+            let rect = nib.string(&format!("{{{{{}, {}}}, {{{}, {}}}}}", g(f.x), g(f.y), g(f.w), g(f.h)));
             let value = Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(3)), ("NS.rectval", rect)]));
             let key_path = nib.string("frame");
             scene.pairs.push((name.to_string(), Value::New(Object::new("UINibKeyValuePair", vec![("UIObject", reference(name)), ("UIValue", value), ("UIKeyPath", key_path)]))));
@@ -2243,6 +2282,11 @@ fn view_name(id: &str) -> String {
     format!("view {id}")
 }
 
+/// Whether `name` is a view's, as `view_name` makes them.
+fn is_view_name(name: &str) -> bool {
+    name.starts_with("view ")
+}
+
 /// A document constraint's object name, by its id, for outlets to it.
 fn constraint_name(c: Node) -> Result<String, String> {
     Ok(format!("constraint {}", attr(c, "id")?))
@@ -2371,6 +2415,48 @@ impl<'a> Scene<'a> {
 fn listed_segues<'a, 'i>(scene: &Scene, vc: Node<'a, 'i>) -> Vec<(usize, Node<'a, 'i>)> {
     let order: Vec<usize> = scene.segue_listing.clone().unwrap_or_else(|| (0..scene.segues.len()).collect());
     order.into_iter().filter_map(|i| vc.descendants().find(|d| d.attribute("id") == Some(scene.segues[i].as_str())).map(|n| (i, n))).collect()
+}
+
+/// A scroll view's own values, after its large content: its indicators,
+/// paging, zoom bouncing, bounces, directional lock and zoom scales, as a
+/// subview or a controller's root view (a corpus storyboard).
+fn scroll_values(values: &mut Vec<(&'static str, Value)>, n: Node) -> Result<(), String> {
+    values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+    if n.attribute("showsHorizontalScrollIndicator").is_some() {
+        values.push(("UIShowsHorizontalScrollIndicator", Value::Bool(false)));
+    }
+    if n.attribute("showsVerticalScrollIndicator").is_some() {
+        values.push(("UIShowsVerticalScrollIndicator", Value::Bool(false)));
+    }
+    // Paging after the indicators, not bouncing zoom leaving
+    // `UIBouncesZoom` out, then a horizontal bounce (a corpus
+    // storyboard, as a collection view's); both bounces aren't
+    // established.
+    if n.attribute("pagingEnabled").is_some() {
+        values.push(("UIPagingEnabled", Value::Bool(true)));
+    }
+    if n.attribute("bouncesZoom").is_none() {
+        values.push(("UIBouncesZoom", Value::Bool(true)));
+    }
+    if n.attribute("alwaysBounceHorizontal").is_some() {
+        if n.attribute("alwaysBounceVertical").is_some() {
+            return fail("a scroll view bouncing both ways is not supported by this ibtool");
+        }
+        values.push(("UIAlwaysBounceHorizontal", Value::Bool(true)));
+    }
+    if n.attribute("alwaysBounceVertical").is_some() {
+        values.push(("UIAlwaysBounceVertical", Value::Bool(true)));
+    }
+    if n.attribute("directionalLockEnabled").is_some() {
+        values.push(("UIDirectionalLockEnabled", Value::Bool(true)));
+    }
+    for (a, key) in [("minimumZoomScale", "UIMinimumZoomScale"), ("maximumZoomScale", "UIMaximumZoomScale")] {
+        if let Some(z) = n.attribute(a) {
+            values.push((key, Value::Float(number(z)? as f32)));
+        }
+    }
+    values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
+    Ok(())
 }
 
 /// A view's content hugging priorities, each 250 unless given.
@@ -2882,18 +2968,29 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
                         && leaf.ancestors().skip(1).take_while(|a| *a != container).filter(|a| !a.has_tag_name("subviews")).all(|a| matches!(a.tag_name().name(), "view" | "stackView" | "scrollView"))
                 })
         };
-        let nested = second != id && deeper(second) && nib.variations.is_some();
+        // An old-format xib cell's own safe-area guide as the second item
+        // is ranked so too (five probes and a corpus xib); as the first, as
+        // a sibling.
+        let cell_guide = n != container && scene.safe_areas.iter().any(|g| g.0 == second && g.1 == name);
+        let nested = (second != id && ((deeper(second) && nib.variations.is_some()) || cell_guide)).then(|| view_depth(container, second));
+        // An item deeper than its subviews with the view itself, as the root
+        // view's: grouped by its place in the view (a corpus storyboard and
+        // eight probes).
+        let with_deeper = nib.variations.is_some() && ((second == id && deeper(first)) || (first == id && deeper(second)));
+        let nested_second = nested.is_some();
         let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, nested)?;
         // Its own safe-area guide, either item, counts as at the origin, as
         // the root view's (two probes).
         let own_safe_area = |item: &str| scene.safe_areas.iter().any(|g| g.0 == item && g.1 == name);
         for item in [first, second] {
-            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) && !own_safe_area(item) && !(item == second && nested) {
+            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) && !own_safe_area(item) && !(item == second && nested_second) && !with_deeper {
                 return fail(format!("a subview's constraints on {item} are not supported by this ibtool"));
             }
         }
         let f = if own_safe_area(key.0) {
             Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+        } else if with_deeper {
+            nested_origin(container, key.0)?
         } else {
             let v = direct.iter().find(|v| v.attribute("id") == Some(key.0)).ok_or_else(|| format!("a subview's constraints on {} are not supported by this ibtool", key.0))?;
             subview_frame(*v)?
@@ -2912,9 +3009,12 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     let own_guides: Vec<(&str, Frame)> = scene.safe_areas.iter().filter(|g| g.1 == name)
         .map(|g| (g.0.as_str(), Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 })).collect();
     order_ties(&mut others, |o| (o.1, o.2), &direct, &own_guides)?;
-    for (_, key, _, _, second) in &others {
-        if key.1 == 0 {
-            let view = view_name(second);
+    // The views deeper than its subviews they name, either item, for the
+    // objects' turn of its constraints.
+    let deep = |item: &str| item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && container.descendants().any(|d| d.is_element() && d.attribute("id") == Some(item) && d.parent().is_some_and(|p| p.has_tag_name("subviews")));
+    for (_, _, _, first, second) in &others {
+        for item in [*first, *second].into_iter().filter(|i| deep(i)) {
+            let view = view_name(item);
             if !scene.held_pulled.iter().any(|p| p.1 == view) {
                 scene.held_pulled.push((name.to_string(), view));
             }
@@ -3085,7 +3185,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             };
             // Its colours: text, highlighted and background, the background
             // before `UIDeepDrawRect` (one corpus storyboard).
-            if let Some(c) = children(n, "color").find(|c| !matches!(c.attribute("key"), Some("textColor" | "highlightedColor" | "backgroundColor" | "shadowColor"))) {
+            if let Some(c) = children(n, "color").find(|c| !matches!(c.attribute("key"), Some("textColor" | "highlightedColor" | "backgroundColor" | "shadowColor" | "tintColor"))) {
                 return fail(format!("a label's {} colour is not supported by this ibtool", c.attribute("key").unwrap_or("unkeyed")));
             }
             if let Some(c) = child(n, "color", "backgroundColor") {
@@ -3113,6 +3213,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             let mode = content_mode(n.attribute("contentMode").unwrap_or("left"))?;
             if mode != 0 {
                 values.push(("UIContentMode", Value::Int(mode)));
+            }
+            // Its tint colour after its content mode (a corpus storyboard);
+            // beside clipping it isn't established.
+            if let Some(c) = child(n, "color", "tintColor") {
+                if n.attribute("clipsSubviews").is_some() {
+                    return fail("a clipping label with a tint colour is not supported by this ibtool");
+                }
+                values.push(("UITintColor", color(nib, c)?));
             }
             if n.attribute("clipsSubviews").is_some() {
                 values.push(("UIClipsToBounds", Value::Bool(true)));
@@ -4263,7 +4371,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")), ("textAlignment", None),
                 ("text", None), ("editable", Some("NO")), ("selectable", Some("NO")), ("scrollEnabled", Some("NO")), ("bounces", Some("NO")),
                 ("bouncesZoom", Some("NO")), ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")),
-                ("indicatorStyle", None),
+                ("indicatorStyle", None), ("alwaysBounceVertical", Some("YES")),
                 ("adjustsFontForContentSizeCategory", Some("YES")), ("translatesAutoresizingMaskIntoConstraints", Some("NO")), ("id", None),
                 ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("hidden", Some("YES")), ("tag", None), ("alpha", None),
                 // `fixedFrame` changes nothing, nor does Interface Builder's
@@ -4375,6 +4483,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             if n.attribute("bouncesZoom").is_none() {
                 values.push(("UIBouncesZoom", Value::Bool(true)));
+            }
+            // Bouncing vertically after it, as a scroll view's (a corpus
+            // storyboard).
+            if n.attribute("alwaysBounceVertical").is_some() {
+                values.push(("UIAlwaysBounceVertical", Value::Bool(true)));
             }
             // Its keyboard dismiss mode after `UIBouncesZoom`, as a table's
             // (onDrag 1, interactive 2: one probe).
@@ -5138,41 +5251,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
             nib.large_content(&mut values);
             if scroll {
-                values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
-                if n.attribute("showsHorizontalScrollIndicator").is_some() {
-                    values.push(("UIShowsHorizontalScrollIndicator", Value::Bool(false)));
-                }
-                if n.attribute("showsVerticalScrollIndicator").is_some() {
-                    values.push(("UIShowsVerticalScrollIndicator", Value::Bool(false)));
-                }
-                // Paging after the indicators, not bouncing zoom leaving
-                // `UIBouncesZoom` out, then a horizontal bounce (a corpus
-                // storyboard, as a collection view's); both bounces aren't
-                // established.
-                if n.attribute("pagingEnabled").is_some() {
-                    values.push(("UIPagingEnabled", Value::Bool(true)));
-                }
-                if n.attribute("bouncesZoom").is_none() {
-                    values.push(("UIBouncesZoom", Value::Bool(true)));
-                }
-                if n.attribute("alwaysBounceHorizontal").is_some() {
-                    if n.attribute("alwaysBounceVertical").is_some() {
-                        return fail("a scroll view bouncing both ways is not supported by this ibtool");
-                    }
-                    values.push(("UIAlwaysBounceHorizontal", Value::Bool(true)));
-                }
-                if n.attribute("alwaysBounceVertical").is_some() {
-                    values.push(("UIAlwaysBounceVertical", Value::Bool(true)));
-                }
-                if n.attribute("directionalLockEnabled").is_some() {
-                    values.push(("UIDirectionalLockEnabled", Value::Bool(true)));
-                }
-                for (a, key) in [("minimumZoomScale", "UIMinimumZoomScale"), ("maximumZoomScale", "UIMaximumZoomScale")] {
-                    if let Some(z) = n.attribute(a) {
-                        values.push((key, Value::Float(number(z)? as f32)));
-                    }
-                }
-                values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(0)));
+                scroll_values(&mut values, n)?;
             }
             // SKView's own values: its frame (at the origin: whether it is
             // the frame or the bounds isn't established), an empty info
@@ -5368,11 +5447,45 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
     Ok(Some(if orientation == "landscape" { (h, w) } else { (w, h) }))
 }
 
+/// How deep `id` is in `container`: 1 for its subviews, 2 for theirs, and
+/// so on; 1 for anything that isn't a subview (a layout guide).
+fn view_depth(container: Node, id: &str) -> usize {
+    container.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id))
+        .map_or(1, |leaf| leaf.ancestors().take_while(|a| *a != container).filter(|a| a.has_tag_name("subviews")).count().max(1))
+}
+
+/// A view nested in plain, stack or scroll views inside `container`: its
+/// origin in `container`'s coordinates, its outermost holder where it is laid
+/// out, as a root view's nested views are placed (refused if being laid out
+/// resizes that holder).
+fn nested_origin(container: Node, id: &str) -> Result<Frame, String> {
+    let nested = || format!("a subview's constraints on {id} are not supported by this ibtool");
+    let leaf = container.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id)).ok_or_else(nested)?;
+    let (mut x, mut y, mut v) = (0.0, 0.0, leaf);
+    while v != container {
+        let parent = v.parent().filter(|p| p.has_tag_name("subviews")).and_then(|p| p.parent()).ok_or_else(nested)?;
+        let f = if parent == container {
+            let (laid, document) = (subview_frame(v)?, frame(v)?);
+            if (laid.w, laid.h) != (document.w, document.h) {
+                return fail(nested());
+            }
+            laid
+        } else {
+            frame(v)?
+        };
+        (x, y) = (x + f.x, y + f.y);
+        v = parent;
+    }
+    let f = frame(leaf)?;
+    Ok(Frame { x, y, w: f.w, h: f.h })
+}
+
 /// Where Xcode puts a root view's constraint (docs/clean-room/ibtool.md):
 /// grouped by the item other than the root view, or the first item between
 /// siblings, the groups by where their item is (below); in a group,
 /// constraints to a view deeper than the root's subviews (`nested` second
-/// items) first, then those with the root view, then those between
+/// items, with their depth) first, the deepest first (eleven probes and a
+/// corpus storyboard), then those with the root view, then those between
 /// siblings. Those with the root view go by kind (horizontal centres,
 /// vertical centres, left and right edges, horizontal edges with a leading
 /// or trailing one, then the rest), then by first and second attribute in
@@ -5381,7 +5494,7 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
 /// trailing first (a 272-constraint probe and 40 random ones). Those to
 /// deeper views and between siblings go by first and second attribute in
 /// another order. Equal keys are ordered by `order_ties`.
-fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: bool) -> Result<(&'a str, u8, [usize; 4]), String> {
+fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: Option<usize>) -> Result<(&'a str, u8, [usize; 4]), String> {
     // The last baseline (`baseline`) after the first (three probes).
     const SIBLINGS: [&str; 20] = [
         "centerXWithinMargins", "centerX", "rightMargin", "leftMargin", "right", "left", "trailingMargin", "leadingMargin", "trailing", "leading",
@@ -5410,7 +5523,10 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
     let (group, kind, attributes) = if first == root || second == root {
         (if first == root { second } else { first }, 1, with_root_key(a1, a2, first == root)?)
     } else {
-        (first, if nested { 0 } else { 2 }, [rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?, 0, 0])
+        match nested {
+            Some(depth) => (first, 0, [usize::MAX - depth, rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?, 0]),
+            None => (first, 2, [rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?, 0, 0]),
+        }
     };
     Ok((group, kind, attributes))
 }
@@ -5905,6 +6021,12 @@ fn bar_events(
         let from_right = items.len() - items.iter().position(|i| i == item).unwrap_or(0);
         events.push((selector, from_right, item, controller));
     }
+    // A custom view's control performs its segue on its event, touch up
+    // inside, as its actions keep their masks.
+    let (masked_performs, performs): (Vec<&(String, String)>, Vec<&(String, String)>) = performs.iter().partition(|p| is_view_name(&p.0));
+    if !masked_performs.is_empty() && (masked_performs.len() > 1 || !masked.is_empty()) {
+        return fail("several bar button items' custom views' segues, or one beside their actions, are not supported by this ibtool");
+    }
     events.extend(performs.iter().enumerate().map(|(i, (item, template))| ("perform:", i, item.as_str(), template.as_str())));
     for (selector, item) in responder {
         let from_right = items.len() - items.iter().position(|i| i == item).unwrap_or(0);
@@ -5915,6 +6037,11 @@ fn bar_events(
     for (selector, view, mask) in masked {
         let Value::New(mut o) = event_connection(nib, selector, view, controller) else { unreachable!() };
         o.values.push(("UIEventMask", Value::Int(*mask)));
+        connections.push(Value::New(o));
+    }
+    for (view, template) in masked_performs {
+        let Value::New(mut o) = event_connection(nib, "perform:", view, template) else { unreachable!() };
+        o.values.push(("UIEventMask", Value::Int(64)));
         connections.push(Value::New(o));
     }
     Ok(connections)
@@ -6159,7 +6286,7 @@ struct Embedded {
     /// their actions (selector, item), after the templates' outlets.
     bar_items: Vec<String>,
     bar_actions: Vec<(String, String, i64)>,
-    /// Its gesture recognizers' names, in reverse document order, and their
+    /// Its gesture recognizers' names, in `gesture_listing`'s order, and their
     /// actions (selector, recognizer, target: the controller, or a segue's
     /// template for `perform:`) by selector.
     gestures: Vec<String>,
@@ -6286,7 +6413,7 @@ fn embedded_controller(
         }
         gesture_actions.extend(gesture_performs.iter().map(|(g, t)| ("perform:".to_string(), g.clone(), t.clone())));
         gesture_actions.sort_by(|a, b| a.0.cmp(&b.0));
-        gestures = defined.iter().rev().map(|d| d.1.clone()).collect();
+        gestures = gesture_listing(&root.recognizers)?.into_iter().map(|i| defined[i].1.clone()).collect();
     }
     // An empty table is one object however many controllers have one.
     let external = if templates.external.is_empty() {
@@ -6938,7 +7065,7 @@ pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: O
 /// safe-area guide taken out (`safe_area`: whether it had one): its nib is
 /// the one Xcode compiles for a prototype cell, the guide listed.
 /// A xib's collection view cell, as a collection view's prototype cell's nib.
-pub fn compile_xib_collection_cell(xml: &str, module: Option<&str>, localizable: bool, safe_area: bool) -> Result<Vec<u8>, String> {
+pub fn compile_xib_collection_cell(xml: &str, module: Option<&str>, localizable: bool, safe_area: Option<&str>) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let cell = children(root, "objects").flat_map(|o| children(o, "collectionViewCell")).next().ok_or("a xib without a cell")?;
@@ -7343,6 +7470,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             _ if children(vc, "sceneKitView").next().is_some() => "sceneKitView",
             // ARKit's, an SCNView compiled as one (a corpus storyboard).
             _ if children(vc, "arscnView").next().is_some() => "arscnView",
+            // A scroll view as the controller's view (a corpus storyboard).
+            _ if !xib && children(vc, "scrollView").any(|v| v.attribute("key") == Some("view")) => "scrollView",
             _ => "view",
         };
         let original_class = segue::original_class(vc);
@@ -7395,7 +7524,20 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 // A simulated app context is Interface Builder's alone (one
                 // probe).
                 ("simulatedAppContext", None),
+                ("showsHorizontalScrollIndicator", Some("NO")), ("showsVerticalScrollIndicator", Some("NO")), ("alwaysBounceVertical", Some("YES")),
+                ("alwaysBounceHorizontal", Some("YES")), ("pagingEnabled", Some("YES")), ("bouncesZoom", Some("NO")),
+                ("directionalLockEnabled", Some("YES")), ("minimumZoomScale", None), ("maximumZoomScale", None),
             ])?;
+            const SCROLLING: [&str; 9] = [
+                "showsHorizontalScrollIndicator", "showsVerticalScrollIndicator", "alwaysBounceVertical", "alwaysBounceHorizontal", "pagingEnabled",
+                "bouncesZoom", "directionalLockEnabled", "minimumZoomScale", "maximumZoomScale",
+            ];
+            if !view.has_tag_name("scrollView") && SCROLLING.iter().any(|a| view.attribute(*a).is_some()) {
+                return fail("scrolling attributes on a <view> are not supported by this ibtool");
+            }
+            if view.has_tag_name("scrollView") && children(view, "viewLayoutGuide").any(|g| g.attribute("key") != Some("safeArea")) {
+                return fail("a root scroll view's content or frame layout guide is not supported by this ibtool");
+            }
         }
         let view_id = attr(view, "id")?;
         let root_name = view_name(view_id);
@@ -7930,7 +8072,6 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 Ok((x * x + y * y, x))
             };
             let mut xml_constraints: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, Option<&str>)> = Vec::new();
-            let mut safe_area_nested = 0;
             for cs in children(view, "constraints") {
                 for c in children(cs, "constraint") {
                     only_attributes(c, &[
@@ -7965,17 +8106,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                             return fail(format!("constraints on {id} are not supported by this ibtool"));
                         }
                     }
-                    let nested = second != view_id && Some(second) != safe_area_id && !legacy(second) && !direct.iter().any(|v| v.attribute("id") == Some(second));
-                    // From the safe-area guide to deeper views, several are
-                    // ordered as neither the views' places nor their depth
-                    // say (four probes and a corpus storyboard); one is as
-                    // others (a corpus storyboard).
-                    if nested && Some(first) == safe_area_id {
-                        safe_area_nested += 1;
-                        if safe_area_nested > 1 {
-                            return fail("a root view's constraints from its safe-area guide to several views deeper than its subviews are not supported by this ibtool");
-                        }
-                    }
+                    let nested = (second != view_id && Some(second) != safe_area_id && !legacy(second) && !direct.iter().any(|v| v.attribute("id") == Some(second))).then(|| view_depth(view, second));
                     let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?, nested)?;
                     xml_constraints.push((place(key.0)?, key, c, first, Some(second)));
                 }
@@ -8090,8 +8221,12 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 "collectionReusableView" => "UICollectionReusableView",
                 "sceneKitView" => "SCNView",
                 "arscnView" => "ARSCNView",
+                "scrollView" => "UIScrollView",
                 _ => "UIView",
             };
+            if view.has_tag_name("scrollView") {
+                scroll_values(&mut values, view)?;
+            }
             // A SceneKit view's own keys follow, its `backgroundColor` the
             // view's background or nil (two corpus storyboards, as an
             // ARSCNView's).
@@ -8156,16 +8291,20 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             objects.extend(scene.guides.iter().map(|g| reference(format!("guide {}", g.1))));
             // Then breadth first: each view in turn, from a queue, lists the
             // constraints it holds and then its subviews, which join the queue.
-            // A view deeper than its holder's subviews that a subview's
-            // constraints name is listed right before the turn of the
-            // holder's first subview, in their order (twelve probes, two
-            // holders side by side among them, and two corpus storyboards);
-            // the root's come after its level's last turn (eight probes).
+            // Its constraints take a turn of their own, between them and its
+            // subviews, listing the views they name deeper than its subviews
+            // that aren't listed yet, in their order: right before the turn of
+            // the holder's first subview, unless the root's constraints
+            // already listed that subview and so listed its own subviews
+            // first (twenty probes, two holders side by side among them, and
+            // four corpus storyboards); the root's come after its level's
+            // last turn (eight probes).
             if scene.held_pulled.iter().any(|p| pulled.contains(&p.1)) {
                 return fail("a view both the root view's and a subview's constraints pull is not supported by this ibtool");
             }
             let held_pulled: Vec<(String, String)> = std::mem::take(&mut scene.held_pulled);
-            let mut queue: std::collections::VecDeque<(usize, Option<&String>)> = [(0, None)].into();
+            // (depth, view, whether it is the turn of the view's constraints)
+            let mut queue: std::collections::VecDeque<(usize, Option<&String>, bool)> = [(0, None, false)].into();
             let mut root_turn_end = objects.len();
             let mut level = 0;
             let mut level_holders: Vec<&String> = Vec::new();
@@ -8179,7 +8318,18 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         None => break,
                     }
                 }
-                let Some((depth, v)) = queue.pop_front() else { break };
+                let Some((depth, v, held)) = queue.pop_front() else { break };
+                if held {
+                    let holder = v.expect("a view's turn");
+                    for (_, view) in held_pulled.iter().filter(|p| &p.0 == holder) {
+                        if !order.contains(view) {
+                            objects.push(reference(view.clone()));
+                            order.push(view.clone());
+                            queue.push_back((depth, Some(view), false));
+                        }
+                    }
+                    continue;
+                }
                 if let Some(v) = v {
                     level_holders.push(v);
                 }
@@ -8200,31 +8350,28 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     let s = &scene.subviews.iter().find(|s| s.1 == *l).expect("found above").1;
                     objects.push(reference(s.clone()));
                     order.push(s.clone());
-                    queue.push_back((depth + 1, Some(s)));
+                    queue.push_back((depth + 1, Some(s), false));
                 }
-                if let Some(v) = v {
-                    let first_of = |h: &String| scene.subviews.iter().find(|s| s.0.as_ref() == Some(h)).map(|s| &s.1);
-                    for (_, view) in held_pulled.iter().filter(|p| first_of(&p.0) == Some(v)) {
-                        objects.push(reference(view.clone()));
-                        order.push(view.clone());
-                        queue.push_back((depth + 1, Some(view)));
-                    }
-                }
+                let held_turn = v.filter(|v| held_pulled.iter().any(|p| &p.0 == *v));
                 if let Some(v) = v.filter(|_| !subviews_first) {
                     objects.extend(constraints(v));
+                    if let Some(h) = held_turn {
+                        queue.push_back((depth + 1, Some(h), true));
+                    }
                 }
                 if let Some((_, items)) = v.and_then(|v| scene.toolbar_items.iter().find(|t| &t.0 == v)) {
                     objects.extend(items.iter().map(|i| reference(i.clone())));
-                    queue.extend(items.iter().map(|i| (depth + 1, Some(i))));
+                    queue.extend(items.iter().map(|i| (depth + 1, Some(i), false)));
                 }
                 if let Some((_, view)) = v.and_then(|v| scene.item_views.iter().find(|t| &t.0 == v)) {
                     objects.push(reference(view.clone()));
                 }
                 let inlined = v.is_some_and(|v| scene.effect_content_views.contains(v));
-                for (_, s) in scene.subviews.iter().filter(|s| s.0.as_ref() == v && !inlined && !pulled.contains(&s.1) && !held_pulled.iter().any(|p| p.1 == s.1) && Some(&s.1) != layout_child.as_ref()) {
+                let fresh: Vec<&String> = scene.subviews.iter().filter(|s| s.0.as_ref() == v && !inlined && !pulled.contains(&s.1) && !order.contains(&s.1) && Some(&s.1) != layout_child.as_ref()).map(|s| &s.1).collect();
+                for s in fresh {
                     objects.push(reference(s.clone()));
                     order.push(s.clone());
-                    queue.push_back((depth + 1, Some(s)));
+                    queue.push_back((depth + 1, Some(s), false));
                     // A visual effect view's content view's subviews follow
                     // it, before the effect view's own constraints (a
                     // corpus storyboard; a probe of one with the content's
@@ -8233,18 +8380,21 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         for (_, c) in scene.subviews.iter().filter(|c| c.0.as_ref() == Some(s)) {
                             objects.push(reference(c.clone()));
                             order.push(c.clone());
-                            queue.push_back((depth + 2, Some(c)));
+                            queue.push_back((depth + 2, Some(c), false));
                         }
                     }
                 }
                 if let Some(v) = v.filter(|_| subviews_first) {
                     objects.extend(constraints(v));
+                    if held_turn.is_some() {
+                        return fail("a visual effect view's constraints on views deeper than its subviews are not supported by this ibtool");
+                    }
                 }
                 if v.is_none() {
                     for p in &pulled {
                         objects.push(reference(p.clone()));
                         order.push(p.clone());
-                        queue.push_back((depth + 1, Some(p)));
+                        queue.push_back((depth + 1, Some(p), false));
                     }
                     root_turn_end = objects.len();
                 }
@@ -8369,6 +8519,26 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
             }
             scene.pairs.sort_by_key(|p| listed(&p.0));
+            // Accessibility configurations go in the objects' order (twelve
+            // probes and corpus storyboards, views under one view
+            // constraints pull up the list among them); when only some are
+            // under such a view, or under different ones, Xcode orders them
+            // otherwise, as neither their order nor their depth says (nine
+            // probes and a corpus storyboard): refused.
+            let parent_of = |v: &String| scene.subviews.iter().find(|s| s.1 == *v).and_then(|s| s.0.clone());
+            let pulled_under = |v: &String| {
+                let mut at = Some(v.clone());
+                while let Some(x) = at {
+                    if pulled.contains(&x) || held_pulled.iter().any(|p| p.1 == x) {
+                        return Some(x);
+                    }
+                    at = parent_of(&x);
+                }
+                None
+            };
+            if scene.accessibility.windows(2).any(|w| pulled_under(&w[0].0) != pulled_under(&w[1].0)) {
+                return fail("accessibility configurations of views some of which constraints pull up the objects list are not supported by this ibtool");
+            }
             let position = |name: &String| order.iter().position(|o| o == name).unwrap_or(usize::MAX);
             scene.accessibility.sort_by_key(|a| position(&a.0));
 
@@ -8648,7 +8818,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let gesture_performs: Vec<(String, String)> = templates.performs.iter().filter(|p| p.0.starts_with("gesture ")).cloned().collect();
         templates.performs.retain(|p| !p.0.starts_with("gesture "));
         let mut external = templates.external;
-        // The recognizers: the nib's objects in reverse document order,
+        // The recognizers: the nib's objects in `gesture_listing`'s order,
         // kept alive in document order, mapped to their placeholders.
         // A navigation controller's root that nothing loads on its own has
         // them in the navigation controller's nib (two probes).
@@ -8675,7 +8845,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             return fail("a view's gesture recognizers in another order than the document's are not supported by this ibtool");
         }
         let mut gesture_objects = Vec::new();
-        for r in recognizers.iter().rev() {
+        for r in gesture_listing(&recognizers)?.into_iter().map(|i| &recognizers[i]) {
             let (object, selectors) = gesture_recognizer(&mut vnib, module, *r, vc_id)?;
             gesture_objects.push((Value::New(object.named(format!("gesture {}", attr(*r, "id")?))), attr(*r, "id")?, selectors));
         }
@@ -8770,9 +8940,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
             swapper.push(("UIAutoresizesArchivedViewToFullSize", Value::Bool(false)));
         }
-        // Its transition and presentation styles after its identifiers,
-        // before its extended edges (six probes); beside segues or gesture
-        // recognizers they are refused.
+        // Its transition and presentation styles after its identifiers and
+        // segue templates, before its extended edges (nine probes and a
+        // corpus storyboard); beside gesture recognizers they are refused.
         let transition = match vc.attribute("modalTransitionStyle") {
             None | Some("coverVertical") => None,
             Some("flipHorizontal") => Some(1),
@@ -8781,8 +8951,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             Some(other) => return fail(format!("modalTransitionStyle=\"{other}\" is not supported by this ibtool")),
         };
         let presentation = modal_presentation_style(vc)?;
-        if (transition.is_some() || presentation.is_some()) && (templates.array.is_some() || !recognizers.is_empty()) {
-            return fail("a controller's presentation styles beside segues or gesture recognizers are not supported by this ibtool");
+        if (transition.is_some() || presentation.is_some()) && !recognizers.is_empty() {
+            return fail("a controller's presentation styles beside gesture recognizers are not supported by this ibtool");
         }
         if let Some(array) = templates.array {
             swapper.push(("UIStoryboardSegueTemplates", array));
@@ -9020,8 +9190,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         }
         // Their actions by selector, those with one selector in document
         // order (two probes).
-        let mut gesture_actions: Vec<(String, &str)> =
-            gesture_objects.iter().rev().flat_map(|(_, id, selectors)| selectors.iter().map(|s| (s.clone(), *id))).collect();
+        let mut gesture_actions: Vec<(String, &str)> = recognizers.iter()
+            .filter_map(|r| gesture_objects.iter().find(|o| Some(o.1) == r.attribute("id")))
+            .flat_map(|(_, id, selectors)| selectors.iter().map(|s| (s.clone(), *id))).collect();
         gesture_actions.sort_by(|a, b| a.0.cmp(&b.0));
         // Custom objects first, in reverse document order (three probes).
         for o in custom_objects.iter().rev() {

@@ -432,9 +432,9 @@ fn custom_layout(nib: &mut Nib, module: Option<&str>, layout: Node) -> Result<Ob
 
 /// A prototype cell's nib: the cell, its content view and the content
 /// view's subviews.
-/// A xib's cell (`xib`: whether it has a safe-area guide) keeps its colours
+/// A xib's cell (`xib`: its safe-area guide's id, if it has one) keeps its colours
 /// exact and lists its guide after its content view.
-pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
+pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<Option<&str>>) -> Result<Vec<u8>, String> {
     only_attributes(cell, &[
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("insetsLayoutMarginsFromSafeArea", Some("NO")),
@@ -565,13 +565,22 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         if pinned {
             cv.push(("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints", Value::Bool(true)));
         }
+        // The cell's safe-area guide in its constraints is its content
+        // view's, as a subview's own is (a corpus xib).
+        if let Some(Some(g)) = xib.filter(|_| held) {
+            scene.safe_areas.push((g.to_string(), content_name.clone()));
+        }
         if let Some(own) = held_constraints(&mut nib, &mut scene, cell, content, &content_name)? {
             cv.push(("UIViewAutolayoutConstraints", own));
         }
         // A xib's cell with a safe-area guide and constraints of its own
-        // archives its content view's guide (four probes).
-        if xib == Some(true) && held {
-            let guide = super::named_safe_area_guide(&mut nib, &content_name, &format!("{content_name} safe area guide"));
+        // archives its content view's guide (four probes), defined where a
+        // constraint first uses it.
+        if matches!(xib, Some(Some(_))) && held {
+            let guide = match scene.layout_guides.iter().find(|g| g.0 == content_name) {
+                Some(_) => reference(format!("{content_name} safe area guide")),
+                None => super::named_safe_area_guide(&mut nib, &content_name, &format!("{content_name} safe area guide")),
+            };
             cv.push(("UIViewLayoutGuides", nib.array("NSMutableArray", vec![guide])));
         }
     } else {
@@ -674,7 +683,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     if !old {
         objects.push(reference(content_name.clone()));
     }
-    if xib == Some(true) {
+    if matches!(xib, Some(Some(_))) {
         objects.push(super::table::cell_safe_area(&mut nib));
     }
     // The old format's content view lists its subviews before its

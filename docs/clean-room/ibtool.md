@@ -85,7 +85,11 @@ any other (one probe).
   - In the old format (a `<view key="contentView">` without an id), a cell
     with a guide and constraints of its own also archives its content
     view's safe-area guide, with its system constraints, after the content
-    view's constraints.
+    view's constraints. The cell's constraints may use the guide: it is
+    the content view's, defined where a constraint first uses it, at its
+    origin for their order, and as the second item ranked as a view
+    deeper than the subviews is, first in its group (five probes and a
+    corpus xib).
 
   A cell's layout margins, then its `insetsLayoutMarginsFromSafeArea="NO"`,
   follow its constraints (two probes), its restoration identifier comes
@@ -361,7 +365,8 @@ other values of the attributes these use, is refused. Observed:
   storyboard labelling each).
 - A label's declared text colour, even `labelColor`, sets
   `UIDisableUpdateTextColorOnTraitCollectionChange`; a nil one is
-  `labelColor` without it.
+  `labelColor` without it. Its tint colour is `UITintColor` after its
+  content mode (a corpus storyboard); beside clipping it is refused.
 - A view gets `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints` only
   when its element says `translatesAutoresizingMaskIntoConstraints="NO"`
   (labels, a text field, a button and a stack view, with it removed) and a
@@ -434,9 +439,11 @@ other values of the attributes these use, is refused. Observed:
   (0, 330) after both. That comparison needn't be an order, so where the
   two places of two such views disagree the storyboard is refused (13
   probes). In a group, constraints whose
-  second item is deeper than the root's subviews come first, by first and
-  then second attribute in the siblings' order below (eleven probes; a
-  deeper view as the first item, which would group them by it, is refused),
+  second item is deeper than the root's subviews come first, the deepest
+  first, then by first and second attribute in the siblings' order below
+  (22 probes: depths two to four, from the safe-area guide or a sibling,
+  attributes and document order against depth; and a corpus storyboard's
+  seven from its safe-area guide),
   then the constraints with the root view, by kind and then by first and
   second attribute: those with a horizontal centre (either attribute,
   `centerXWithinMargins` before `centerX`), then a vertical centre, then
@@ -549,18 +556,21 @@ other values of the attributes these use, is refused. Observed:
   each fail one).
 - A subview's constraints may name, as their second item, a view deeper
   than its own subviews (in plain, stack or scroll views): ordered as the
-  root view's nested ones are, first in their group. The objects list such
-  views not under their own superviews but right before the turn of their
-  holder's first subview in the breadth-first walk, in their
-  constraints' order, and they join the queue there; the root view's are
-  its level's, as above (seventeen probes: depths two to four, siblings
-  before and after, views of other branches between, two holders side by
-  side, plain or stack views; and two corpus storyboards). Twelve of those
-  fit the earlier reading, after the last turn of the holder's level,
-  which two holders side by side disprove. A deeper first item is refused,
-  and so are a root view's constraints from its safe-area guide to several
-  views deeper than its subviews: their order fits neither the views'
-  places nor their depth (two probes and a corpus storyboard).
+  root view's nested ones are, first in their group. A deeper view with
+  the holder itself, either item, is grouped by its place in the holder,
+  as the root view's are (eight probes, plain, stack and scroll holders,
+  and two corpus storyboards). In the breadth-first walk a holder's
+  constraints take a turn of their own, between its constraints and its
+  subviews: it lists the views they name that aren't listed yet, in their
+  constraints' order, and those join the queue there. That is right before
+  the turn of the holder's first subview, unless the root's constraints
+  pulled that subview up already, whose own turn then listed them first;
+  the root view's are its level's, as above (25 probes: depths two to
+  four, siblings before and after, views of other branches between, two
+  holders side by side, plain, stack or scroll views, either item; and
+  four corpus storyboards). Twelve of those fit the earlier reading, after
+  the last turn of the holder's level, which two holders side by side
+  disprove.
 - A constraint a view's default variation excludes (`<variation
   key="default"><mask key="constraints"><exclude reference=…/>`,
   Interface Builder's Installed unchecked) is left out of the view's
@@ -763,7 +773,9 @@ other values of the attributes these use, is refused. Observed:
   `UIPreferredContentSize`, a size, after its identifiers and segue
   templates (three probes, AdaptivePopover); beside gesture recognizers,
   presentation styles, extended edges, scroll view insets or table
-  selection settings, and in an embedded controller, it is refused. A navigation controller's
+  selection settings, and in an embedded controller, it is refused.
+  Transition and presentation styles follow the segue templates (three
+  probes and a corpus storyboard). A navigation controller's
   `extendedLayoutIncludesOpaqueBars` is `UIKeyExtendedLayoutIncludesOpaqueBars`
   1 before `UIViewControllers` (one probe). A text view's custom class
   swaps in for it as a text field's does, and a segmented control's mask is
@@ -868,7 +880,9 @@ other values of the attributes these use, is refused. Observed:
   `UIShowsHorizontalScrollIndicator`, `UIShowsVerticalScrollIndicator`
   (each false when turned off), `UIScrollDisabled`, `UIBouncesZoom` (left
   out when off), `UIKeyboardDismissMode` (onDrag 1, interactive 2: one
-  probe) and `UIScrollViewContentInsetAdjustmentBehavior` 0; one
+  probe) and `UIScrollViewContentInsetAdjustmentBehavior` 0, with
+  `UIAlwaysBounceVertical` right after `UIBouncesZoom` (a corpus
+  storyboard); one
   that doesn't scroll doesn't clip. Its data detectors are
   `UIDataDetectorTypes` (phone numbers 1, links 2, addresses 4, calendar
   events 8) after its alignment,
@@ -1065,7 +1079,10 @@ other values of the attributes these use, is refused. Observed:
   its document order, and the controller's own placeholder follows them.
   A view with several has one collection connection holding them all; the
   root view's comes first, then the others in document order. The
-  controller's nib lists the recognizers in reverse document order,
+  controller's nib lists the recognizers by UIKit class name (long press,
+  pan, swipe, tap), each class's in reverse document order (eleven probes
+  of up to four classes and a corpus storyboard; recognizers of one class
+  alone, as the earlier ten probes were, look like reverse document order),
   `UITopLevelObjectsToKeepAliveFromStoryboard` in document order, and
   their actions by selector, one selector's in document order (ten
   probes). A recognizer of two views is refused, and so is a view whose
@@ -1294,8 +1311,12 @@ objects (its own nib's, or its navigation controller's).
   switch's frame), are key-value pairs in the nib holding the item: the
   controller's, or the navigation controller's for its root (two corpus
   storyboards); several items', or beside the controller's own, are
-  refused. Custom views with subviews, constraints, outlets, segues or
-  accessibility settings are refused, as are two actions with one mask
+  refused. A custom view's control's segue is templated as an item's is,
+  the control performing it on touch up inside (`UIEventMask` 64) after the
+  other events (a corpus storyboard's button presenting a controller);
+  several, or one beside custom views' actions, are refused. Custom views
+  with subviews, constraints, outlets or accessibility settings are
+  refused, as are two actions with one mask
   and selector, and custom views in a navigation bar in a view. A custom
   view of a custom class is swapped in as a subview is, and several
   outlets to custom views are sorted by name (two corpus storyboards).
@@ -1749,7 +1770,9 @@ when paging, `UIBouncesZoom` (left out for `bouncesZoom="NO"`),
 `UIAlwaysBounceHorizontal` (three probes; with a vertical bounce too it is
 refused), `UIAlwaysBounceVertical`, `UIDirectionalLockEnabled`, the minimum and maximum
 zoom scales (floats) and `UIScrollViewContentInsetAdjustmentBehavior` 0
-(eight probes). Its content and frame layout guides are each a
+(eight probes). A controller's root view may be one (`<scrollView
+key="view">`), with the same values after its large content (a corpus
+storyboard); its content and frame layout guides are refused. Its content and frame layout guides are each a
 placeholder `UILayoutGuide` at the start of its turn in the objects,
 whether or not a constraint uses them, and nothing else when none does.
 Its subviews' constraints to them (held by the scroll view, the guide
@@ -1827,7 +1850,11 @@ static text 64, not enabled 256, header 65536, none 0) and
 `UIIsAccessibilityElement` (0 or 1); equal numbers are one object (14
 probes). In `Base.lproj` the hint and label are `NSLocalizableString`s
 keyed `<id>.accessibilityHint` and `<id>.accessibilityLabel`, as titles
-are; the identifier stays a string (one probe). Runtime attributes, switches (their frame pair) and accessibility
+are; the identifier stays a string (one probe). Where constraints pull
+views up the objects list and only some configured views are under one
+of them, or they are under different ones, Xcode orders the
+configurations neither by the objects nor by depth (nine probes and a
+corpus storyboard): refused. Runtime attributes, switches (their frame pair) and accessibility
 settings inside table headers, and accessibility settings inside cells, are
 refused, but for a prototype cell's own accessibility configuration (three
 probes, a corpus storyboard: it is the cell nib's, for the cell) when its
@@ -2126,7 +2153,9 @@ controls (42 probes):
 - **A switch.** `UISelected` when selected (a corpus storyboard),
   `UISwitchEnabled` (or `UIDisabled`), `UISwitchOn` when on,
   `UISwitchOnTintColor`. Its frame is also a key-value pair, `frame`
-  (`NS.special` 3, `{{x, y}, {w, h}}`), however it is laid out, before its
+  (`NS.special` 3, `{{x, y}, {w, h}}`, the numbers to 17 significant
+  digits as `%.17g` writes them: a corpus storyboard's laid-out
+  0.66666666666665719), however it is laid out, before its
   runtime attributes' pairs; the other controls' runtime attributes are
   pairs as any view's (a corpus storyboard).
 - **A slider.** `UIValue` (a float) unless 0 or not given, `UIMinValue`
