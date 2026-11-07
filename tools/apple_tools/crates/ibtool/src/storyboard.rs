@@ -2972,17 +2972,18 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         // is ranked so too (five probes and a corpus xib); as the first, as
         // a sibling.
         let cell_guide = n != container && scene.safe_areas.iter().any(|g| g.0 == second && g.1 == name);
-        let nested = second != id && ((deeper(second) && nib.variations.is_some()) || cell_guide);
+        let nested = (second != id && ((deeper(second) && nib.variations.is_some()) || cell_guide)).then(|| view_depth(container, second));
         // An item deeper than its subviews with the view itself, as the root
         // view's: grouped by its place in the view (a corpus storyboard and
         // eight probes).
         let with_deeper = nib.variations.is_some() && ((second == id && deeper(first)) || (first == id && deeper(second)));
+        let nested_second = nested.is_some();
         let key = constraint_key(id, first, a, second, attr(c, "secondAttribute")?, nested)?;
         // Its own safe-area guide, either item, counts as at the origin, as
         // the root view's (two probes).
         let own_safe_area = |item: &str| scene.safe_areas.iter().any(|g| g.0 == item && g.1 == name);
         for item in [first, second] {
-            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) && !own_safe_area(item) && !(item == second && nested) && !with_deeper {
+            if item != id && !direct.iter().any(|v| v.attribute("id") == Some(item)) && !(item == second && own_guide(item)) && !own_safe_area(item) && !(item == second && nested_second) && !with_deeper {
                 return fail(format!("a subview's constraints on {item} are not supported by this ibtool"));
             }
         }
@@ -5446,6 +5447,13 @@ fn device_size(platform: Platform, id: &str, orientation: &str) -> Result<Option
     Ok(Some(if orientation == "landscape" { (h, w) } else { (w, h) }))
 }
 
+/// How deep `id` is in `container`: 1 for its subviews, 2 for theirs, and
+/// so on; 1 for anything that isn't a subview (a layout guide).
+fn view_depth(container: Node, id: &str) -> usize {
+    container.descendants().find(|d| d.is_element() && d.attribute("id") == Some(id))
+        .map_or(1, |leaf| leaf.ancestors().take_while(|a| *a != container).filter(|a| a.has_tag_name("subviews")).count().max(1))
+}
+
 /// A view nested in plain, stack or scroll views inside `container`: its
 /// origin in `container`'s coordinates, its outermost holder where it is laid
 /// out, as a root view's nested views are placed (refused if being laid out
@@ -5476,7 +5484,8 @@ fn nested_origin(container: Node, id: &str) -> Result<Frame, String> {
 /// grouped by the item other than the root view, or the first item between
 /// siblings, the groups by where their item is (below); in a group,
 /// constraints to a view deeper than the root's subviews (`nested` second
-/// items) first, then those with the root view, then those between
+/// items, with their depth) first, the deepest first (eleven probes and a
+/// corpus storyboard), then those with the root view, then those between
 /// siblings. Those with the root view go by kind (horizontal centres,
 /// vertical centres, left and right edges, horizontal edges with a leading
 /// or trailing one, then the rest), then by first and second attribute in
@@ -5485,7 +5494,7 @@ fn nested_origin(container: Node, id: &str) -> Result<Frame, String> {
 /// trailing first (a 272-constraint probe and 40 random ones). Those to
 /// deeper views and between siblings go by first and second attribute in
 /// another order. Equal keys are ordered by `order_ties`.
-fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: bool) -> Result<(&'a str, u8, [usize; 4]), String> {
+fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2: &str, nested: Option<usize>) -> Result<(&'a str, u8, [usize; 4]), String> {
     // The last baseline (`baseline`) after the first (three probes).
     const SIBLINGS: [&str; 20] = [
         "centerXWithinMargins", "centerX", "rightMargin", "leftMargin", "right", "left", "trailingMargin", "leadingMargin", "trailing", "leading",
@@ -5514,7 +5523,10 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
     let (group, kind, attributes) = if first == root || second == root {
         (if first == root { second } else { first }, 1, with_root_key(a1, a2, first == root)?)
     } else {
-        (first, if nested { 0 } else { 2 }, [rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?, 0, 0])
+        match nested {
+            Some(depth) => (first, 0, [usize::MAX - depth, rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?, 0]),
+            None => (first, 2, [rank(&SIBLINGS, a1)?, rank(&SIBLINGS, a2)?, 0, 0]),
+        }
     };
     Ok((group, kind, attributes))
 }
@@ -8060,7 +8072,6 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 Ok((x * x + y * y, x))
             };
             let mut xml_constraints: Vec<((f64, f64), (&str, u8, [usize; 4]), Node, &str, Option<&str>)> = Vec::new();
-            let mut safe_area_nested = 0;
             for cs in children(view, "constraints") {
                 for c in children(cs, "constraint") {
                     only_attributes(c, &[
@@ -8095,17 +8106,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                             return fail(format!("constraints on {id} are not supported by this ibtool"));
                         }
                     }
-                    let nested = second != view_id && Some(second) != safe_area_id && !legacy(second) && !direct.iter().any(|v| v.attribute("id") == Some(second));
-                    // From the safe-area guide to deeper views, several are
-                    // ordered as neither the views' places nor their depth
-                    // say (four probes and a corpus storyboard); one is as
-                    // others (a corpus storyboard).
-                    if nested && Some(first) == safe_area_id {
-                        safe_area_nested += 1;
-                        if safe_area_nested > 1 {
-                            return fail("a root view's constraints from its safe-area guide to several views deeper than its subviews are not supported by this ibtool");
-                        }
-                    }
+                    let nested = (second != view_id && Some(second) != safe_area_id && !legacy(second) && !direct.iter().any(|v| v.attribute("id") == Some(second))).then(|| view_depth(view, second));
                     let key = constraint_key(view_id, first, attr(c, "firstAttribute")?, second, attr(c, "secondAttribute")?, nested)?;
                     xml_constraints.push((place(key.0)?, key, c, first, Some(second)));
                 }
@@ -8518,6 +8519,26 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
             }
             scene.pairs.sort_by_key(|p| listed(&p.0));
+            // Accessibility configurations go in the objects' order (twelve
+            // probes and corpus storyboards, views under one view
+            // constraints pull up the list among them); when only some are
+            // under such a view, or under different ones, Xcode orders them
+            // otherwise, as neither their order nor their depth says (nine
+            // probes and a corpus storyboard): refused.
+            let parent_of = |v: &String| scene.subviews.iter().find(|s| s.1 == *v).and_then(|s| s.0.clone());
+            let pulled_under = |v: &String| {
+                let mut at = Some(v.clone());
+                while let Some(x) = at {
+                    if pulled.contains(&x) || held_pulled.iter().any(|p| p.1 == x) {
+                        return Some(x);
+                    }
+                    at = parent_of(&x);
+                }
+                None
+            };
+            if scene.accessibility.windows(2).any(|w| pulled_under(&w[0].0) != pulled_under(&w[1].0)) {
+                return fail("accessibility configurations of views some of which constraints pull up the objects list are not supported by this ibtool");
+            }
             let position = |name: &String| order.iter().position(|o| o == name).unwrap_or(usize::MAX);
             scene.accessibility.sort_by_key(|a| position(&a.0));
 
