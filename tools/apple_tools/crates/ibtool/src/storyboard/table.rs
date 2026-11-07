@@ -431,8 +431,6 @@ pub(super) fn table_view_nib(
             }
         }
         if table.attribute("dataMode").is_some_and(|m| m != "prototypes")
-            || header_or_footer(table, "tableHeaderView").is_some()
-            || header_or_footer(table, "tableFooterView").is_some()
             || table.attribute("keyboardDismissMode").is_some()
         {
             return fail("a refresh control in a static table, or with a header or footer view or a keyboard dismiss mode, is not supported by this ibtool");
@@ -524,7 +522,7 @@ pub(super) fn table_view_nib(
             let mut values = Vec::new();
             // Without a frame, the missing frame, as a subview (two corpus
             // storyboards).
-            let f = match child(r, "rect", "frame") {
+            let f = match frame_node(r) {
                 Some(_) => frame(r)?,
                 None => missing_frame(r)?,
             };
@@ -598,6 +596,7 @@ pub(super) fn table_view_nib(
         let mut section_names = Vec::new();
         let mut parts = Vec::new();
         let mut segue_outlets = Vec::new();
+        let mut cell_control_outlets = Vec::new();
         for ss in children(table, "sections") {
             only_children(ss, &["tableViewSection"])?;
             for sec in children(ss, "tableViewSection") {
@@ -612,7 +611,20 @@ pub(super) fn table_view_nib(
                 for cs in children(sec, "cells") {
                     only_children(cs, &["tableViewCell"])?;
                     for cell in children(cs, "tableViewCell") {
-                        let (cell_value, cell_parts) = cell_object(&mut nib, module, cell, vc_id, false)?;
+                        let (cell_value, mut cell_parts) = cell_object(&mut nib, module, cell, vc_id, true)?;
+                        // Its views' outlets to the controller (a collection
+                        // view's data source and delegate), before the
+                        // header's and footer's and the table's own of one
+                        // name (three corpus storyboards); several cells'
+                        // order isn't established.
+                        let own = std::mem::take(&mut cell_parts.scene.control_outlets);
+                        if own.iter().any(|o| o.2 != "upstream") {
+                            return fail("a static cell's views' outlets to custom objects are not supported by this ibtool");
+                        }
+                        if !own.is_empty() && !cell_control_outlets.is_empty() {
+                            return fail("several static cells' views' outlets to the controller are not supported by this ibtool");
+                        }
+                        cell_control_outlets.extend(own);
                         if !cell_parts.scene.accessibility.is_empty() {
                             return fail("accessibility settings on a static table's cells are not supported by this ibtool");
                         }
@@ -651,6 +663,8 @@ pub(super) fn table_view_nib(
                 section_names.push(name);
             }
         }
+        let at = vc_outlets.len();
+        outlets.splice(at..at, cell_control_outlets);
         // Cells' segue outlets in their placeholders' order.
         segue_outlets.sort();
         outlets.extend(segue_outlets.into_iter().map(|(i, cell)| ("selectionSegueTemplate".to_string(), cell, format!("upstream segue {i}"))));
@@ -707,6 +721,9 @@ pub(super) fn table_view_nib(
     for (placeholder, view) in scene.containers {
         outlets.push(("containerView".to_string(), placeholder, view));
     }
+    if !scene.view_collections.is_empty() {
+        return fail("views' outlet collections here are not supported by this ibtool");
+    }
     for (label, source, destination) in scene.view_outlets {
         if !levels.iter().any(|l| l.1 == destination) {
             return fail("a header or footer view's outlets to anything but its table's views are not supported by this ibtool");
@@ -724,7 +741,7 @@ pub(super) fn table_view_nib(
     // selector, as a static table's cells' (three corpus storyboards);
     // beside those or the refresh control's not established.
     if !header_actions.is_empty() {
-        if !refresh_actions.is_empty() || !cell_actions.is_empty() {
+        if !cell_actions.is_empty() {
             return fail("actions in a table's header or footer beside its cells' or refresh control's are not supported by this ibtool");
         }
         header_actions.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
@@ -861,7 +878,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     let own = runtime_attributes(nib, cell, &cell_name)?;
     scene.pairs.extend(own.into_iter().map(|p| (cell_name.clone(), p)));
     // Without a frame, the missing frame, whatever the cell's (four probes).
-    let cf = match child(content, "rect", "frame") {
+    let cf = match frame_node(content) {
         Some(_) => frame(content)?,
         None => missing_frame(content)?,
     };
@@ -900,7 +917,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         }
         scene.subviews.sort_by_key(|s| Some(&s.1) != detail_label.as_ref());
     }
-    if scene.actions.iter().any(|a| a.3 != "upstream") || !scene.segues.is_empty() || (!outlets && !scene.control_outlets.is_empty()) || !scene.view_outlets.is_empty() {
+    if scene.actions.iter().any(|a| a.3 != "upstream") || !scene.segues.is_empty() || (!outlets && !scene.control_outlets.is_empty()) || (!scene.view_outlets.is_empty() || !scene.view_collections.is_empty()) {
         return fail("actions other than on the cell, outlets and segues in a cell are not supported by this ibtool");
     }
     // A prototype's nib holds its switches' frames and its views' runtime
@@ -1225,7 +1242,7 @@ pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_are
     }
     let (value, parts) = cell_object(nib, module, cell, vc_id, true)?;
     let CellParts { name, content, mut scene } = parts;
-    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() || !scene.view_outlets.is_empty() || scene.actions.iter().any(|a| a.3 != "upstream") {
+    if !scene.pairs.is_empty() || !scene.accessibility.is_empty() || (!scene.view_outlets.is_empty() || !scene.view_collections.is_empty()) || scene.actions.iter().any(|a| a.3 != "upstream") {
         return fail("outlets, runtime attributes or accessibility in a cell beside a xib's view are not supported by this ibtool");
     }
     let control_outlets = std::mem::take(&mut scene.control_outlets);

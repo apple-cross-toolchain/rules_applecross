@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="23504" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES">
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="23506"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <objects>
+        <placeholder placeholderIdentifier="IBFilesOwner" id="-1" userLabel="File's Owner"/>
+        <placeholder placeholderIdentifier="IBFirstResponder" id="-2" customClass="UIResponder"/>
+        <view contentMode="scaleToFill" id="iN0-l3-epB" customClass="InputBar" customModule="App" customModuleProvider="target">
+            <rect key="frame" x="0.0" y="0.0" width="393" height="120"/>
+            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+            <subviews>
+                <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="Oc1-aa-001">
+                    <rect key="frame" x="0.0" y="0.0" width="393" height="60"/>
+                    <color key="backgroundColor" white="0.5" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                </view>
+                <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="Oc1-aa-002">
+                    <rect key="frame" x="0.0" y="60" width="393" height="60"/>
+                    <color key="backgroundColor" white="0.25" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                </view>
+            </subviews>
+            <viewLayoutGuide key="safeArea" id="vUN-kp-3ea"/>
+            <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+            <constraints>
+                <constraint firstItem="Oc1-aa-001" firstAttribute="top" secondItem="iN0-l3-epB" secondAttribute="top" id="Oc1-aa-003"/>
+                <constraint firstItem="Oc1-aa-002" firstAttribute="top" secondItem="Oc1-aa-001" secondAttribute="bottom" id="Oc1-aa-004"/>
+                <constraint firstAttribute="bottom" secondItem="Oc1-aa-002" secondAttribute="bottom" id="Oc1-aa-005"/>
+                <constraint firstItem="Oc1-aa-001" firstAttribute="leading" secondItem="iN0-l3-epB" secondAttribute="leading" id="Oc1-aa-006"/>
+                <constraint firstItem="Oc1-aa-002" firstAttribute="leading" secondItem="iN0-l3-epB" secondAttribute="leading" id="Oc1-aa-007"/>
+                <constraint firstAttribute="trailing" secondItem="Oc1-aa-001" secondAttribute="trailing" id="Oc1-aa-008"/>
+                <constraint firstAttribute="trailing" secondItem="Oc1-aa-002" secondAttribute="trailing" id="Oc1-aa-009"/>
+                <constraint firstItem="Oc1-aa-001" firstAttribute="height" secondItem="Oc1-aa-002" secondAttribute="height" id="Oc1-aa-010"/>
+            </constraints>
+            <connections>
+                <outlet property="topView" destination="Oc1-aa-001" id="Oc1-bb-001"/>
+                <outletCollection property="visibleConstraints" destination="Oc1-aa-010" collectionClass="NSMutableArray" id="Oc1-bb-002"/>
+                <outletCollection property="panels" destination="Oc1-aa-002" id="Oc1-bb-003"/>
+                <outletCollection property="panels" destination="Oc1-aa-001" id="Oc1-bb-004"/>
+                <outletCollection property="hiddenConstraints" destination="Oc1-aa-003" collectionClass="NSMutableArray" id="Oc1-bb-005"/>
+            </connections>
+        </view>
+    </objects>
+</document>

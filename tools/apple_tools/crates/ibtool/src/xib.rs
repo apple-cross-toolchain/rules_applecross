@@ -42,6 +42,7 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     if !matches!(kind, Some("com.apple.InterfaceBuilder3.CocoaTouch.XIB" | "com.apple.InterfaceBuilder3.CocoaTouch.iPad.XIB")) {
         return fail("only iOS xibs are supported by this ibtool");
     }
+    crate::storyboard::refuse_before_ios8(root)?;
     if doc.descendants().any(|d| d.attribute("id") == Some(CONTROLLER)) {
         return fail(format!("an object with id {CONTROLLER} is not supported by this ibtool"));
     }

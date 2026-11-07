@@ -195,6 +195,9 @@ pub(super) fn parent_controller_nib(
                     Kind::Split => (None, false),
                 };
                 let mut embedded = embedded_controller(&mut nib, r, &child_name, "controller", None, item, nib_names)?;
+                if !embedded.item_pairs.is_empty() || !embedded.gesture_delegates.is_empty() {
+                    return fail("runtime attributes of a child's bar button items, or its gesture recognizers' delegates, are not supported by this ibtool");
+                }
                 if !embedded.gestures.is_empty() {
                     if !child_gestures.is_empty() || !embedded.bar_items.is_empty() || kind == Kind::Split {
                         return fail("several children's gesture recognizers, one beside bar button items, or a split view child's, are not supported by this ibtool");
@@ -233,6 +236,9 @@ pub(super) fn parent_controller_nib(
                     }
                 };
                 let mut embedded = embedded_controller(&mut nib, r, &root_name, &child_name, Some(&format!("{child_name} bar")), None, nib_names)?;
+                if !embedded.item_pairs.is_empty() || !embedded.gesture_delegates.is_empty() {
+                    return fail("runtime attributes of a child's bar button items, or its gesture recognizers' delegates, are not supported by this ibtool");
+                }
                 take_bar(i, &mut embedded, &root_name)?;
                 // Its root's segues (Xcode's master-detail template): the
                 // templates after the child's deeper parts, before the next

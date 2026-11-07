@@ -44,7 +44,9 @@ any other (one probe).
   corpus's).
 - Where the view sits on the canvas (`canvasLocation`) and the simulated
   bars and screen (`simulated…Metrics`) are the editor's and aren't
-  compiled.
+  compiled; so are a view's simulated orientation and a split view
+  master's simulated size (`splitViewMasterSimulatedSizeMetrics`) anywhere
+  (corpus storyboards).
 - **A table view cell.** With an owner without connections, a top-level
   `<tableViewCell>` compiles to the nib of a storyboard's prototype cell
   (Table view controllers, below), but for the cell's safe-area guide, an
@@ -63,7 +65,10 @@ any other (one probe).
   with three differences (and a subview's own safe-area guide is a
   placeholder first in its turn among the objects, as in a view's nib;
   its views' outlets to one another are among the cell's, by name, the
-  cell's first where names are equal: two of the corpus's):
+  cell's first where names are equal: two of the corpus's; its
+  `fixedFrame` changes nothing, and `translatesAutoresizingMaskIntoConstraints="NO"`
+  is `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints` after its
+  clipping: one of the corpus's):
   - Its content view is always pinned to the cell by the four
     `UIIBSystemGenerated` constraints, as a prototype's is only when it holds
     constraints.
@@ -196,7 +201,7 @@ CoreGraphics evaluates with vImage (`crates/ibtool/src/colorsync.rs`):
 - Display P3 to extended sRGB;
 - calibrated white to the gamma 2.2 grey;
 - without `colorMatched`, sRGB and gamma 2.2 grey to Generic RGB, clamped
-  to 0 to 1.
+  to 0 to 1; device RGB converts as sRGB does (a corpus xib).
 
 Each step is a curve per channel, a 3×3 matrix and a curve per channel.
 
@@ -430,7 +435,10 @@ other values of the attributes these use, is refused. Observed:
   leading margin, trailing, leading, each tied with its right or left
   counterpart; between a leading and a trailing edge, the one whose root
   view's edge is the trailing one first), then the rest (width, top margin,
-  bottom margin, bottom, top, first baseline, height). Measured with all
+  bottom margin, bottom, top, first baseline, height), among which a
+  subview's width or height to the root view's other dimension goes by the
+  same ranks (16 random probes; with the root view as the first item Xcode
+  leaves such a constraint out, twelve probes, so it is refused). Measured with all
   272 combinations of horizontal and vertical edges and centres, both ways
   round, between the root view and a subview at once, in three document
   orders and a random subset, 40 random sets of eight, and 30 more of ten
@@ -574,12 +582,32 @@ other values of the attributes these use, is refused. Observed:
   more views or installed constraints do); and a corpus storyboard. This
   is not the order of key-value pairs, which go by the objects' own places
   (eight probes with runtime attributes behind root constraints). Variations for
-  size classes are refused, as are variations anywhere but in a plain
-  controller's view nib.
+  size classes are refused but for those of attributes (below), as are
+  variations anywhere but in a plain controller's view nib.
+- A size class's variation of a stack view's `axis` or a label's font is a
+  `_UIAttributeTraitStorage` in the view nib's trait storage list:
+  `UIObject` the view, `UIKeyPath` `axis` or `font`, `UIRecords` the size
+  class's `_UIAttributeTraitStorageRecord` (a `UITraitCollection` of
+  `UITraitCollectionBuiltinTrait-_UITraitNameHorizontalSizeClass` then
+  `…VerticalSizeClass`, compact 1 and regular 2, and its `UIValue`), then
+  the default's (the shared empty traits and the default: the shared
+  number, or the default font object); `UIDescendants` the varied views
+  (two corpus storyboards and a xib). A storyboard archives the value of
+  the variation its device has (an iPhone compact and regular in portrait,
+  a small one compact both ways in landscape, an iPad regular both ways,
+  nothing without a device: seven probes); a xib the default, whatever its
+  device (two probes). Several size classes of one attribute, several
+  attributes of one view, the root view's, other iPhones in landscape and
+  attributes beside constraints' variations are refused.
+- A document deploying before iOS 8 (`<deployment version>` below 0x800)
+  is refused: Xcode compiles such a xib into a nib directory for each
+  idiom (`out~iphone.nib/runtime.nib` and `objects-8.0+.nib`), with or
+  without variations (a probe and a corpus xib).
 - A storyboard in a `Base.lproj` directory has its translatable strings
   archived as `NSLocalizableString`s: the string inline (`NS.bytes`),
   `NSKey` `<id>.<property>` and `NSDev` the string (shared as strings
-  are), for a label's `text`, a button's `normalTitle`, a text field's
+  are), for a label's `text`, a button's `normalTitle` (and
+  `highlightedTitle`, `selectedTitle`, `disabledTitle`: a probe of each), a text field's
   `placeholder` and a controller's or navigation item's `title` (whose
   attributed title holds the same object). Elsewhere, `en.lproj`
   included, they are plain strings (five probes, two corpus storyboards).
@@ -612,8 +640,9 @@ other values of the attributes these use, is refused. Observed:
   (17 probes, on labels and containers). A text field's are in the same
   place as a label's (five probes), followed by its hugging when either
   priority is given (each 250 unless given; two probes). An aspect ratio
-  the root view holds on one of its subviews is the subview's own, in its
-  constraints and in its turn among the objects (one probe). Two aspect
+  the root view (or any superview: a corpus storyboard) holds on one of
+  its subviews is the subview's own, in its constraints and in its turn
+  among the objects (one probe). Two aspect
   ratios on one dimension, its own and one the root view holds, go by id
   (three probes and one of the corpus's). Two of a subview's own
   constants on one dimension go by relation (less than or equal, greater
@@ -650,6 +679,8 @@ other values of the attributes these use, is refused. Observed:
   Where the root's size isn't its frame's, a subview whose mask has a
   flexible left or top margin or a sizable width or height is refused; the
   rest are compiled, with or without a device (eight probes).
+- An image view's `<imageReference key="image" image="…"/>` naming only its
+  image compiles as an `image` attribute (a probe).
 - An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`;
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 after its priorities when it
   says NO: one probe;
@@ -749,10 +780,12 @@ other values of the attributes these use, is refused. Observed:
   `toolsVersion`, root views and a table cell's content view among them),
   or has no size when the document says `fixedFrame="YES"` (18 probes,
   three corpus storyboards); so is an image view or a segmented control
-  (four probes, one corpus storyboard), and a table view or navigation bar
-  without `fixedFrame` (two probes), an image view's `fixedFrame`
+  (four probes, one corpus storyboard), and a table view, navigation bar
+  or stack view (a corpus storyboard) without `fixedFrame` (two probes), an image view's `fixedFrame`
   otherwise changing nothing. An image view's `UIAutoresizingMask` is a
-  label's (below). A view's `<userGuides>`, the canvas's, change nothing
+  label's (below). An older document's `<frame key="frameInset">` with
+  only `minX`, `minY`, `width` and `height` is the frame at (minX, minY)
+  (a probe); inset from the other edges it is refused. A view's `<userGuides>`, the canvas's, change nothing
   (one probe). An empty `<toolbarItems/>` on a view
   controller changes nothing (one probe).
 - A label's `lineBreakMode` is `UILineBreakMode` after `UIMinimumFontSize`
@@ -920,7 +953,9 @@ other values of the attributes these use, is refused. Observed:
 - A stack view's `userInteractionEnabled="NO"` is
   `UIUserInteractionDisabled` after its hidden flag and tag (one probe).
   A content mode other than scale to fill is `UIContentMode` after its
-  mask (one probe and one of the corpus's).
+  mask (one probe and one of the corpus's). Without `opaque="NO"` it is
+  `UIOpaque` after `UIDeepDrawRect`, and it may be a table's header or
+  footer view (corpus storyboards).
 - A text field's `userInteractionEnabled="NO"` is
   `UIUserInteractionDisabled` right after `UIDeepDrawRect`, and
   `adjustsFontSizeToFit="NO"` leaves its `UIAdjustsFontSizeToFit` out (a
@@ -964,13 +999,19 @@ other values of the attributes these use, is refused. Observed:
   colour's are (four probes).
 - A scene's gesture recognizer whose delegate is the controller has a
   `delegate` outlet to it in the controller's nib, after the controller's
-  storyboard outlet (one probe; several, or one in an embedded controller,
-  are refused).
+  storyboard outlet (one probe; several are refused). A navigation
+  controller's root's has it in the navigation controller's nib, after
+  the storyboard outlets, before `sceneViewController` (a corpus
+  storyboard); beside the root's outlets to custom views, or in other
+  embedded controllers, it is refused.
 - A scene's gesture recognizer (tap, pan or swipe) is in
   the controller's nib (one no view has there alone, kept alive with the
   others but without a placeholder in the view's nib: one probe), after the storyboard placeholder, with
   `UIGestureRecognizer.allowedTouchTypes` 15 and
-  `requiresExclusiveTouchType`, then a tap's `_imp` `UITapRecognizer`
+  `requiresExclusiveTouchType` (after `UIGestureRecognizer.disabled` when
+  `enabled="NO"`, a probe of a tap and a pan, or
+  `UIGestureRecognizer.delaysTouchesBegan`, a corpus storyboard; both
+  together are refused), then a tap's `_imp` `UITapRecognizer`
   (taps or touches when not 1), a pan's minimum and maximum touches and
   `allowedScrollTypesMask` 0, a swipe's direction (left 2, up 4, down 8,
   right left out); with a custom class, a `UIClassSwapper` of those values
@@ -1015,7 +1056,16 @@ other values of the attributes these use, is refused. Observed:
   after `sceneViewController` by selector (two probes and a corpus
   storyboard). Beside segues or bar button items, in several children, in
   a split view controller's child and in other containers, they are
-  refused.
+  refused. An identified collection view controller that is also a
+  navigation controller's root has them in both nibs; its archived-view
+  setting precedes their keep-alive list (a corpus storyboard).
+- A collection view controller's recognizers, all its collection view's:
+  the view nib gives their placeholders the first numbers, then the
+  controller's and the segues', and its collection connection comes
+  first; the controller's nib lists them after the controller (top-level
+  and objects, before its navigation item), defined in its external
+  objects table, its outlets to them as a plain controller's (two corpus
+  storyboards). A table view controller's are refused.
 - A navigation controller's root's runtime attributes are key-value pairs
   on it in the navigation controller's nib too (two probes and a corpus
   storyboard); other embedded controllers' are refused.
@@ -1175,8 +1225,12 @@ objects (its own nib's, or its navigation controller's).
   `perform:`s, by mask and then selector, whatever the items' sides. A
   controller's outlet to one is in the nib holding the item, after the
   controller's storyboard outlet (13 probes, pushed and root controllers).
-  Custom views with subviews, constraints, outlets, segues, a custom
-  class, runtime attributes or accessibility settings are refused, as are
+  An item's runtime attributes, or its custom view's key-value pairs (a
+  switch's frame), are key-value pairs in the nib holding the item: the
+  controller's, or the navigation controller's for its root (two corpus
+  storyboards); several items', or beside the controller's own, are
+  refused. Custom views with subviews, constraints, outlets, segues, a
+  custom class or accessibility settings are refused, as are
   two actions with one mask and selector, several outlets, and custom
   views in a navigation bar in a view.
 
@@ -1297,7 +1351,7 @@ rest are refused for other elements):
   nib carries its declared item the same way, after its title, and lists it
   after the navigation item.
 - The bar is laid out by Xcode: bounds 0x54 centred at its frame's x and
-  27 below its top (a mask of flexible width and top margin changes
+  27 below its top (without a frame, at the origin: a corpus storyboard) (a mask of flexible width and top margin changes
   nothing: six probes and two corpus storyboards), its background colour if any, opaque, mask 10, hugging `{250, 250}`,
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off, `UIDelegate`
   the controller, `UIItems` (an `NSArray` of the children's items),
@@ -1384,8 +1438,13 @@ probes:
   controller as a search bar's (two probes). The header's and footer's
   controls' actions on the controller follow the outlets, by event mask
   then selector, and their runtime attributes are the nib's key-value
-  pairs (three of the corpus's; beside the cells' or a refresh control's
-  they're refused).
+  pairs (three of the corpus's; beside the cells' they're refused, and
+  the header's actions come before a refresh control's: a corpus
+  storyboard).
+- A static table's cell's views' outlets to the controller (a collection
+  view's data source and delegate) are among the outlets before the
+  header's and footer's and the table's own of one name (three corpus
+  storyboards); several cells' are refused.
 - Left out, the row height is 44, a plain table's section heights 22, and
   the estimates 0.
 - A table without user interaction has `UIUserInteractionDisabled` after
@@ -1563,7 +1622,15 @@ probe; several constraints aren't in document order in a corpus
 storyboard, and are refused) in a mutable array in document order,
 `runtimeCollectionClassName` the class and `addsContentToExistingCollection`
 false. Those of table and collection view controllers, and beside a gesture
-recognizer, are refused (six probes).
+recognizer, are refused (six probes): beside recognizers, where the
+collections' connections fall among the recognizers', and so their
+placeholders' numbers, changes with the document's order (six probes).
+
+A view's own outlet collections (other than `gestureRecognizers`) are
+connections from the view in the same form, after the controller's, in
+the order of their first entries (a corpus xib, a probe); beside the
+controller's or recognizers' collections, and in cells, headers and
+footers, they are refused.
 
 A button may be disabled (`UIDisabled`) and aligned other than at the centre:
 `UIContentVerticalAlignment` and `UIContentVerticalAlignment2` (top 1,
@@ -1711,8 +1778,9 @@ writes it) is its table's `UIRefreshControl`, after
 `UIAlwaysBounceVertical`: a `UIRefreshControl` of its frame, multiple
 touches, content mode 4, `UIDisabled` and `UIRefreshControlStyle` 2, after
 the table in the objects, its value-changed actions event connections
-(mask 4096) after the outlets; in a static table, beside header and footer
-views or a keyboard dismiss mode it is refused (two probes). Without a
+(mask 4096) after the outlets; in a static table, beside a keyboard
+dismiss mode it is refused (two probes). Beside header and footer views
+it compiles as without them (two corpus storyboards). Without a
 frame it is 1000x1000 at the origin. Its attributed title (one fragment)
 is `UIAttributedTitle` after the style: an `NSAttributedString` of the
 text and attributes `NSFont`, the system font (11 points for
@@ -1883,7 +1951,13 @@ content view as a `_UIVisualEffectContentView` (its subviews, mask 18,
 with its subviews as a container's, then
 `UIViewInsetsLayoutMarginsFromSafeArea` 0 when turned off), listed as its
 child; the objects list its subviews before its constraints (one probe)
-(seven probes; material styles are refused). The objects list its content
+(seven probes; material styles are refused). A vibrancy effect
+(`<vibrancyEffect>` holding a blur effect) is a `UIVibrancyEffect` with
+`UIVibrancyEffectBlurAutomaticStyle` and `UIVibrancyEffectBlurStyle`, the
+blur's values, and tints the content view white (`UITintColor`
+`whiteColor` after its clipping: five probes). Its `fixedFrame` changes
+nothing, and its mask is 36 whatever the document gives (a corpus
+storyboard). The objects list its content
 view's subviews right after the content view, in its own turn, before the
 constraints it holds (one of the corpus's). Constraints it holds
 itself follow its not-translating key, and the objects list them after
@@ -2027,7 +2101,8 @@ inside it. Observed with 15 probes and one corpus storyboard:
   (`UIAlwaysBounceVertical`, after `UIBouncesZoom`; four probes).
 - The collection view: geometry, background colour (with `colorMatched`,
   an opaque grey white is `systemBackgroundColor`, at the root or in a
-  view: nine probes), opaque, multiple
+  view: nine probes), opaque (left out for `opaque="NO"`, and zoom scales
+  after `UIBouncesZoom`, at the root too: a corpus storyboard), multiple
   touch, mask, clipping, then `UIScrollViewIndicatorInsetAdjustmentBehavior`
   1, `UIBouncesZoom`, `UIDelegate` archived as nil,
   `UIScrollViewContentInsetAdjustmentBehavior` 0, `UICollectionLayout`,
@@ -2119,8 +2194,10 @@ the same. Observed with 55 probes:
 - A segue's template: `UIStoryboardShowSegueTemplate` (show, and
   showDetail with `UIActionName` `showDetailViewController:sender:`
   instead of `showViewController:sender:`),
-  `UIStoryboardPresentationSegueTemplate` or
-  `UIStoryboardPushSegueTemplate`; a custom segue (with a class) a plain
+  `UIStoryboardPresentationSegueTemplate`,
+  `UIStoryboardPushSegueTemplate` or, for an old `modal` segue that
+  animates, `UIStoryboardModalSegueTemplate` (a probe and a corpus
+  storyboard); a custom segue (with a class) a plain
   `UIStoryboardSegueTemplate` without an action name. Its values:
   `UIIdentifier` (the segue's identifier, if any), `UISegueClassName` (a
   custom class's runtime name, for any kind: three probes; in the
@@ -2196,7 +2273,8 @@ the same. Observed with 55 probes:
   `selectionSegueTemplate` outlet from the cell to it, sorted with the
   cell's outlets.
 
-An unwind segue leads to its scene's `<exit>` and loads nothing. Its
+An unwind segue leads to its scene's `<exit>` and loads nothing; one to
+another scene's exit compiles the same (a probe). Its
 template is a `UIStoryboardUnwindSegueTemplate`: `UIIdentifier` if any,
 `UIDestinationViewControllerIdentifier` archived as nil, `UIAnimates`
 false when it doesn't animate, and `UIAction` (the unwind action's
@@ -2209,11 +2287,13 @@ probes.
 
 A container view (`<containerView>`, with one embed segue) is a plain
 `UIView` in its scene's view nib, without `UIOpaque` when the document
-says `opaque="NO"`. Without an embed segue it is only that (two probes,
-one of a custom class). Its embed segue gets a placeholder like a control's,
+says `opaque="NO"`, with `UIHidden` when hidden (a corpus storyboard).
+Without an embed segue it is only that (two probes, one of a custom
+class). Its embed segue gets a placeholder like a control's,
 in document order with the others, and instead of an action the
 placeholder has a `containerView` outlet to the view, sorted by label
-with the view nib's outlets. The template is a
+with the view nib's outlets, before a controller's own outlet of that
+name (a corpus storyboard). The template is a
 `UIStoryboardEmbedSegueTemplate`: `UIIdentifier` if any,
 `UIDestinationViewControllerIdentifier`, `UIPerformOnViewLoad` true and
 `UIContainerView` archived as nil. A custom class swaps the view as a

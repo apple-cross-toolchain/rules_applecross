@@ -207,6 +207,14 @@ fn template(nib: &mut Nib, module: Option<&str>, s: Node, names: &HashMap<String
             }
             "UIStoryboardPresentationSegueTemplate"
         }
+        // An older document's modal segue: its identifier and destination
+        // alone (one of the corpus's).
+        "modal" => {
+            if animates {
+                return fail("a modal segue that doesn't animate is not supported by this ibtool");
+            }
+            "UIStoryboardModalSegueTemplate"
+        }
         "embed" => {
             if animates {
                 return fail("an embed segue that doesn't animate is not supported by this ibtool");
@@ -259,12 +267,12 @@ fn template(nib: &mut Nib, module: Option<&str>, s: Node, names: &HashMap<String
 /// An unwind segue's template: no destination, the action it unwinds to.
 fn unwind_template(nib: &mut Nib, s: Node) -> Result<Object, String> {
     only_attributes(s, &[("destination", None), ("kind", None), ("identifier", None), ("unwindAction", None), ("animates", Some("NO")), ("id", None)])?;
-    // Interface Builder connects it to the exit of its own scene.
+    // Interface Builder connects it to the exit of its own scene; another
+    // scene's compiles as that one would (a probe).
     let destination = attr(s, "destination")?;
-    let scene = s.ancestors().find(|a| a.has_tag_name("scene"));
-    let exit = scene.and_then(|scene| scene.descendants().find(|d| d.attribute("id") == Some(destination)));
+    let exit = s.document().descendants().find(|d| d.attribute("id") == Some(destination));
     if !exit.is_some_and(|e| e.has_tag_name("exit")) {
-        return fail("an unwind segue to anything but its scene's exit is not supported by this ibtool");
+        return fail("an unwind segue to anything but an exit is not supported by this ibtool");
     }
     let mut values = Vec::new();
     if let Some(identifier) = s.attribute("identifier") {
