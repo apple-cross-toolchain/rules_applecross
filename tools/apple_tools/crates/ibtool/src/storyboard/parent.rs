@@ -51,6 +51,13 @@ pub(super) fn children_of<'a>(kind: Kind, node: Node<'a, '_>) -> Result<Vec<(&'a
 /// (its children's and their roots', in reverse), the scene's own
 /// placeholders, and the controller with its children (and a tab bar
 /// controller's tab bar). `kids` are in document order.
+///
+/// `in_navigation`, a navigation controller whose root it is: the nib is
+/// that controller's, holding it as its root (a corpus storyboard's tab bar
+/// controller): it is a held controller too, its placeholder before its
+/// children's, its own navigation item on the navigation bar, and
+/// `UIParentViewController` the navigation controller, after that item;
+/// the navigation controller and its bar are listed before it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn parent_controller_nib(
     platform: Platform,
@@ -62,6 +69,7 @@ pub(super) fn parent_controller_nib(
     kids: &[(&str, Child)],
     swapped: bool,
     nib_names: &HashMap<String, String>,
+    in_navigation: Option<Node>,
 ) -> Result<(String, Vec<u8>), String> {
     let mut allowed = vec![
         ("id", None),
@@ -91,13 +99,30 @@ pub(super) fn parent_controller_nib(
         return fail("useStoryboardIdentifierAsRestorationIdentifier without a storyboard identifier is not supported by this ibtool");
     }
     let class = kind.class();
-    let name = node.attribute("storyboardIdentifier").map_or_else(|| format!("{class}-{id}"), str::to_string);
+    let name = match in_navigation {
+        Some(nav) => {
+            check_navigation_controller(nav)?;
+            if kind != Kind::Tab || node.attribute("storyboardIdentifier").is_some() || node.attribute("customClass").is_some() || child(node, "navigationItem", "navigationItem").is_none() {
+                return fail("a navigation controller's root container other than a plain tab bar controller with a navigation item is not supported by this ibtool");
+            }
+            // Its children's placeholders' outlets go otherwise beside
+            // navigation children (a probe).
+            if kids.iter().any(|k| matches!(k.1, Child::Navigation(..))) {
+                return fail("a navigation controller's root tab bar controller with navigation children is not supported by this ibtool");
+            }
+            nav.attribute("storyboardIdentifier").map_or_else(|| format!("UINavigationController-{}", nav.attribute("id").unwrap_or_default()), str::to_string)
+        }
+        None => node.attribute("storyboardIdentifier").map_or_else(|| format!("{class}-{id}"), str::to_string),
+    };
     let mut nib = Nib::new(platform, color_matched, localizable);
 
     // The controllers it holds in preorder (each child, then a navigation
     // controller's root) with their original classes; their scenes'
     // storyboard placeholders come in reverse.
     let mut held: Vec<(String, &str)> = Vec::new();
+    if in_navigation.is_some() {
+        held.push(("controller".to_string(), class));
+    }
     for (i, (_, k)) in kids.iter().enumerate() {
         match k {
             Child::Controller(r) => held.push((format!("child {i}"), r.original_class)),
@@ -114,6 +139,44 @@ pub(super) fn parent_controller_nib(
     top.push(proxy(&mut nib, "IBFilesOwner", "owner"));
     top.push(proxy(&mut nib, "IBFirstResponder", "responder"));
     top.push(proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard"));
+    // A custom object in its scene, of a custom class, its outlets to the
+    // controller alone: top-level and listed before the controller, kept
+    // alive by it after its children, its outlets after the scene outlet (a
+    // corpus storyboard's tab bar controller's transition delegate); several
+    // aren't established.
+    let custom: Vec<Node> = node.parent().into_iter().flat_map(|o| children(o, "customObject")).collect();
+    if custom.len() > 1 || (!custom.is_empty() && kind != Kind::Tab) {
+        return fail("several custom objects in a container's scene, or one in a split view controller's, are not supported by this ibtool");
+    }
+    let mut custom_outlets = Vec::new();
+    for o in &custom {
+        only_attributes(*o, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+        if o.attribute("customClass").is_none() {
+            return fail("a custom object without a class is not supported by this ibtool");
+        }
+        let object_name = format!("object {}", attr(*o, "id")?);
+        for c in o.children().filter(|c| c.is_element()) {
+            if !c.has_tag_name("connections") {
+                return fail(format!("<{}> inside a container's custom object is not supported by this ibtool", c.tag_name().name()));
+            }
+            only_children(c, &["outlet"])?;
+            for out in children(c, "outlet") {
+                only_attributes(out, &[("property", None), ("destination", None), ("id", None)])?;
+                if out.attribute("destination") != node.attribute("id") {
+                    return fail("a container's custom object's outlets to anything but the container are not supported by this ibtool");
+                }
+                custom_outlets.push((attr(out, "property")?.to_string(), object_name.clone()));
+            }
+        }
+        if node.descendants().any(|d| d.attribute("destination") == o.attribute("id")) {
+            return fail("connections to a container's custom object are not supported by this ibtool");
+        }
+        let class = runtime_class_name(*o, module, "UICustomObject")?;
+        let values = vec![("UIClassName", nib.string(&class)), ("UIOriginalClassName", nib.string("UICustomObject"))];
+        top.push(Value::New(Object::new("UIClassSwapper", values).named(object_name)));
+    }
+    custom_outlets.sort();
+    let custom_names: Vec<String> = custom.iter().map(|o| format!("object {}", o.attribute("id").unwrap_or_default())).collect();
 
     let mut values = Vec::new();
     // A tab bar controller's own navigation item, empty, is its first
@@ -125,7 +188,16 @@ pub(super) fn parent_controller_nib(
         if kind != Kind::Tab || item.has_children() || node.attribute("title").is_some() || node.attribute("storyboardIdentifier").is_some() {
             return fail("a container's own navigation item, other than an empty tab bar controller's, is not supported by this ibtool");
         }
-        values.push(("UINavigationItem", navigation_item(&mut nib, item, "own navigation item", id)?.value));
+        let mut own = navigation_item(&mut nib, item, "own navigation item", id)?.value;
+        if in_navigation.is_some() {
+            if let Value::New(o) = &mut own {
+                o.values.push(("UINavigationBar", reference("navigation bar")));
+            }
+        }
+        values.push(("UINavigationItem", own));
+    }
+    if in_navigation.is_some() {
+        values.push(("UIParentViewController", reference("navigation")));
     }
     if let Some(title) = node.attribute("title") {
         values.push(("UITitle", nib.text(id, "title", title)));
@@ -165,13 +237,18 @@ pub(super) fn parent_controller_nib(
     let mut child_gestures: Vec<String> = Vec::new();
     let mut gesture_actions: Vec<(String, String, String)> = Vec::new();
     let mut bar_actions: Vec<(String, String, String)> = Vec::new();
-    let mut take_bar = |i: usize, embedded: &mut Embedded, controller: &str| -> Result<(), String> {
+    // A navigation child's root's bar button items' segues: `perform:` on
+    // their templates, after the other connections, in the children's order
+    // (a corpus storyboard's three).
+    let mut bar_performs: Vec<(String, String)> = Vec::new();
+    let mut take_bar = |i: usize, embedded: &mut Embedded, controller: &str, performs_ok: bool| -> Result<(), String> {
         if embedded.bar_items.is_empty() {
             return Ok(());
         }
-        if !embedded.templates.performs.is_empty() || embedded.bar_actions.iter().any(|a| a.2 != 0) {
+        if (!performs_ok && !embedded.templates.performs.is_empty()) || embedded.bar_actions.iter().any(|a| a.2 != 0) {
             return fail("a child's bar button items with segues or custom views' actions are not supported by this ibtool");
         }
+        bar_performs.extend(std::mem::take(&mut embedded.templates.performs));
         bar_items.push((i, std::mem::take(&mut embedded.bar_items)));
         bar_actions.extend(std::mem::take(&mut embedded.bar_actions).into_iter().map(|(selector, item, _)| (selector, item, controller.to_string())));
         Ok(())
@@ -204,7 +281,7 @@ pub(super) fn parent_controller_nib(
                     gesture_actions = std::mem::take(&mut embedded.gesture_actions);
                 }
                 let has_bar_items = !embedded.bar_items.is_empty();
-                take_bar(i, &mut embedded, &child_name)?;
+                take_bar(i, &mut embedded, &child_name, false)?;
                 if let Some(n) = &embedded.navigation_item {
                     own_parts.push(reference(n.clone()));
                 }
@@ -248,11 +325,22 @@ pub(super) fn parent_controller_nib(
                         (None, false)
                     }
                 };
-                let mut embedded = embedded_controller(&mut nib, r, &root_name, &child_name, Some(&format!("{child_name} bar")), None, nib_names)?;
+                // Its root's own tab bar item, before its navigation item and
+                // listed after it (a corpus storyboard), as in a navigation
+                // controller's own nib.
+                let root_tab_name = format!("{root_name} tab bar item");
+                let root_tab = match child(r.vc, "tabBarItem", "tabBarItem") {
+                    Some(_) if kind == Kind::Tab => Some(tab::tab_bar_item(&mut nib, r.vc, &root_tab_name)?.0),
+                    Some(_) => return fail("a split view controller's navigation root with a tab bar item is not supported by this ibtool"),
+                    None => None,
+                };
+                let has_root_tab = root_tab.is_some();
+                let mut embedded = embedded_controller(&mut nib, r, &root_name, &child_name, Some(&format!("{child_name} bar")), root_tab, nib_names)?;
                 if !embedded.item_pairs.is_empty() || !embedded.gesture_delegates.is_empty() {
                     return fail("runtime attributes of a child's bar button items, or its gesture recognizers' delegates, are not supported by this ibtool");
                 }
-                take_bar(i, &mut embedded, &root_name)?;
+                let bar_segues = no_segues(r) && !embedded.templates.performs.is_empty();
+                take_bar(i, &mut embedded, &root_name, bar_segues)?;
                 // Its root's segues (Xcode's master-detail template): the
                 // templates after the child's deeper parts, before the next
                 // child's (a corpus tab bar controller's), their outlets to
@@ -267,6 +355,14 @@ pub(super) fn parent_controller_nib(
                     template_outlets.extend(std::mem::take(&mut embedded.templates.outlets).into_iter().map(|t| (t, root_name.clone())));
                 }
                 let root_item = embedded.navigation_item.clone();
+                // Its root's bar button items' templates, after its
+                // navigation and tab bar items, their outlets to the root
+                // with the others'.
+                let mut bar_templates = Vec::new();
+                if bar_segues {
+                    bar_templates = std::mem::take(&mut embedded.templates.objects);
+                    template_outlets.extend(std::mem::take(&mut embedded.templates.outlets).into_iter().map(|t| (t, root_name.clone())));
+                }
                 child_values.push(navigation_controller(&mut nib, module, *nav, &child_name, embedded, &root_name, identified, title, Some((item, "controller")))?);
                 own_parts.push(reference(format!("{child_name} bar")));
                 if explicit {
@@ -276,6 +372,10 @@ pub(super) fn parent_controller_nib(
                 if let Some(n) = root_item {
                     own_deeper.push(reference(n));
                 }
+                if has_root_tab {
+                    own_deeper.push(reference(root_tab_name));
+                }
+                own_deeper.extend(bar_templates);
             }
         }
         parts.push(own_parts);
@@ -290,6 +390,13 @@ pub(super) fn parent_controller_nib(
     if !kids.is_empty() {
         values.push(("UIChildViewControllers", nib.array("NSMutableArray", child_values)));
     }
+    if !custom_names.is_empty() {
+        if !child_gestures.is_empty() {
+            return fail("a container's custom object beside its children's gesture recognizers is not supported by this ibtool");
+        }
+        let alive = custom_names.iter().map(|n| reference(n.clone())).collect();
+        values.push(("UITopLevelObjectsToKeepAliveFromStoryboard", nib.array("NSArray", alive)));
+    }
     presentation_context(node, &mut values);
     if node.attribute("automaticallyAdjustsScrollViewInsets").is_some() {
         values.push(("UIKeyAutomaticallyAdjustsScrollViewInsets", Value::Int(0)));
@@ -302,7 +409,7 @@ pub(super) fn parent_controller_nib(
         }
         Kind::Split => values.push(("UISplitViewControllerPrimaryEdge", Value::Int(0))),
     }
-    let controller = if swapped || node.attribute("customClass").is_some() {
+    let controller = if (swapped && in_navigation.is_none()) || node.attribute("customClass").is_some() {
         let runtime = runtime_class_name(node, module, class)?;
         values.push(("UIClassName", nib.string(&runtime)));
         values.push(("UIOriginalClassName", nib.string(class)));
@@ -310,11 +417,39 @@ pub(super) fn parent_controller_nib(
     } else {
         Object::new(class, values)
     };
-    top.push(Value::New(controller.named("controller")));
+    // The navigation controller holding it, loaded in its stead.
+    let loaded = if in_navigation.is_some() { "navigation" } else { "controller" };
+    match in_navigation {
+        Some(nav) => {
+            if !custom_names.is_empty() || !child_gestures.is_empty() {
+                return fail("a navigation controller's root tab bar controller with custom objects or recognizers is not supported by this ibtool");
+            }
+            let root = Embedded {
+                value: Value::New(controller.named("controller")),
+                templates: segue::Templates { external: Vec::new(), array: None, objects: Vec::new(), outlets: Vec::new(), performs: Vec::new() },
+                navigation_item: Some("own navigation item".to_string()),
+                bar_items: Vec::new(),
+                bar_actions: Vec::new(),
+                gestures: Vec::new(),
+                gesture_actions: Vec::new(),
+                item_outlets: Vec::new(),
+                item_pairs: Vec::new(),
+                gesture_delegates: Vec::new(),
+            };
+            let title = navigation_title(&mut nib, nav)?;
+            top.push(navigation_controller(&mut nib, module, nav, "navigation", root, "controller", swapped, title, None)?);
+        }
+        None => top.push(Value::New(controller.named("controller"))),
+    }
     top.extend(child_gestures.iter().map(|g| reference(g.clone())));
 
     let mut objects: Vec<Value> = held.iter().rev().map(|(n, _)| reference(format!("{n} storyboard"))).collect();
-    objects.extend([reference("owner"), reference("responder"), reference("storyboard"), reference("controller")]);
+    objects.extend([reference("owner"), reference("responder"), reference("storyboard")]);
+    objects.extend(custom_names.iter().map(|n| reference(n.clone())));
+    if in_navigation.is_some() {
+        objects.extend([reference("navigation"), reference("navigation bar")]);
+    }
+    objects.push(reference("controller"));
     if own_item.is_some() {
         if !child_gestures.is_empty() {
             return fail("a tab bar controller's own navigation item beside its children's gesture recognizers is not supported by this ibtool");
@@ -342,13 +477,16 @@ pub(super) fn parent_controller_nib(
     }
     // The controller's storyboard outlet, then the others in preorder,
     // stably by their controllers' original classes.
-    let mut connections = vec![outlet(&mut nib, "storyboard", "controller", "storyboard")];
+    let mut connections = vec![outlet(&mut nib, "storyboard", loaded, "storyboard")];
     let mut by_class = held.clone();
     by_class.sort_by(|a, b| a.1.cmp(b.1));
     for (held_name, _) in &by_class {
         connections.push(outlet(&mut nib, "storyboard", held_name, &format!("{held_name} storyboard")));
     }
-    connections.push(outlet(&mut nib, "sceneViewController", "owner", "controller"));
+    connections.push(outlet(&mut nib, "sceneViewController", "owner", loaded));
+    for (property, object) in &custom_outlets {
+        connections.push(outlet(&mut nib, property, object, "controller"));
+    }
     for (template, root) in &template_outlets {
         connections.push(outlet(&mut nib, "viewController", template, root));
     }
@@ -360,6 +498,12 @@ pub(super) fn parent_controller_nib(
     }
     for (selector, item, controller) in &bar_actions {
         connections.push(event_connection(&mut nib, selector, item, controller));
+    }
+    if !bar_performs.is_empty() && !bar_actions.is_empty() {
+        return fail("children's bar button items' segues beside their actions are not supported by this ibtool");
+    }
+    for (item, template) in &bar_performs {
+        connections.push(event_connection(&mut nib, "perform:", item, template));
     }
     if !gesture_actions.is_empty() && (!bar_actions.is_empty() || !template_outlets.is_empty()) {
         return fail("a child's gesture recognizers beside bar button items' actions or segues are not supported by this ibtool");
