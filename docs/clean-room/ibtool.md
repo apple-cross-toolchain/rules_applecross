@@ -642,10 +642,31 @@ other values of the attributes these use, is refused. Observed:
   places cross 10 (a colour, another scene or other ids don't move it;
   more views or installed constraints do); and a corpus storyboard. This
   is not the order of key-value pairs, which go by the objects' own places
-  (eight probes with runtime attributes behind root constraints). Variations for
-  size classes are refused but for those of attributes (below), as are
-  variations anywhere but in a plain controller's view nib or a xib's
-  cell's nib. There the cell is the trait storage list's top-level object,
+  (eight probes with runtime attributes behind root constraints).
+  A size class's variation of a view's constraints (`<variation
+  key="heightClass=compact"><mask key="constraints">` including and
+  excluding them) or subviews (`<mask key="subviews">` excluding some)
+  adds records after the default's: one per size class, sorted by the
+  variation's key (`heightClass=compact` before `widthClass=regular`,
+  whatever the document's order), each its own `UITraitCollection`, its
+  added objects the constraints it includes and its removed objects those
+  it excludes, those on the subviews it leaves out and, for a subview left
+  out, all of the subview's own (a storage of its own). A view leaving
+  out subviews has a `traitStorageSubviews` storage first, its candidates
+  all its subviews in document order, a record per size class removing
+  them; its descendants begin with the view itself. Placeholder
+  constraints are in no record. The removed and added constraints go by
+  places as decimal strings: withheld ones as above, installed ones by
+  their own places in the objects (a probe of two). When the document's
+  device has one of the size classes, the nib archives the device's state,
+  that class's included constraints installed and its excluded ones
+  withheld, the records unchanged (two probes); the device having several,
+  or leaving out subviews, is refused (one probe). Eleven probes and two
+  corpus storyboards, a prototype cell's among them, whose nib then has
+  its trait storage list as a xib's cell's does. Variations for size
+  classes are refused but for those and attributes' (below), as are
+  variations anywhere but in a plain controller's view nib, a xib's cell's
+  nib or a prototype cell's. There the cell is the trait storage list's top-level object,
   and each view's excluded constraints are encoded where the objects list
   them, in their places among its others (a corpus xib and a probe);
   several excluded from one view are refused. A visual effect view's content view counts among the views in
@@ -674,6 +695,9 @@ other values of the attributes these use, is refused. Observed:
   that storage twice, each with objects of its own, and the descendants
   hold the constraint (a corpus storyboard). When the device has the size
   class, for several, or beside other variations it is refused.
+- An older document's frame inset in percentages (`minX="50.00%"`) puts
+  the view at that share of the room its superview leaves it, `(superview
+  − size) × percentage` (a corpus storyboard's centred stack view).
 - A document deploying before iOS 8 (`<deployment version>` below 0x800)
   is refused: Xcode compiles such a xib into a nib directory for each
   idiom (`out~iphone.nib/runtime.nib` and `objects-8.0+.nib`), with or
@@ -1504,7 +1528,21 @@ rest are refused for other elements):
   among its own parts after its tab bar item, their `viewController`
   outlets to it after `sceneViewController` (one corpus storyboard, twice);
   several children's, or one beside a navigation item, bar button items or
-  recognizers, are refused. Identified navigation children or ones loaded
+  recognizers, are refused. A navigation child's root's bar button items'
+  segues are templates in the root's `UIStoryboardSegueTemplates`, listed
+  among its deeper parts after its navigation item and its own tab bar item
+  (which comes before its navigation item, as in a navigation controller's
+  nib), their `viewController` outlets to the root after the scene outlet
+  and the items' `perform:` after all the outlets, both in the children's
+  order (a corpus storyboard's three children, a probe of two in reverse
+  document order); beside the items' actions they are refused.
+- A custom object in the tab bar controller's scene, of a custom class,
+  is top-level and listed after the storyboard placeholder, before the
+  controller, which keeps it alive (`UITopLevelObjectsToKeepAliveFromStoryboard`
+  after `UIChildViewControllers`); its outlets to the controller follow the
+  scene outlet (a corpus storyboard, a probe). Several, outlets to anything
+  else, connections to it, and one in a split view controller's scene are
+  refused. Identified navigation children or ones loaded
   on their own too, tab bar items with insets, and tab bar controllers
   nothing loads are refused.
 
