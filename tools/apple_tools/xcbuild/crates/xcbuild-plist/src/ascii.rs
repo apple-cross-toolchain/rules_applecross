@@ -118,8 +118,21 @@ impl<'a> Lexer<'a> {
 pub fn parse(input: &str) -> Result<Value, ParseError> {
     let mut lexer = Lexer::new(input);
     lexer.skip_whitespace_and_comments();
+    // A .strings file: dictionary entries without the braces, or nothing.
+    if lexer.peek().is_none() {
+        return Ok(Value::Dictionary(plist::Dictionary::new()));
+    }
     let value = parse_value(&mut lexer)?;
-    Ok(value)
+    lexer.skip_whitespace_and_comments();
+    match (value, lexer.peek()) {
+        (Value::String(key), Some(b'=') | Some(b';')) => {
+            let mut dict = plist::Dictionary::new();
+            parse_dictionary_entry(&mut lexer, &mut dict, key)?;
+            parse_dictionary_entries(&mut lexer, dict, None)
+        }
+        (value, None) => Ok(value),
+        (_, Some(_)) => Err(lexer.error("unexpected data after the top-level value")),
+    }
 }
 
 fn parse_value(lexer: &mut Lexer) -> Result<Value, ParseError> {
@@ -138,48 +151,59 @@ fn parse_value(lexer: &mut Lexer) -> Result<Value, ParseError> {
 
 fn parse_dictionary(lexer: &mut Lexer) -> Result<Value, ParseError> {
     assert_eq!(lexer.advance(), Some(b'{'));
+    parse_dictionary_entries(lexer, plist::Dictionary::new(), Some(b'}'))
+}
 
-    let mut dict = plist::Dictionary::new();
-
+/// Entries up to `close`, or to the end of input when there is none.
+fn parse_dictionary_entries(
+    lexer: &mut Lexer,
+    mut dict: plist::Dictionary,
+    close: Option<u8>,
+) -> Result<Value, ParseError> {
     loop {
         lexer.skip_whitespace_and_comments();
 
-        match lexer.peek() {
-            Some(b'}') => {
+        match (lexer.peek(), close) {
+            (Some(c), Some(close)) if c == close => {
                 lexer.advance();
                 return Ok(Value::Dictionary(dict));
             }
-            None => return Err(lexer.error("unexpected end of dictionary")),
+            (None, None) => return Ok(Value::Dictionary(dict)),
+            (None, Some(_)) => return Err(lexer.error("unexpected end of dictionary")),
             _ => {}
         }
 
-        // Parse key
         let key = parse_string_value(lexer)?;
-
         lexer.skip_whitespace_and_comments();
+        parse_dictionary_entry(lexer, &mut dict, key)?;
+    }
+}
 
-        // Expect = or ;
-        match lexer.peek() {
-            Some(b'=') => {
-                lexer.advance();
-                lexer.skip_whitespace_and_comments();
-                let value = parse_value(lexer)?;
-                dict.insert(key, value);
+/// The rest of an entry after its key: `= value;`, or `;` for key = key.
+fn parse_dictionary_entry(
+    lexer: &mut Lexer,
+    dict: &mut plist::Dictionary,
+    key: String,
+) -> Result<(), ParseError> {
+    match lexer.peek() {
+        Some(b'=') => {
+            lexer.advance();
+            lexer.skip_whitespace_and_comments();
+            let value = parse_value(lexer)?;
+            dict.insert(key, value);
 
-                lexer.skip_whitespace_and_comments();
-                if lexer.peek() == Some(b';') {
-                    lexer.advance();
-                }
-            }
-            Some(b';') => {
-                // Key without value (shorthand for key = key)
-                dict.insert(key.clone(), Value::String(key));
+            lexer.skip_whitespace_and_comments();
+            if lexer.peek() == Some(b';') {
                 lexer.advance();
             }
-            _ => {
-                return Err(lexer.error("expected '=' or ';' in dictionary"));
-            }
+            Ok(())
         }
+        Some(b';') => {
+            dict.insert(key.clone(), Value::String(key));
+            lexer.advance();
+            Ok(())
+        }
+        _ => Err(lexer.error("expected '=' or ';' in dictionary")),
     }
 }
 
@@ -446,6 +470,22 @@ fn write_data(output: &mut String, data: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_strings_file() {
+        let input = "/* header */\n\"a\" = \"b\";\n// note\nc = \"d\";\n";
+        let result = parse(input).unwrap();
+        let d = result.as_dictionary().expect("expected dictionary");
+        assert_eq!(d.len(), 2);
+        assert_eq!(d.get("a"), Some(&Value::String("b".to_string())));
+        assert_eq!(d.get("c"), Some(&Value::String("d".to_string())));
+    }
+
+    #[test]
+    fn test_parse_empty_strings_file() {
+        let result = parse("// nothing here\n").unwrap();
+        assert_eq!(result, Value::Dictionary(plist::Dictionary::new()));
+    }
 
     #[test]
     fn test_parse_simple_dict() {
