@@ -317,15 +317,21 @@ struct Variation {
 /// view's size classes, aren't established.
 fn device_withheld<'a>(nib: &Nib, n: Node<'a, '_>, excluded: &[&'a str]) -> Result<Vec<&'a str>, String> {
     let mut withheld = excluded.to_vec();
-    let device = device_size_classes(nib, n)?;
     let masks = size_masks(n)?;
-    let holding: Vec<&SizeMask> = masks.iter().filter(|m| traits_hold(&m.traits, device)).collect();
     let superview = n.parent().filter(|p| p.has_tag_name("subviews")).and_then(|p| p.parent());
     let id = n.attribute("id");
-    let left_out = match superview {
-        Some(p) => size_masks(p)?.iter().any(|m| traits_hold(&m.traits, device) && id.is_some_and(|id| m.subviews.contains(&id))),
-        None => false,
+    let superview_masks = match superview {
+        Some(p) => size_masks(p)?,
+        None => Vec::new(),
     };
+    let leaving_out: Vec<&SizeMask> = superview_masks.iter().filter(|m| id.is_some_and(|id| m.subviews.contains(&id))).collect();
+    // Without size classes, the device's don't matter (an Apple TV's, say).
+    if masks.is_empty() && leaving_out.is_empty() {
+        return Ok(withheld);
+    }
+    let device = device_size_classes(nib, n)?;
+    let holding: Vec<&SizeMask> = masks.iter().filter(|m| traits_hold(&m.traits, device)).collect();
+    let left_out = leaving_out.iter().any(|m| traits_hold(&m.traits, device));
     if left_out || holding.len() > 1 || holding.iter().any(|m| !m.subviews.is_empty()) {
         return fail("a size class's variation of subviews, or several, for the device's size classes is not supported by this ibtool");
     }
