@@ -111,9 +111,10 @@ any other (one probe).
 - **A lone table, collection or web view.** Alone in the xib, its owner's
   `view` outlet its own, it compiles as beside a view (the table view and
   collection view controller templates, three probes): this ibtool
-  compiles it beside a placeholder view the nib then leaves out. An empty
-  xib (the Empty template) is its owner and first responder alone (one
-  probe).
+  compiles it beside a placeholder view the nib then leaves out, with
+  any views and cells after it beside that placeholder too (a corpus xib).
+  An empty xib (the Empty template) is its owner and first responder
+  alone (one probe).
 - The nib's top-level objects and its objects list follow the document's
   order: a first responder placed after the view comes after it there
   too (one probe, two corpus xibs).
@@ -294,7 +295,8 @@ other values of the attributes these use, is refused. Observed:
   white 1): white and alpha in the grey colour space (4) for the greys
   (`labelColor`, `systemBackgroundColor`, `lightTextColor`, ...), sRGB (2)
   otherwise, after its `UISystemColorName`. The 40 colours of the system
-  colour list measured on iOS are those this ibtool knows; others, and
+  colour list measured on iOS are those this ibtool knows, and
+  `tableCellGroupedBackgroundColor` (white: a corpus storyboard); others, and
   system colours on tvOS, are refused. A system colour needn't be defined
   in the document's resources, and Xcode 11's forms with a fallback name or
   components beside `systemColor` archive the same (four probes). Documents
@@ -586,7 +588,14 @@ other values of the attributes these use, is refused. Observed:
   is not the order of key-value pairs, which go by the objects' own places
   (eight probes with runtime attributes behind root constraints). Variations for
   size classes are refused but for those of attributes (below), as are
-  variations anywhere but in a plain controller's view nib.
+  variations anywhere but in a plain controller's view nib or a xib's
+  cell's nib. There the cell is the trait storage list's top-level object,
+  and each view's excluded constraints are encoded where the objects list
+  them, in their places among its others (a corpus xib and a probe);
+  several excluded from one view are refused. A visual effect view's content view counts among the views in
+  the document's order, and its subviews' storages come twice, in order
+  and then again right after them (two corpus xibs); varied views after
+  them are refused.
 - A size class's variation of a stack view's `axis` or a label's font is a
   `_UIAttributeTraitStorage` in the view nib's trait storage list:
   `UIObject` the view, `UIKeyPath` `axis` or `font`, `UIRecords` the size
@@ -686,7 +695,8 @@ other values of the attributes these use, is refused. Observed:
   image compiles as an `image` attribute (a probe).
 - An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`;
   `UIViewInsetsLayoutMarginsFromSafeArea` 0 after its priorities when it
-  says NO: one probe;
+  says NO: one probe; its placeholder's intrinsic size changes nothing: a
+  corpus storyboard, with and without it;
   any content mode but `topLeft`, as UIViewContentMode's: ten probes) archives as a label's geometry and flags (a
   background colour first, hidden and tag after `UIOpaque`, alpha after
   the mask), then `UIContentMode` unless scale to fill, `UIClipsToBounds`,
@@ -1043,8 +1053,9 @@ other values of the attributes these use, is refused. Observed:
   before a recognizer's delegate outlet, by name (four probes and one of
   the corpus's). Beside bar button items in the controller's own nib, the
   recognizers' actions and the items' go together by selector (two probes
-  and two random storyboards); bar items' segues and custom views' actions
-  there, and a selector both share, are refused.
+  and two random storyboards), and so does one item segue's `perform:` (a
+  corpus storyboard); several items' segues, custom views' actions there,
+  and a selector both share, are refused.
 - A navigation controller's root that nothing loads on its own keeps its
   recognizers in the navigation controller's nib: defined in the root's
   `UIExternalObjectsTableForViewLoading` in their placeholders' order,
@@ -1218,7 +1229,9 @@ then `UIStyle` (1 with no style, 2 for done, none for plain), then its
 an item may have a title, an image, both or neither (five probes), then
 its image insets (`UIImageInsets`, top, left, bottom, right: four probes;
 its landscape insets, which change nothing here, are refused), then its
-tint (`UITintColor`; two probes). The items follow the controller's segue templates in its nib's
+tint (`UITintColor`; two probes). A width is `UIWidth`, a float, after its
+title (a corpus storyboard; beside an image, insets, a tint or a custom
+view it is refused). The items follow the controller's segue templates in its nib's
 objects (its own nib's, or its navigation controller's).
 - **Actions.** An item's action on its controller is an event connection
   without a mask.
@@ -1242,7 +1255,15 @@ objects (its own nib's, or its navigation controller's).
   the controller keep their event masks and follow the items' actions and
   `perform:`s, by mask and then selector, whatever the items' sides. A
   controller's outlet to one is in the nib holding the item, after the
-  controller's storyboard outlet (13 probes, pushed and root controllers).
+  controller's storyboard outlet (13 probes, pushed and root controllers);
+  so is one to a navigation root's bar button item, in the navigation
+  controller's nib by name with those (a corpus storyboard). A
+  controller's runtime attributes and its items' pairs go together, its
+  own first, as the objects list them; with a tab bar item too, the
+  objects list the navigation item, the tab bar item, then the bar button
+  items (a corpus storyboard's two controllers). A controller's outlets to
+  a toolbar's bar button items or custom views in its view are the view
+  nib's (a corpus storyboard).
   An item's runtime attributes, or its custom view's key-value pairs (a
   switch's frame), are key-value pairs in the nib holding the item: the
   controller's, or the navigation controller's for its root (two corpus
@@ -1395,10 +1416,15 @@ rest are refused for other elements):
   `UIBarTranslucence` 1, or 2 when `translucent="NO"`.
 - One empty external objects table and one empty attributes dictionary (of
   navigation item titles) are shared by every object that has one.
-- Simulated bottom bar metrics change nothing. Children with segues of
-  their own, identified navigation children or ones loaded on their own
-  too, tab bar items with insets, and tab bar controllers nothing loads are
-  refused.
+- Simulated bottom bar metrics change nothing. A plain child's segues
+  (a container view's embed segue) are templates after its
+  `UIParentViewController`, defined in its external objects table, listed
+  among its own parts after its tab bar item, their `viewController`
+  outlets to it after `sceneViewController` (one corpus storyboard, twice);
+  several children's, or one beside a navigation item, bar button items or
+  recognizers, are refused. Identified navigation children or ones loaded
+  on their own too, tab bar items with insets, and tab bar controllers
+  nothing loads are refused.
 
 ## Split view controllers
 

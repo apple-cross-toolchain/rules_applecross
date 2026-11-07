@@ -67,7 +67,8 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
             }
             ("view" | "collectionReusableView" | "tableViewCell" | "collectionViewCell", _) if view.is_none() && lone.is_none() => view = Some(o),
             (tag, _) if view.is_none() && lone.is_none() && BESIDE_VIEWS.contains(&tag) => lone = Some(o),
-            (tag, _) if view.is_some_and(|v| v.has_tag_name("view")) && (tag == "tableViewCell" || tag == "customObject" || BESIDE_VIEWS.contains(&tag)) => cells.push(o),
+            // Beside a lone view too: the placeholder view's then (below).
+            (tag, _) if (view.is_some_and(|v| v.has_tag_name("view")) || lone.is_some()) && (tag == "tableViewCell" || tag == "customObject" || BESIDE_VIEWS.contains(&tag)) => cells.push(o),
             (tag, _) => return fail(format!("a xib's top-level {tag} beside its one view is not supported by this ibtool")),
         }
     }
