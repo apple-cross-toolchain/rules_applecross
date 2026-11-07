@@ -1438,6 +1438,16 @@ fn runtime_class_name(n: Node, module: Option<&str>, default: &str) -> Result<St
     })
 }
 
+/// A system font's named size (`<fontDescription size=…>`): the button
+/// size 18 (one probe), the system size 14 (a corpus xib).
+fn named_font_size(name: &str) -> Result<f64, String> {
+    match name {
+        "button" => Ok(18.0),
+        "system" => Ok(14.0),
+        other => fail(format!("size=\"{other}\" on <fontDescription> is not supported by this ibtool")),
+    }
+}
+
 /// A label's minimum font size and scale factor, when it adjusts its font
 /// size to fit (the default) and has either. A scale factor's size is
 /// rounded to the nearest quarter point, halves up; a size's factor is the
@@ -1452,10 +1462,11 @@ fn minimum_font_size(n: Node) -> Result<Option<(f32, f32)>, String> {
     }
     // A text style's size is its default Dynamic Type size.
     let description = child(n, "fontDescription", "fontDescription");
-    let font_size = match (description.and_then(|f| f.attribute("pointSize")), description.and_then(|f| f.attribute("style"))) {
-        (Some(size), _) => number(size)?,
-        (None, Some(style)) => text_style_size(style)?,
-        (None, None) => return fail("a minimum font size without the font's point size is not supported by this ibtool"),
+    let font_size = match (description.and_then(|f| f.attribute("pointSize")), description.and_then(|f| f.attribute("style")), description.and_then(|f| f.attribute("size"))) {
+        (Some(size), _, _) => number(size)?,
+        (None, Some(style), _) => text_style_size(style)?,
+        (None, None, Some(named)) => named_font_size(named)?,
+        (None, None, None) => return fail("a minimum font size without the font's point size is not supported by this ibtool"),
     };
     Ok(Some(match (factor, size) {
         (Some(factor), _) => {
@@ -1482,7 +1493,7 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
                 only_attributes(n, &[("key", None), ("name", None), ("family", None), ("pointSize", None)])?;
                 (None, Some(name), number(attr(n, "pointSize")?)?, "regular")
             } else {
-                only_attributes(n, &[("key", None), ("type", None), ("weight", None), ("pointSize", None), ("size", Some("button"))])?;
+                only_attributes(n, &[("key", None), ("type", None), ("weight", None), ("pointSize", None), ("size", None)])?;
                 // The bold system font is the bold weight.
                 let face = match (attr(n, "type")?, n.attribute("weight")) {
                     ("system", weight) => weight.unwrap_or("regular"),
@@ -1490,10 +1501,9 @@ fn font(nib: &mut Nib, n: Option<Node>, default_size: Option<f64>) -> Result<Val
                     ("italicSystem", None) => "italic",
                     (kind, _) => return fail(format!("a {kind} font with a weight is not supported by this ibtool")),
                 };
-                // No size is 12 points (two probes); the button size is 18
-                // (one probe).
+                // No size is 12 points (two probes); a named size is its own.
                 let point_size = match (n.attribute("size"), n.attribute("pointSize")) {
-                    (Some(_), None) => 18.0,
+                    (Some(named), None) => named_font_size(named)?,
                     (None, _) => number(attr(n, "pointSize")?)?,
                     (Some(_), Some(_)) => return fail("a font with both a size and a point size is not supported by this ibtool"),
                 };
@@ -7053,6 +7063,9 @@ pub struct XibLayout {
     /// Whether its view is the placeholder a lone view is compiled beside,
     /// left out of the nib.
     pub placeholder: bool,
+    /// Whether its view is a top-level view controller's, archived inside
+    /// a `UIViewController` listed before it.
+    pub in_controller: bool,
 }
 
 /// A xib rewritten as a one-scene storyboard (xib.rs), the table view
@@ -7930,18 +7943,29 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 scene.segues = placed.iter().map(|&doc| scene.segues[doc].clone()).collect();
                 scene.segue_listing = Some((0..placed.len()).map(new_index).collect());
             }
-            let gesture_proxies: Vec<Value> =
-                numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", gesture_base + i + 1), &format!("gesture {g}"))).collect();
+            // A xib's recognizers are its nib's own top-level objects, after
+            // its view (below), not placeholders.
+            let xib_gestures = xib && !recognizers.is_empty();
+            if xib_gestures && (!scene.segues.is_empty() || recognizers.iter().any(|r| gesture_delegate(*r) || gesture_segue(*r).is_some())) {
+                return fail("a xib's gesture recognizers beside segues, or with outlets or segues of their own, are not supported by this ibtool");
+            }
+            let gesture_proxies: Vec<Value> = if xib_gestures {
+                Vec::new()
+            } else {
+                numbered.iter().enumerate().map(|(i, g)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", gesture_base + i + 1), &format!("gesture {g}"))).collect()
+            };
             // Where they go with the first responder last isn't established.
             if responder_last && (!gesture_proxies.is_empty() || !referenced.is_empty()) {
                 return fail("gesture recognizers or custom objects in a xib whose first responder follows its view are not supported by this ibtool");
             }
             let lead = (if responder_last { 1 } else { 2 }) + gesture_base;
             top.splice(lead..lead, gesture_proxies);
-            objects.splice(lead..lead, numbered.iter().map(|g| reference(format!("gesture {g}"))));
+            if !xib_gestures {
+                objects.splice(lead..lead, numbered.iter().map(|g| reference(format!("gesture {g}"))));
+            }
             let object_proxies: Vec<Value> =
                 referenced.iter().enumerate().map(|(i, id)| proxy(&mut nib, &format!("UpstreamPlaceholder-{}", object_base + i + 1), &view_name(id))).collect();
-            let at = lead + numbered.len() + usize::from(controller_first);
+            let at = lead + if xib_gestures { 0 } else { numbered.len() } + usize::from(controller_first);
             top.splice(at..at, object_proxies);
             objects.splice(at..at, referenced.iter().map(|id| reference(view_name(id))));
             for i in 0..scene.segues.len() {
@@ -8273,6 +8297,20 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 top.push(responder);
                 objects.push(reference("responder"));
             }
+            // A xib's recognizers, top-level after its view in document
+            // order and listed right after it, their actions on the owner by
+            // selector (a corpus xib's three).
+            let mut xib_gesture_actions: Vec<(String, String)> = Vec::new();
+            if xib_gestures {
+                for r in &recognizers {
+                    let id = attr(*r, "id")?;
+                    let (object, selectors) = gesture_recognizer(&mut nib, module, *r, vc_id)?;
+                    top.push(Value::New(object.named(format!("gesture {id}"))));
+                    objects.push(reference(format!("gesture {id}")));
+                    xib_gesture_actions.extend(selectors.into_iter().map(|s| (s, format!("gesture {id}"))));
+                }
+                xib_gesture_actions.sort_by(|a, b| a.0.cmp(&b.0));
+            }
             // The safe-area guide follows the root view.
             let placeholder = |nib: &mut Nib| {
                 let identifier = nib.string("");
@@ -8504,6 +8542,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 top.retain(|v| !matches!(v, Value::New(o) if o.name.as_deref() == Some(root_name.as_str())));
                 objects.retain(|v| !matches!(v, Value::Ref(r) if *r == root_name));
             }
+            if layout.is_some_and(|l| l.in_controller) {
+                let at = top.iter().position(|v| matches!(v, Value::New(o) if o.name.as_deref() == Some(root_name.as_str()))).ok_or("a xib's controller's view")?;
+                let view_object = std::mem::replace(&mut top[at], Value::Nil);
+                top[at] = Value::New(Object::new("UIViewController", vec![("UIView", view_object)]).named("xib controller".to_string()));
+                let listed = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == root_name)).ok_or("a xib's controller's view")?;
+                objects.insert(listed, reference("xib controller"));
+            }
             // Runtime attributes and accessibility configurations go in that
             // order too, each view's as the document gives them (eight
             // probes, and six of accessibility on several views). Key-value
@@ -8654,6 +8699,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
             }
             scene.actions.sort_by(|a, b| (a.2, &a.0, visited(&a.1)).cmp(&(b.2, &b.0, visited(&b.1))));
+            if !xib_gesture_actions.is_empty() && !scene.actions.is_empty() {
+                return fail("a xib's gesture recognizers' actions beside its controls' are not supported by this ibtool");
+            }
+            for (selector, source) in &xib_gesture_actions {
+                let values = vec![("UILabel", nib.string(selector)), ("UISource", reference(source.clone())), ("UIDestination", reference("upstream"))];
+                connections.push(Value::New(Object::new("UIRuntimeEventConnection", values)));
+            }
             for (selector, source, mask, destination) in &scene.actions {
                 let label = nib.string(selector);
                 let mut values = vec![("UILabel", label), ("UISource", reference(source.clone())), ("UIDestination", reference(destination.clone()))];
