@@ -304,6 +304,37 @@ struct Variation {
     /// Its subviews, when a size class leaves some out: the candidates in
     /// document order, and each size class's traits and removed subviews.
     subviews: Option<(Vec<String>, Vec<(Vec<(&'static str, i64)>, Vec<String>)>)>,
+    /// The constraints the nib withholds: the default's excluded ones, or
+    /// those the device's size class leaves out (`device_withheld`).
+    withheld: Vec<String>,
+}
+
+/// The ids of the constraints `n` holds that the nib withholds: those its
+/// default variation excludes, but as the device's size class includes and
+/// excludes them when it has one of `n`'s (four probes): Xcode archives
+/// the device's state, its records the same either way. Subviews left out
+/// for the device's size class, and the device having several of the
+/// view's size classes, aren't established.
+fn device_withheld<'a>(nib: &Nib, n: Node<'a, '_>, excluded: &[&'a str]) -> Result<Vec<&'a str>, String> {
+    let mut withheld = excluded.to_vec();
+    let device = device_size_classes(nib, n)?;
+    let masks = size_masks(n)?;
+    let holding: Vec<&SizeMask> = masks.iter().filter(|m| traits_hold(&m.traits, device)).collect();
+    let superview = n.parent().filter(|p| p.has_tag_name("subviews")).and_then(|p| p.parent());
+    let id = n.attribute("id");
+    let left_out = match superview {
+        Some(p) => size_masks(p)?.iter().any(|m| traits_hold(&m.traits, device) && id.is_some_and(|id| m.subviews.contains(&id))),
+        None => false,
+    };
+    if left_out || holding.len() > 1 || holding.iter().any(|m| !m.subviews.is_empty()) {
+        return fail("a size class's variation of subviews, or several, for the device's size classes is not supported by this ibtool");
+    }
+    let placeholder = |c: &str| n.document().descendants().any(|d| d.has_tag_name("constraint") && d.attribute("id") == Some(c) && d.attribute("placeholder").is_some());
+    for m in holding {
+        withheld.retain(|c| !m.include.contains(c));
+        withheld.extend(m.exclude.iter().filter(|c| !placeholder(c)));
+    }
+    Ok(withheld)
 }
 
 /// A size class's variation of a view's constraints and subviews
@@ -2760,7 +2791,7 @@ fn record_variation(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], candi
         nib.varied.push(id.to_string());
         return Ok(());
     }
-    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names, classes: Vec::new(), subviews: None });
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names.clone(), classes: Vec::new(), subviews: None, withheld: names });
     nib.varied.push(id.to_string());
     Ok(())
 }
@@ -2769,10 +2800,7 @@ fn record_variation(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], candi
 /// superview leaves out for some.
 fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], candidates: Vec<(Node, String, Vec<String>)>, masks: &[SizeMask], left_out: &[&SizeMask]) -> Result<(), String> {
     let id = attr(n, "id")?;
-    let device = device_size_classes(nib, n)?;
-    if masks.iter().chain(left_out.iter().copied()).any(|m| traits_hold(&m.traits, device)) {
-        return fail("a size class's variation of constraints or subviews for the device's size class is not supported by this ibtool");
-    }
+    let withheld_ids = device_withheld(nib, n, excluded)?;
     if nib.variations.is_none() {
         return fail("a variation of a view outside a controller's own view is not supported by this ibtool");
     }
@@ -2851,8 +2879,12 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
     if default.is_empty() && classes.is_empty() && subviews.is_none() {
         return Ok(());
     }
+    let mut withheld = Vec::new();
+    for c in &withheld_ids {
+        withheld.push(named(c)?);
+    }
     let variations = nib.variations.as_mut().expect("checked above");
-    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: default, classes, subviews });
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: default, classes, subviews, withheld });
     Ok(())
 }
 
@@ -3090,10 +3122,10 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         let mut records = Vec::new();
         if !v.excluded.is_empty() {
             let removed: Vec<String> = v.candidates.iter().map(|c| c.0.clone()).filter(|c| v.excluded.contains(c)).collect();
-            records.push(record(nib, None, &[], &removed, &v.excluded)?);
+            records.push(record(nib, None, &[], &removed, &v.withheld)?);
         }
         for (traits, added, removed) in &v.classes {
-            records.push(record(nib, Some(traits), added, removed, &v.excluded)?);
+            records.push(record(nib, Some(traits), added, removed, &v.withheld)?);
         }
         let records = nib.array("NSMutableArray", records);
         let candidates = nib.set("NSOrderedSet", v.candidates.iter().map(|c| reference(c.0.clone())).collect())?;
@@ -3133,6 +3165,7 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         .collect();
     let own: Vec<Node> = children(n, "constraints").flat_map(|cs| children(cs, "constraint")).collect();
     let excluded = excluded_constraints(n)?;
+    let withheld_ids = device_withheld(nib, n, &excluded)?;
     if own.is_empty() && held.is_empty() {
         record_variation(nib, n, name, &excluded, Vec::new())?;
         return Ok(None);
@@ -3318,7 +3351,7 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         }
         scene.own_constraints.push((name.to_string(), constraint_name.clone()));
         let Value::New(o) = m else { unreachable!() };
-        if excluded.contains(&attr(c, "id")?) {
+        if withheld_ids.contains(&attr(c, "id")?) {
             nib.withheld.push(o.named(constraint_name));
         } else {
             values.push(Value::New(o.named(constraint_name)));
@@ -8436,12 +8469,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             let mut constraint_values: Vec<Value> = guide_constraints.iter().map(|n| reference(n.clone())).collect();
             let mut constraint_names = Vec::new();
             let excluded = excluded_constraints(view)?;
+            let withheld_ids = device_withheld(&nib, view, &excluded)?;
             let mut candidates = Vec::new();
             // The safe-area guide is archived where an installed constraint
             // first uses it, else in the view's guides (one probe).
             let (mut safe_area_used, mut safe_area_defined) = (false, false);
             for (_, _, c, first, second) in &xml_constraints {
-                let withheld = excluded.contains(&attr(*c, "id")?);
+                let withheld = withheld_ids.contains(&attr(*c, "id")?);
                 let mut items = Vec::new();
                 let mut names = Vec::new();
                 for id in std::iter::once(*first).chain(*second) {
