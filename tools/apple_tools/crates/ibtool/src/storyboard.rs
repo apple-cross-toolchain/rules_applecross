@@ -5089,7 +5089,19 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 if let Some(image) = st.attribute("backgroundImage") {
                     content.push(("UIBackgroundImage", nib.image(image)));
                 }
-                if let Some(c) = child(*st, "color", "titleColor") {
+                // A rounded rectangle button's normal title colour in a
+                // document saved for iOS 6 and earlier is left out when it
+                // is that button's old default (two corpus storyboards).
+                let old_default = |c: Node| {
+                    n.attribute("buttonType") == Some("roundedRect")
+                        && st.attribute("key") == Some("normal")
+                        && n.document().root_element().attribute("variant") == Some("6xAndEarlier")
+                        && c.attribute("red") == Some("0.19607843137254902")
+                        && c.attribute("green") == Some("0.30980392156862746")
+                        && c.attribute("blue") == Some("0.52156862745098043")
+                        && c.attribute("alpha") == Some("1")
+                };
+                if let Some(c) = child(*st, "color", "titleColor").filter(|c| !old_default(*c)) {
                     content.push(("UITitleColor", color(nib, c)?));
                 }
                 if let Some(c) = child(*st, "color", "titleShadowColor") {
@@ -7411,11 +7423,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or(if platform == Platform::Tvos { "landscape" } else { "portrait" }))?,
         None => None,
     };
-    // A document Xcode 5 saved in the iOS 6 format (`variant="6xAndEarlier"`)
-    // compiles with quirks of its own: buttons' title colours and some
-    // subviews left out (two corpus storyboards); refused.
-    if root.attribute("variant").is_some() {
-        return fail("a document saved for iOS 6 and earlier (variant) is not supported by this ibtool");
+    // A document Xcode 5 saved for iOS 6 and earlier, as an Xcode 4 one.
+    let xcode4 = root.attribute("version") == Some("2.0");
+    if root.attribute("variant").is_some_and(|v| v != "6xAndEarlier" || !xcode4) {
+        return fail("a document variant other than iOS 6 and earlier's in an Xcode 4 document is not supported by this ibtool");
     }
     let generic_canvas = if has_device {
         false
@@ -7424,9 +7435,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     } else {
         let target = minimum_deployment_target.ok_or("a storyboard without a device needs --minimum-deployment-target for this ibtool")?;
         let major: u32 = target.split('.').next().and_then(|m| m.parse().ok()).ok_or_else(|| format!("not a deployment target: {target}"))?;
-        // An Xcode 4 document's views are on it whatever the target (a
-        // corpus storyboard).
-        major < 17 || root.attribute("version") == Some("2.0")
+        // An Xcode 4 document's views are on it whatever the target (three
+        // corpus storyboards).
+        major < 17 || xcode4
     };
     let color_matched = root.attribute("colorMatched") == Some("YES");
     let initial = root.attribute("initialViewController");
@@ -7927,7 +7938,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // corpus's), and none without (one of the corpus's).
         let autolayout = view.document().root_element().attribute("useAutolayout") == Some("YES");
         // A xib's view gets none (36 of the corpus's).
-        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout && !xib && !scenekit {
+        // A document saved for iOS 6 and earlier gets none either (two
+        // corpus storyboards).
+        let ios6 = view.document().root_element().attribute("variant") == Some("6xAndEarlier");
+        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout && !xib && !scenekit && !ios6 {
             scene.guides = vec![("implicit top guide", "top"), ("implicit bottom guide", "bottom")];
         }
         // Without Auto Layout a subview's default mask isn't the usual one
@@ -8074,6 +8088,9 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 return fail("an embedded controller without a device or the generic canvas is not supported by this ibtool")
             }
             (true, _, _, None) if traits => Frame { x: 0.0, y: 0.0, w: 600.0, h: 600.0 },
+            // An iPad document's (`iOS.CocoaTouch.iPad`) the default
+            // iPad's, 820x1180 (a corpus storyboard).
+            (true, _, _, None) if root.attribute("targetRuntime") == Some("iOS.CocoaTouch.iPad") => Frame { x: 0.0, y: 0.0, w: 820.0, h: 1180.0 },
             (true, _, _, None) => Frame { x: 0.0, y: 0.0, w: 393.0, h: 852.0 },
             (true, _, _, Some((w, h))) if traits => Frame { x: 0.0, y: 0.0, w, h },
             (true, _, _, Some(_)) => return fail("a freeform size without trait collections is not supported by this ibtool"),

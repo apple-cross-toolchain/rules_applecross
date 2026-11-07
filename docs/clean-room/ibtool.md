@@ -703,9 +703,13 @@ other values of the attributes these use, is refused. Observed:
   collections), and its table view cells' content view is a `<view
   key="contentView">` without an id, compiled as a content view whose
   background colour Xcode leaves out (a corpus storyboard); with
-  constraints it is refused. A document Xcode 5 saved for iOS 6 and
-  earlier (`variant="6xAndEarlier"`) is refused: its buttons' title
-  colours and some subviews are left out (two corpus storyboards).
+  constraints it is refused. On the generic canvas an iPad document
+  (`targetRuntime="iOS.CocoaTouch.iPad"`) is the default iPad's 820x1180.
+  One Xcode 5 saved for iOS 6 and earlier (`variant="6xAndEarlier"`) gets
+  no implicit legacy layout guides, and a rounded rectangle button's
+  normal title colour there is left out when it is that button's old
+  default blue (0.196, 0.310, 0.522; two corpus storyboards, iPhone and
+  iPad); other variants are refused.
 - A document deploying before iOS 8 (`<deployment version>` below 0x800)
   is refused: Xcode compiles such a xib into a nib directory for each
   idiom (`out~iphone.nib/runtime.nib` and `objects-8.0+.nib`), with or
