@@ -179,6 +179,8 @@ const SYSTEM_COLORS: &[(&str, SystemColor)] = &[
     ("systemYellowColor", SystemColor::Rgb([1.0, 0.8, 0.0, 1.0])),
     ("tertiaryLabelColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.2980392157])),
     ("tertiarySystemBackgroundColor", SystemColor::Gray([1.0, 1.0])),
+    // A grouped table cell's background (a corpus storyboard).
+    ("tableCellGroupedBackgroundColor", SystemColor::Gray([1.0, 1.0])),
     ("tertiarySystemFillColor", SystemColor::Rgb([0.462745098, 0.462745098, 0.5019607843, 0.12])),
     ("tertiarySystemGroupedBackgroundColor", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
     ("tintColor", SystemColor::Rgb([0.0, 0.5333333333, 1.0, 1.0])),
@@ -882,7 +884,7 @@ fn bar_button_item<'a, 'i>(
     nib: &mut Nib, b: Node<'a, 'i>, name: &str, vc_id: &str, actions: &mut Vec<(String, String, i64)>, segues: &mut Vec<(Node<'a, 'i>, String)>,
     responder: Option<&str>, responder_actions: &mut Vec<(String, String)>, pairs: Option<&mut Vec<Value>>,
 ) -> Result<Object, String> {
-    only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("id", None)])?;
+    only_attributes(b, &[("key", None), ("title", None), ("image", None), ("style", None), ("systemItem", None), ("width", None), ("id", None)])?;
     // A custom view (a button, a segmented control...) is compiled as a
     // subview, first among the item's values and listed after it among the
     // objects (two probes). Its actions on the controller keep their event
@@ -1011,6 +1013,14 @@ fn bar_button_item<'a, 'i>(
     // Its tint, last (two probes).
     if let Some(c) = child(b, "color", "tintColor") {
         values.push(("UITintColor", color(nib, c)?));
+    }
+    // A width after its title (a corpus storyboard); beside an image,
+    // insets, a tint or a custom view it isn't established.
+    if let Some(w) = b.attribute("width") {
+        if values.iter().any(|v| matches!(v.0, "UIImage" | "UIImageInsets" | "UITintColor" | "UICustomView")) {
+            return fail("a bar button item's width beside an image, insets, a tint or a custom view is not supported by this ibtool");
+        }
+        values.push(("UIWidth", Value::Float(number(w)? as f32)));
     }
     Ok(Object::new("UIBarButtonItem", values))
 }
@@ -2627,7 +2637,7 @@ fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
 /// order. Its descendants are the items
 /// those constraints relate, but the root view, in the order they first
 /// appear; a guide is its objects-list placeholder.
-fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>) -> Result<Option<Value>, String> {
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, repeated: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
     if variations.is_empty() && attributes.is_empty() {
@@ -2677,7 +2687,17 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
     variations.sort_by_key(place);
     let mut storages = Vec::new();
     let mut descendants: Vec<String> = Vec::new();
-    for v in variations {
+    // A visual effect view's content's subviews' storages come twice: in
+    // order, then again after them (a corpus xib's three); other views'
+    // after theirs aren't established.
+    let first_repeated = variations.iter().position(|v| repeated.contains(&v.view));
+    if let Some(at) = first_repeated {
+        if variations[at..].iter().any(|v| !repeated.contains(&v.view)) {
+            return fail("a variation after a visual effect view's content's subviews' is not supported by this ibtool");
+        }
+    }
+    let again: Vec<Variation> = first_repeated.map(|at| variations[at..].iter().map(|v| Variation { view: v.view.clone(), candidates: v.candidates.clone(), excluded: v.excluded.clone() }).collect()).unwrap_or_default();
+    for v in variations.into_iter().chain(again) {
         for (_, items) in &v.candidates {
             for item in items {
                 if item != root && !descendants.contains(item) {
@@ -5054,6 +5074,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("verticalCompressionResistancePriority", None), ("adjustsImageSizeForAccessibilityContentSizeCategory", Some("YES")),
                 ("fixedFrame", Some("YES")), ("catalog", Some("system")), ("id", None), ("insetsLayoutMarginsFromSafeArea", Some("NO")),
                 ("opaque", Some("NO")), ("multipleTouchEnabled", Some("YES")), ("autoresizesSubviews", Some("NO")),
+                // Its placeholder's intrinsic size is Interface Builder's
+                // alone (a corpus storyboard, with and without it).
+                ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None),
             ])?;
             only_children(n, &["rect", "autoresizingMask", "color", "constraints", "connections", "userDefinedRuntimeAttributes", "accessibility", "imageReference"])?;
             // An image reference naming only its image is the `image`
@@ -5907,6 +5930,9 @@ struct RootController<'a, 'i> {
     gesture_order: Vec<String>,
     /// Its outlets to its navigation item's custom views, (property, view).
     item_outlets: Vec<(String, String)>,
+    /// Its outlets to its navigation item's bar button items, (property,
+    /// id), named where the item is compiled.
+    bar_outlets: Vec<(String, String)>,
     /// The module of the target's own classes.
     module: Option<String>,
 }
@@ -6031,11 +6057,16 @@ fn embedded_controller(
     let mut bar_actions = Vec::new();
     let mut bar_segues = Vec::new();
     let mut item_pairs = Vec::new();
+    let mut bar_item_outlets: Vec<(String, String)> = Vec::new();
     let item = match (explicit_item, bar) {
         (Some(i), _) => {
             let parts = navigation_item_with(nib, i, &item_name, attr(vc, "id")?, None)?;
             if !parts.title_parts.is_empty() {
                 return fail("an embedded controller's title view with subviews or constraints is not supported by this ibtool");
+            }
+            for (property, id) in &root.bar_outlets {
+                let name = parts.item_ids.iter().find(|i| i.0 == *id).map(|i| i.1.clone()).ok_or("an outlet to a bar button item this ibtool doesn't compile is not supported")?;
+                bar_item_outlets.push((property.clone(), name));
             }
             item_pairs = parts.pairs;
             bar_items = parts.bar_items;
@@ -6177,7 +6208,12 @@ fn embedded_controller(
         bar_actions,
         gestures,
         gesture_actions,
-        item_outlets: root.item_outlets.clone(),
+        item_outlets: {
+            let mut all = root.item_outlets.clone();
+            all.extend(bar_item_outlets);
+            all.sort();
+            all
+        },
     })
 }
 
@@ -7360,6 +7396,12 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     // And one to a custom view of its navigation item's bar
                     // button items in the nib that holds the item, after
                     // the controller's storyboard outlet (two probes).
+                    // One to a custom view of a toolbar in its view is in
+                    // the view nib, as one to a view (a corpus storyboard).
+                    Some(v) if v.attribute("key") == Some("customView") && v.ancestors().any(|a| a.has_tag_name("toolbar")) && v.ancestors().any(|a| a == vc) => view_name(destination),
+                    // So is one to a toolbar's bar button item (a corpus
+                    // storyboard).
+                    Some(b) if b.has_tag_name("barButtonItem") && b.ancestors().any(|a| a.has_tag_name("toolbar")) && b.ancestors().any(|a| a == vc) => format!("toolbar item {destination}"),
                     Some(v) if v.parent_element().is_some_and(|p| p.has_tag_name("barButtonItem")) && v.attribute("key") == Some("customView") => {
                         let item = v.ancestors().find(|a| a.has_tag_name("navigationItem") || a.has_tag_name("toolbarItems"));
                         if item.and_then(|i| i.parent_element()) != Some(vc) {
@@ -8313,8 +8355,17 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
             // The views in the document's order, depth first.
             let mut preorder = vec![root_name.clone()];
-            preorder.extend(view.descendants().filter(|d| d.is_element() && d.parent().is_some_and(|p| p.has_tag_name("subviews"))).filter_map(|d| d.attribute("id")).map(view_name));
-            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks)?;
+            // A visual effect view's content view among them (a corpus xib).
+            let effect_content = |d: &Node| d.attribute("key") == Some("contentView") && d.parent().is_some_and(|p| p.has_tag_name("visualEffectView"));
+            preorder.extend(view.descendants().filter(|d| d.is_element() && (d.parent().is_some_and(|p| p.has_tag_name("subviews")) || effect_content(d))).filter_map(|d| d.attribute("id")).map(view_name));
+            // A visual effect view's content's subviews (below).
+            let repeated: Vec<String> = view
+                .descendants()
+                .filter(|d| d.is_element() && d.parent().and_then(|p| p.parent()).is_some_and(|c| effect_content(&c)) && d.parent().is_some_and(|p| p.has_tag_name("subviews")))
+                .filter_map(|d| d.attribute("id"))
+                .map(view_name)
+                .collect();
+            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &repeated)?;
             let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
             if xib {
                 rename_references(&mut root, "upstream", "owner");
@@ -8382,11 +8433,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             bar_responder = parts.responder_actions;
             item_ids = parts.item_ids;
             item_pairs = parts.pairs;
-            // In its own nib only; a tab's child held by its parent alone
-            // has none (one probe).
-            if has_tab_item && !bar_items.is_empty() && (is_initial || identified || segue_destination) {
-                return fail("a controller with both a tab bar item and bar button items in its own nib is not supported by this ibtool");
-            }
+            // In its own nib the objects list the navigation item, the tab
+            // bar item, then the bar button items (a corpus storyboard's
+            // two); a tab's child held by its parent alone has none (one
+            // probe).
         }
         // A recognizer's segue is templated as a bar button item's is, after
         // the controls' (three probes); several, or beside bar button items'
@@ -8643,6 +8693,14 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         for r in delegates {
             connections.push(outlet(&mut vnib, "delegate", &format!("gesture {}", attr(*r, "id")?), "controller"));
         }
+        // A navigation controller's root nothing else loads has them in
+        // the navigation controller's nib, with its outlets to custom views
+        // (a corpus storyboard).
+        let root_only = nav_root_only && !is_initial && !identified && !segue_destination;
+        let mut embedded_bar_outlets = Vec::new();
+        if embedded_here && root_only && !bar_outlets.is_empty() {
+            embedded_bar_outlets = std::mem::take(&mut bar_outlets);
+        }
         if !bar_outlets.is_empty() && (!gesture_outlets.is_empty() || !item_outlets.is_empty() || !object_outlets.is_empty() || embedded_here) {
             return fail("outlets to bar button items beside other outlets in the controller's nib, or of an embedded controller, are not supported by this ibtool");
         }
@@ -8666,8 +8724,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // together by selector (two probes); bar segues, custom views'
         // actions and shared selectors are refused there.
         let merged = !recognizers.is_empty() && !bar_items.is_empty();
-        if merged && (!templates.performs.is_empty() || bar_actions.iter().any(|a| a.2 != 0) || !bar_responder.is_empty()) {
-            return fail("a gesture recognizer beside bar button items' segues or custom views' actions is not supported by this ibtool");
+        // Their segues' `perform:`s by selector with the rest (a corpus
+        // storyboard's one).
+        if merged && (templates.performs.len() > 1 || bar_actions.iter().any(|a| a.2 != 0) || !bar_responder.is_empty()) {
+            return fail("a gesture recognizer beside several bar button items' segues or custom views' actions is not supported by this ibtool");
         }
         if !merged {
             connections.extend(bar_events(&mut vnib, &bar_items, &bar_actions, &templates.performs, &bar_responder, "controller")?);
@@ -8766,6 +8826,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             gesture_actions.into_iter().map(|(selector, id)| (selector, format!("gesture {id}"), "controller".to_string())).collect();
         if merged {
             events.extend(bar_actions.iter().map(|(selector, item, _)| (selector.clone(), item.clone(), "controller".to_string())));
+            events.extend(templates.performs.iter().map(|(item, template)| ("perform:".to_string(), item.clone(), template.clone())));
             events.sort_by(|a, b| a.0.cmp(&b.0));
             if events.windows(2).any(|w| w[0].0 == w[1].0) {
                 return fail("gesture recognizers' and bar button items' actions sharing a selector are not supported by this ibtool");
@@ -8812,11 +8873,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         top.extend(later_gestures.into_iter().map(|(object, _)| object));
         // The controller's runtime attributes are its own nib's.
         let mut pairs = runtime_attributes(&mut vnib, vc, "controller")?;
-        // Its bar button items' too (a corpus storyboard); beside the
-        // controller's own, their order isn't established.
-        if !pairs.is_empty() && !item_pairs.is_empty() {
-            return fail("runtime attributes of both a controller and its bar button items are not supported by this ibtool");
-        }
+        // Its bar button items' too, after its own as the objects list
+        // them (two corpus storyboards).
         pairs.extend(item_pairs);
         if !pairs.is_empty() && !beside_pairs.is_empty() {
             return fail("runtime attributes of both a controller and views beside it are not supported by this ibtool");
@@ -8842,6 +8900,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 own_segues: own_segues.clone(),
                 recognizers: recognizers.clone(),
                 item_outlets: item_outlets.clone(),
+                bar_outlets: embedded_bar_outlets.clone(),
                 gesture_order: gesture_order(&scene.gesture_views).into_iter().cloned().collect(),
                 module: module.map(str::to_string),
             });

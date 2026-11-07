@@ -153,6 +153,7 @@ pub(super) fn parent_controller_nib(
     // to its root), after that child's deeper parts, and the child's index.
     let mut template_objects: Vec<Value> = Vec::new();
     let mut template_child = None;
+    let mut plain_template = false;
     let mut template_outlets: Vec<(String, String)> = Vec::new();
     // The children's bar button items, by child, after every child's
     // parts, and their actions (selector, item, controller) after the scene
@@ -184,9 +185,6 @@ pub(super) fn parent_controller_nib(
         let mut own_deeper = Vec::new();
         match k {
             Child::Controller(r) => {
-                if !no_segues(r) {
-                    return fail("a child controller with segues is not supported by this ibtool");
-                }
                 let (item, explicit) = match kind {
                     Kind::Tab => {
                         let (item, explicit) = tab::tab_bar_item(&mut nib, r.vc, &item_name)?;
@@ -205,12 +203,27 @@ pub(super) fn parent_controller_nib(
                     child_gestures = std::mem::take(&mut embedded.gestures);
                     gesture_actions = std::mem::take(&mut embedded.gesture_actions);
                 }
+                let has_bar_items = !embedded.bar_items.is_empty();
                 take_bar(i, &mut embedded, &child_name)?;
                 if let Some(n) = &embedded.navigation_item {
                     own_parts.push(reference(n.clone()));
                 }
                 if explicit {
                     own_parts.push(reference(item_name.clone()));
+                }
+                // Its segues' templates among its own parts, after its tab
+                // bar item, their outlets to it with the others' (a corpus
+                // storyboard's container view); one child's only, without a
+                // navigation item, bar button items or recognizers.
+                if !no_segues(r) {
+                    if !template_objects.is_empty() || template_child.is_some() || plain_template || embedded.navigation_item.is_some()
+                        || !embedded.templates.performs.is_empty() || !embedded.gestures.is_empty() || has_bar_items
+                    {
+                        return fail("a child controller with segues beside other children's, a navigation item, bar button items or recognizers is not supported by this ibtool");
+                    }
+                    plain_template = true;
+                    own_parts.append(&mut embedded.templates.objects);
+                    template_outlets.extend(std::mem::take(&mut embedded.templates.outlets).into_iter().map(|t| (t, child_name.clone())));
                 }
                 child_values.push(embedded.value);
             }
@@ -246,7 +259,7 @@ pub(super) fn parent_controller_nib(
                 // the root after the scene's (one corpus storyboard, two
                 // ways).
                 if !no_segues(r) {
-                    if !template_objects.is_empty() || !embedded.templates.performs.is_empty() || !embedded.gestures.is_empty() {
+                    if !template_objects.is_empty() || plain_template || !embedded.templates.performs.is_empty() || !embedded.gestures.is_empty() {
                         return fail("segues from more than one child, or with bar button items or gestures, are not supported by this ibtool");
                     }
                     template_objects.extend(std::mem::take(&mut embedded.templates.objects));

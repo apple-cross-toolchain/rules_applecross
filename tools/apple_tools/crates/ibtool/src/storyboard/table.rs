@@ -1097,6 +1097,11 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
 pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
     let mut nib = Nib::new(platform, color_matched, localizable);
     nib.xib = xib.is_some();
+    // A xib's cell's default variations, as a view nib's (three corpus
+    // xibs).
+    if xib.is_some() {
+        nib.variations = Some(Vec::new());
+    }
     let safe_area = xib == Some(true);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
@@ -1140,6 +1145,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
             objects.push(reference(s.clone()));
             queue.push_back(s);
         }
+        // Its excluded constraints among them in their places (a probe).
         objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
         for (_, s) in others {
             if *v != content_name {
@@ -1215,7 +1221,28 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     scene.pairs.sort_by_key(|p| listed(&p.0));
     let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
     let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
-    nib::archive(root_object_full(&mut nib, top, objects, connections, accessibility, pairs))
+    // Excluded constraints are encoded where the objects list them, and
+    // the trait storage list's top-level object is the cell, its views in
+    // the document's order; several excluded from one view, whose ranking
+    // isn't established here, are refused.
+    let mut objects = objects;
+    for o in std::mem::take(&mut nib.withheld) {
+        let name = o.name.clone().expect("named");
+        let at = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == name)).ok_or("an excluded constraint a cell's objects don't list is not supported by this ibtool")?;
+        objects[at] = Value::New(o);
+    }
+    if nib.variations.as_ref().is_some_and(|v| v.iter().any(|v| v.excluded.len() > 1)) {
+        return fail("several constraints a cell's view's variation excludes are not supported by this ibtool");
+    }
+    let mut order = vec![content_name.clone()];
+    order.extend(scene.subviews.iter().map(|s| s.1.clone()));
+    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &[])?;
+    let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
+    if let Some(list) = traits {
+        let lists = nib.array("NSArray", vec![list]);
+        root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
+    }
+    nib::archive(root)
 }
 
 /// A table view cell beside a xib's view, in the view's nib: its object,
