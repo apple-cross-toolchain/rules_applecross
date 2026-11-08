@@ -96,8 +96,11 @@ pub fn appearance(entry: &serde_json::Value) -> Option<u16> {
 /// nothing (the scan leaves them out).
 /// `platform` (actool's name for it): its own idiom's colours take their
 /// appearance from universal ones ([`own_idiom`]); watchOS keeps only
-/// colours without an appearance (three probes).
-pub fn compile(sets: &[(String, std::path::PathBuf)], platform: &str, identifier: impl Fn(&str) -> u16) -> Result<(Vec<Facet>, Vec<Rendition>), String> {
+/// colours without an appearance (three probes). For iOS with
+/// `phone_and_pad` targeted, iPhone, iPad and CarPlay colours keep their
+/// idioms beside universal ones and watch, Mac, TV and visionOS colours are
+/// left out, as image sets' are.
+pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platform: &str, identifier: impl Fn(&str) -> u16) -> Result<(Vec<Facet>, Vec<Rendition>), String> {
     let own = own_idiom(platform);
     let mut facets = Vec::new();
     let mut renditions = Vec::new();
@@ -129,7 +132,11 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], platform: &str, identifier
                 (Some("universal"), Some(_)) if own_appearances.contains(&appearance_for(entry, platform)) => continue,
                 (Some("universal"), _) => 0,
                 (_, Some(_)) => continue,
-                _ => return unsupported("a colour for an idiom other than universal".into()),
+                (Some("iphone"), None) if phone_and_pad => 1,
+                (Some("ipad"), None) if phone_and_pad => 2,
+                (Some("car"), None) if phone_and_pad => 4,
+                (Some("watch" | "mac" | "tv" | "vision"), None) if phone_and_pad => continue,
+                _ => return unsupported("a colour for an idiom other than universal, without both --target-device iphone and ipad".into()),
             };
             let Some(appearance) = appearance_for(entry, platform) else {
                 return unsupported(format!("the appearances {}", entry["appearances"]));
@@ -137,10 +144,10 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], platform: &str, identifier
             if platform == "watch" && appearance != 0 {
                 continue;
             }
-            if seen.contains(&appearance) {
+            if seen.contains(&(appearance, idiom)) {
                 return unsupported("two colours for one appearance".into());
             }
-            seen.push(appearance);
+            seen.push((appearance, idiom));
             let mut attrs = vec![(car::ATTR_SCALE, 1), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_COLOR)];
             if appearance != 0 {
                 attrs.push((car::ATTR_APPEARANCE, appearance));

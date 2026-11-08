@@ -520,7 +520,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             *o.sticker_icon.borrow_mut() = Some(name.clone());
         }
     }
-    let (color_facets, colors) = colorset::compile(&scan.color_sets, platform, name_identifier)?;
+    let (color_facets, colors) = colorset::compile(&scan.color_sets, phone && pad, platform, name_identifier)?;
     images.facets.extend(color_facets);
     images.renditions.extend(colors);
     let (data_facets, data) = dataset::compile(&scan.data_sets, name_identifier)?;
