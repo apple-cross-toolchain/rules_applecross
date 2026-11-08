@@ -1000,9 +1000,14 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
     if images.packable.iter().any(|p| p.1 == 0 && atlases.contains(&(p.0, p.2))) {
         return Err(format!("image sets packed at a scale and idiom of the {icon_name} icon set's atlases are not supported by this actool"));
     }
-    for (name, source) in &compiled.bundle_files {
+    for (name, file) in &compiled.bundle_files {
         let p = out_dir.join(name);
-        std::fs::copy(source, &p).map_err(|e| format!("{}: {e}", source.display()))?;
+        match file {
+            iconset::BundleFile::Copy(source) => {
+                std::fs::copy(source, &p).map_err(|e| format!("{}: {e}", source.display()))?;
+            }
+            iconset::BundleFile::Write(bytes) => std::fs::write(&p, bytes).map_err(|e| format!("{}: {e}", p.display()))?,
+        }
         outputs.push(p);
     }
     if let Some(icns) = &compiled.icns {
@@ -1051,11 +1056,11 @@ fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &
         // macOS: the light appearance at 16 to 512 pt @2x and 1024 pt @1x,
         // packed as an icon set's images are, and the icon family.
         let flat = document.render_mac()?.to_bgra();
-        let at = |px: usize| unpremultiplied(&image::resize(&flat, px, px));
+        let at = |px: usize| image::resize(&flat, px, px).unpremultiplied_rgba();
         let mut slots = Vec::new();
         for (size, scale) in [(16, 2), (32, 2), (64, 2), (128, 2), (256, 2), (512, 2), (1024, 1)] {
             let filename = icon::raster_name(name, size, "NSAppearanceNameSystem");
-            slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file: PathBuf::new(), filename, image: Some(at((size * scale) as usize)) });
+            slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file: PathBuf::new(), filename, image: Some(at((size * scale) as usize)), universal: false });
         }
         let rasters = iconset::compile_with(name, id, &slots, false, false, false, true, false)?;
         let icns = image::icns(&[
@@ -1111,16 +1116,6 @@ fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &
     finish(o, out_dir, platform, Some(name), false, renditions, compiled, Kind::Ios { phone: Some(phone_icons), pad: Some(pad_icons) }, outputs)
 }
 
-/// Straight RGBA from premultiplied BGRA, rounding to nearest.
-fn unpremultiplied(img: &image::Bgra) -> image::Rgba {
-    let mut data = Vec::with_capacity(img.data.len());
-    for p in img.data.chunks_exact(4) {
-        let a = p[3] as u32;
-        let c = |c: u8| if a == 0 { 0 } else { ((c as u32 * 255 + a / 2) / a).min(255) as u8 };
-        data.extend_from_slice(&[c(p[2]), c(p[1]), c(p[0]), p[3]]);
-    }
-    image::Rgba { width: img.width, height: img.height, data }
-}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

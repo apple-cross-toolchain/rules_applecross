@@ -5,6 +5,13 @@ use crate::car::{self, Rendition};
 use crate::image;
 use std::path::{Path, PathBuf};
 
+/// A bundle icon: an icon set's file copied, or bytes written.
+#[derive(Clone)]
+pub enum BundleFile {
+    Copy(PathBuf),
+    Write(Vec<u8>),
+}
+
 pub struct Slot {
     pub idiom: &'static str,
     /// CoreUI's subtype: a watch size, or 0.
@@ -16,6 +23,9 @@ pub struct Slot {
     pub filename: String,
     /// Its image, when it isn't read from `file`.
     pub image: Option<image::Rgba>,
+    /// From an iOS icon of all sizes (`universal` for `ios`), whose bundle
+    /// icons Xcode writes anew rather than copies.
+    pub universal: bool,
 }
 
 /// A rendition to pack or store: its group, `dimension2` and pixels.
@@ -53,7 +63,7 @@ pub struct Compiled {
     /// A macOS app's icon family.
     pub icns: Option<Vec<u8>>,
     /// Files copied into the bundle: (output name, source).
-    pub bundle_files: Vec<(String, PathBuf)>,
+    pub bundle_files: Vec<(String, BundleFile)>,
     pub phone: Option<DeviceIcons>,
     pub pad: Option<DeviceIcons>,
     pub has_dimension1: bool,
@@ -424,10 +434,34 @@ fn compile_full(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: b
     // iPad. Each target device's entry names the icon and lists those it
     // has (iPad's, when it has its own, the iPhone one first when both are
     // targets); for iPad alone, an App Store icon also names the icon for
-    // iPhone.
+    // iPhone. An iOS icon of all sizes has them written anew as simulator
+    // PNGs (a corpus icon set).
     let mut bundle_files = Vec::new();
     let (mut phone_icons, mut pad_icons) = (None, None);
-    let find = |idiom: &str, size: f64| slots.iter().find(|s| s.idiom == idiom && s.size == size && s.scale == 2).map(|s| s.file.clone());
+    // An iOS icon of all sizes with a 1024 pt image has both resampled from
+    // it, as a single-size icon's, whatever its other sizes; without one,
+    // neither (25 random icon sets).
+    let master = slots.iter().any(|s| s.universal).then(|| items.iter().find(|i| i.scale == 1 && i.subtype == 0 && i.dimension2 == rank(1024.0))).flatten();
+    let find = |idiom: &str, size: f64| {
+        if slots.iter().any(|s| s.universal) {
+            let px = (size * 2.0) as usize;
+            let resized = image::resize(&master?.image.to_bgra(), px, px);
+            return Some(BundleFile::Write(image::plain_png(&resized.unpremultiplied_rgba(), true)));
+        }
+        let s = slots.iter().find(|s| s.idiom == idiom && s.size == size && s.scale == 2)?;
+        Some(BundleFile::Copy(s.file.clone()))
+    };
+    // Its bundle icons, both whatever the target devices, each device's
+    // entry listing them as a single-size icon's does (ten builds for
+    // iPhone or iPad alone).
+    if let (true, Some(_)) = (slots.iter().any(|s| s.universal), master) {
+        for (file, idiom, size) in [(format!("{name}60x60@2x.png"), "iphone", 60.0), (format!("{name}76x76@2x~ipad.png"), "ipad", 76.0)] {
+            bundle_files.push((file, find(idiom, size).expect("a 1024 pt image")));
+        }
+        let phone_icons = Some(DeviceIcons { files: vec![format!("{name}60x60")], named: phone });
+        let pad_icons = Some(DeviceIcons { files: vec![format!("{name}60x60"), format!("{name}76x76")], named: pad });
+        return Ok(Compiled { renditions, deferred, icns: None, bundle_files, phone: phone_icons, pad: pad_icons, has_dimension1 });
+    }
     let phone_file = if phone { find("iphone", 60.0) } else { None };
     if let Some(f) = &phone_file {
         bundle_files.push((format!("{name}60x60@2x.png"), f.clone()));
@@ -482,8 +516,13 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         // A single-size watch icon (universal, for watchOS, 1024 pt) is
         // compiled as a watch icon of that size (one probe).
         let single_watch = i["idiom"] == "universal" && i["platform"] == "watchos" && i["size"] == "1024x1024" && i.get("scale").is_none();
+        // An iOS icon of all sizes (universal, for iOS) is each size's for
+        // the iPhone and the iPad alike, the 1024 pt one at 1x
+        // (`universal_ios`).
+        let universal_ios = i["idiom"] == "universal" && i["platform"] == "ios";
         let idiom = match i["idiom"].as_str() {
             _ if single_watch => "watch",
+            _ if universal_ios => "iphone",
             Some("iphone") => "iphone",
             Some("ipad") => "ipad",
             Some("watch") => "watch",
@@ -493,11 +532,13 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             other => return Err(format!("{filename}: the {} idiom is not supported by this actool in a multi-size icon set", other.unwrap_or("missing"))),
         };
         let size = i["size"].as_str().and_then(|s| s.split_once('x')).and_then(|(w, h)| (w == h).then(|| w.parse::<f64>().ok()).flatten()).ok_or_else(|| format!("{filename}: unsupported size"))?;
-        let scale = if single_watch { 1 } else { i["scale"].as_str().and_then(|s| s.strip_suffix('x')).and_then(|s| s.parse().ok()).ok_or_else(|| format!("{filename}: unsupported scale"))? };
+        let scale = if single_watch || (universal_ios && i.get("scale").is_none()) { 1 } else { i["scale"].as_str().and_then(|s| s.strip_suffix('x')).and_then(|s| s.parse().ok()).ok_or_else(|| format!("{filename}: unsupported scale"))? };
         // An icon generator's `expected-size` and `folder` are ignored (one
         // probe, Valdi's).
         let allowed: &[&str] = if single_watch {
             &["filename", "idiom", "size", "platform"]
+        } else if universal_ios {
+            &["filename", "idiom", "size", "scale", "platform"]
         } else if idiom == "watch" {
             &["filename", "idiom", "size", "scale", "role", "subtype", "expected-size", "folder"]
         } else {
@@ -521,6 +562,7 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             (20.0, 1), (20.0, 2), (29.0, 1), (29.0, 2), (40.0, 1), (40.0, 2), (50.0, 1), (50.0, 2), (72.0, 1), (72.0, 2), (76.0, 1), (76.0, 2), (83.5, 2),
         ];
         let known = match idiom {
+            _ if universal_ios => true,
             "iphone" => PHONE.contains(&(size, scale)),
             "ipad" => PAD.contains(&(size, scale)),
             "ios-marketing" => (size, scale) == (1024.0, 1),
@@ -541,7 +583,10 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
             ("watch", Some("notificationCenter" | "quickLook"), Some("42mm")) => 384,
             (_, role, subtype) => return Err(format!("{filename}: role {} and subtype {} are not supported by this actool", role.unwrap_or("none"), subtype.unwrap_or("none"))),
         };
-        out.push(Slot { idiom, subtype, size, scale, file: icon_dir.join(filename), filename: filename.to_string(), image: None });
+        out.push(Slot { idiom, subtype, size, scale, file: icon_dir.join(filename), filename: filename.to_string(), image: None, universal: universal_ios });
+        if universal_ios {
+            out.push(Slot { idiom: "ipad", subtype, size, scale, file: icon_dir.join(filename), filename: filename.to_string(), image: None, universal: true });
+        }
     }
     Ok(out)
 }
