@@ -572,6 +572,16 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         if !known {
             return Err(format!("{filename}: {idiom} {size}pt @{scale}x is not an icon slot this actool supports"));
         }
+        // An iPhone or iPad image of another size than its slot's is left
+        // out, without a word, as if the set didn't list it (five probes:
+        // larger and smaller, a size's only image, the 60 pt @3x the iPhone
+        // XR's icon is made from, iPad's bundle icon).
+        if matches!(idiom, "iphone" | "ipad") {
+            let px = (size * scale as f64).round() as usize;
+            if png_size(&icon_dir.join(filename)).is_some_and(|wh| wh != (px, px)) {
+                continue;
+            }
+        }
         // Watch icons by role and size: the app launcher's is stored for all
         // sizes, as companion settings' are.
         let subtype = match (idiom, i["role"].as_str(), i["subtype"].as_str()) {
@@ -589,6 +599,19 @@ pub fn slots(icon_dir: &Path, images: &serde_json::Value) -> Result<Vec<Slot>, S
         }
     }
     Ok(out)
+}
+
+/// A PNG's width and height from its header; None if it isn't a PNG (its
+/// decoding reports why).
+fn png_size(path: &Path) -> Option<(usize, usize)> {
+    use std::io::Read;
+    let mut head = [0u8; 24];
+    std::fs::File::open(path).ok()?.read_exact(&mut head).ok()?;
+    if head[..8] != *b"\x89PNG\r\n\x1a\n" || head[12..16] != *b"IHDR" {
+        return None;
+    }
+    let be = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize;
+    Some((be(&head[16..20]), be(&head[20..24])))
 }
 
 fn opaque_image(image: &image::Rgba) -> bool {
