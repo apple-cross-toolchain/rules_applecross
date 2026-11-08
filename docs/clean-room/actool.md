@@ -1115,9 +1115,22 @@ set's: layout 1000, flags 0, no size, scale 100, pixel format `DATA`
 the composition, 0x3ed (the identifier's length with its NUL, 0, then the
 identifier and a NUL) and 0x3ee 1, and its payload the file as `RAWD`
 (version 0, length, bytes), whatever its size. A catalog of data alone has
-no appearance table. Without a type identifier Xcode looks one up for the
-file's extension (`.drawing` is `com.apple.drawing`), which this actool
-refuses, as it does several files or other idioms (eight probes).
+no appearance table. Several files or other idioms are refused (eight
+probes).
+
+Without a type identifier Xcode records the one the Mac's type database
+gives the file's last extension, whatever its case, lowercased (`.drawing`
+is `com.apple.drawing`, `.tar.gz` gzip's, `.PNG` `public.png`). That
+database holds what macOS and Xcode declare, but also what installed apps
+do: on one Mac `.dat` was a game's type. This actool knows the 705
+extensions macOS 27 and Xcode 27.2 declare (CoreTypes' and their
+frameworks' declarations, each compiled by Xcode and kept where its
+answer is that declaration; `data_utis.rs`) and refuses others. A file
+without an extension is `dyn.age8u`, the dynamic identifier for an empty
+extension: `dyn.a` and the bytes of `1=<extension>` five bits at a time,
+most significant first, in `abcdefghkmnpqrstuvwxyz0123456789`
+(`dyn.age81u8p4` for an unclaimed `xyz`). `tests/actool_catalog/cases/
+data-set-types`.
 
 ## macOS catalogs
 
