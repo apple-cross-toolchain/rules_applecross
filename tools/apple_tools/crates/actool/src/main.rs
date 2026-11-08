@@ -8,6 +8,7 @@ mod bom;
 mod car;
 mod colorset;
 mod colour;
+mod data_utis;
 mod dataset;
 mod directions;
 mod dmp2;
