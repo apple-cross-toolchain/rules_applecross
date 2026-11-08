@@ -829,9 +829,14 @@ table under Packed images; 54 of 54 random catalogs of 2 to 39 colour sets
 were byte-identical with it (25 of 54 like them had identifiers sharing a
 bucket, which the earlier model refused).
 
-Refused: idioms other than universal for iOS (Xcode thins them by target
-device: an iPhone build kept iphone and car and dropped universal), and keys
-not above. For macOS, see macOS catalogs. In the 350-catalog comparison 13 more catalogs matched:
+For iOS built for both iPhone and iPad, iPhone, iPad and CarPlay colours
+keep their idioms beside universal ones (each appearance's of each idiom a
+rendition) and watch, Mac, TV and visionOS colours are left out, as image
+sets' are (40 random catalogs of one to four sets of one to five idioms
+and appearances; a corpus catalog; `tests/actool_catalog/cases/
+colour-idioms`). Refused: idioms other than universal for iOS built for
+one device only (Xcode thins them by target device: an iPhone build kept
+iphone and car and dropped universal), and keys not above. For macOS, see macOS catalogs. In the 350-catalog comparison 13 more catalogs matched:
 8 byte-identical and 5 matching but for the appearance blocks' order.
 
 A colour may refer to a system colour (`"reference"`, with platform
