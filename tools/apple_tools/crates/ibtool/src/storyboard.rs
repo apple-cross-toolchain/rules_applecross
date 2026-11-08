@@ -250,6 +250,17 @@ fn layout_attribute(name: &str) -> Result<i64, String> {
     })
 }
 
+/// What a document's nibs share: its platform, whether it is localizable
+/// and colour matched (`Nib`'s fields), and its deployment target's major
+/// version (`None` without one).
+#[derive(Clone, Copy)]
+struct Settings {
+    platform: Platform,
+    color_matched: bool,
+    localizable: bool,
+    target: Option<u32>,
+}
+
 /// A nib being built: object names, and the strings and numbers it shares.
 /// Xcode's nibs hold one object per distinct string or number, encoded
 /// where it is first used.
@@ -278,6 +289,8 @@ struct Nib {
     xib: bool,
     /// A pre-iOS 8 xib's nib for one idiom (`Idiom`), else `None`.
     idiom: Option<Idiom>,
+    /// The deployment target's major version (`Settings`).
+    target: Option<u32>,
 }
 
 /// One of the nibs Xcode compiles a xib deploying before iOS 8 into: for
@@ -424,8 +437,20 @@ fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
 }
 
 impl Nib {
-    fn new(platform: Platform, color_matched: bool, localizable: bool) -> Nib {
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None }
+    fn new(settings: Settings) -> Nib {
+        let Settings { platform, color_matched, localizable, target } = settings;
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None, target }
+    }
+
+    /// The settings it was made with, for another nib of the document.
+    fn settings(&self) -> Settings {
+        Settings { platform: self.platform, color_matched: self.color_matched, localizable: self.localizable, target: self.target }
+    }
+
+    /// Whether the document deploys before iOS `major` (`None`: unknown,
+    /// without a target).
+    fn before(&self, major: u32) -> Option<bool> {
+        self.target.map(|t| t < major)
     }
 
     /// A colour's component as this nib keeps it.
@@ -4190,11 +4215,18 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             only_children(n, &["rect", "date", "constraints"])?;
             // A xib archives the document's date as `UIDate`, after the
             // mode, and so does a storyboard naming its deployment target (a
-            // `<deployment>` with a version, iOS 8 on), where Xcode archives
-            // the time it compiles instead: there this ibtool archives the
-            // document's date, Xcode's own output differing from run to run
-            // (fifteen probes). A countdown timer has none (two probes).
-            let dated = nib.xib || n.document().descendants().any(|d| d.has_tag_name("deployment") && d.attribute("version").is_some());
+            // `<deployment>` with a version, iOS 8 on) or deploying before
+            // iOS 14 (a corpus storyboard at iOS 12 to 15), where Xcode
+            // archives the time it compiles instead: there this ibtool
+            // archives the document's date, Xcode's own output differing
+            // from run to run (fifteen probes). A countdown timer has none
+            // (two probes).
+            let versioned = n.document().descendants().any(|d| d.has_tag_name("deployment") && d.attribute("version").is_some());
+            let dated = match nib.before(14) {
+                _ if nib.xib || versioned => true,
+                Some(before_14) => before_14,
+                None => return fail("a storyboard's date picker needs --minimum-deployment-target for this ibtool"),
+            };
             let date = match child(n, "date", "date").filter(|_| dated) {
                 Some(d) => {
                     only_attributes(d, &[("key", Some("date")), ("timeIntervalSinceReferenceDate", None)])?;
@@ -5279,11 +5311,30 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some(h) = horizontal {
                 values.push(("UIContentHorizontalAlignment", Value::Int(h)));
             }
+            // Below iOS 15 a configured button also archives its normal
+            // state, as an unconfigured one does, titled with the
+            // configuration's title whatever the state's (a probe at iOS 13
+            // to 15, four corpus documents at iOS 12), and image insets
+            // (below). Other states, or no title, aren't established.
+            let legacy_title = match nib.before(15) {
+                _ if configuration.is_none() => None,
+                Some(false) => None,
+                Some(true) => {
+                    let only_normal_title = matches!(states.as_slice(), [(0, _, st)] if st.attributes().all(|a| matches!(a.name(), "key" | "title")) && !st.has_children());
+                    let title = configuration.and_then(|c| c.attribute("title"));
+                    if !only_normal_title || title.is_none() || child(n, "inset", "imageEdgeInsets").is_some() || child(n, "inset", "titleEdgeInsets").is_some() {
+                        return fail("a configured button below iOS 15 other than with a title and a normal state's title is not supported by this ibtool");
+                    }
+                    title
+                }
+                None => return fail("a configured button needs --minimum-deployment-target for this ibtool"),
+            };
+            let legacy = legacy_title.is_some();
             let mut stateful = Vec::new();
-            for (value, key, st) in states.iter().filter(|_| configuration.is_none()) {
+            for (value, key, st) in states.iter().filter(|_| configuration.is_none() || legacy) {
                 stateful.push(nib.int_number(*value));
                 let mut content = Vec::new();
-                if let Some(title) = st.attribute("title") {
+                if let Some(title) = legacy_title.or(st.attribute("title")) {
                     // A localizable build's key is the state's, as normal's
                     // (`<id>.highlightedTitle`: one probe of each state).
                     content.push(("UITitle", nib.text(id, &format!("{key}Title"), title)));
@@ -5321,7 +5372,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 stateful.push(Value::New(Object::new("UIButtonContent", content)));
             }
             // No states at all, no stateful content (two probes).
-            if configuration.is_none() && !stateful.is_empty() {
+            if (configuration.is_none() || legacy) && !stateful.is_empty() {
                 values.push(("UIButtonStatefulContent", nib.array("NSMutableDictionary", stateful)));
             }
             // NSLineBreakMode unless the default middle truncation (two
@@ -5390,6 +5441,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some(c) => button_configuration(nib, c, id)?,
                 None => Value::Nil,
             };
+            // Its image insets top, left and bottom 0 and right the smallest
+            // normal double (`DBL_MIN`).
+            if legacy {
+                values.push(("UIImageEdgeInsets", doubles(&[0.0, 0.0, 0.0, f64::MIN_POSITIVE])));
+            }
             values.push(("UIButtonConfiguration", configuration));
             if n.attribute("customClass").is_some() {
                 let class = runtime_class_name(n, scene.module, "UIButton")?;
@@ -6752,7 +6808,7 @@ fn navigation_root<'a>(nav: Node<'a, '_>) -> Result<Option<&'a str>, String> {
 /// nib: the controller holding its bar alone, without items (a corpus
 /// storyboard's five, and probes). One with a title, a tab bar item or
 /// other settings isn't established.
-fn rootless_navigation_controller_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, nav: Node, swapped: bool) -> Result<(String, Vec<u8>), String> {
+fn rootless_navigation_controller_nib(settings: Settings, module: Option<&str>, nav: Node, swapped: bool) -> Result<(String, Vec<u8>), String> {
     check_navigation_controller(nav)?;
     const OTHER: [&str; 5] = ["title", "modalPresentationStyle", "automaticallyAdjustsScrollViewInsets", "extendedLayoutIncludesOpaqueBars", "definesPresentationContext"];
     if OTHER.iter().any(|a| nav.attribute(*a).is_some()) || child(nav, "tabBarItem", "tabBarItem").is_some() {
@@ -6760,7 +6816,7 @@ fn rootless_navigation_controller_nib(platform: Platform, color_matched: bool, l
     }
     let nav_id = attr(nav, "id")?;
     let name = nav.attribute("storyboardIdentifier").map_or_else(|| format!("UINavigationController-{nav_id}"), str::to_string);
-    let mut nib = Nib::new(platform, color_matched, localizable);
+    let mut nib = Nib::new(settings);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
@@ -7445,9 +7501,7 @@ fn navigation_title(nib: &mut Nib, nav: Node) -> Result<Option<Value>, String> {
 /// swapped in for UINavigationController, its root view controller (as in
 /// its own nib, with its navigation item, real or implied) and its bar.
 fn navigation_controller_nib(
-    platform: Platform,
-    color_matched: bool,
-    localizable: bool,
+    settings: Settings,
     module: Option<&str>,
     nav: Node,
     root: &RootController,
@@ -7461,7 +7515,7 @@ fn navigation_controller_nib(
     let has_tab_item = child(nav, "tabBarItem", "tabBarItem").is_some();
     let nav_id = attr(nav, "id")?;
     let name = nav.attribute("storyboardIdentifier").map_or_else(|| format!("UINavigationController-{nav_id}"), str::to_string);
-    let mut nib = Nib::new(platform, color_matched, localizable);
+    let mut nib = Nib::new(settings);
     // The root's scene's storyboard placeholder comes first.
     let root_storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "root storyboard");
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
@@ -7574,6 +7628,10 @@ pub struct XibLayout {
     pub in_controller: bool,
     /// A xib deploying before iOS 8: the idiom whose nib this is.
     pub idiom: Option<Idiom>,
+    /// The ids of its top-level objects with a freeform simulated size
+    /// (which the rewrite leaves out), keeping their frames on the generic
+    /// canvas.
+    pub freeform: Vec<String>,
 }
 
 /// A xib rewritten as a one-scene storyboard (xib.rs), the table view
@@ -7584,26 +7642,30 @@ pub fn compile_xib(xml: &str, minimum_deployment_target: Option<&str>, module: O
 
 /// A main window xib (xib.rs): its window, custom objects and container
 /// controller.
-pub fn compile_xib_window(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
-    window::compile(xml, module, localizable)
+pub fn compile_xib_window(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+    window::compile(xml, target_major(minimum_deployment_target)?, module, localizable)
 }
 
 /// A xib's top-level table view cell (xib.rs), its canvas location and
 /// safe-area guide taken out (`safe_area`: whether it had one): its nib is
 /// the one Xcode compiles for a prototype cell, the guide listed.
 /// A xib's collection view cell, as a collection view's prototype cell's nib.
-pub fn compile_xib_collection_cell(xml: &str, module: Option<&str>, localizable: bool, safe_area: Option<&str>) -> Result<Vec<u8>, String> {
+pub fn compile_xib_collection_cell(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, safe_area: Option<&str>) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let cell = children(root, "objects").flat_map(|o| children(o, "collectionViewCell")).next().ok_or("a xib without a cell")?;
-    collection::cell_nib(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable, module, cell, false, Some(safe_area))
+    let target = target_major(minimum_deployment_target)?;
+    let settings = Settings { platform: Platform::Ios, color_matched: root.attribute("colorMatched") == Some("YES"), localizable, target };
+    let xib = collection::XibCell { safe_area, before_17: target.map(|t| t < 17) };
+    collection::cell_nib(settings, module, cell, false, Some(xib))
 }
 
-pub fn compile_xib_cell(xml: &str, module: Option<&str>, localizable: bool, safe_area: bool) -> Result<Vec<u8>, String> {
+pub fn compile_xib_cell(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, safe_area: bool) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let cell = children(root, "objects").flat_map(|o| children(o, "tableViewCell")).next().ok_or("a xib without a cell")?;
-    table::cell_nib(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable, module, cell, false, Some(safe_area))
+    let settings = Settings { platform: Platform::Ios, color_matched: root.attribute("colorMatched") == Some("YES"), localizable, target: target_major(minimum_deployment_target)? };
+    table::cell_nib(settings, module, cell, false, Some(safe_area))
 }
 
 /// Refuses a document deploying before iOS 8 (`<deployment version>`
@@ -7618,6 +7680,29 @@ pub fn refuse_before_ios8(root: Node) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// A deployment target's major version (`None` without one).
+fn target_major(minimum_deployment_target: Option<&str>) -> Result<Option<u32>, String> {
+    minimum_deployment_target
+        .map(|target| target.split('.').next().and_then(|m| m.parse::<u32>().ok()).ok_or_else(|| format!("not a deployment target: {target}")))
+        .transpose()
+}
+
+/// Whether a xib's top-level object is laid out on the canvas below iOS 17
+/// (unless it has a freeform size), by its element: a plain or scroll view
+/// is, whatever its frame's size; controls, bars, cells and other views
+/// keep their frames (30 element types probed at iOS 16, the view's and
+/// those beside it alike; corpus xibs at iOS 12 and 16, a web view's
+/// among them).
+fn xib_on_canvas(view: Node) -> Result<bool, String> {
+    match view.tag_name().name() {
+        "view" | "scrollView" | "tableView" | "collectionView" | "textView" => Ok(true),
+        "activityIndicatorView" | "button" | "collectionReusableView" | "collectionViewCell" | "imageView" | "label" | "mapView" | "navigationBar"
+        | "pickerView" | "searchBar" | "segmentedControl" | "slider" | "stackView" | "tabBar" | "tableViewCell" | "textField" | "toolbar"
+        | "visualEffectView" | "webView" | "wkWebView" => Ok(false),
+        other => fail(format!("a device-less xib's top-level {other} below iOS 17 is not supported by this ibtool")),
+    }
 }
 
 fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, layout: Option<&XibLayout>) -> Result<Compiled, String> {
@@ -7654,16 +7739,20 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     if root.attribute("variant").is_some_and(|v| v != "6xAndEarlier" || !xcode4) {
         return fail("a document variant other than iOS 6 and earlier's in an Xcode 4 document is not supported by this ibtool");
     }
+    let target = target_major(minimum_deployment_target)?;
+    let before_17 = target.map(|t| t < 17);
+    // A device Xcode doesn't know is the generic canvas below iOS 17 (a
+    // corpus storyboard at iOS 16); from 17 its views take their frames.
     let generic_canvas = if has_device {
-        false
+        device_size.is_none() && before_17.ok_or("a document on a device this ibtool doesn't know needs --minimum-deployment-target for this ibtool")?
     } else {
-        let target = minimum_deployment_target.ok_or("a storyboard without a device needs --minimum-deployment-target for this ibtool")?;
-        let major: u32 = target.split('.').next().and_then(|m| m.parse().ok()).ok_or_else(|| format!("not a deployment target: {target}"))?;
+        let before_17 = before_17.ok_or("a storyboard without a device needs --minimum-deployment-target for this ibtool")?;
         // An Xcode 4 document's views are on it whatever the target (three
         // corpus storyboards).
-        major < 17 || xcode4
+        before_17 || xcode4
     };
     let color_matched = root.attribute("colorMatched") == Some("YES");
+    let settings = Settings { platform, color_matched, localizable, target };
     let initial = root.attribute("initialViewController");
     let scenes = children(root, "scenes").next().ok_or("storyboard has no scenes")?;
     let scene_nodes: Vec<Node> = children(scenes, "scene").collect();
@@ -7829,7 +7918,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if spacing.fract() != 0.0 || spacing < 0.0 {
                 return fail("a page view controller's fractional page spacing is not supported by this ibtool");
             }
-            let mut nib = Nib::new(platform, color_matched, localizable);
+            let mut nib = Nib::new(settings);
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
             let responder = proxy(&mut nib, "IBFirstResponder", "responder");
             let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
@@ -7912,7 +8001,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if !reached.contains(id) {
                 continue;
             }
-            let mut nib = Nib::new(platform, color_matched, localizable);
+            let mut nib = Nib::new(settings);
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
             let responder = proxy(&mut nib, "IBFirstResponder", "responder");
             let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
@@ -7966,7 +8055,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 continue;
             }
             let name = segue::nib_name(placeholder)?;
-            let mut nib = Nib::new(platform, color_matched, localizable);
+            let mut nib = Nib::new(settings);
             let owner = proxy(&mut nib, "IBFilesOwner", "owner");
             let responder = proxy(&mut nib, "IBFirstResponder", "responder");
             let storyboard = proxy(&mut nib, "UIStoryboardPlaceholder", "storyboard");
@@ -8280,25 +8369,47 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             }
         }
 
-        let mut nib = Nib::new(platform, color_matched, localizable);
+        let mut nib = Nib::new(settings);
         nib.xib = xib;
         nib.idiom = idiom;
         // A controller's freeform size (`<size key="freeformSize">`, the
         // simulated metrics' own size) replaces the device's or the generic
         // canvas's, but not the frame a device-less view from iOS 17 keeps,
-        // nor a device Xcode doesn't know's (three probes).
+        // nor a device Xcode doesn't know's from iOS 17 (three probes; below,
+        // on the generic canvas, it does: a corpus storyboard).
         let freeform = match child(vc, "size", "freeformSize") {
-            Some(_) if has_device && device_size.is_none() => None,
+            Some(_) if has_device && device_size.is_none() && !generic_canvas => None,
             Some(s) => Some((number(attr(s, "width")?)?, number(attr(s, "height")?)?)),
             None => None,
         };
         // The generic canvas is size classes' 600x600; without them, the
         // default device's 393x852.
         let traits = root.attribute("useTraitCollections") == Some("YES");
+        // A xib's top-level object keeps its frame from iOS 17; below, one
+        // laid out on the canvas (`xib_on_canvas`) without a freeform size
+        // keeps its origin at the device's size, or without a device the
+        // generic canvas's (eleven probes at iOS 16 and 18, offset or not,
+        // in either orientation).
+        let xib_frame = |n: Node| -> Result<Frame, String> {
+            let f = frame(n)?;
+            let freeform = layout.is_some_and(|l| l.freeform.iter().any(|id| Some(id.as_str()) == n.attribute("id")));
+            if !xib || freeform || before_17 == Some(false) || !xib_on_canvas(n)? {
+                return Ok(f);
+            }
+            let (w, h) = match device_size {
+                _ if before_17.is_none() => return fail("a xib's view without a freeform size needs --minimum-deployment-target for this ibtool"),
+                Some(size) => size,
+                None if has_device => return fail("a xib's view on a device this ibtool doesn't know, below iOS 17, is not supported by this ibtool"),
+                None if traits => (600.0, 600.0),
+                None if root.attribute("targetRuntime") == Some("iOS.CocoaTouch.iPad") => return fail("an iPad xib's view without trait collections below iOS 17 is not supported by this ibtool"),
+                None => (393.0, 852.0),
+            };
+            Ok(Frame { x: f.x, y: f.y, w, h })
+        };
         let f = match (generic_canvas, has_device, device_size, freeform) {
-            // A xib's view keeps its frame, whatever the device (nine of
-            // the corpus's).
-            _ if xib && frame_node(view).is_some() => frame(view)?,
+            // A xib's view keeps its frame, whatever the device, from iOS
+            // 17 (nine of the corpus's); below, see `xib_frame`.
+            _ if xib && frame_node(view).is_some() => xib_frame(view)?,
             (true, _, _, None) | (false, true, Some(_), None) if embedded.contains_key(vc_id) => {
                 let (w, h) = embedded[vc_id];
                 Frame { x: 0.0, y: 0.0, w, h }
@@ -8315,8 +8426,18 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             (true, _, _, Some(_)) => return fail("a freeform size without trait collections is not supported by this ibtool"),
             // On a device, the view keeps its frame's origin (three probes).
             (false, true, Some(_), Some((w, h))) | (false, true, Some((w, h)), None) => {
-                let origin = frame_node(view).map(|_| frame(view)).transpose()?;
-                Frame { x: origin.as_ref().map_or(0.0, |o| o.x), y: origin.as_ref().map_or(0.0, |o| o.y), w, h }
+                let origin = frame_node(view).map(|_| frame(view)).transpose()?.map_or((0.0, 0.0), |o| (o.x, o.y));
+                // Below iOS 17, at the origin whatever its frame's says (four
+                // probe storyboards at iOS 12 to 16.4, a view at y 20 or 64,
+                // below a bar or not).
+                let origin = match before_17 {
+                    _ if origin == (0.0, 0.0) => origin,
+                    Some(false) => origin,
+                    Some(true) if platform == Platform::Ios => (0.0, 0.0),
+                    Some(true) => return fail("a root view off the origin on a device below version 17 on this platform is not supported by this ibtool"),
+                    None => return fail("a root view off the origin on a device needs --minimum-deployment-target for this ibtool"),
+                };
+                Frame { x: origin.0, y: origin.1, w, h }
             }
             (false, true, None, Some(_)) => return fail("a freeform size with this device is not supported by this ibtool"),
             // Without a frame (and no device), the missing frame, as a
@@ -8354,7 +8475,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             gesture + 1
         };
         let (view_root, upstream_used) = if is_table {
-            let (root, upstream_used, segues, listing, mut table_varied) = table::table_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets, child(vc, "refreshControl", "refreshControl"))?;
+            let (root, upstream_used, segues, listing, mut table_varied) = table::table_view_nib(settings, module, vc_id, view, &f, &vc_outlets, child(vc, "refreshControl", "refreshControl"))?;
             varied.append(&mut table_varied);
             scene.segues = segues;
             scene.segue_listing = listing;
@@ -8370,7 +8491,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if gestures.len() != recognizers.len() || attached.len() != recognizers.len() {
                 return fail("a collection view controller's gesture recognizers other than its collection view's are not supported by this ibtool");
             }
-            let (root, upstream_used, segues) = collection::collection_view_nib(platform, color_matched, localizable, module, vc_id, view, &f, &vc_outlets, &gestures)?;
+            let (root, upstream_used, segues) = collection::collection_view_nib(settings, module, vc_id, view, &f, &vc_outlets, &gestures)?;
             scene.segues = segues;
             if !gestures.is_empty() {
                 scene.gesture_views.push((view_name(attr(view, "id")?), gestures));
@@ -8379,12 +8500,18 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         } else {
             nib.variations = Some(Vec::new());
             // Laid out at another size than its frame's, the root view resizes
-            // its autoresizing subviews: only those whose masks keep their
-            // frames (fixed left and top margins, size) are established.
+            // its subviews by their masks, translating them into constraints
+            // or not, constrained or not (six probes at iOS 16 and 18, two
+            // corpus storyboards without size classes), but for constrained
+            // ones on size classes' generic canvas, which keep their frames
+            // (a probe and a corpus storyboard): only those whose masks keep
+            // their frames (fixed left and top margins, size) are
+            // established.
             let document = if frame_node(view).is_none() && !has_device { missing_frame(view)? } else { frame(view)? };
             if (f.w, f.h) != (document.w, document.h) {
+                let constrained = constrained_views(view);
                 for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
-                    if s.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+                    if generic_canvas && traits && s.attribute("id").is_some_and(|id| constrained.contains(&id)) {
                         continue;
                     }
                     let mask = match children(s, "autoresizingMask").next() {
@@ -9013,7 +9140,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     // constraints those its subviews are on.
                     scene.constrained.extend(constrained_views(*r));
                     let saved = scene.parent.take();
-                    let value = subview(&mut nib, &mut scene, *r)?;
+                    let value = match frame_node(*r) {
+                        Some(_) => placed_subview(&mut nib, &mut scene, *r, xib_frame(*r)?)?,
+                        None => subview(&mut nib, &mut scene, *r)?,
+                    };
                     scene.parent = saved;
                     let name = view_name(attr(*r, "id")?);
                     let held = |scene: &Scene, v: &String| scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())).collect::<Vec<_>>();
@@ -9299,7 +9429,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         let swapped = is_initial || identified || vc.attribute("customClass").is_some();
         let view_segues = listed_segues(&scene, vc);
 
-        let mut vnib = Nib::new(platform, color_matched, localizable);
+        let mut vnib = Nib::new(settings);
         let owner = proxy(&mut vnib, "IBFilesOwner", "owner");
         let responder = proxy(&mut vnib, "IBFirstResponder", "responder");
         let storyboard = proxy(&mut vnib, "UIStoryboardPlaceholder", "storyboard");
@@ -9882,13 +10012,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // A tab bar controller as its root, held in its nib.
         if let Some((parent_index, kind, node, _, _)) = parents.iter().find(|p| p.2.attribute("id") == Some(root_id)) {
             let held = held_kids(parent_index)?;
-            let (name, bytes) = parent::parent_controller_nib(platform, color_matched, localizable, module, *kind, *node, held, swapped, &nib_names, Some(nav))?;
+            let (name, bytes) = parent::parent_controller_nib(settings, module, *kind, *node, held, swapped, &nib_names, Some(nav))?;
             let entry = (name.clone(), initial == Some(attr(nav, "id")?), nav.attribute("storyboardIdentifier").is_some());
             outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
             continue;
         }
         let root = roots.get(root_id).ok_or("a navigation controller's root view controller is not in a supported scene")?;
-        let (name, bytes) = navigation_controller_nib(platform, color_matched, localizable, module, nav, root, swapped, &nib_names)?;
+        let (name, bytes) = navigation_controller_nib(settings, module, nav, root, swapped, &nib_names)?;
         let entry = (name.clone(), initial == Some(attr(nav, "id")?), nav.attribute("storyboardIdentifier").is_some());
         outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }
@@ -9901,7 +10031,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             continue;
         }
         let swapped = initial == Some(id) || nav.attribute("storyboardIdentifier").is_some();
-        let (name, bytes) = rootless_navigation_controller_nib(platform, color_matched, localizable, module, nav, swapped)?;
+        let (name, bytes) = rootless_navigation_controller_nib(settings, module, nav, swapped)?;
         let entry = (name.clone(), initial == Some(id), nav.attribute("storyboardIdentifier").is_some());
         outputs.push((index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }
@@ -9920,7 +10050,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         }
         let held = held_kids(index)?;
         let swapped = initial == Some(id) || node.attribute("storyboardIdentifier").is_some();
-        let (name, bytes) = parent::parent_controller_nib(platform, color_matched, localizable, module, *kind, *node, held, swapped, &nib_names, None)?;
+        let (name, bytes) = parent::parent_controller_nib(settings, module, *kind, *node, held, swapped, &nib_names, None)?;
         let entry = (name.clone(), initial == Some(id), node.attribute("storyboardIdentifier").is_some());
         outputs.push((*index, vec![(format!("{name}.nib"), bytes)], Some(entry)));
     }

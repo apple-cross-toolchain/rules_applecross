@@ -9,17 +9,29 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def cases():
-    """(case, its xib) of each case."""
+    """(case, its xib or storyboard) of each case."""
     for name in sorted(os.listdir(os.path.join(HERE, "cases"))):
-        if name.endswith(".xib"):
-            yield name[:-len(".xib")], os.path.join(HERE, "cases", name)
+        for ext in (".xib", ".storyboard"):
+            if name.endswith(ext):
+                yield name[:-len(ext)], os.path.join(HERE, "cases", name)
+
+
+def target(case):
+    """The deployment target: iOS 18, or the one a case's name ends with
+    (`-ios16`)."""
+    base, _, version = case.rpartition("-ios")
+    return version + ".0" if base and version.isdigit() else "18.0"
 
 
 def compile_xib(tool, xib, out, env=None):
     """Runs `tool` (a command list) on `xib` as rules_apple's compile_xib
-    does, for an iPhone and iPad app of iOS 18; returns (status, output)."""
-    args = tool + ["--compile", out, "--minimum-deployment-target", "18.0", "--target-device", "iphone",
-                   "--target-device", "ipad", "--module", "App", "--output-format", "human-readable-text", xib]
+    does (on a storyboard, as its compile_storyboard does, into `out`'s
+    directory), for an iPhone and iPad app of the case's target; returns
+    (status, output)."""
+    case = os.path.splitext(os.path.basename(xib))[0]
+    output = ["--compilation-directory", os.path.dirname(out)] if xib.endswith(".storyboard") else ["--compile", out]
+    args = tool + output + ["--minimum-deployment-target", target(case), "--target-device", "iphone",
+                            "--target-device", "ipad", "--module", "App", "--output-format", "human-readable-text", xib]
     r = subprocess.run(args, capture_output=True, text=True, env=env)
     return r.returncode, r.stdout + r.stderr
 
@@ -32,7 +44,8 @@ def sha256(path):
 def digest(path):
     """The nib's SHA-256; for a xib deploying before iOS 8, compiled into a
     nib directory for each idiom beside it (`X~iphone.nib/runtime.nib`,
-    ...), a line for each of their files, its path and SHA-256, sorted.
+    ...), or a storyboard (`X.storyboardc/...`), a line for each of their
+    files, its path and SHA-256, sorted.
     None where there's neither."""
     if os.path.isfile(path):
         return sha256(path)

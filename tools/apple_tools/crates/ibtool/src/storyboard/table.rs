@@ -301,7 +301,7 @@ fn table_values(
     if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
-            let (bytes, mut varied) = cell_nib_varied(nib.platform, nib.color_matched, nib.localizable, scene.module, *c, placeholder.is_some(), None)?;
+            let (bytes, mut varied) = cell_nib_varied(nib.settings(), scene.module, *c, placeholder.is_some(), None)?;
             nib.varied.append(&mut varied);
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
@@ -391,7 +391,7 @@ fn swapped_table(nib: &mut Nib, n: Node, module: Option<&str>, mut values: Vec<(
 #[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn table_view_nib(
-    platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, table: Node, f: &Frame,
+    settings: Settings, module: Option<&str>, vc_id: &str, table: Node, f: &Frame,
     vc_outlets: &[(String, String)], refresh: Option<Node>,
 ) -> Result<(Object, bool, Vec<String>, Option<Vec<usize>>, Vec<String>), String> {
     check_table(table)?;
@@ -501,7 +501,7 @@ pub(super) fn table_view_nib(
         }
         listing = Some(order);
     }
-    let mut nib = Nib::new(platform, color_matched, localizable);
+    let mut nib = Nib::new(settings);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let mut top = vec![owner, responder];
@@ -1134,13 +1134,13 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
 /// Xcode lays out at its foot, and the content view's subviews. A xib's
 /// cell (`xib`: whether it has a safe-area guide) lists its guide after
 /// its content view, and keeps its colours exact.
-pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
-    Ok(cell_nib_varied(platform, color_matched, localizable, module, cell, has_segue, xib)?.0)
+pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<Vec<u8>, String> {
+    Ok(cell_nib_varied(settings, module, cell, has_segue, xib)?.0)
 }
 
 /// `cell_nib`, with the ids of the views whose variations it compiled.
-fn cell_nib_varied(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<(Vec<u8>, Vec<String>), String> {
-    let mut nib = Nib::new(platform, color_matched, localizable);
+fn cell_nib_varied(settings: Settings, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<bool>) -> Result<(Vec<u8>, Vec<String>), String> {
+    let mut nib = Nib::new(settings);
     nib.xib = xib.is_some();
     // A xib's cell's default variations, as a view nib's (three corpus
     // xibs).
