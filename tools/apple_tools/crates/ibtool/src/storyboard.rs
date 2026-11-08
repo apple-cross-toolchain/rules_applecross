@@ -341,9 +341,6 @@ struct Variation {
     /// Its subviews, when a size class leaves some out: the candidates in
     /// document order, and each size class's traits and removed subviews.
     subviews: Option<(Vec<String>, Vec<(Vec<(&'static str, i64)>, Vec<String>)>)>,
-    /// The constraints the nib withholds: the default's excluded ones, or
-    /// those the device's size class leaves out (`device_withheld`).
-    withheld: Vec<String>,
 }
 
 /// The ids of the constraints `n` holds that the nib withholds: those its
@@ -2860,7 +2857,7 @@ fn record_variation(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], candi
         nib.varied.push(id.to_string());
         return Ok(());
     }
-    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names.clone(), default: true, classes: Vec::new(), subviews: None, withheld: names });
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names, default: true, classes: Vec::new(), subviews: None });
     nib.varied.push(id.to_string());
     Ok(())
 }
@@ -2955,12 +2952,12 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
     if excluded.is_empty() && classes.is_empty() && subviews.is_none() {
         return Ok(());
     }
-    let mut withheld = Vec::new();
+    // The constraints the nib withholds must be the view's own.
     for c in withheld_ids.iter().filter(|c| !placeholder(c)) {
-        withheld.push(named(c)?);
+        named(c)?;
     }
     let variations = nib.variations.as_mut().expect("checked above");
-    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: default, default: !excluded.is_empty(), classes, subviews, withheld });
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: default, default: !excluded.is_empty(), classes, subviews });
     Ok(())
 }
 
@@ -3067,6 +3064,22 @@ fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&Stri
     }
     places.extend(ranked_run(pending, &withheld));
     let ranks: HashMap<String, usize> = places.iter().enumerate().filter_map(|(i, n)| n.map(|n| (n.clone(), i + 1))).collect();
+    // A record's constraints go by these keys as decimal strings: an excluded
+    // one's rank, any other's place in the objects counted from 1 without
+    // the excluded ones (438 sets in 150 probes, views nested and not, the
+    // device in and out of their size classes).
+    let mut keys: HashMap<String, usize> = ranks.iter().filter(|(n, _)| withheld.contains(n)).map(|(n, r)| (n.clone(), *r)).collect();
+    let mut place = 0;
+    for o in objects.iter() {
+        match o {
+            Value::Ref(r) if withheld.contains(r) => {}
+            Value::Ref(r) => {
+                place += 1;
+                keys.insert(r.clone(), place);
+            }
+            _ => place += 1,
+        }
+    }
     // Excluded constraints are encoded where the objects list them.
     for o in std::mem::take(&mut nib.withheld) {
         let name = o.name.clone().expect("named");
@@ -3127,10 +3140,10 @@ fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&Stri
         }
     }
     nib.variations = Some(all.into_iter().filter(|v| !in_cells.contains(&v.view)).collect());
-    let mut lists: Vec<Value> = trait_storage_list(nib, root_name, &preorder, &ranks, &repeated, &footer.into_iter().collect::<Vec<_>>())?.into_iter().collect();
+    let mut lists: Vec<Value> = trait_storage_list(nib, root_name, &preorder, &keys, &repeated, &footer.into_iter().collect::<Vec<_>>())?.into_iter().collect();
     for (cell, order, repeated, mine) in cell_lists {
         nib.variations = Some(mine);
-        lists.extend(trait_storage_list(nib, &cell, &order, &ranks, &repeated, &order)?);
+        lists.extend(trait_storage_list(nib, &cell, &order, &keys, &repeated, &order)?);
     }
     Ok(lists)
 }
@@ -3146,13 +3159,12 @@ fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&Stri
 /// those constraints relate, but the root view, in the order they first
 /// appear; a guide is its objects-list placeholder.
 ///
-/// Every record's constraints go by `ranks` as decimal strings, a
-/// constraint the device installs by its rank less one (136 sets of two to
-/// seven constraints in 90 probes of a root view's variations, the device
-/// in or out of their size classes). Where several views have variations,
-/// a record of two or more with one the device installs is refused (60
-/// probes of a root view's and a subview's, and a corpus storyboard).
-fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, repeated: &[String], unsure: &[String]) -> Result<Option<Value>, String> {
+/// Every record's constraints go by `keys` as decimal strings
+/// (`encode_variations`): an excluded constraint's rank, a constraint the
+/// device installs by its place in the objects without the excluded ones.
+/// For the views in `unsure` (a table's footer's, a xib's cells'), a set
+/// whose keys cross ten is refused.
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMap<String, usize>, repeated: &[String], unsure: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
     if variations.is_empty() && attributes.is_empty() {
@@ -3242,24 +3254,15 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         }
     }
     let again: Vec<Variation> = first_repeated.map(|at| variations[at..].to_vec()).unwrap_or_default();
-    let several = variations.len() > 1;
     // A record's traits: the default's shared, a size class's its own.
-    let record = |nib: &mut Nib, traits: Option<&Vec<(&'static str, i64)>>, added: &[String], removed: &[String], withheld: &[String]| -> Result<Value, String> {
+    let record = |nib: &mut Nib, traits: Option<&Vec<(&'static str, i64)>>, added: &[String], removed: &[String]| -> Result<Value, String> {
         let traits = match traits {
             None => nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new())),
             Some(t) => Value::New(Object::new("UITraitCollection", t.iter().map(|(k, v)| (*k, Value::Int(*v))).collect())),
         };
         let sorted = |names: &[String]| -> Result<Vec<Value>, String> {
             let mut names: Vec<&String> = names.iter().collect();
-            // Constraints the device installs are ordered so only where one
-            // view has variations: with several, two or more in a record
-            // aren't established (a corpus storyboard, 60 probes of a root
-            // view's and a subview's).
-            if several && names.len() > 1 && names.iter().any(|c| !withheld.contains(*c)) {
-                return fail("a size class's record of several constraints the device installs, in a nib where several views have variations, is not supported by this ibtool");
-            }
-            let key = |c: &&String| ranks.get(*c).map(|r| if withheld.contains(*c) { *r } else { r.saturating_sub(1) });
-            names.sort_by_key(|c| key(c).map(|k| k.to_string()));
+            names.sort_by_key(|c| keys.get(*c).map(usize::to_string));
             Ok(names.into_iter().map(|c| reference(c.clone())).collect::<Vec<Value>>())
         };
         let (added, removed) = (sorted(added)?, sorted(removed)?);
@@ -3274,7 +3277,7 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         // variations, 40 of xib cells': crossing ten, three differed).
         if unsure.contains(&v.view) {
             let crossing = |set: &[String]| {
-                let r: Vec<usize> = set.iter().filter_map(|c| ranks.get(c).copied()).collect();
+                let r: Vec<usize> = set.iter().filter_map(|c| keys.get(c).copied()).collect();
                 r.iter().any(|&a| a < 10) && r.iter().any(|&b| b >= 10)
             };
             if crossing(&v.excluded) || v.classes.iter().any(|(_, a, r)| crossing(a) || crossing(r)) {
@@ -3296,7 +3299,7 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
             }
             let mut records = Vec::new();
             for (traits, removed) in classes {
-                records.push(record(nib, Some(traits), &[], removed, &[])?);
+                records.push(record(nib, Some(traits), &[], removed)?);
             }
             let records = nib.array("NSMutableArray", records);
             let candidates = nib.set("NSOrderedSet", all.iter().map(|s| reference(s.clone())).collect())?;
@@ -3320,10 +3323,10 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         let mut records = Vec::new();
         if v.default {
             let removed: Vec<String> = v.candidates.iter().map(|c| c.0.clone()).filter(|c| v.excluded.contains(c)).collect();
-            records.push(record(nib, None, &[], &removed, &v.withheld)?);
+            records.push(record(nib, None, &[], &removed)?);
         }
         for (traits, added, removed) in &v.classes {
-            records.push(record(nib, Some(traits), added, removed, &v.withheld)?);
+            records.push(record(nib, Some(traits), added, removed)?);
         }
         let records = nib.array("NSMutableArray", records);
         let candidates = nib.set("NSOrderedSet", v.candidates.iter().map(|c| reference(c.0.clone())).collect())?;
