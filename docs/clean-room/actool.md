@@ -922,10 +922,15 @@ blocks' order).
 With both `--target-device iphone` and `ipad`, an image may be for the
 iPhone, iPad or CarPlay idiom: its key has idiom 1, 2 or 4 (none for
 universal), and each idiom has atlases of its own, keyed by it, the link
-naming its key in attribute order. Watch, Mac and TV images are left out
-(a set of nothing else has no facet, a catalog of nothing else compiles to
-nothing). Other idioms, device idioms with other target devices, and
-atlases for both an appearance and an idiom are refused (13 probes).
+naming its key in attribute order. Watch, Mac, TV and vision images are
+left out, and so are iPad images at 3x and CarPlay ones at 1x, scales those
+devices don't have (a set of nothing else has no facet, a catalog of
+nothing else compiles to nothing): each compiled beside a universal 2x
+image gave the same output as without it, every other idiom and scale
+didn't, and seven visionOS test catalogs built for iOS were the same
+without their vision images. Other idioms, device idioms with other target
+devices, and atlases for both an appearance and an idiom are refused (13
+probes).
 
 Folders are scanned for image sets: a folder's assets are named as at the
 top, or with its name and a slash before theirs when its `Contents.json`
@@ -1243,7 +1248,13 @@ fails. The one found among every probe and random catalog here: an image
 set with an image without a scale (Any) and images with one, which Xcode
 reports for iOS, macOS and tvOS whatever their idioms and appearances, and
 for watchOS and visionOS for some sets only (by a rule not established);
-this actool refuses every such set, with Xcode's message. The comparisons
+this actool refuses every such set, with Xcode's message. For iOS and tvOS
+an iPad or TV image at 3x and a vision image at 1x don't count as images
+with a scale: of 80 random sets of two to four images (idioms, scales,
+dark or not), Xcode reported the error for exactly the 50 with an image
+without a scale and another counting, on both platforms. Other exemptions
+the data allows (a Mac or watch image at 3x, a watch one at 1x) didn't
+decide any set and aren't assumed. The comparisons
 check Xcode's diagnostics (`tools/xcode_equivalence.py`'s
 `actool_diagnostics`), and `tests/actool_catalog` keeps Xcode's error for
 the cases it reports one.

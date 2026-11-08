@@ -1,0 +1,13 @@
+{
+  "images": [
+    {
+      "filename": "i0.png",
+      "idiom": "ipad",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}
