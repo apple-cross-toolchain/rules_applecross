@@ -51,11 +51,10 @@ fn verified(keys: &[&str], sets: &[&[&str]], what: &str) -> Result<(), String> {
     fail(format!("a {what} with {} is not supported by this ibtool", keys.join(", ")))
 }
 
-const LABEL_ORDER: [&str; 9] = ["fontSize2", "color", "fontSize", "text", "property", "type", "fontScale", "numberOfLines", "alignment"];
-const LABEL_SETS: [&[&str]; 2] = [
-    &["type", "alignment", "text", "numberOfLines", "fontScale", "property"],
-    &["type", "alignment", "text", "numberOfLines", "fontScale", "property", "color", "fontSize", "fontSize2"],
-];
+/// The order Xcode inserts a label's keys in, which decides their order in
+/// the dictionary: one that reproduces all 47 key orders of 40 probes'
+/// labels (any subset of these keys) and the corpus's.
+const LABEL_ORDER: [&str; 9] = ["fontSize2", "color", "fontSize", "text", "property", "type", "fontScale", "alignment", "numberOfLines"];
 const GROUP_ORDER: [&str; 6] = ["type", "width", "alignment", "verticalAlignment", "layout", "items"];
 
 /// WatchKit's names for the text styles verified here.
@@ -103,12 +102,21 @@ fn item(n: Node, outlets: &[(String, String)]) -> Result<Value, String> {
             let mut entries = vec![("type", Value::string("label"))];
             for a in n.attributes() {
                 match a.name() {
+                    // An explicit left is left out (probes).
+                    "alignment" if a.value() == "left" => {}
                     "alignment" => entries.push(("alignment", Value::string(a.value()))),
                     "text" => entries.push(("text", Value::string(a.value()))),
+                    // One line, the default, is left out (probes).
+                    "numberOfLines" if a.value() == "1" => {}
                     "numberOfLines" => entries.push(("numberOfLines", Value::Integer(a.value().parse().map_err(|_| format!("not a number: {}", a.value()))?))),
                     "id" => {}
                     other => return fail(format!("the {other} attribute of a label is not supported by this ibtool")),
                 }
+            }
+            // A label without an alignment is recorded as 3, an integer
+            // (40 probes).
+            if n.attribute("alignment").is_none() {
+                entries.push(("alignment", Value::Integer(3)));
             }
             for c in elements(n) {
                 match (c.tag_name().name(), c.attribute("key")) {
@@ -132,8 +140,6 @@ fn item(n: Node, outlets: &[(String, String)]) -> Result<Value, String> {
             if let Some(p) = property {
                 entries.push(("property", p));
             }
-            let keys: Vec<&str> = entries.iter().map(|e| e.0).collect();
-            verified(&keys, &LABEL_SETS, "label")?;
             dict(&LABEL_ORDER, entries)
         }
         other => fail(format!("<{other}> is not supported by this ibtool")),
@@ -146,7 +152,7 @@ fn shared(v: &Value, _: &cf::binary::Position) -> bool {
     !matches!(v, Value::String(s) if s.starts_with("controller-"))
 }
 
-pub fn compile(xml: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+pub fn compile(xml: &str, module: Option<&str>) -> Result<Vec<(String, Vec<u8>)>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let initial = attr(root, "initialViewController")?;
@@ -176,8 +182,19 @@ pub fn compile(xml: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
                 }
             }
             let items = items.into_iter().map(|i| item(i, &outlets)).collect::<Result<Vec<_>, _>>()?;
-            let class = controller.attribute("customClass").ok_or("controllers without a custom class are not supported by this ibtool")?;
-            let entry = dict(&["controllerClass", "items"], vec![("controllerClass", Value::string(class)), ("items", Value::Array(items))])?;
+            if controller.attribute("customClass").is_none() {
+                return fail("controllers without a custom class are not supported by this ibtool");
+            }
+            // Its class as the runtime names it: a Swift class of a module
+            // (the target's, given by --module) mangled (a corpus
+            // storyboard). A controller without items has none listed (the
+            // same storyboard and a probe).
+            let class = crate::storyboard::runtime_class_name(controller, module, "")?;
+            let mut values = vec![("controllerClass", Value::string(class))];
+            if !items.is_empty() {
+                values.push(("items", Value::Array(items)));
+            }
+            let entry = dict(&["controllerClass", "items"], values)?;
             controllers.push((format!("controller-{id}"), entry));
         }
     }
