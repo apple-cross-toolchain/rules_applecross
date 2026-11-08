@@ -117,9 +117,15 @@ any other (one probe).
   swapper for `UICustomObject` listing nothing, the owner's outlets and a
   table's data source and delegate reaching it. A cell's controls'
   outlets and actions on the owner are sorted with the view's (outlets by
-  name, actions by mask and selector); the cell's own connections, runtime
+  name, actions by mask and selector), and so are the cell's own outlets
+  to its views. Its default variations have a trait storage list of their
+  own after the view's, one per cell in document order, the cell its
+  top-level object, its views in the document's order and its content
+  view's subviews' storages twice, as a visual effect view's content's; a
+  record whose ranks cross ten is refused. The cell's segues, runtime
   attributes and accessibility there aren't established and are refused
-  (eleven probes, four corpus xibs).
+  (eleven probes, 80 of one or two cells with outlets and variations,
+  four corpus xibs).
 - **A lone table, collection or web view.** Alone in the xib, its owner's
   `view` outlet its own, it compiles as beside a view (the table view and
   collection view controller templates, three probes): this ibtool
@@ -663,14 +669,14 @@ other values of the attributes these use, is refused. Observed:
   placeholders still has its record, empty, as does a default variation
   excluding only placeholders; a placeholder's own variations (a size
   class's constant) compile to nothing (four probes, a corpus storyboard).
-  The removed and added constraints go by those places as decimal
-  strings, withheld ones as above and installed ones by theirs less one
-  (136 sets of two to seven constraints in 90 probes of a root view's,
-  the device in or out of their size classes). Where several views have
-  variations, a record of two or more with one the device installs is
-  refused: neither order fits there (60 probes of a root view's and a
-  subview's variations, three of which compiled differently before, and
-  a corpus storyboard). When the document's
+  The removed and added constraints go by decimal strings: withheld ones
+  by those places, installed ones by their places in the objects counted
+  from 1 without the withheld ones (438 sets of two to seven constraints
+  in 150 probes, a root view's variations and a root view's and a
+  subview's, the device in or out of their size classes, and a corpus
+  storyboard). In a table's footer and a xib's cells beside its view, a
+  set whose keys cross ten is refused (three of 180 probes differed
+  there). When the document's
   device has one of the size classes, the nib archives the device's state,
   that class's included constraints installed and its excluded ones
   withheld, the records unchanged (two probes); the device having several,
@@ -678,8 +684,13 @@ other values of the attributes these use, is refused. Observed:
   corpus storyboards, a prototype cell's among them, whose nib then has
   its trait storage list as a xib's cell's does. Variations for size
   classes are refused but for those and attributes' (below), as are
-  variations anywhere but in a plain controller's view nib, a xib's cell's
-  nib or a prototype cell's. There the cell is the trait storage list's top-level object,
+  variations anywhere but in a plain controller's view nib, a table view
+  controller's table's header and footer views, a xib's cell's nib or a
+  prototype cell's. A table's are as a plain controller's, the table the
+  top-level object, but its footer's storage comes before its header's, as
+  the table lists them, and a footer's record whose constraints' ranks
+  cross ten is refused (100 probes of a header's and a footer's
+  variations, and a corpus storyboard's headers). There the cell is the trait storage list's top-level object,
   and each view's excluded constraints are encoded where the objects list
   them, in their places among its others (a corpus xib and a probe);
   several excluded from one view are refused. A visual effect view's content view counts among the views in
@@ -1798,7 +1809,11 @@ A table's header and footer views (`<view key="tableHeaderView">`,
 table's `UITableHeaderView` and `UITableFooterView`, after
 `UIInsetsContentViewsToSafeArea`. Xcode lays them out itself: the header
 view at the top, as wide as the table is laid out, whatever its frame
-says; the footer view keeps its x, width and height and is right under the
+says, an older document's frame inset (`<frame key="frameInset"
+height="125" maxX="225"/>`, with or without `minX` and `minY`) giving it
+only its height (six probes and a corpus storyboard); the footer view
+keeps its x, width and height (a frame inset with `maxX` is refused: one
+probe has it take the table's width less both insets) and is right under the
 header view (or at the top) in a plain table, or in a grouped or inset
 grouped one under the header view (35 points without one) and a section
 footer height (17 when automatic). Rows, section headers and estimates
@@ -1964,10 +1979,13 @@ A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
 `UINibAccessibilityConfigurationsKey`, several views' (the root view's
-too, first: one probe) in the objects'
-order (siblings either way round, a container and its subview with its
-configuration before or after its subviews, a nested label after a
-sibling: six probes):
+too, first: one probe) in the order Xcode visits the views for actions
+(below): a storyboard's root view's subviews in document order, then from
+the last visited each one's own (a stack); a xib's in document order, each
+view before its subviews. That is the objects' order but where
+constraints pull views up the objects list, which doesn't move them here
+(six probes of siblings and containers, nine of pulled views, 100 random
+trees as storyboards and xibs, and a corpus storyboard):
 `UIAccessibileObject` (sic), then those given of `UIAccessibilityHint`,
 `UIAccessibilityIdentifier`, `UIAccessibilityLabel`, `UIAccessibilityTraits`
 (an `NSNumber` of UIAccessibilityTraits' bits: button 1, link 2, image 4,
@@ -1975,11 +1993,7 @@ static text 64, not enabled 256, header 65536, none 0) and
 `UIIsAccessibilityElement` (0 or 1); equal numbers are one object (14
 probes). In `Base.lproj` the hint and label are `NSLocalizableString`s
 keyed `<id>.accessibilityHint` and `<id>.accessibilityLabel`, as titles
-are; the identifier stays a string (one probe). Where constraints pull
-views up the objects list and only some configured views are under one
-of them, or they are under different ones, Xcode orders the
-configurations neither by the objects nor by depth (nine probes and a
-corpus storyboard): refused. Runtime attributes, switches (their frame pair) and accessibility
+are; the identifier stays a string (one probe). Runtime attributes, switches (their frame pair) and accessibility
 settings inside table headers, and accessibility settings inside cells, are
 refused, but for a prototype cell's own accessibility configuration (three
 probes, a corpus storyboard: it is the cell nib's, for the cell) when its
