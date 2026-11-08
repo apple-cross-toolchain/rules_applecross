@@ -60,16 +60,26 @@ pub fn png_has_alpha(bytes: &[u8]) -> bool {
 /// ICC profiles Xcode's actool leaves image set pixels unchanged under, by
 /// the FNV-1a hash of the profile: sRGB IEC61966-2.1 and GIMP's built-in
 /// sRGB, as found in the corpus (two and three variants), each compiled
-/// with an opaque gradient against the same image without it.
-const IDENTITY_PROFILES: [u64; 5] = [0x15f0_d93d_5a6c_822f, 0x56d2_cbfc_a6b5_4318, 0x18f3_1643_b67c_381c, 0xb90f_aac3_c5f1_db88, 0xbe36_3e25_afda_ca4a];
+/// with an opaque gradient against the same image without it, and grey
+/// profiles with sRGB's tone curve (two variants, corpus images against
+/// themselves without them).
+const IDENTITY_PROFILES: [u64; 7] = [
+    0x15f0_d93d_5a6c_822f,
+    0x56d2_cbfc_a6b5_4318,
+    0x18f3_1643_b67c_381c,
+    0xb90f_aac3_c5f1_db88,
+    0xbe36_3e25_afda_ca4a,
+    0xeb19_7747_8678_71f2,
+    0xaec0_702e_e08b_ab34,
+];
 
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
 }
 
 /// Refuses a PNG Xcode colour-manages: an ICC profile other than the sRGB
-/// ones above, or a gamma or chromaticities other than sRGB's (as ImageIO
-/// writes them). Xcode converts those to sRGB before encoding image sets
+/// ones above, or a gamma, or chromaticities beside one, other than sRGB's
+/// (as ImageIO writes them). Xcode converts those to sRGB before encoding image sets
 /// and app icons (Display, Display P3, Generic RGB, opRGB and HD 709
 /// profiles, gamma 1.0, P3 primaries), which isn't established
 /// (docs/clean-room/actool.md).
@@ -79,7 +89,10 @@ pub fn check_color_management(bytes: &[u8]) -> Result<(), String> {
     let info = reader.info();
     let managed = info.icc_profile.as_ref().is_some_and(|p| !IDENTITY_PROFILES.contains(&fnv1a(p)))
         || info.source_gamma.is_some_and(|g| g.into_scaled() != 45455)
-        || info.source_chromaticities.is_some_and(|c| {
+        // Chromaticities without a gamma change nothing (ImageIO needs both
+        // to describe a colour space: Photoshop's rounded sRGB, P3's and
+        // odd ones, each against the same image without them).
+        || info.source_gamma.is_some() && info.source_chromaticities.is_some_and(|c| {
             let v = [c.white.0, c.white.1, c.red.0, c.red.1, c.green.0, c.green.1, c.blue.0, c.blue.1].map(|x| x.into_scaled());
             v != [31270, 32900, 64000, 33000, 30000, 60000, 15000, 6000]
         });
@@ -111,7 +124,8 @@ pub fn decode_png_extended(bytes: &[u8]) -> Result<(Rgba, Option<Vec<u16>>), Str
         check_color_management(bytes)?;
         return Ok((decode_png(bytes)?, None));
     };
-    if info.source_gamma.is_some() || info.source_chromaticities.is_some() || !matches!(info.color_type, png::ColorType::Rgb | png::ColorType::Rgba | png::ColorType::Indexed) {
+    // Chromaticities without a gamma change nothing (check_color_management).
+    if info.source_gamma.is_some() || !matches!(info.color_type, png::ColorType::Rgb | png::ColorType::Rgba | png::ColorType::Indexed) {
         return Err("this PNG's ICC profile with a gamma, chromaticities or grey pixels is not supported by this actool".into());
     }
     let conversion = crate::colour::conversion(profile)?;
