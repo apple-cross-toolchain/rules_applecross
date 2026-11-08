@@ -537,9 +537,11 @@ other values of the attributes these use, is refused. Observed:
     in a subview by its frames added up (two of the corpus's).
   - Equal widths or heights are drawn between the two views' centres: the
     farthest first, equal distances by id, multipliers changing nothing
-    (three corpus files and four probes). The same two items twice with
-    the same constant, either way round, whatever their frames, go by id
-    (four corpus files and two probes).
+    (three corpus files and four probes). The same two items twice or
+    more, either way round, whatever their frames and constants, go by id
+    (four corpus files, two probes, and 60 of a view and a subview it
+    holds two to four constraints between, on one edge, with random
+    constants and ids).
 
   - Before the length come the priority, lowest first (required ones
     last), and the relation: less than or equal, greater than or equal,
@@ -646,18 +648,28 @@ other values of the attributes these use, is refused. Observed:
   A size class's variation of a view's constraints (`<variation
   key="heightClass=compact"><mask key="constraints">` including and
   excluding them) or subviews (`<mask key="subviews">` excluding some)
-  adds records after the default's: one per size class, sorted by the
-  variation's key (`heightClass=compact` before `widthClass=regular`,
-  whatever the document's order), each its own `UITraitCollection`, its
+  adds records after the default's: one per size class, those of one
+  trait first, each group sorted by the variation's key
+  (`heightClass=compact` before `widthClass=regular`, both before
+  `heightClass=regular-widthClass=compact`), whatever the document's order
+  (30 probes of three to five classes), each its own `UITraitCollection`, its
   added objects the constraints it includes and its removed objects those
   it excludes, those on the subviews it leaves out and, for a subview left
   out, all of the subview's own (a storage of its own). A view leaving
   out subviews has a `traitStorageSubviews` storage first, its candidates
   all its subviews in document order, a record per size class removing
   them; its descendants begin with the view itself. Placeholder
-  constraints are in no record. The removed and added constraints go by
-  places as decimal strings: withheld ones as above, installed ones by
-  their own places in the objects (a probe of two). When the document's
+  constraints are in no record, but a size class whose mask names only
+  placeholders still has its record, empty, as does a default variation
+  excluding only placeholders; a placeholder's own variations (a size
+  class's constant) compile to nothing (four probes, a corpus storyboard).
+  The removed and added constraints go by those places as decimal
+  strings, withheld ones as above and installed ones by theirs less one
+  (136 sets of two to seven constraints in 90 probes of a root view's,
+  the device in or out of their size classes). Beside withheld ones, an
+  installed constraint placed more than one past its own place in the
+  objects is refused (a corpus storyboard's, whose subviews' constraints
+  come before it). When the document's
   device has one of the size classes, the nib archives the device's state,
   that class's included constraints installed and its excluded ones
   withheld, the records unchanged (two probes); the device having several,
@@ -755,10 +767,11 @@ other values of the attributes these use, is refused. Observed:
   its subviews is the subview's own, in its constraints and in its turn
   among the objects (one probe). Two aspect
   ratios on one dimension, its own and one the root view holds, go by id
-  (three probes and one of the corpus's). Two of a subview's own
-  constants on one dimension go by relation (less than or equal, greater
-  than or equal, then equal), then id (five probes); with different
-  priorities they are refused.
+  (three probes and one of the corpus's). A subview's own constants on
+  one dimension go by priority, lowest first, then relation (less than or
+  equal, greater than or equal, then equal), then id (five probes, and 120
+  of one to four constants on each dimension with random priorities,
+  relations and ids).
 - A plain `<view>` subview archives its subviews, background colour, the
   flags, its autoresizing mask (36 without one), the autoresizing key
   (left out when it doesn't autoresize its subviews: one probe) and its
