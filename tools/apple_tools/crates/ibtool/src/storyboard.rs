@@ -1796,6 +1796,20 @@ struct Frame {
 
 fn frame(n: Node) -> Result<Frame, String> {
     let r = frame_node(n).ok_or_else(|| format!("<{}> without a frame", n.tag_name().name()))?;
+    // A table's header view is at the table's origin and as wide as the
+    // table, whatever its frame or frame inset says (six probes: offsets,
+    // other widths, `maxX` insets; a corpus storyboard's). A footer's isn't.
+    if n.attribute("key") == Some("tableHeaderView") {
+        if let Some(table) = n.parent().filter(|p| p.has_tag_name("tableView")) {
+            let h = if r.has_tag_name("frame") {
+                only_attributes(r, &[("key", Some("frameInset")), ("minX", None), ("minY", None), ("maxX", None), ("height", None)])?;
+                number(attr(r, "height")?)?
+            } else {
+                number(attr(r, "height")?)?
+            };
+            return Ok(Frame { x: 0.0, y: 0.0, w: frame(table)?.w, h });
+        }
+    }
     if r.has_tag_name("frame") {
         only_attributes(r, &[("key", Some("frameInset")), ("minX", None), ("minY", None), ("width", None), ("height", None)])?;
         let (w, h) = (number(attr(r, "width")?)?, number(attr(r, "height")?)?);
