@@ -310,7 +310,8 @@ guides (in a document using safe areas, a root view that lists neither
 has the safe-area guide all the same: four probes; so does one with
 legacy guides, beside them, whether it lists the safe area or not, the
 safe-area guide following the root view in the objects as without them:
-three probes, constraints on that guide beside legacy ones refused), alone or in a navigation, tab bar or split view controller (and table and collection view
+three probes; constraints on that guide beside legacy ones are as without
+them: 15 probes on iOS, 15 on tvOS, three corpus storyboards), alone or in a navigation, tab bar or split view controller (and table and collection view
 controllers). Subviews: labels (the system font in any weight, bold or
 italic, a font Xcode finds for iOS, or the iOS and tvOS text styles; the
 default or an sRGB, grey or system text colour), text fields
@@ -328,9 +329,11 @@ other values of the attributes these use, is refused. Observed:
   classes' canvas; 393x852 without `useTraitCollections="YES"`, eight
   probes and RxSwift's ImagePicker) whatever its
   frame says when the deployment target is below iOS 17.0, and at its frame
-  from 17.0 on (`resources/Launch`, at 12.0, 16.99, 17.0 and 26.0); Xcode's
-  ibtool fails on a tvOS storyboard without one. A tvOS device without an
-  orientation is landscape (a probe and a corpus storyboard).
+  from 17.0 on (`resources/Launch`, at 12.0, 16.99, 17.0 and 26.0). A tvOS
+  storyboard without one is on the Apple TV, landscape, as if it named it
+  (two corpus storyboards); compiled for anything but a TV, Xcode's
+  ibtool fails on any tvOS storyboard, and so does this one. A tvOS device
+  without an orientation is landscape (a probe and a corpus storyboard).
 - Colour components are kept to 10 significant digits (`%.10g`). Each is
   archived as a float (`UIRed`, `UIWhite`, `UIAlpha`, ...) followed, when
   the float isn't exactly that value, by a `-Double` key with it; the text
@@ -1081,7 +1084,11 @@ other values of the attributes these use, is refused. Observed:
   it says `prefetchingEnabled="YES"` (three probes and a corpus
   storyboard; the attribute is refused). A tvOS navigation bar has no
   `UIViewLayoutMargins` or `UIViewLayoutMarginsAreDirectional` (two
-  probes and a corpus storyboard).
+  probes and a corpus storyboard). A tvOS segmented control has no
+  `UIPointerInteractionEnabled`, a tvOS rounded-rect text field no
+  `UIRoundedRectBackgroundCornerRadius`, and a tvOS control's segue
+  performs on its primary action (`perform:` with mask 8192, not 64):
+  three corpus storyboards.
 
 ## Stack views, content modes, named colours and gesture recognizers
 

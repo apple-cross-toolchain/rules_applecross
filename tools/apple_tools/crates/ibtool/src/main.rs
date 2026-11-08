@@ -42,6 +42,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let mut module: Option<String> = None;
     // The target devices, iPad or not, in the order given.
     let mut devices: Vec<bool> = Vec::new();
+    let mut tv = false;
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
@@ -53,6 +54,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             "--module" => module = Some(value(&a)?),
             "--target-device" => {
                 let device = value(&a)?;
+                tv |= device == "tv";
                 let pad = device == "ipad";
                 if !devices.contains(&pad) {
                     devices.push(pad);
@@ -129,6 +131,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
             continue;
         }
         let xml = std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
+        // Xcode compiles a tvOS storyboard for a TV only (two corpus
+        // storyboards compiled for an iPhone and an iPad fail).
+        if xml.contains("type=\"com.apple.InterfaceBuilder.AppleTV.Storyboard\"") && !devices.is_empty() && !tv {
+            skip(format!("{}: a tvOS storyboard compiled for devices other than a TV is not compiled by Xcode's ibtool", input.display()))?;
+            continue;
+        }
         let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml)
         } else {

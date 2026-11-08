@@ -3861,7 +3861,9 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             values.push(("UIClearButtonOffset", doubles(&[3.0, 1.0])));
             values.extend(trait_values);
             values.push(("UIDisableTextColorUpdateOnTraitCollectionChange", Value::Bool(!attributed)));
-            if border == Some(3) {
+            // A rounded rect's corner radius, iOS's (not tvOS's: a corpus
+            // storyboard).
+            if border == Some(3) && nib.platform == Platform::Ios {
                 values.push(("UIRoundedRectBackgroundCornerRadius", Value::Double(0.0)));
             }
             // A custom class swaps in for it, as a button's does (three
@@ -4203,8 +4205,12 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 ("UIContentVerticalAlignment", Value::Int(1)),
                 ("UIContentVerticalAlignment2", Value::Int(1)),
                 ("UIContentHorizontalAlignment", Value::Int(1)),
-                ("UIPointerInteractionEnabled", Value::Bool(true)),
             ]);
+            // Pointer interaction is iOS's: a tvOS segmented control has none
+            // (a corpus storyboard).
+            if nib.platform == Platform::Ios {
+                values.push(("UIPointerInteractionEnabled", Value::Bool(true)));
+            }
             values.push(("UISegments", nib.array("NSMutableArray", order.into_iter().map(reference).collect())));
             values.push(("UISelectedSegmentIndex", Value::Int(selected as i64)));
             Object::new("UISegmentedControl", values)
@@ -5069,7 +5075,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     if let Some(anchor) = sg.attribute("popoverAnchorView") {
                         scene.view_outlets.push(("anchorView".into(), placeholder.clone(), view_name(anchor)));
                     }
-                    scene.actions.push(("perform:".into(), name.clone(), 64, placeholder));
+                    // On touch up inside, a tvOS control's on its primary
+                    // action (a corpus storyboard).
+                    let mask = if nib.platform == Platform::Tvos { 8192 } else { 64 };
+                    scene.actions.push(("perform:".into(), name.clone(), mask, placeholder));
                 }
             }
             if let Some(c) = child(n, "color", "backgroundColor") {
@@ -7500,13 +7509,16 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     };
     // Without a <device>, Interface Builder lays an iOS scene out on its
     // generic canvas below iOS 17, and at the view's frame from iOS 17 on;
-    // Xcode's ibtool fails on a tvOS one.
+    // a tvOS one on the Apple TV, landscape, as if the document named it
+    // (two corpus storyboards; compiled for anything but a TV, Xcode fails
+    // on a tvOS storyboard: main.rs).
     let device = children(root, "device").next();
-    let has_device = device.is_some();
+    let has_device = device.is_some() || platform == Platform::Tvos;
     let device_size = match device {
         // No orientation is portrait (one probe), on tvOS landscape (a
         // probe and a corpus storyboard).
         Some(d) => device_size(platform, attr(d, "id")?, d.attribute("orientation").unwrap_or(if platform == Platform::Tvos { "landscape" } else { "portrait" }))?,
+        None if platform == Platform::Tvos => device_size(platform, "appleTV", "landscape")?,
         None => None,
     };
     // A document Xcode 5 saved for iOS 6 and earlier, as an Xcode 4 one.
@@ -7516,8 +7528,6 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     }
     let generic_canvas = if has_device {
         false
-    } else if platform == Platform::Tvos {
-        return fail("a tvOS storyboard without a device is not compiled by Xcode's ibtool");
     } else {
         let target = minimum_deployment_target.ok_or("a storyboard without a device needs --minimum-deployment-target for this ibtool")?;
         let major: u32 = target.split('.').next().and_then(|m| m.parse().ok()).ok_or_else(|| format!("not a deployment target: {target}"))?;
@@ -8034,12 +8044,6 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // (40, not 36: one probe), so one without a mask is refused.
         if !autolayout && view.descendants().any(|d| d.is_element() && d.parent().is_some_and(|p| p.has_tag_name("subviews")) && child(d, "autoresizingMask", "autoresizingMask").is_none()) {
             return fail("a subview without an autoresizing mask in a document without Auto Layout is not supported by this ibtool");
-        }
-        let safe_area_listed_id = safe_area.and_then(|g| g.attribute("id"));
-        if !scene.guides.is_empty()
-            && safe_area_listed_id.is_some_and(|id| view.descendants().any(|c| c.has_tag_name("constraint") && (c.attribute("firstItem") == Some(id) || c.attribute("secondItem") == Some(id))))
-        {
-            return fail("constraints on a safe-area guide beside legacy layout guides are not supported by this ibtool");
         }
 
         // Outlets from the view controller into its view, and its own
