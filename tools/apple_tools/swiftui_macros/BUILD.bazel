@@ -12,11 +12,34 @@ swift_compiler_plugin(
     ],
 )
 
+swift_compiler_plugin(
+    name = "AppIntentsMacros",
+    srcs = glob(["Sources/AppIntentsMacros/*.swift"]),
+    deps = [
+        "@swift-syntax//:SwiftCompilerPlugin",
+        "@swift-syntax//:SwiftSyntax",
+        "@swift-syntax//:SwiftSyntaxMacros",
+    ],
+)
+
+swift_compiler_plugin(
+    name = "PreviewsMacros",
+    srcs = glob(["Sources/PreviewsMacros/*.swift"]),
+    deps = [
+        "@swift-syntax//:SwiftCompilerPlugin",
+        "@swift-syntax//:SwiftSyntax",
+        "@swift-syntax//:SwiftSyntaxMacros",
+    ],
+)
+
 swift_test(
     name = "SwiftUIMacrosTests",
     srcs = glob(["Tests/SwiftUIMacrosTests/*.swift"]),
     deps = [
+        ":AppIntentsMacros",
+        ":PreviewsMacros",
         ":SwiftUIMacros",
+        "@swift-syntax//:SwiftSyntaxMacroExpansion",
         "@swift-syntax//:SwiftSyntaxMacrosTestSupport",
     ],
 )
