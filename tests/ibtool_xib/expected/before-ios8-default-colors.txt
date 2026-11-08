@@ -1,0 +1,4 @@
+before-ios8-default-colors~ipad.nib/objects-8.0+.nib 8ee536560eacd8babfe9ae914eb192b841e60e3ad92100a4849fd9721f3af9d9
+before-ios8-default-colors~ipad.nib/runtime.nib 8ee536560eacd8babfe9ae914eb192b841e60e3ad92100a4849fd9721f3af9d9
+before-ios8-default-colors~iphone.nib/objects-8.0+.nib 9aa0d7016cadbe10f6ac38dc874ef7df22e1fc93eeefe1d8cb46dee11ca5e902
+before-ios8-default-colors~iphone.nib/runtime.nib 9aa0d7016cadbe10f6ac38dc874ef7df22e1fc93eeefe1d8cb46dee11ca5e902

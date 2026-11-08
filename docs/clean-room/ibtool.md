@@ -710,10 +710,26 @@ other values of the attributes these use, is refused. Observed:
   normal title colour there is left out when it is that button's old
   default blue (0.196, 0.310, 0.522; two corpus storyboards, iPhone and
   iPad); other variants are refused.
-- A document deploying before iOS 8 (`<deployment version>` below 0x800)
-  is refused: Xcode compiles such a xib into a nib directory for each
-  idiom (`out~iphone.nib/runtime.nib` and `objects-8.0+.nib`), with or
-  without variations (a probe and a corpus xib).
+- A xib deploying before iOS 8 (`<deployment version>` below 0x800) is
+  compiled, for each target device, into a nib directory beside the nib
+  asked for (`out~iphone.nib`, `out~ipad.nib`; with one device only its
+  own, the same bytes; with none, nothing). Each holds `objects-8.0+.nib`,
+  the xib's nib as from iOS 8 with its size classes' variations, and
+  `runtime.nib`, the same with the variation of the idiom's size classes
+  archived (an iPhone's compact width and regular height, an iPad's both
+  regular), a label's minimum scale factor from that variation's font, and
+  no trait storage list; without variations the two are equal. The iPhone's
+  nibs are otherwise the single nib's. The iPad's archive each system
+  colour as sRGB components, not by name: `darkTextColor` black,
+  `lightTextColor` and `tableCellGroupedBackgroundColor` white (alpha 0.6
+  and 1) a float's step off in each component (0.99999994, 1.0000001,
+  1.0000001), `groupTableViewBackgroundColor` (0.94901973, 0.9490196,
+  0.9686275), and every newer colour, a label's default `labelColor`
+  among them, one blue (-5.4925334e-07, 0.45999992, 0.89), all floats
+  without doubles (probes of every system colour above and of the
+  defaults, `tests/ibtool_xib/cases/before-ios8-*`, and a corpus xib).
+  Other colours Xcode names (white, black, clear), iPad xibs, cells and
+  main window xibs deploying before iOS 8, and storyboards are refused.
 - A storyboard in a `Base.lproj` directory has its translatable strings
   archived as `NSLocalizableString`s: the string inline (`NS.bytes`),
   `NSKey` `<id>.<property>` and `NSDev` the string (shared as strings

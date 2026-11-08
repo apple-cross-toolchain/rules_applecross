@@ -16,7 +16,7 @@ fn table_background(nib: &mut Nib, n: Node, plain: bool) -> Result<Value, String
     // storyboard).
     let white = n.attribute("systemColor") == Some("systemBackgroundColor") || (nib.color_matched && opaque_grey_white(n)?);
     if plain && white {
-        return Ok(nib.system_color("tableBackgroundColor", &SystemColor::Gray([1.0, 1.0])));
+        return nib.system_color("tableBackgroundColor", &SystemColor::Gray([1.0, 1.0]));
     }
     // A grouped or inset grouped table's sRGB background of the grouped
     // background colour's own value, at 10 digits, is that system colour;
@@ -27,7 +27,7 @@ fn table_background(nib: &mut Nib, n: Node, plain: bool) -> Result<Value, String
         let c = ["red", "green", "blue", "alpha"].map(|a| n.attribute(a).map(number));
         if let [Some(Ok(r)), Some(Ok(g)), Some(Ok(b)), Some(Ok(a))] = c {
             if [r, g, b, a].map(significant_10) == GROUPED {
-                return Ok(nib.system_color("systemGroupedBackgroundColor", &SystemColor::Rgb(GROUPED)));
+                return nib.system_color("systemGroupedBackgroundColor", &SystemColor::Rgb(GROUPED));
             }
         }
     }
@@ -1026,7 +1026,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     if let Some(c) = background {
         values.push(("UIBackgroundColor", color(nib, c)?));
     } else if system_background {
-        values.push(("UIBackgroundColor", nib.system_color("tableCellPlainBackgroundColor", &SystemColor::Gray([1.0, 1.0]))));
+        values.push(("UIBackgroundColor", nib.system_color("tableCellPlainBackgroundColor", &SystemColor::Gray([1.0, 1.0]))?));
         values.push(("UIDidEncodeCompatibilityBackgroundColor", Value::Bool(true)));
     }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
@@ -1092,7 +1092,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
         values.push(("UISeparatorInset", doubles(&[top?, left?, bottom?, right?])));
     }
     if system_background {
-        values.push(("UISystemBackgroundView", system_background_view(nib, &f)));
+        values.push(("UISystemBackgroundView", system_background_view(nib, &f)?));
     } else {
         values.push(("UISystemBackgroundView", Value::Nil));
     }
@@ -1381,15 +1381,15 @@ fn cell_connections<'a>(cell: Node<'a, '_>) -> Result<(Option<&'a str>, Vec<(&'a
 /// The background view of a cell that selects other than by default: its
 /// size rounded up, holding a background configuration of the plain cell
 /// background.
-fn system_background_view(nib: &mut Nib, f: &Frame) -> Value {
+fn system_background_view(nib: &mut Nib, f: &Frame) -> Result<Value, String> {
     let mut values = Vec::new();
     geometry(&mut values, &Frame { x: 0.0, y: 0.0, w: f.w.ceil(), h: f.h.ceil() });
     values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIOpaque", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
-    let background = nib.system_color("tableCellPlainBackgroundColor", &SystemColor::Gray([1.0, 1.0]));
+    let background = nib.system_color("tableCellPlainBackgroundColor", &SystemColor::Gray([1.0, 1.0]))?;
     let insets = nib.string("{0, 0, 0, 0}");
-    let clear = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]));
+    let clear = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]))?;
     let configuration = Object::new("UIBackgroundConfiguration", vec![
         ("customView", Value::Nil),
         ("hasCustomized-customView", Value::Bool(false)),
@@ -1427,7 +1427,7 @@ fn system_background_view(nib: &mut Nib, f: &Frame) -> Value {
         ("defaultStyle_v2", Value::Int(11)),
     ]);
     values.push(("configurationAPI", Value::New(configuration)));
-    Value::New(Object::new("_UISystemBackgroundView", values))
+    Ok(Value::New(Object::new("_UISystemBackgroundView", values)))
 }
 
 /// A refresh control's attributed title: one fragment with a font and

@@ -1,0 +1,4 @@
+before-ios8-system-colors~ipad.nib/objects-8.0+.nib ea54e3f6d6268557c36e2a605f8f926dfd5715a444568e18e43c7101ff986e66
+before-ios8-system-colors~ipad.nib/runtime.nib ea54e3f6d6268557c36e2a605f8f926dfd5715a444568e18e43c7101ff986e66
+before-ios8-system-colors~iphone.nib/objects-8.0+.nib 2fcf3f7a0528f6db318a76a8799379dc8938e7e1ff6e14470c91647113583a97
+before-ios8-system-colors~iphone.nib/runtime.nib 2fcf3f7a0528f6db318a76a8799379dc8938e7e1ff6e14470c91647113583a97

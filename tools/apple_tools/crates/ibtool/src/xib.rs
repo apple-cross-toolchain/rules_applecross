@@ -25,7 +25,37 @@ fn fail<T>(msg: impl Into<String>) -> Result<T, String> {
 
 /// The nib of an iOS xib.
 pub fn compile(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
-    compile_with(xml, minimum_deployment_target, module, localizable, false)
+    compile_with(xml, minimum_deployment_target, module, localizable, false, None)
+}
+
+/// An idiom's nib directory: its suffix (`~iphone`, `~ipad`) and files.
+pub type IdiomNibs = (&'static str, Vec<(&'static str, Vec<u8>)>);
+
+/// A xib deploying before iOS 8, as Xcode compiles it (`Idiom`): a nib
+/// directory for each target device (`pad`). `None` for a xib from iOS 8
+/// on, a single nib.
+pub fn compile_idioms(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, devices: &[bool]) -> Result<Option<Vec<IdiomNibs>>, String> {
+    let doc = Document::parse(xml).map_err(|e| e.to_string())?;
+    if crate::storyboard::refuse_before_ios8(doc.root_element()).is_ok() {
+        return Ok(None);
+    }
+    if doc.root_element().attribute("type") != Some("com.apple.InterfaceBuilder3.CocoaTouch.XIB") {
+        return fail("an iPad xib deploying before iOS 8 is not supported by this ibtool");
+    }
+    // Without a target device Xcode writes nothing (a probe).
+    if devices.is_empty() {
+        return fail("a xib deploying before iOS 8 without a target device is not supported by this ibtool");
+    }
+    let mut out = Vec::new();
+    for &pad in devices {
+        let mut files = Vec::new();
+        for (name, runtime) in [("objects-8.0+.nib", false), ("runtime.nib", true)] {
+            let idiom = crate::storyboard::Idiom { pad, runtime };
+            files.push((name, compile_with(xml, minimum_deployment_target, module, localizable, false, Some(idiom))?));
+        }
+        out.push((if pad { "~ipad" } else { "~iphone" }, files));
+    }
+    Ok(Some(out))
 }
 
 /// The id of the placeholder view a lone table, collection or web view is
@@ -34,7 +64,7 @@ const PLACEHOLDER: &str = "xib-placeholder-view";
 
 /// `placeholder`: whether the xib's view is the placeholder a lone view was
 /// given, its owner's `view` outlet then the lone view's.
-fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, placeholder: bool) -> Result<Vec<u8>, String> {
+fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Option<&str>, localizable: bool, placeholder: bool, idiom: Option<crate::storyboard::Idiom>) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     // An iPad xib compiles as any other (one probe).
@@ -42,7 +72,9 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     if !matches!(kind, Some("com.apple.InterfaceBuilder3.CocoaTouch.XIB" | "com.apple.InterfaceBuilder3.CocoaTouch.iPad.XIB")) {
         return fail("only iOS xibs are supported by this ibtool");
     }
-    crate::storyboard::refuse_before_ios8(root)?;
+    if idiom.is_none() {
+        crate::storyboard::refuse_before_ios8(root)?;
+    }
     if doc.descendants().any(|d| d.attribute("id") == Some(CONTROLLER)) {
         return fail(format!("an object with id {CONTROLLER} is not supported by this ibtool"));
     }
@@ -50,6 +82,9 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     // A main window xib, its window beside the app delegate and a
     // container controller, is compiled on its own.
     if elements(objects).any(|o| o.has_tag_name("window")) {
+        if idiom.is_some() {
+            return fail("a main window xib deploying before iOS 8 is not supported by this ibtool");
+        }
         return crate::storyboard::compile_xib_window(xml, module, localizable);
     }
     let mut owner = None;
@@ -130,12 +165,15 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
             return fail("a xib's objects element");
         }
         let rewritten = format!("{}{stub}{}", &xml[..at], &xml[at..]);
-        return compile_with(&rewritten, minimum_deployment_target, module, localizable, true);
+        return compile_with(&rewritten, minimum_deployment_target, module, localizable, true, idiom);
     }
     let view = view.ok_or("a xib without a top-level view is not supported by this ibtool")?;
 
     // A cell is a prototype cell's nib, with its safe-area guide.
     if view.has_tag_name("tableViewCell") || view.has_tag_name("collectionViewCell") {
+        if idiom.is_some() {
+            return fail("a cell's xib deploying before iOS 8 is not supported by this ibtool");
+        }
         // Its outlets are the cell nib's (`table::cell_nib`).
         let outlets_only = elements(owner).all(|c| c.has_tag_name("connections") && elements(c).all(|o| o.has_tag_name("outlet")));
         if elements(owner).next().is_some() && (!outlets_only || !view.has_tag_name("tableViewCell")) {
@@ -220,7 +258,7 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         Some(r) => roots.iter().filter(|o| elements(objects).position(|e| e == **o) < Some(r)).count(),
         None => 0,
     };
-    let layout = crate::storyboard::XibLayout { responder_at, cell_guides, placeholder, in_controller };
+    let layout = crate::storyboard::XibLayout { responder_at, cell_guides, placeholder, in_controller, idiom };
     let compiled = crate::storyboard::compile_xib(&storyboard, minimum_deployment_target, module, localizable, &layout)?;
     let name = format!("{CONTROLLER}-view-{view_id}.nib");
     compiled.files.into_iter().find(|f| f.0 == name).map(|f| f.1).ok_or_else(|| "the xib's view compiled to no nib".to_string())

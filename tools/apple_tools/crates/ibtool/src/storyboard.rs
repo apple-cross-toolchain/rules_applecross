@@ -276,6 +276,40 @@ struct Nib {
     /// them, where a storyboard's are rounded to 10 significant digits (one
     /// probe of each), and its views their masks (`document_mask`).
     xib: bool,
+    /// A pre-iOS 8 xib's nib for one idiom (`Idiom`), else `None`.
+    idiom: Option<Idiom>,
+}
+
+/// One of the nibs Xcode compiles a xib deploying before iOS 8 into: for
+/// each target device a directory (`out~iphone.nib`, `out~ipad.nib`) of
+/// `objects-8.0+.nib`, the xib as from iOS 8 with its size classes'
+/// variations, and `runtime.nib`, the same with the variation of the
+/// idiom's size classes archived and no trait storage (the iPhone's
+/// compact width and regular height, the iPad's both regular). An iPad's
+/// system colours are its own (`pre_ios8_pad_color`). Probes in
+/// docs/clean-room/ibtool.md.
+#[derive(Clone, Copy)]
+pub struct Idiom {
+    pub pad: bool,
+    pub runtime: bool,
+}
+
+/// A system colour as an iPad's nib of a xib deploying before iOS 8 has
+/// it: sRGB components whatever the colour, the colours iOS 7 lacked (and
+/// a label's default text colour) all one blue; `None` for the colours not
+/// measured (white, black and clear among them). Measured for every colour
+/// of `SYSTEM_COLORS`.
+fn pre_ios8_pad_color(name: &str) -> Option<[f64; 4]> {
+    // Floats' values, archived without their doubles.
+    const NEAR_WHITE: [f64; 3] = [0.9999999403953552, 1.0000001192092896, 1.0000001192092896];
+    Some(match name {
+        "darkTextColor" => [0.0, 0.0, 0.0, 1.0],
+        "lightTextColor" => [NEAR_WHITE[0], NEAR_WHITE[1], NEAR_WHITE[2], 0.6],
+        "tableCellGroupedBackgroundColor" => [NEAR_WHITE[0], NEAR_WHITE[1], NEAR_WHITE[2], 1.0],
+        "groupTableViewBackgroundColor" => [0.949019730091095, 0.9490196108818054, 0.9686275124549866, 1.0],
+        n if SYSTEM_COLORS.iter().any(|(c, _)| *c == n) => [-5.492533432516211e-07, 0.4599999189376831, 0.8899999856948853, 1.0],
+        _ => return None,
+    })
 }
 
 /// A view's constraints, some of which its default variation excludes.
@@ -391,7 +425,7 @@ fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
 
 impl Nib {
     fn new(platform: Platform, color_matched: bool, localizable: bool) -> Nib {
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None }
     }
 
     /// A colour's component as this nib keeps it.
@@ -526,19 +560,30 @@ impl Nib {
         Ok(Value::New(Object::new(class, KEYS.iter().map(String::as_str).zip(items).collect())))
     }
 
-    fn system_color(&mut self, name: &str, color: &SystemColor) -> Value {
+    fn system_color(&mut self, name: &str, color: &SystemColor) -> Result<Value, String> {
+        if self.idiom.is_some_and(|i| i.pad) {
+            let c = pre_ios8_pad_color(name).ok_or_else(|| format!("system colour {name} on an iPad, deploying before iOS 8, is not supported by this ibtool"))?;
+            let (keys, text) = exact_color_components(&RGB_KEYS, &c);
+            return Ok(self.shared(format!("color:pre-ios8-pad:{c:?}"), || {
+                let mut values = vec![("UIColorComponentCount", Value::Int(4))];
+                values.extend(keys);
+                values.push(("NSRGB", Value::Data(text)));
+                values.push(("NSColorSpace", Value::Int(2)));
+                Object::new("UIColor", values).with_fallback("NSColor")
+            }));
+        }
         let name_value = self.string(name);
         let (count, components, text_key, space) = match color {
             SystemColor::Gray(c) => (2, color_components(&GRAY_KEYS, c), "NSWhite", 4),
             SystemColor::Rgb(c) => (4, color_components(&RGB_KEYS, c), "NSRGB", 2),
         };
-        self.shared(format!("color:{name}"), || {
+        Ok(self.shared(format!("color:{name}"), || {
             let mut keys = vec![("UISystemColorName", name_value), ("UIColorComponentCount", Value::Int(count))];
             keys.extend(components.0);
             keys.push((text_key, Value::Data(components.1)));
             keys.push(("NSColorSpace", Value::Int(space)));
             Object::new("UIColor", keys).with_fallback("NSColor")
-        })
+        }))
     }
 
     /// UIViewLargeContentStoredProperties, which tvOS's views don't have.
@@ -584,7 +629,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
             return fail(format!("system color {name}: system colors outside iOS are not supported by this ibtool"));
         }
         let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
-        return Ok(nib.system_color(name, sc));
+        return nib.system_color(name, sc);
     }
     // Xcode 11's form names the system colour (and an older fallback), the
     // older form only a UIKit class colour; neither is declared in the
@@ -595,7 +640,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
             return fail(format!("system color {name}: system colors outside iOS are not supported by this ibtool"));
         }
         let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
-        return Ok(nib.system_color(name, sc));
+        return nib.system_color(name, sc);
     }
     // A colour of the asset catalog, by name: its definition in the
     // document's resources, marked as the catalog's.
@@ -695,7 +740,7 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
             _ => None,
         };
         if let Some(name) = name {
-            return Ok(nib.system_color(name, &SystemColor::Gray(c)));
+            return nib.system_color(name, &SystemColor::Gray(c));
         }
         if let Some(v) = nib.existing(&format!("color:gray:{c:?}")) {
             return Ok(v);
@@ -1432,7 +1477,7 @@ fn content_mode(name: &str) -> Result<i64, String> {
 /// A system colour by name, as the table above has it.
 fn system_color_named(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (_, c) = SYSTEM_COLORS.iter().find(|(n, _)| *n == name).ok_or_else(|| format!("system colour {name} is not supported by this ibtool"))?;
-    Ok(nib.system_color(name, c))
+    nib.system_color(name, c)
 }
 
 /// A text field's or text view's `<textInputTraits>` as its values, in Xcode's order. The
@@ -1542,8 +1587,9 @@ fn named_font_size(name: &str) -> Result<f64, String> {
 /// A label's minimum font size and scale factor, when it adjusts its font
 /// size to fit (the default) and has either. A scale factor's size is
 /// rounded to the nearest quarter point, halves up; a size's factor is the
-/// size over the font's.
-fn minimum_font_size(n: Node) -> Result<Option<(f32, f32)>, String> {
+/// size over the font's: the archived font's (`description`), a size
+/// class's where the device has it (a pre-iOS 8 xib's runtime nib).
+fn minimum_font_size(n: Node, description: Option<Node>) -> Result<Option<(f32, f32)>, String> {
     if n.attribute("adjustsFontSizeToFit").is_some() {
         return Ok(None);
     }
@@ -1552,7 +1598,6 @@ fn minimum_font_size(n: Node) -> Result<Option<(f32, f32)>, String> {
         return Ok(None);
     }
     // A text style's size is its default Dynamic Type size.
-    let description = child(n, "fontDescription", "fontDescription");
     let font_size = match (description.and_then(|f| f.attribute("pointSize")), description.and_then(|f| f.attribute("style")), description.and_then(|f| f.attribute("size"))) {
         (Some(size), _, _) => number(size)?,
         (None, Some(style), _) => text_style_size(style)?,
@@ -2715,7 +2760,8 @@ fn size_class_traits(key: &str) -> Result<Vec<(&'static str, i64)>, String> {
 /// are archived with their defaults, whatever its device (two probes).
 fn device_size_classes(nib: &Nib, n: Node) -> Result<Option<(i64, i64)>, String> {
     if nib.xib {
-        return Ok(None);
+        // But for a pre-iOS 8 xib's runtime nib (`Idiom`).
+        return Ok(nib.idiom.filter(|i| i.runtime).map(|i| if i.pad { (2, 2) } else { (1, 2) }));
     }
     let Some(device) = n.document().root_element().children().find(|c| c.has_tag_name("device")) else { return Ok(None) };
     let id = attr(device, "id")?;
@@ -3554,7 +3600,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // the trait collection changes.
             let text_color = match text_color {
                 Some(c) => color(nib, c)?,
-                None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
+                None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0]))?,
             };
             values.push(("UITextColor", text_color));
             if let Some(c) = highlighted {
@@ -3589,7 +3635,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 "middleTruncation" => Some(5),
                 other => return fail(format!("lineBreakMode=\"{other}\" on <label> is not supported by this ibtool")),
             };
-            let minimum = minimum_font_size(n)?;
+            let minimum = minimum_font_size(n, archived_font)?;
             if n.attribute("adjustsFontSizeToFit").is_none() {
                 values.push(("UIAdjustsFontSizeToFit", Value::Bool(true)));
             }
@@ -3775,7 +3821,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if !attributed {
                 let text_color = match text_color {
                     Some(c) => color(nib, c)?,
-                    None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0])),
+                    None => nib.system_color("labelColor", &SystemColor::Gray([0.0, 1.0]))?,
                 };
                 values.push(("UITextColor", text_color));
             }
@@ -3891,7 +3937,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             cv.push(("UIClipsToBounds", Value::Bool(true)));
             // A vibrancy effect's tints it white (five probes).
             if vibrancy.is_some() {
-                cv.push(("UITintColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))));
+                cv.push(("UITintColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))?));
             }
             // Its constraints with its subviews, as a container's, listed
             // after its subviews (one probe).
@@ -4454,7 +4500,7 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                     reference(colour_name)
                 }
                 None => {
-                    values.push(("UIBackgroundColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))));
+                    values.push(("UIBackgroundColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))?));
                     Value::Nil
                 }
             };
@@ -6957,7 +7003,7 @@ fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, Strin
     let clear = match (background_color, fill) {
         // A background colour of its own replaces the style's (two probes).
         (Some(k), _) => color(nib, k)?,
-        (None, None) => nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0])),
+        (None, None) => nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]))?,
         (None, Some(c)) => {
             let (components, text) = exact_color_components(&RGB_KEYS, &c);
             let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
@@ -6967,7 +7013,7 @@ fn button_configuration(nib: &mut Nib, c: Node, id: &str) -> Result<Value, Strin
             Value::New(Object::new("UIColor", keys).with_fallback("NSColor"))
         }
     };
-    let stroke = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]));
+    let stroke = nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]))?;
     let insets = nib.string("{0, 0, 0, 0}");
     let background = Object::new("UIBackgroundConfiguration", vec![
         ("customView", Value::Nil),
@@ -7365,6 +7411,8 @@ pub struct XibLayout {
     /// Whether its view is a top-level view controller's, archived inside
     /// a `UIViewController` listed before it.
     pub in_controller: bool,
+    /// A xib deploying before iOS 8: the idiom whose nib this is.
+    pub idiom: Option<Idiom>,
 }
 
 /// A xib rewritten as a one-scene storyboard (xib.rs), the table view
@@ -7417,7 +7465,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     let responder_last = responder_at > 0;
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
-    refuse_before_ios8(root)?;
+    let idiom = layout.and_then(|l| l.idiom);
+    if idiom.is_none() {
+        refuse_before_ios8(root)?;
+    }
     let platform = match root.attribute("type") {
         Some("com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB") => Platform::Ios,
         Some("com.apple.InterfaceBuilder.AppleTV.Storyboard") => Platform::Tvos,
@@ -8075,6 +8126,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
 
         let mut nib = Nib::new(platform, color_matched, localizable);
         nib.xib = xib;
+        nib.idiom = idiom;
         // A controller's freeform size (`<size key="freeformSize">`, the
         // simulated metrics' own size) replaces the device's or the generic
         // canvas's, but not the frame a device-less view from iOS 17 keeps,
@@ -8314,7 +8366,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             } else if scenekit {
                 // A SceneKit view's is white unless the document gives one,
                 // as an ARSCNView's (a corpus storyboard).
-                values.push(("UIBackgroundColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))));
+                values.push(("UIBackgroundColor", nib.system_color("whiteColor", &SystemColor::Gray([1.0, 1.0]))?));
             }
             values.push(("UIDeepDrawRect", Value::Bool(true)));
             if view.attribute("opaque").is_none() {
@@ -9111,7 +9163,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if xib {
                 rename_references(&mut root, "upstream", "owner");
             }
-            if let Some(list) = traits {
+            // A pre-iOS 8 xib's runtime nib has its idiom's variation alone.
+            if let Some(list) = traits.filter(|_| !idiom.is_some_and(|i| i.runtime)) {
                 let lists = nib.array("NSArray", vec![list]);
                 root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
             }
