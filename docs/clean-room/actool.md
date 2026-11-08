@@ -43,7 +43,10 @@ nine digits: the kernel's value at every tap except the one nearest `c`,
 which weighs 1; normalized over the taps; each rounded to 14 bits, and then
 a tap beyond an edge added to the edge pixel's; the rounding residual of
 the 14-bit weights on that nearest tap. This reproduces both icons with no
-differing sample. Merging the taps beyond an edge before rounding instead
+differing sample. The image is premultiplied; each resampled pixel's alpha
+is then raised to its largest colour component, so that it stays
+premultiplied (a translucent icon's faint edges: five random icons, every
+pixel). Merging the taps beyond an edge before rounding instead
 differs for noisy images near the edges (up to 12 samples, rows and
 columns 1 and 118 of the 120 px icon; 25 random images through the public
 API agree with rounding first).
@@ -337,7 +340,19 @@ for both and naming the icon only for a target; building for iOS, a set's
 `mac` images are ignored (mypod's), and a set of only those compiles to
 nothing (no Assets.car, an empty partial Info.plist; Flutter's macOS
 template). With no image for any target device, Xcode compiles another
-device's (an iPad set for iPhone alone); that is refused. A grey icon (every
+device's (an iPad set for iPhone alone); that is refused.
+
+An iOS icon of all sizes (Xcode's "All Sizes": entries of idiom
+`universal` and platform `ios`, any sizes, the 1024 pt one without a
+scale) is compiled as an iPhone set and an iPad set of the same entries:
+each size for both idioms, the 1024 pt image at 1x among them, and the
+iPhone XR's 90 pt @2x from 60pt@3x as above. Its bundle icons aren't
+copied: with a 1024 pt image both are resampled from it as a single-size
+icon's (Resampling), whatever its other sizes and target devices, each
+device's entry listing them as a single-size icon's; without one there
+are none. 25 random sets of 3 to 16 sizes, opaque and translucent, with
+and without a 1024 pt image, for both devices and (six) each alone, and a
+corpus set (`tests/actool_catalog/cases/universal-icon`). A grey icon (every
 pixel R = G = B, whatever the PNG's colour type) is stored as GA8, as
 image sets' are: GA8 atlases named `S.O.1` (rows 32-byte aligned; an
 opaque one's padding is alpha 255, but not the bytes aligning its rows)
