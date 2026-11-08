@@ -1,0 +1,398 @@
+[
+  {
+    "typeName": "MyApp.ContentTypeOption",
+    "mangledTypeName": "5MyApp17ContentTypeOptionO",
+    "kind": "enum",
+    "file": "with.swift",
+    "line": 3,
+    "conformances": [
+      "Swift.Equatable",
+      "Swift.Hashable",
+      "Swift.RawRepresentable",
+      "AppIntents.AppEnum",
+      "AppIntents.AppValue",
+      "AppIntents.StaticDisplayRepresentable",
+      "AppIntents.PersistentlyIdentifiable",
+      "AppIntents.TypeDisplayRepresentable",
+      "AppIntents._IntentValue",
+      "Swift.Sendable",
+      "AppIntents.CaseDisplayRepresentable",
+      "Swift.SendableMetatype",
+      "Foundation.CustomLocalizedStringResourceConvertible",
+      "Swift.CaseIterable",
+      "Swift.BitwiseCopyable"
+    ],
+    "allConformances": [
+      {
+        "protocolName": "Swift.Equatable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "Swift.Hashable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "Swift.RawRepresentable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "AppIntents.AppEnum",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "AppIntents.AppValue",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "AppIntents.StaticDisplayRepresentable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "AppIntents.PersistentlyIdentifiable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "AppIntents.TypeDisplayRepresentable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "AppIntents._IntentValue",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "Swift.Sendable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "AppIntents.CaseDisplayRepresentable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "Swift.SendableMetatype",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "Foundation.CustomLocalizedStringResourceConvertible",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "Swift.CaseIterable",
+        "conformanceDefiningModule": "MyApp"
+      },
+      {
+        "protocolName": "Swift.BitwiseCopyable",
+        "conformanceDefiningModule": "MyApp"
+      }
+    ],
+    "associatedTypeAliases": [
+      {
+        "typeAliasName": "RawValue",
+        "substitutedTypeName": "Swift.String",
+        "substitutedMangledTypeName": "SS"
+      },
+      {
+        "typeAliasName": "ValueType",
+        "substitutedTypeName": "MyApp.ContentTypeOption",
+        "substitutedMangledTypeName": "5MyApp17ContentTypeOptionO"
+      },
+      {
+        "typeAliasName": "UnwrappedType",
+        "substitutedTypeName": "MyApp.ContentTypeOption",
+        "substitutedMangledTypeName": "5MyApp17ContentTypeOptionO"
+      },
+      {
+        "typeAliasName": "Specification",
+        "substitutedTypeName": "some AppIntents.ResolverSpecification",
+        "substitutedMangledTypeName": "10AppIntents0A4EnumPAAE28defaultResolverSpecificationQrvpZQOy02MyA017ContentTypeOptionO_Qo_",
+        "opaqueTypeProtocolRequirements": [
+          "AppIntents.ResolverSpecification"
+        ],
+        "opaqueTypeSameTypeRequirements": []
+      },
+      {
+        "typeAliasName": "AllCases",
+        "substitutedTypeName": "Swift.Array<MyApp.ContentTypeOption>",
+        "substitutedMangledTypeName": "Say5MyApp17ContentTypeOptionOG"
+      }
+    ],
+    "properties": [
+      {
+        "label": "typeDisplayRepresentation",
+        "type": "AppIntents.TypeDisplayRepresentation",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "with.swift",
+        "line": 6,
+        "valueKind": "InitCall",
+        "value": {
+          "type": "AppIntents.TypeDisplayRepresentation",
+          "arguments": [
+            {
+              "label": "name",
+              "type": "Foundation.LocalizedStringResource",
+              "valueKind": "InitCall",
+              "value": {
+                "type": "Foundation.LocalizedStringResource",
+                "arguments": [
+                  {
+                    "label": "",
+                    "type": "Swift.String.LocalizationValue",
+                    "valueKind": "RawLiteral",
+                    "value": "sType"
+                  },
+                  {
+                    "label": "table",
+                    "type": "Swift.Optional<Swift.String>",
+                    "valueKind": "RawLiteral",
+                    "value": "T"
+                  },
+                  {
+                    "label": "locale",
+                    "type": "Foundation.Locale",
+                    "valueKind": "Runtime"
+                  },
+                  {
+                    "label": "bundle",
+                    "type": "Foundation.LocalizedStringResource.BundleDescription",
+                    "valueKind": "Runtime"
+                  },
+                  {
+                    "label": "comment",
+                    "type": "Swift.Optional<Swift.StaticString>",
+                    "valueKind": "NilLiteral"
+                  }
+                ]
+              }
+            },
+            {
+              "label": "numericFormat",
+              "type": "Swift.Optional<Foundation.LocalizedStringResource>",
+              "valueKind": "NilLiteral"
+            }
+          ]
+        }
+      },
+      {
+        "label": "caseDisplayRepresentations",
+        "type": "Swift.Dictionary<MyApp.ContentTypeOption, AppIntents.DisplayRepresentation>",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "with.swift",
+        "line": 7,
+        "valueKind": "Dictionary",
+        "value": [
+          {
+            "key": {
+              "valueKind": "Enum",
+              "value": {
+                "name": "allContent"
+              }
+            },
+            "value": {
+              "valueKind": "InitCall",
+              "value": {
+                "type": "AppIntents.DisplayRepresentation",
+                "arguments": [
+                  {
+                    "label": "title",
+                    "type": "Foundation.LocalizedStringResource",
+                    "valueKind": "InitCall",
+                    "value": {
+                      "type": "Foundation.LocalizedStringResource",
+                      "arguments": [
+                        {
+                          "label": "",
+                          "type": "Swift.String.LocalizationValue",
+                          "valueKind": "RawLiteral",
+                          "value": "sAll"
+                        },
+                        {
+                          "label": "table",
+                          "type": "Swift.Optional<Swift.String>",
+                          "valueKind": "RawLiteral",
+                          "value": "T"
+                        },
+                        {
+                          "label": "locale",
+                          "type": "Foundation.Locale",
+                          "valueKind": "Runtime"
+                        },
+                        {
+                          "label": "bundle",
+                          "type": "Foundation.LocalizedStringResource.BundleDescription",
+                          "valueKind": "Runtime"
+                        },
+                        {
+                          "label": "comment",
+                          "type": "Swift.Optional<Swift.StaticString>",
+                          "valueKind": "NilLiteral"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "label": "subtitle",
+                    "type": "Swift.Optional<Foundation.LocalizedStringResource>",
+                    "valueKind": "NilLiteral"
+                  },
+                  {
+                    "label": "image",
+                    "type": "Swift.Optional<AppIntents.DisplayRepresentation.Image>",
+                    "valueKind": "InitCall",
+                    "value": {
+                      "type": "AppIntents.DisplayRepresentation.Image",
+                      "arguments": [
+                        {
+                          "label": "systemName",
+                          "type": "Swift.String",
+                          "valueKind": "RawLiteral",
+                          "value": "square"
+                        },
+                        {
+                          "label": "isTemplate",
+                          "type": "Swift.Optional<Swift.Bool>",
+                          "valueKind": "NilLiteral"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "key": {
+              "valueKind": "Enum",
+              "value": {
+                "name": "podcasts"
+              }
+            },
+            "value": {
+              "valueKind": "InitCall",
+              "value": {
+                "type": "AppIntents.DisplayRepresentation",
+                "arguments": [
+                  {
+                    "label": "title",
+                    "type": "Foundation.LocalizedStringResource",
+                    "valueKind": "InitCall",
+                    "value": {
+                      "type": "Foundation.LocalizedStringResource",
+                      "arguments": [
+                        {
+                          "label": "",
+                          "type": "Swift.String.LocalizationValue",
+                          "valueKind": "RawLiteral",
+                          "value": "sPod"
+                        },
+                        {
+                          "label": "table",
+                          "type": "Swift.Optional<Swift.String>",
+                          "valueKind": "RawLiteral",
+                          "value": "T"
+                        },
+                        {
+                          "label": "locale",
+                          "type": "Foundation.Locale",
+                          "valueKind": "Runtime"
+                        },
+                        {
+                          "label": "bundle",
+                          "type": "Foundation.LocalizedStringResource.BundleDescription",
+                          "valueKind": "Runtime"
+                        },
+                        {
+                          "label": "comment",
+                          "type": "Swift.Optional<Swift.StaticString>",
+                          "valueKind": "NilLiteral"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "label": "subtitle",
+                    "type": "Swift.Optional<Foundation.LocalizedStringResource>",
+                    "valueKind": "NilLiteral"
+                  },
+                  {
+                    "label": "image",
+                    "type": "Swift.Optional<AppIntents.DisplayRepresentation.Image>",
+                    "valueKind": "InitCall",
+                    "value": {
+                      "type": "AppIntents.DisplayRepresentation.Image",
+                      "arguments": [
+                        {
+                          "label": "systemName",
+                          "type": "Swift.String",
+                          "valueKind": "RawLiteral",
+                          "value": "mic"
+                        },
+                        {
+                          "label": "isTemplate",
+                          "type": "Swift.Optional<Swift.Bool>",
+                          "valueKind": "NilLiteral"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "label": "allCases",
+        "type": "Swift.Array<MyApp.ContentTypeOption>",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "true",
+        "valueKind": "Array",
+        "value": [
+          {
+            "valueKind": "Enum",
+            "value": {
+              "name": "allContent"
+            }
+          },
+          {
+            "valueKind": "Enum",
+            "value": {
+              "name": "podcasts"
+            }
+          }
+        ]
+      },
+      {
+        "label": "rawValue",
+        "type": "Swift.String",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "false",
+        "isComputed": "true",
+        "valueKind": "Runtime"
+      },
+      {
+        "label": "navigationTarget",
+        "type": "MyApp.Target",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "false",
+        "isComputed": "true",
+        "file": "with.swift",
+        "line": 16,
+        "valueKind": "Runtime"
+      }
+    ],
+    "cases": [
+      {
+        "name": "allContent",
+        "rawValue": "allContent"
+      },
+      {
+        "name": "podcasts",
+        "rawValue": "podcasts"
+      }
+    ]
+  }
+]

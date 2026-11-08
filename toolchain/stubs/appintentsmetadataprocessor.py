@@ -613,7 +613,13 @@ def entity_query(module, entry):
 
 def app_enum(module, entry):
     props = _properties(entry)
-    extra = set(props) - {"typeDisplayRepresentation", "caseDisplayRepresentations", "allCases", "rawValue"}
+    # An instance property of the enum's own, computed, changes nothing (one probe).
+    extra = {
+        label
+        for label, prop in props.items()
+        if label not in {"typeDisplayRepresentation", "caseDisplayRepresentations", "allCases", "rawValue"} and
+           not (prop.get("isStatic") == "false" and prop.get("isComputed") == "true")
+    }
     if extra:
         unestablished("an AppEnum's {}".format(", ".join(sorted(extra))))
     out = {
