@@ -1266,7 +1266,7 @@ fn cell_nib_varied(platform: Platform, color_matched: bool, localizable: bool, m
     }
     let mut order = vec![content_name.clone()];
     order.extend(scene.subviews.iter().map(|s| s.1.clone()));
-    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &HashMap::new(), &[])?;
+    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &[])?;
     let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
     if let Some(list) = traits {
         let lists = nib.array("NSArray", vec![list]);

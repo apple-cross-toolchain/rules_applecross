@@ -666,10 +666,11 @@ other values of the attributes these use, is refused. Observed:
   The removed and added constraints go by those places as decimal
   strings, withheld ones as above and installed ones by theirs less one
   (136 sets of two to seven constraints in 90 probes of a root view's,
-  the device in or out of their size classes). Beside withheld ones, an
-  installed constraint placed more than one past its own place in the
-  objects is refused (a corpus storyboard's, whose subviews' constraints
-  come before it). When the document's
+  the device in or out of their size classes). Where several views have
+  variations, a record of two or more with one the device installs is
+  refused: neither order fits there (60 probes of a root view's and a
+  subview's variations, three of which compiled differently before, and
+  a corpus storyboard). When the document's
   device has one of the size classes, the nib archives the device's state,
   that class's included constraints installed and its excluded ones
   withheld, the records unchanged (two probes); the device having several,

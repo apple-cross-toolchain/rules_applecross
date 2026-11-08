@@ -2990,12 +2990,12 @@ fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
 /// appear; a guide is its objects-list placeholder.
 ///
 /// Every record's constraints go by `ranks` as decimal strings, a
-/// constraint the device installs by its rank less one (two of a size
-/// class's records' 136 sets of two to seven constraints in 90 probes of a
-/// root view's, the device in or out of their size classes); beside
-/// withheld ones, one ranked more than one past its place in the objects
-/// (`places`) is refused.
-fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, places: &HashMap<String, usize>, repeated: &[String]) -> Result<Option<Value>, String> {
+/// constraint the device installs by its rank less one (136 sets of two to
+/// seven constraints in 90 probes of a root view's variations, the device
+/// in or out of their size classes). Where several views have variations,
+/// a record of two or more with one the device installs is refused (60
+/// probes of a root view's and a subview's, and a corpus storyboard).
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, repeated: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
     if variations.is_empty() && attributes.is_empty() {
@@ -3085,6 +3085,7 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         }
     }
     let again: Vec<Variation> = first_repeated.map(|at| variations[at..].to_vec()).unwrap_or_default();
+    let several = variations.len() > 1;
     // A record's traits: the default's shared, a size class's its own.
     let record = |nib: &mut Nib, traits: Option<&Vec<(&'static str, i64)>>, added: &[String], removed: &[String], withheld: &[String]| -> Result<Value, String> {
         let traits = match traits {
@@ -3093,12 +3094,12 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         };
         let sorted = |names: &[String]| -> Result<Vec<Value>, String> {
             let mut names: Vec<&String> = names.iter().collect();
-            // Beside withheld ones, a constraint the device installs that
-            // ranks more than one past its place (other views' constraints
-            // ranked before it) isn't established (a corpus storyboard).
-            let mixed = names.iter().any(|c| withheld.contains(*c)) && names.iter().any(|c| !withheld.contains(*c));
-            if mixed && names.iter().any(|c| !withheld.contains(*c) && ranks.get(*c).zip(places.get(*c)).is_some_and(|(r, p)| *r > p + 1)) {
-                return fail("a size class's record of constraints the device installs, ranked past their places, beside withheld ones is not supported by this ibtool");
+            // Constraints the device installs are ordered so only where one
+            // view has variations: with several, two or more in a record
+            // aren't established (a corpus storyboard, 60 probes of a root
+            // view's and a subview's).
+            if several && names.len() > 1 && names.iter().any(|c| !withheld.contains(*c)) {
+                return fail("a size class's record of several constraints the device installs, in a nib where several views have variations, is not supported by this ibtool");
             }
             names.sort_by_key(|c| ranks.get(*c).map(|r| if withheld.contains(*c) { *r } else { r.saturating_sub(1) }.to_string()));
             Ok(names.into_iter().map(|c| reference(c.clone())).collect::<Vec<Value>>())
@@ -9116,8 +9117,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 .filter_map(|d| d.attribute("id"))
                 .map(view_name)
                 .collect();
-            let places: HashMap<String, usize> = objects.iter().enumerate().filter_map(|(i, o)| if let Value::Ref(r) = o { Some((r.clone(), i + 1)) } else { None }).collect();
-            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &places, &repeated)?;
+            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &repeated)?;
             // An ARSCNView comes before the placeholders, top-level and in
             // the objects (a corpus storyboard, and as a SceneKit view it
             // doesn't: a probe).
