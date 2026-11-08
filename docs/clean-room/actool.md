@@ -26,6 +26,16 @@ entries and every other block stay the same. This actool always writes them
 in one order. Comparisons with Xcode's output allow exactly that variation
 ([README.md](README.md#determinism)).
 
+## Deployment targets before 2019's systems
+
+For a deployment target before iOS 13, tvOS 13, watchOS 6 or macOS 10.15,
+Xcode stores each image twice: a legacy rendition (palette-image
+compression, no deployment target in its key) beside the usual one keyed
+by deployment target 2019, the key format gaining
+`kCRThemeDeploymentTargetName`. Colours and data sets are unchanged (an
+image set, and a colour and a data set, at each side of each threshold).
+This actool refuses images there; catalogs of colours and data compile.
+
 ## Resampling
 
 Observed: the 120 and 152 px icons are downscaled from the 1024 px image.
@@ -1253,11 +1263,13 @@ corpus's catalogs).
 
 ## Complications
 
-A watch complication set (`.complicationset`) whose image sets name no
-files, as Xcode's watch app template makes it, compiles to nothing for
-watchOS and iOS alike: no Assets.car, and an empty partial Info.plist for
-a catalog of nothing else (two of the corpus's catalogs). Complication sets
-with images are refused.
+A watch complication set (`.complicationset`) compiles to nothing for
+every platform, its image sets' images too: Xcode 27.2 leaves out
+rules_apple's complication set of three circular images for iOS, tvOS,
+watchOS and macOS, beside an image set compiled as alone; one whose image
+sets name no files, as Xcode's watch app template makes it, gives no
+Assets.car and an empty partial Info.plist for a catalog of nothing else
+(two of the corpus's catalogs).
 
 ## Image stacks
 
