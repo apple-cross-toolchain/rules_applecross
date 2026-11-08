@@ -332,6 +332,9 @@ struct Variation {
     /// items it relates.
     candidates: Vec<(String, Vec<String>)>,
     excluded: Vec<String>,
+    /// Whether it has a default variation, whose record is written even
+    /// when it excludes only placeholder constraints (a probe).
+    default: bool,
     /// Its size classes' records, sorted by their variations' keys: the
     /// traits, the constraints added and those removed.
     classes: Vec<(Vec<(&'static str, i64)>, Vec<String>, Vec<String>)>,
@@ -2843,7 +2846,7 @@ fn record_variation(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], candi
         nib.varied.push(id.to_string());
         return Ok(());
     }
-    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names.clone(), classes: Vec::new(), subviews: None, withheld: names });
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: names.clone(), default: true, classes: Vec::new(), subviews: None, withheld: names });
     nib.varied.push(id.to_string());
     Ok(())
 }
@@ -2862,7 +2865,7 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
         candidates.iter().find(|k| k.0.attribute("id") == Some(c)).map(|k| k.1.clone()).ok_or_else(|| format!("a variation of {c}, which isn't one of the view's own constraints, is not supported by this ibtool"))
     };
     let mut default = Vec::new();
-    for e in excluded {
+    for e in excluded.iter().filter(|c| !placeholder(c)) {
         default.push(named(e)?);
     }
     // A left-out subview's: without subviews of its own, and its
@@ -2883,8 +2886,13 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
             }
         }
     }
+    // Size classes of one trait first, then by key (30 probes of three to
+    // five classes in random document order).
+    fn class_order<'k>(k: &&'k str) -> (usize, &'k str) {
+        (k.matches('=').count(), *k)
+    }
     let mut keys: Vec<&str> = masks.iter().map(|m| m.key).chain(left_out.iter().map(|m| m.key)).collect();
-    keys.sort();
+    keys.sort_by_key(class_order);
     keys.dedup();
     let mut classes = Vec::new();
     for key in keys {
@@ -2914,13 +2922,15 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
             }
         }
         let removed = unique;
-        if !added.is_empty() || !removed.is_empty() {
+        // A size class whose mask names only placeholder constraints still
+        // has its record, empty (two probes, a corpus storyboard).
+        if own.is_some() || !added.is_empty() || !removed.is_empty() {
             classes.push((traits, added, removed));
         }
     }
     let subview_classes: Vec<(Vec<(&'static str, i64)>, Vec<String>)> = {
         let mut sorted: Vec<&SizeMask> = masks.iter().filter(|m| !m.subviews.is_empty()).collect();
-        sorted.sort_by_key(|m| m.key);
+        sorted.sort_by_key(|m| class_order(&m.key));
         sorted.into_iter().map(|m| (m.traits.clone(), m.subviews.iter().map(|s| view_name(s)).collect())).collect()
     };
     let subviews = (!subview_classes.is_empty()).then(|| {
@@ -2928,15 +2938,15 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
         (all, subview_classes)
     });
     nib.varied.push(id.to_string());
-    if default.is_empty() && classes.is_empty() && subviews.is_none() {
+    if excluded.is_empty() && classes.is_empty() && subviews.is_none() {
         return Ok(());
     }
     let mut withheld = Vec::new();
-    for c in &withheld_ids {
+    for c in withheld_ids.iter().filter(|c| !placeholder(c)) {
         withheld.push(named(c)?);
     }
     let variations = nib.variations.as_mut().expect("checked above");
-    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: default, classes, subviews, withheld });
+    variations.push(Variation { view: name.to_string(), candidates: candidates.into_iter().map(|c| (c.1, c.2)).collect(), excluded: default, default: !excluded.is_empty(), classes, subviews, withheld });
     Ok(())
 }
 
@@ -3025,10 +3035,13 @@ fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
 /// those constraints relate, but the root view, in the order they first
 /// appear; a guide is its objects-list placeholder.
 ///
-/// A size class's records rank the constraints the default installs by
-/// their own places in the objects (`places`), as decimal strings too (a
-/// probe), and the withheld ones by `ranks`.
-fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, places: &HashMap<String, usize>, repeated: &[String]) -> Result<Option<Value>, String> {
+/// Every record's constraints go by `ranks` as decimal strings, a
+/// constraint the device installs by its rank less one (136 sets of two to
+/// seven constraints in 90 probes of a root view's variations, the device
+/// in or out of their size classes). Where several views have variations,
+/// a record of two or more with one the device installs is refused (60
+/// probes of a root view's and a subview's, and a corpus storyboard).
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, repeated: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
     if variations.is_empty() && attributes.is_empty() {
@@ -3118,18 +3131,26 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         }
     }
     let again: Vec<Variation> = first_repeated.map(|at| variations[at..].to_vec()).unwrap_or_default();
+    let several = variations.len() > 1;
     // A record's traits: the default's shared, a size class's its own.
     let record = |nib: &mut Nib, traits: Option<&Vec<(&'static str, i64)>>, added: &[String], removed: &[String], withheld: &[String]| -> Result<Value, String> {
         let traits = match traits {
             None => nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new())),
             Some(t) => Value::New(Object::new("UITraitCollection", t.iter().map(|(k, v)| (*k, Value::Int(*v))).collect())),
         };
-        let sorted = |names: &[String]| {
+        let sorted = |names: &[String]| -> Result<Vec<Value>, String> {
             let mut names: Vec<&String> = names.iter().collect();
-            names.sort_by_key(|c| if withheld.contains(*c) { ranks.get(*c) } else { places.get(*c) }.map(usize::to_string));
-            names.into_iter().map(|c| reference(c.clone())).collect::<Vec<Value>>()
+            // Constraints the device installs are ordered so only where one
+            // view has variations: with several, two or more in a record
+            // aren't established (a corpus storyboard, 60 probes of a root
+            // view's and a subview's).
+            if several && names.len() > 1 && names.iter().any(|c| !withheld.contains(*c)) {
+                return fail("a size class's record of several constraints the device installs, in a nib where several views have variations, is not supported by this ibtool");
+            }
+            names.sort_by_key(|c| ranks.get(*c).map(|r| if withheld.contains(*c) { *r } else { r.saturating_sub(1) }.to_string()));
+            Ok(names.into_iter().map(|c| reference(c.clone())).collect::<Vec<Value>>())
         };
-        let (added, removed) = (sorted(added), sorted(removed));
+        let (added, removed) = (sorted(added)?, sorted(removed)?);
         let added = nib.set("NSSet", added)?;
         let removed = nib.set("NSSet", removed)?;
         Ok(Value::New(Object::new("_UIRelationshipTraitStorageRecord", vec![("UITraitCollection", traits), ("UIAddedObjects", added), ("UIRemovedObjects", removed)])))
@@ -3161,7 +3182,7 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
                 ("UIRelationshipCandidates", candidates),
             ])));
         }
-        if v.excluded.is_empty() && v.classes.is_empty() {
+        if !v.default && v.classes.is_empty() {
             continue;
         }
         for (_, items) in &v.candidates {
@@ -3172,7 +3193,7 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
             }
         }
         let mut records = Vec::new();
-        if !v.excluded.is_empty() {
+        if v.default {
             let removed: Vec<String> = v.candidates.iter().map(|c| c.0.clone()).filter(|c| v.excluded.contains(c)).collect();
             records.push(record(nib, None, &[], &removed, &v.withheld)?);
         }
@@ -3248,12 +3269,9 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
                 return fail("a subview's constraint without a second item on another view is not supported by this ibtool");
             }
             let rank = 2 * ["width", "height"].iter().position(|x| *x == a).ok_or_else(|| format!("a subview's own constraint on {a} is not supported by this ibtool"))?;
-            // Two on one dimension go by relation (less than or equal,
-            // greater than or equal, then equal: five probes), then id;
-            // with different priorities they aren't established.
-            if sizes.iter().any(|(r, o): &(usize, Node)| *r == rank && o.attribute("priority") != c.attribute("priority")) {
-                return fail("two constraints on a subview's same dimension with different priorities are not supported by this ibtool");
-            }
+            // Two on one dimension go by priority, lowest first, then
+            // relation (less than or equal, greater than or equal, then
+            // equal: five probes), then id.
             sizes.push((rank, c));
             continue;
         };
@@ -3318,7 +3336,11 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
         Some("greaterThanOrEqual") => 1,
         _ => 2,
     };
-    sizes.sort_by_key(|f| (f.0, relation(f.1), f.1.attribute("id")));
+    let priority = |c: Node| c.attribute("priority").map_or(Ok(1000.0), str::parse::<f64>).map_err(|_| "a constraint's priority is not a number");
+    for (_, c) in &sizes {
+        priority(*c)?;
+    }
+    sizes.sort_by(|a, b| a.0.cmp(&b.0).then(priority(a.1).unwrap().total_cmp(&priority(b.1).unwrap())).then(relation(a.1).cmp(&relation(b.1))).then(a.1.attribute("id").cmp(&b.1.attribute("id"))));
     others.sort_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)).then(a.1.cmp(&b.1)));
     // The view's own safe-area guide measures as an empty rectangle at its
     // origin, as the root view's does (a corpus storyboard).
@@ -5907,7 +5929,8 @@ fn constraint_key<'a>(root: &str, first: &'a str, a1: &str, second: &'a str, a2:
 /// refused. Before the length come the priority, lowest first, and the
 /// relation: less than or equal, greater than or equal, then equal (100
 /// probe scenes), and so for the same items twice or more (100 more); the
-/// same two items with the same constant, whatever their frames, by id.
+/// same two items, a view and one inside it, whatever their frames and
+/// constants, by id.
 fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 4]), Node<'a, 'i>), siblings: &[Node<'a, 'i>], guides: &[(&str, Frame)]) -> Result<(), String> {
     let unstable = || fail("two constraints Xcode orders unstably (the same items and attributes) are not supported by this ibtool");
     // An attribute's axis (0 horizontal, 1 vertical) and where along it
@@ -5978,13 +6001,14 @@ fn order_ties<'a, 'i, T>(v: &mut [T], of: impl Fn(&T) -> ((&'a str, u8, [usize; 
                 let id = c.attribute("id").unwrap_or("");
                 let (Some(f), Some(s)) = (item(c.attribute("firstItem"))?, item(c.attribute("secondItem"))?) else {
                     // The same two items again, either way round (the
-                    // holding view an absent item), with the same constant:
-                    // by id, whatever their frames (four corpus files).
+                    // holding view an absent item): by id, whatever their
+                    // frames and constants (four corpus files; 30 probes of
+                    // a view and its subview with two to four constants).
                     let pair = |o: Node<'a, 'i>| {
                         let holder = o.parent().and_then(|p| p.parent()).and_then(|h| h.attribute("id"));
                         let mut items = [o.attribute("firstItem").or(holder), o.attribute("secondItem").or(holder)];
                         items.sort();
-                        (items, o.attribute("constant"))
+                        items
                     };
                     let first = pair(of(&v[start]).1);
                     let again = v[start..end].iter().all(|t| pair(of(t).1) == first);
@@ -9145,8 +9169,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 .filter_map(|d| d.attribute("id"))
                 .map(view_name)
                 .collect();
-            let places: HashMap<String, usize> = objects.iter().enumerate().filter_map(|(i, o)| if let Value::Ref(r) = o { Some((r.clone(), i + 1)) } else { None }).collect();
-            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &places, &repeated)?;
+            let traits = trait_storage_list(&mut nib, &root_name, &preorder, &ranks, &repeated)?;
             // An ARSCNView comes before the placeholders, top-level and in
             // the objects (a corpus storyboard, and as a SceneKit view it
             // doesn't: a probe).
@@ -9897,6 +9920,11 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
     };
     files.push(("Info.plist".into(), cf::binary::to_bytes_with(&info, &share, cf::binary::Dictionaries::Grown)));
     for v in root.descendants().filter(|d| d.has_tag_name("variation")) {
+        // A placeholder constraint is removed at build time with its
+        // variations (a probe, a corpus storyboard).
+        if v.parent_element().is_some_and(|p| p.has_tag_name("constraint") && p.attribute("placeholder").is_some()) {
+            continue;
+        }
         let holder = v.parent_element().and_then(|p| p.attribute("id"));
         if !holder.is_some_and(|h| varied.iter().any(|v| v == h)) {
             return fail(format!("a variation of {} is not supported by this ibtool", holder.unwrap_or("a view")));
