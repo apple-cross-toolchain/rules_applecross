@@ -87,10 +87,15 @@ public struct EntryMacro: AccessorMacro, PeerMacro {
             // FocusedValueKey is SwiftUI's own, not SwiftUICore's, in Apple's.
             return ["private struct \(raw: "__Key_" + p.name): SwiftUI.\(raw: key.name) {\n    typealias Value = \(value)\n}"]
         }
-        guard let defaultValue = p.defaultValue ?? (p.type?.is(OptionalTypeSyntax.self) == true ? "nil" : nil) else {
+        // `T!` is keyed as `T?`, nil unless given (Xcode's, one probe).
+        var type = p.type
+        if let iuo = type?.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
+            type = TypeSyntax(OptionalTypeSyntax(wrappedType: iuo.wrappedType.trimmed))
+        }
+        guard let defaultValue = p.defaultValue ?? (type?.is(OptionalTypeSyntax.self) == true ? "nil" : nil) else {
             throw MacroError(description: "'@Entry' needs a default value")
         }
-        let typeAnnotation = p.type.map { ": \($0.trimmedDescription)" } ?? ""
+        let typeAnnotation = type.map { ": \($0.trimmedDescription)" } ?? ""
         var members = "    @SwiftUICore.__EntryDefaultValue\n    static var defaultValue\(typeAnnotation) = \(defaultValue.trimmedDescription)"
         // A default made by a call is checked: a class's is made again on
         // every read (_SwiftUIEntryTypeCheck's class overload warns).
