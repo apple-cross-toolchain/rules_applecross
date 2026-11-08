@@ -189,6 +189,11 @@ pub fn resize(src: &Bgra, dw: usize, dh: usize) -> Bgra {
                 let acc: i64 = taps.iter().map(|&(j, w)| mid[(j * dw + x) * 4 + c] as i64 * w as i64).sum();
                 out[(y * dw + x) * 4 + c] = round14(acc);
             }
+            // A pixel stays premultiplied: its alpha raised to its largest
+            // colour (translucent icons' faint edges: five random icons,
+            // every pixel).
+            let p = &mut out[(y * dw + x) * 4..(y * dw + x) * 4 + 4];
+            p[3] = p[3].max(p[0]).max(p[1]).max(p[2]);
         }
     }
     Bgra { width: dw, height: dh, data: out }
@@ -506,6 +511,17 @@ pub fn icns(entries: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
 impl Bgra {
     /// Straight RGBA, for opaque images only: unpremultiplying anything else
     /// would need rounding rules not established.
+    /// Straight RGBA, rounding to nearest.
+    pub fn unpremultiplied_rgba(&self) -> Rgba {
+        let mut data = Vec::with_capacity(self.data.len());
+        for p in self.data.chunks_exact(4) {
+            let a = p[3] as u32;
+            let c = |c: u8| if a == 0 { 0 } else { ((c as u32 * 255 + a / 2) / a).min(255) as u8 };
+            data.extend_from_slice(&[c(p[2]), c(p[1]), c(p[0]), p[3]]);
+        }
+        Rgba { width: self.width, height: self.height, data }
+    }
+
     pub fn opaque_rgba(&self) -> Option<Rgba> {
         let mut data = Vec::with_capacity(self.data.len());
         for p in self.data.chunks_exact(4) {
