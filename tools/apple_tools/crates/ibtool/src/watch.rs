@@ -146,7 +146,7 @@ fn shared(v: &Value, _: &cf::binary::Position) -> bool {
     !matches!(v, Value::String(s) if s.starts_with("controller-"))
 }
 
-pub fn compile(xml: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+pub fn compile(xml: &str, module: Option<&str>) -> Result<Vec<(String, Vec<u8>)>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let initial = attr(root, "initialViewController")?;
@@ -176,8 +176,19 @@ pub fn compile(xml: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
                 }
             }
             let items = items.into_iter().map(|i| item(i, &outlets)).collect::<Result<Vec<_>, _>>()?;
-            let class = controller.attribute("customClass").ok_or("controllers without a custom class are not supported by this ibtool")?;
-            let entry = dict(&["controllerClass", "items"], vec![("controllerClass", Value::string(class)), ("items", Value::Array(items))])?;
+            if controller.attribute("customClass").is_none() {
+                return fail("controllers without a custom class are not supported by this ibtool");
+            }
+            // Its class as the runtime names it: a Swift class of a module
+            // (the target's, given by --module) mangled (a corpus
+            // storyboard). A controller without items has none listed (the
+            // same storyboard and a probe).
+            let class = crate::storyboard::runtime_class_name(controller, module, "")?;
+            let mut values = vec![("controllerClass", Value::string(class))];
+            if !items.is_empty() {
+                values.push(("items", Value::Array(items)));
+            }
+            let entry = dict(&["controllerClass", "items"], values)?;
             controllers.push((format!("controller-{id}"), entry));
         }
     }

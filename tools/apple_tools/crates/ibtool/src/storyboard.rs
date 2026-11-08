@@ -1556,7 +1556,7 @@ fn text_input_traits(nib: &mut Nib, t: Node, text_view: bool) -> Result<Vec<(&'s
 /// named as the Swift runtime names it (`_TtC`, then the module and class,
 /// each after its length in bytes; the standard library is `s`). A module
 /// the target provides is ibtool's `--module`, when there is one.
-fn runtime_class_name(n: Node, module: Option<&str>, default: &str) -> Result<String, String> {
+pub(crate) fn runtime_class_name(n: Node, module: Option<&str>, default: &str) -> Result<String, String> {
     let Some(class) = n.attribute("customClass") else {
         if n.attribute("customModule").is_some() || n.attribute("customModuleProvider").is_some_and(|p| !p.is_empty()) {
             return fail("a custom module without a custom class is not supported by this ibtool");

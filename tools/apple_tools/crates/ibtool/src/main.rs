@@ -130,7 +130,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         let xml = std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
         let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
-            watch::compile(&xml)
+            watch::compile(&xml, module.as_deref())
         } else {
             storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files)
         };
