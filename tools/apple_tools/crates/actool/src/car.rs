@@ -184,7 +184,7 @@ impl Catalog {
         cf::hash::number_table_order_established(ids.len())
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
         let mut bom = Bom::new();
         let header = bom.alloc(Vec::new());
         let renditions_tree = Tree::reserve(&mut bom, 4096, false);
@@ -315,13 +315,13 @@ impl Catalog {
         le32(&mut h, self.key_semantics);
         bom.set(header, h);
 
-        renditions_tree.finish(&mut bom, &rendition_entries);
-        facets_tree.finish(&mut bom, &facet_entries);
+        renditions_tree.finish(&mut bom, &rendition_entries)?;
+        facets_tree.finish(&mut bom, &facet_entries)?;
         if let Some(t) = &appearances_tree {
-            t.finish(&mut bom, &appearance_entries);
+            t.finish(&mut bom, &appearance_entries)?;
         }
         bitmap_entries.sort_by_key(|e| e.0);
-        bitmap_tree.finish(&mut bom, &bitmap_entries);
+        bitmap_tree.finish(&mut bom, &bitmap_entries)?;
 
         bom.var("CARHEADER", header);
         bom.var("RENDITIONS", renditions_tree.header);
@@ -332,7 +332,7 @@ impl Catalog {
         bom.var("KEYFORMAT", key_format);
         bom.var("EXTENDED_METADATA", extended);
         bom.var("BITMAPKEYS", bitmap_tree.header);
-        bom.to_bytes()
+        Ok(bom.to_bytes())
     }
 }
 
