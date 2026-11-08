@@ -152,35 +152,30 @@ struct Scan {
     sticker_icons: Vec<(String, PathBuf)>,
 }
 
+/// Whether Xcode stores a legacy rendition beside each image, for a
+/// deployment target before 2019's systems: iOS and tvOS 13, watchOS 6,
+/// macOS 10.15 (an image set at each side of each, for each platform;
+/// colours and data are unchanged).
+fn legacy_images(platform: &str, target: &str) -> bool {
+    let mut parts = target.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+    let (major, minor) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    match platform {
+        "ios" | "atv" => major < 13,
+        "watch" => major < 6,
+        "macosx" => (major, minor) < (10, 15),
+        _ => false,
+    }
+}
+
+/// Whether the inputs hold an Icon Composer document.
+fn document_inputs(o: &Options) -> bool {
+    o.inputs.iter().any(|p| p.extension().is_some_and(|e| e == "icon"))
+}
+
 pub(crate) fn has_entries(contents: &serde_json::Value, list: &str, field: &str) -> bool {
     contents[list].as_array().is_some_and(|items| items.iter().any(|i| !i[field].is_null()))
 }
 
-/// Whether a complication set holds no images: only image sets, none of
-/// whose entries names a file, and no other files.
-fn empty_complications(set: &Path) -> Result<bool, String> {
-    for e in std::fs::read_dir(set).map_err(|e| format!("{}: {e}", set.display()))? {
-        let p = e.map_err(|e| e.to_string())?.path();
-        let name = p.file_name().unwrap().to_string_lossy().into_owned();
-        if name == "Contents.json" || name.starts_with('.') {
-            continue;
-        }
-        if !name.ends_with(".imageset") || !p.is_dir() {
-            return Ok(false);
-        }
-        for f in std::fs::read_dir(&p).map_err(|e| format!("{}: {e}", p.display()))? {
-            let f = f.map_err(|e| e.to_string())?.file_name();
-            if f != "Contents.json" && !f.to_string_lossy().starts_with('.') {
-                return Ok(false);
-            }
-        }
-        let contents = p.join("Contents.json");
-        if contents.is_file() && has_entries(&read_json(&contents)?, "images", "filename") {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
 
 /// Lists a catalog's assets, refusing kinds this actool doesn't compile. A
 /// color set without colour components compiles to nothing, as in Xcode.
@@ -278,9 +273,10 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
             Some((stem, "launchimage")) if top => found.launch_images.push((stem.to_string(), p)),
             Some((stem, "stickersiconset")) if top => found.sticker_icons.push((stem.to_string(), p)),
-            // A complication set whose image sets name no files compiles to
-            // nothing (two probes, watchOS); one with images is refused.
-            Some((_, "complicationset")) if empty_complications(&p)? => {}
+            // A complication set compiles to nothing, its images too, for
+            // every platform (two probes of empty sets, watchOS; rules_apple's
+            // set of images for iOS, tvOS, watchOS and macOS).
+            Some((_, "complicationset")) => {}
             None if p.is_dir() => {
                 // A folder: its Contents.json may say it provides a namespace.
                 let contents = p.join("Contents.json");
@@ -454,6 +450,20 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     let catalogs: Vec<PathBuf> = o.inputs.iter().filter(|p| !is_document(p)).cloned().collect();
     let mut scan = scan(&catalogs)?;
     one_image_set_per_name(&catalogs, &mut scan.image_sets, &mut o.warnings.borrow_mut())?;
+    // Below 2019's systems Xcode stores each image twice, a legacy rendition
+    // beside one keyed by deployment target (`legacy_images`).
+    if legacy_images(platform, &o.minimum_deployment_target) {
+        let image_sets = scan.image_sets.iter().map(|(_, d)| d.join("Contents.json")).filter(|c| c.is_file()).map(|c| read_json(&c)).collect::<Result<Vec<_>, _>>()?;
+        let any_images = image_sets.iter().any(|c| has_entries(c, "images", "filename"))
+            || o.app_icon.is_some()
+            || document_inputs(o)
+            || !scan.launch_images.is_empty()
+            || !scan.brand_assets.is_empty()
+            || !scan.solid_stacks.is_empty();
+        if any_images {
+            return Err(format!("images for a deployment target before iOS 13, tvOS 13, watchOS 6 or macOS 10.15 ({}), where Xcode adds legacy renditions, are not supported by this actool", o.minimum_deployment_target));
+        }
+    }
     for (kind, sets) in [("colour", &scan.color_sets), ("data", &scan.data_sets)] {
         if let Some(name) = sets.iter().enumerate().find_map(|(i, (n, _))| sets[..i].iter().any(|(m, _)| m == n).then_some(n)) {
             return Err(format!("{kind} sets named alike (\"{name}\") are not supported by this actool"));
