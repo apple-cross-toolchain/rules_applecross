@@ -2625,7 +2625,11 @@ Compile to `Interface.storyboardc/Interface.plist`, a binary property list
 dictionary of its `type` and properties (a label's `text`, `numberOfLines`,
 `fontScale` 1, a text style's WatchKit name as `fontSize` and `fontSize2`,
 `color`, an outlet's `property`; a group's `width`, alignments, `layout`,
-`items`). A controller's class is its runtime name: a Swift class of a
+`items`). A label's `alignment` is left out when `left` and is the integer
+3 when the document has none; one line is left out; its keys go in in
+the order `fontSize2`, `color`, `fontSize`, `text`, `property`, `type`,
+`fontScale`, `alignment`, `numberOfLines`, which reproduces all 47 key
+orders of 80 random probes' labels (any subset of those keys). A controller's class is its runtime name: a Swift class of a
 custom module mangled (`_TtC5Other19InterfaceController`), the target's
 module (`customModuleProvider="target"`) being `--module`'s; a controller
 without items has no `items` (four probes and a corpus storyboard). A
