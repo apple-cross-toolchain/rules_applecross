@@ -12,7 +12,6 @@ on:
       - tools/xcode_equivalence.py
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
-      - tools/linux_vm/Containerfile
       - tools/system_tools/**
   push:
     branches:
@@ -27,7 +26,6 @@ on:
       - tools/xcode_equivalence.py
       - tools/apple_tools/**
       - tools/build-ported-tools.sh
-      - tools/linux_vm/Containerfile
       - tools/system_tools/**
   workflow_dispatch:
 
@@ -50,12 +48,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t ported-tools -f tools/linux_vm/Containerfile tools/linux_vm
       - name: Configure BuildBuddy cache
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: |
-          touch ~/.bazelrc
           [ -n "$BUILDBUDDY_API_KEY" ] || exit 0
           {
             echo 'build --bes_results_url=https://app.buildbuddy.io/invocation/'
@@ -66,19 +62,17 @@ jobs:
             echo 'build --modify_execution_info=CcConfigureMakeRule=+no-remote-cache'
           } > ~/.bazelrc
       - name: Build and test the ported tools
-        run: >-
-          docker run --rm -v "$PWD:$PWD" -v "$HOME/.bazelrc:/root/.bazelrc:ro" -w "$PWD" ported-tools bash -c
-          'git config --global --add safe.directory "$PWD" &&
-          tools/build-ported-tools.sh dist &&
-          cd tools/apple_tools &&
-          bazel test -c opt //... &&
-          python3 ../../tests/actool_icon/actool_icon_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
-          python3 ../../tests/actool_catalog/actool_catalog_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
-          python3 ../../tests/actool_vector/actool_vector_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)" &&
-          python3 ../../tests/ibtool_xib/ibtool_xib_test.py "$(bazel cquery -c opt --output=files //crates/ibtool 2>/dev/null)" &&
-          python3 ../../tests/pngcrush/pngcrush_test.py "$(bazel cquery -c opt --output=files //crates/pngcrush 2>/dev/null)" &&
-          cd swiftui_macros &&
-          bazel test //...'
+        run: |
+          tools/build-ported-tools.sh dist
+          cd tools/apple_tools
+          bazel test -c opt //...
+          python3 ../../tests/actool_icon/actool_icon_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)"
+          python3 ../../tests/actool_catalog/actool_catalog_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)"
+          python3 ../../tests/actool_vector/actool_vector_test.py "$(bazel cquery -c opt --output=files //crates/actool 2>/dev/null)"
+          python3 ../../tests/ibtool_xib/ibtool_xib_test.py "$(bazel cquery -c opt --output=files //crates/ibtool 2>/dev/null)"
+          python3 ../../tests/pngcrush/pngcrush_test.py "$(bazel cquery -c opt --output=files //crates/pngcrush 2>/dev/null)"
+          cd swiftui_macros
+          bazel test //...
       - uses: actions/upload-artifact@v7
         with:
           name: ported-tools-linux-${{ matrix.arch }}
@@ -106,7 +100,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           last="$(git tag --list 'ported-tools-*' --sort=-version:refname | head -n 1)"
-          if git diff --quiet "$last" HEAD -- tools/apple_tools tools/system_tools tools/build-ported-tools.sh tools/linux_vm/Containerfile; then
+          if git diff --quiet "$last" HEAD -- tools/apple_tools tools/system_tools tools/build-ported-tools.sh; then
             echo "The ported tools haven't changed since $last"
             exit 0
           fi
