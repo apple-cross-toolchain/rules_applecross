@@ -580,7 +580,8 @@ margin.
 ## Colour-managed PNGs
 
 Xcode converts an image set's or app icon's PNG with an ICC profile other
-than sRGB IEC61966-2.1's or GIMP's built-in sRGB to sRGB (each of the
+than sRGB IEC61966-2.1's, GIMP's built-in sRGB, or a grey profile with
+sRGB's tone curve (two variants) to sRGB (each of the
 corpus's 20 profiles compiled on an opaque gradient differs from the
 gradient alone). ImageIO's image drawn into an 8-bit sRGB `CGContext` gives
 Xcode's pixels exactly: compiling those pixels untagged gives Xcode's
@@ -588,8 +589,14 @@ output for 64x68 images (a 16-level colour cube and a grey ramp) with
 Display P3, Adobe RGB, Generic RGB, ITU-709, ITU-2020, ROMM, DCI-P3, ACEScg
 and sRGB profiles. A wide-gamut profile adds a 16-bit extended-sRGB
 rendition beside the 8-bit one, but only for an image with colours well
-outside sRGB (below). A PNG with `gAMA` other than 1/2.2 or `cHRM` other
-than sRGB's is converted too; an `sRGB` chunk changes nothing.
+outside sRGB (below). A PNG with `gAMA` other than 1/2.2, or with `cHRM`
+other than sRGB's beside a `gAMA`, is converted too. `cHRM` without `gAMA`
+changes nothing, whatever its primaries (Photoshop's sRGB rounded to
+31269, 32899, ..., P3's and odd ones, each against the same image without
+it; `tests/actool_catalog/cases/png-chromaticities-alone`), with or
+without a profile; nor does an `sRGB` chunk. In the 809-catalog corpus
+this made 20 more catalogs byte-identical (Photoshop exports carry such
+a `cHRM`).
 
 This actool converts any RGB profile with colorants and one curve for all
 three channels, in the forms below, and refuses the image where Xcode
