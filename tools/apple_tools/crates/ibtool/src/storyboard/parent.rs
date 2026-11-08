@@ -60,9 +60,7 @@ pub(super) fn children_of<'a>(kind: Kind, node: Node<'a, '_>) -> Result<Vec<(&'a
 /// the navigation controller and its bar are listed before it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn parent_controller_nib(
-    platform: Platform,
-    color_matched: bool,
-    localizable: bool,
+    settings: Settings,
     module: Option<&str>,
     kind: Kind,
     node: Node,
@@ -114,7 +112,7 @@ pub(super) fn parent_controller_nib(
         }
         None => node.attribute("storyboardIdentifier").map_or_else(|| format!("{class}-{id}"), str::to_string),
     };
-    let mut nib = Nib::new(platform, color_matched, localizable);
+    let mut nib = Nib::new(settings);
 
     // The controllers it holds in preorder (each child, then a navigation
     // controller's root) with their original classes; their scenes'

@@ -85,7 +85,7 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         if idiom.is_some() {
             return fail("a main window xib deploying before iOS 8 is not supported by this ibtool");
         }
-        return crate::storyboard::compile_xib_window(xml, module, localizable);
+        return crate::storyboard::compile_xib_window(xml, minimum_deployment_target, module, localizable);
     }
     let mut owner = None;
     let mut responder = None;
@@ -184,9 +184,9 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         let document = format!("{}{cell}{}", &xml[..view.range().start], &xml[view.range().end..]);
         let guide = elements(view).find(|c| safe_area(c)).map(|c| c.attribute("id").ok_or("a safe-area guide without an id")).transpose()?;
         return if view.has_tag_name("tableViewCell") {
-            crate::storyboard::compile_xib_cell(&document, module, localizable, guide.is_some())
+            crate::storyboard::compile_xib_cell(&document, minimum_deployment_target, module, localizable, guide.is_some())
         } else {
-            crate::storyboard::compile_xib_collection_cell(&document, module, localizable, guide)
+            crate::storyboard::compile_xib_collection_cell(&document, minimum_deployment_target, module, localizable, guide)
         };
     }
     let owner_id = owner.attribute("id").ok_or("a File's Owner without an id")?;
@@ -258,7 +258,11 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
         Some(r) => roots.iter().filter(|o| elements(objects).position(|e| e == **o) < Some(r)).count(),
         None => 0,
     };
-    let layout = crate::storyboard::XibLayout { responder_at, cell_guides, placeholder, in_controller, idiom };
+    let freeform = elements(objects)
+        .filter(|o| elements(*o).any(|c| c.has_tag_name("freeformSimulatedSizeMetrics") && c.attribute("key") == Some("simulatedDestinationMetrics")))
+        .filter_map(|o| o.attribute("id").map(str::to_string))
+        .collect();
+    let layout = crate::storyboard::XibLayout { responder_at, cell_guides, placeholder, in_controller, idiom, freeform };
     let compiled = crate::storyboard::compile_xib(&storyboard, minimum_deployment_target, module, localizable, &layout)?;
     let name = format!("{CONTROLLER}-view-{view_id}.nib");
     compiled.files.into_iter().find(|f| f.0 == name).map(|f| f.1).ok_or_else(|| "the xib's view compiled to no nib".to_string())

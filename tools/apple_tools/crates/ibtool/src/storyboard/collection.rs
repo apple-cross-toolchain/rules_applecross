@@ -9,7 +9,7 @@ use super::*;
 /// the segues its cells trigger.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn collection_view_nib(
-    platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, vc_id: &str, cv: Node, f: &Frame,
+    settings: Settings, module: Option<&str>, vc_id: &str, cv: Node, f: &Frame,
     vc_outlets: &[(String, String)], gestures: &[String],
 ) -> Result<(Object, bool, Vec<String>), String> {
     only_attributes(cv, &[
@@ -54,7 +54,7 @@ pub(super) fn collection_view_nib(
 
     let (cells, segues) = prototypes(cv)?;
 
-    let mut nib = Nib::new(platform, color_matched, localizable);
+    let mut nib = Nib::new(settings);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let mut top = vec![owner, responder];
@@ -250,7 +250,7 @@ fn collection_values(
     if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
-            let bytes = cell_nib(nib.platform, nib.color_matched, nib.localizable, module, *c, placeholder.is_some(), None)?;
+            let bytes = cell_nib(nib.settings(), module, *c, placeholder.is_some(), None)?;
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -260,7 +260,7 @@ fn collection_values(
     if !supplementary.is_empty() {
         let mut nibs = Vec::new();
         for (key, v) in &supplementary {
-            let bytes = reusable_view_nib(nib.platform, nib.color_matched, nib.localizable, module, *v)?;
+            let bytes = reusable_view_nib(nib.settings(), module, *v)?;
             nibs.push(nib.string(key));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -430,11 +430,19 @@ fn custom_layout(nib: &mut Nib, module: Option<&str>, layout: Node) -> Result<Ob
     Ok(Object::new("UIClassSwapper", vec![("UIClassName", class_name), ("UIOriginalClassName", original)]))
 }
 
+/// A xib's collection view cell: its safe-area guide's id, if it has one,
+/// and whether it deploys before iOS 17 (unknown without a target).
+#[derive(Clone, Copy)]
+pub(super) struct XibCell<'a> {
+    pub safe_area: Option<&'a str>,
+    pub before_17: Option<bool>,
+}
+
 /// A prototype cell's nib: the cell, its content view and the content
 /// view's subviews.
-/// A xib's cell (`xib`: its safe-area guide's id, if it has one) keeps its colours
-/// exact and lists its guide after its content view.
-pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<Option<&str>>) -> Result<Vec<u8>, String> {
+/// A xib's cell keeps its colours exact and lists its guide after its
+/// content view.
+pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<XibCell>) -> Result<Vec<u8>, String> {
     only_attributes(cell, &[
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("insetsLayoutMarginsFromSafeArea", Some("NO")),
@@ -507,7 +515,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         None => format!("{cell_name} content"),
     };
 
-    let mut nib = Nib::new(platform, color_matched, localizable);
+    let mut nib = Nib::new(settings);
     nib.xib = xib.is_some();
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
@@ -521,8 +529,16 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     let mut scene = Scene::new(cell_id, module, if old { cell } else { content }, Some(content_name.clone()));
     // A content view holding constraints is pinned to its cell's edges by
     // constraints Xcode makes, which the objects leave out.
-    // A xib's is pinned whatever it holds (five probes).
-    let pinned = held || children(content, "constraints").any(|c| c.has_children()) || xib.is_some();
+    // A xib's is pinned whatever it holds from iOS 17 (five probes); below,
+    // as a prototype's (six corpus xibs at iOS 12 and 16, the 22 with
+    // constraints alike).
+    let constrained = held || children(content, "constraints").any(|c| c.has_children());
+    let pinned = match xib {
+        None => constrained,
+        Some(_) if constrained => true,
+        Some(XibCell { before_17: Some(before_17), .. }) => !before_17,
+        Some(_) => return fail("a xib's collection view cell without constraints needs --minimum-deployment-target for this ibtool"),
+    };
     let cf = frame(content)?;
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
@@ -567,7 +583,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         }
         // The cell's safe-area guide in its constraints is its content
         // view's, as a subview's own is (a corpus xib).
-        if let Some(Some(g)) = xib.filter(|_| held) {
+        if let Some(g) = xib.and_then(|x| x.safe_area).filter(|_| held) {
             scene.safe_areas.push((g.to_string(), content_name.clone()));
         }
         if let Some(own) = held_constraints(&mut nib, &mut scene, cell, content, &content_name)? {
@@ -576,7 +592,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
         // A xib's cell with a safe-area guide and constraints of its own
         // archives its content view's guide (four probes), defined where a
         // constraint first uses it.
-        if matches!(xib, Some(Some(_))) && held {
+        if xib.is_some_and(|x| x.safe_area.is_some()) && held {
             let guide = match scene.layout_guides.iter().find(|g| g.0 == content_name) {
                 Some(_) => reference(format!("{content_name} safe area guide")),
                 None => super::named_safe_area_guide(&mut nib, &content_name, &format!("{content_name} safe area guide")),
@@ -683,7 +699,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
     if !old {
         objects.push(reference(content_name.clone()));
     }
-    if matches!(xib, Some(Some(_))) {
+    if xib.is_some_and(|x| x.safe_area.is_some()) {
         objects.push(super::table::cell_safe_area(&mut nib));
     }
     // The old format's content view lists its subviews before its
@@ -775,7 +791,7 @@ pub(super) fn cell_nib(platform: Platform, color_matched: bool, localizable: boo
 /// container's, then the flags and its reuse identifier; the objects list a
 /// safe-area guide after it (one probe). Its own constraints, outlets,
 /// actions, colours and a custom class are refused.
-fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool, module: Option<&str>, v: Node) -> Result<Vec<u8>, String> {
+fn reusable_view_nib(settings: Settings, module: Option<&str>, v: Node) -> Result<Vec<u8>, String> {
     only_attributes(v, &[
         ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
@@ -795,7 +811,7 @@ fn reusable_view_nib(platform: Platform, color_matched: bool, localizable: bool,
         }
     }
     let name = view_name(attr(v, "id")?);
-    let mut nib = Nib::new(platform, color_matched, localizable);
+    let mut nib = Nib::new(settings);
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let mut scene = Scene::new(attr(v, "id")?, module, v, Some(name.clone()));

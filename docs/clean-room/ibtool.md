@@ -42,7 +42,19 @@ any other (one probe).
   this ibtool rewrites the xib as that one-scene storyboard and compiles
   it, leaving the placeholder out.
 - Unlike a scene's view, the view keeps its own frame whatever the device
-  (nine of the corpus's), gets no legacy top and bottom layout guides when
+  from iOS 17.0 on (nine of the corpus's). Below 17.0, a top-level plain
+  view (custom class or not), scroll, table, collection or text view
+  without a freeform size (`freeformSimulatedSizeMetrics`) keeps its
+  frame's origin but takes the device's size, or without a device the
+  generic canvas's (600x600, 393x852 without `useTraitCollections`), the
+  root view's and the views beside it alike, whatever its frame's size;
+  labels, buttons, text fields, image, stack, map, web, picker, activity
+  and visual effect views, bars, segmented controls, sliders, cells and
+  reusable views keep their frames (eleven probes at iOS 16 and 18, offset
+  or not, in either orientation; 30 element types probed at iOS 16; a
+  corpus sample at iOS 12 to 16). Other elements, and devices Xcode
+  doesn't know, are refused there. The view gets no legacy top and bottom
+  layout guides when
   it has no safe area (36), and has a safe-area guide only when it lists
   one, not whenever the document uses safe areas (two).
 - Colour components are kept as the document writes them, where a
@@ -78,8 +90,10 @@ any other (one probe).
   is `UIViewDoesNotTranslateAutoresizingMaskIntoConstraints` after its
   clipping: one of the corpus's):
   - Its content view is always pinned to the cell by the four
-    `UIIBSystemGenerated` constraints, as a prototype's is only when it holds
-    constraints.
+    `UIIBSystemGenerated` constraints from iOS 17.0 on, as a prototype's is
+    only when it holds constraints; below 17.0, a xib's is pinned as a
+    prototype's is (six corpus xibs at iOS 12 and 16, the 22 with
+    constraints alike, and probes at 11 to 18).
   - Its safe-area guide, unowned as a table cell's, follows its content
     view.
   - In the old format (a `<view key="contentView">` without an id), a cell
@@ -820,20 +834,27 @@ other values of the attributes these use, is refused. Observed:
   `UIOpaque` out, and `multipleTouchEnabled` is `UIMultipleTouchEnabled`
   before its autoresizing keys (Flutter's accessibility launch screen).
 - With a `<device>`, the root view is laid out at the device's size (or
-  its freeform size) at its frame's origin (a view below an opaque bar is
-  at y 64; eight probes, with simulated bars changing nothing),
+  its freeform size) at its frame's origin from iOS 17.0 on (a view below
+  an opaque bar is at y 64; eight probes, with simulated bars changing
+  nothing), at the origin below 17.0 (four probe storyboards at 12 to 16.4,
+  at y 20 or 64, below a bar or not),
   whatever its frame's size says: 26 device ids measured in both orientations
   (landscape swaps width and height; `retina3_5` and `retina6_72` are
   393x852 either way; `appleTV` is 1920x1080). Ids Xcode doesn't know
   (`retina5_4`, `ipad10_5`, `ipad12_9`, `ipad8_3rounded`,
-  `ipad13_0rounded`, `appleTV4K`) take the frame; other ids are refused.
-- Subviews keep their frames whatever size the root view is laid out at,
-  except autoresizing ones (not `translatesAutoresizingMaskIntoConstraints="NO"`),
-  which the root resizes by their masks (sizable width and height grow
-  with it: 100x80 under a 375x667 frame laid out at 600x600 is 325x13).
-  Where the root's size isn't its frame's, a subview whose mask has a
-  flexible left or top margin or a sizable width or height is refused; the
-  rest are compiled, with or without a device (eight probes).
+  `ipad13_0rounded`, `appleTV4K`) take the frame from iOS 17.0 on, and are
+  the generic canvas below (a corpus storyboard at 16); other ids are
+  refused.
+- The root resizes its subviews by their masks when it is laid out at
+  another size than its frame (sizable width and height grow with it:
+  100x80 under a 375x667 frame laid out at 600x600 is 325x13), whether or
+  not they translate their masks into constraints, and on a device whether
+  or not they are constrained (eight probes, then six at iOS 16 and 18 and
+  a corpus storyboard; on the generic canvas a constrained one kept its
+  frame in a probe and was resized in a corpus storyboard). Where the
+  root's size isn't its frame's, a subview whose mask has a flexible left
+  or top margin or a sizable width or height is refused; the rest keep
+  their frames, with or without a device.
 - An image view's `<imageReference key="image" image="…"/>` naming only its
   image compiles as an `image` attribute (a probe).
 - An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`;
@@ -2031,6 +2052,15 @@ storyboard). A `baseBackgroundColor`, which also becomes the background's
 colour without the flag, other settings and images are refused; 200
 random storyboards with configured buttons were byte-identical.
 
+Below iOS 15.0 a configured button also archives its normal state as an
+unconfigured one does (`UIButtonStatefulContent`, after its large content
+properties), titled with the configuration's title whatever the state's
+(localizable as `<id>.normalTitle`), and `UIImageEdgeInsets` before
+`UIButtonConfiguration`: top, left and bottom 0 and right the smallest
+normal double, `DBL_MIN` (a probe at 13.0 to 15.0 and four corpus
+documents at 12.0). Other states, no title, and insets are refused there,
+as is a configured button without a deployment target.
+
 Buttons take a custom class, swapped in after `UIButtonConfiguration`
 (two probes), and labels one swapped in last (two probes). Stack views and visual effect views take runtime
 attributes (two probes). Image views take a custom class (swapped in, after their image), runtime
@@ -2113,8 +2143,9 @@ probes; Xcode lays the wheels style out at its own width, so it is
 refused). A xib archives the document's date as `UIDate` (an `NSDate`,
 `NS.time` the document's `timeIntervalSinceReferenceDate`), after the mode
 and before the interval, none for a count-down timer (three probes). A
-storyboard with a `<deployment>` naming a version (iOS 8 on) archives one
-in the same place, but the time it is compiled, which differs on every
+storyboard with a `<deployment>` naming a version (iOS 8 on), or
+deploying before iOS 14.0 (a corpus storyboard at 12.0 to 15.0), archives
+one in the same place, but the time it is compiled, which differs on every
 run (fifteen probes): this ibtool archives the document's date there too,
 so its output is reproducible and has Xcode's shape, differing only in a
 value Xcode's own runs disagree on (a corpus storyboard).
@@ -2532,7 +2563,9 @@ the same. Observed with 55 probes:
   in an embedded controller and beside gesture recognizers they are
   refused.
 - A controller's freeform size is ignored on a device Xcode doesn't know
-  (ipad10_5, ipad12_9): the view keeps its frame (three probes).
+  (ipad10_5, ipad12_9) from iOS 17.0 on: the view keeps its frame (three
+  probes). Below 17.0, on the generic canvas there, it is the view's size
+  (a corpus storyboard).
 - A control's segue (a button's, or a prototype cell's) is triggered from
   its view nib through a placeholder of its own: the view nib has
   `UpstreamPlaceholder-<n>` proxies, the controller's first if the view

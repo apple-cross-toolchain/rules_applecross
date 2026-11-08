@@ -22,11 +22,11 @@ fn object_name(id: &str) -> String {
     format!("window xib {id}")
 }
 
-pub(super) fn compile(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+pub(super) fn compile(xml: &str, target: Option<u32>, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let objects_node = children(root, "objects").next().ok_or("a xib without objects")?;
-    let mut nib = Nib::new(Platform::Ios, root.attribute("colorMatched") == Some("YES"), localizable);
+    let mut nib = Nib::new(Settings { platform: Platform::Ios, color_matched: root.attribute("colorMatched") == Some("YES"), localizable, target });
     nib.xib = true;
     let mut top = vec![proxy(&mut nib, "IBFilesOwner", "owner"), proxy(&mut nib, "IBFirstResponder", "responder")];
     let mut objects = vec![reference("owner"), reference("responder")];

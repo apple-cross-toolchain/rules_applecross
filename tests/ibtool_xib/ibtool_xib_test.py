@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""iOS xibs through this repository's ibtool, strict, against Xcode 27's
+"""iOS xibs and storyboards through this repository's ibtool, strict, against Xcode 27's
 nibs (expected/, from update_expected.py): byte for byte.
 
     python3 tests/ibtool_xib/ibtool_xib_test.py PATH/TO/ibtool
