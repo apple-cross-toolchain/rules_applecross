@@ -117,9 +117,15 @@ any other (one probe).
   swapper for `UICustomObject` listing nothing, the owner's outlets and a
   table's data source and delegate reaching it. A cell's controls'
   outlets and actions on the owner are sorted with the view's (outlets by
-  name, actions by mask and selector); the cell's own connections, runtime
+  name, actions by mask and selector), and so are the cell's own outlets
+  to its views. Its default variations have a trait storage list of their
+  own after the view's, one per cell in document order, the cell its
+  top-level object, its views in the document's order and its content
+  view's subviews' storages twice, as a visual effect view's content's; a
+  record whose ranks cross ten is refused. The cell's segues, runtime
   attributes and accessibility there aren't established and are refused
-  (eleven probes, four corpus xibs).
+  (eleven probes, 80 of one or two cells with outlets and variations,
+  four corpus xibs).
 - **A lone table, collection or web view.** Alone in the xib, its owner's
   `view` outlet its own, it compiles as beside a view (the table view and
   collection view controller templates, three probes): this ibtool

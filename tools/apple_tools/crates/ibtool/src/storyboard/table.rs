@@ -803,10 +803,10 @@ pub(super) fn table_view_nib(
         cell_pairs = header_pairs;
     }
     let holder = |name: &String| scene.own_constraints.iter().find(|c| &c.1 == name).map(|c| c.0.clone());
-    let traits = encode_variations(&mut nib, &mut objects, holder, &root_name, table)?;
+    let lists = encode_variations(&mut nib, &mut objects, holder, &root_name, table)?;
     let mut root = root_object_with_pairs(&mut nib, top, objects, connections, cell_pairs);
-    if let Some(list) = traits {
-        let lists = nib.array("NSArray", vec![list]);
+    if !lists.is_empty() {
+        let lists = nib.array("NSArray", lists);
         root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
     }
     Ok((root, upstream_used, segues, listing, std::mem::take(&mut nib.varied)))
@@ -1284,7 +1284,7 @@ fn cell_nib_varied(platform: Platform, color_matched: bool, localizable: bool, m
     }
     let mut order = vec![content_name.clone()];
     order.extend(scene.subviews.iter().map(|s| s.1.clone()));
-    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &[], None)?;
+    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &[], &[])?;
     let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
     if let Some(list) = traits {
         let lists = nib.array("NSArray", vec![list]);
@@ -1308,15 +1308,29 @@ pub(super) struct XibCell {
     pub names: Vec<String>,
     pub control_outlets: Vec<(String, String, String)>,
     pub actions: Vec<(String, String, i64, String)>,
+    /// Its outlets to its own views, (label, cell, view).
+    pub outlets: Vec<(String, String, String)>,
+    /// Its views' constraints, (holder, constraint).
+    pub own_constraints: Vec<(String, String)>,
 }
 
 pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_area: bool, vc_id: &str) -> Result<XibCell, String> {
-    let (segue, outlets) = cell_connections(cell)?;
-    if segue.is_some() || !outlets.is_empty() {
-        return fail("connections of a cell beside a xib's view are not supported by this ibtool");
+    let (segue, cell_outlets) = cell_connections(cell)?;
+    if segue.is_some() {
+        return fail("a segue from a cell beside a xib's view is not supported by this ibtool");
     }
     let (value, parts) = cell_object(nib, module, cell, vc_id, true)?;
     let CellParts { name, content, mut scene } = parts;
+    // Its outlets to its views, sorted by name with the nib's others (a
+    // corpus xib's two cells).
+    let mut outlets = Vec::new();
+    for (label, destination) in cell_outlets {
+        let destination = view_name(destination);
+        if !scene.subviews.iter().any(|s| s.1 == destination) {
+            return fail("a cell's outlets to anything but its content's views are not supported by this ibtool");
+        }
+        outlets.push((label.to_string(), name.clone(), destination));
+    }
     if !scene.pairs.is_empty() || !scene.accessibility.is_empty() || (!scene.view_outlets.is_empty() || !scene.view_collections.is_empty()) || scene.actions.iter().any(|a| a.3 != "upstream") {
         return fail("outlets, runtime attributes or accessibility in a cell beside a xib's view are not supported by this ibtool");
     }
@@ -1356,7 +1370,8 @@ pub(super) fn xib_cell(nib: &mut Nib, module: Option<&str>, cell: Node, safe_are
     }
     let mut names = vec![name, content];
     names.extend(scene.subviews.iter().map(|s| s.1.clone()));
-    Ok(XibCell { value, first, rest, names, control_outlets, actions })
+    let own_constraints = scene.own_constraints;
+    Ok(XibCell { value, first, rest, names, control_outlets, actions, outlets, own_constraints })
 }
 
 /// A xib's cell's safe-area guide: unowned and not archived.

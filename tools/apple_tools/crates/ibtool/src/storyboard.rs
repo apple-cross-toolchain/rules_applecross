@@ -3045,7 +3045,7 @@ fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
 /// 1 in the objects, with each run of constraints after the run of other
 /// objects that follows it, and each view's installed constraints in a run
 /// before its excluded ones (198 probes).
-fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&String) -> Option<String>, root_name: &str, view: Node) -> Result<Option<Value>, String> {
+fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&String) -> Option<String>, root_name: &str, view: Node) -> Result<Vec<Value>, String> {
     let withheld: Vec<String> = nib.withheld.iter().map(|o| o.name.clone().expect("named")).collect();
     let listed: Vec<(Option<&String>, Option<String>)> = objects
         .iter()
@@ -3100,7 +3100,39 @@ fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&Stri
         .map(view_name)
         .collect();
     let footer = view.has_tag_name("tableView").then(|| view.children().find(|c| c.is_element() && c.attribute("key") == Some("tableFooterView"))).flatten().and_then(|f| f.attribute("id")).map(view_name);
-    trait_storage_list(nib, root_name, &preorder, &ranks, &repeated, footer.as_deref())
+    // A xib's cells beside its view have lists of their own, after the
+    // view's, each its cell's the top-level object, its views in the
+    // document's order, and its content view's subviews' storages twice,
+    // as a visual effect view's content's (a corpus xib's two cells).
+    let all = nib.variations.take().unwrap_or_default();
+    let cells: Vec<Node> = if nib.xib {
+        view.document().descendants().filter(|d| d.has_tag_name("tableViewCell") && d.parent().is_some_and(|p| p.has_tag_name("objects"))).collect()
+    } else {
+        Vec::new()
+    };
+    let mut cell_lists = Vec::new();
+    let mut in_cells: Vec<String> = Vec::new();
+    for cell in cells {
+        let Some(content) = cell.children().find(|c| c.has_tag_name("tableViewCellContentView")) else { continue };
+        let mut order = vec![view_name(attr(cell, "id")?), view_name(attr(content, "id")?)];
+        order.extend(content.descendants().filter(in_tree).filter_map(|d| d.attribute("id")).map(view_name));
+        let repeated: Vec<String> = children(content, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter_map(|c| c.attribute("id")).map(view_name).collect();
+        let mine: Vec<Variation> = all.iter().filter(|v| order.contains(&v.view)).cloned().collect();
+        if nib.attribute_variations.iter().any(|a| order.contains(&a.view)) {
+            return fail("a size class variation of an attribute in a cell beside a xib's view is not supported by this ibtool");
+        }
+        in_cells.extend(order.iter().cloned());
+        if !mine.is_empty() {
+            cell_lists.push((order[0].clone(), order, repeated, mine));
+        }
+    }
+    nib.variations = Some(all.into_iter().filter(|v| !in_cells.contains(&v.view)).collect());
+    let mut lists: Vec<Value> = trait_storage_list(nib, root_name, &preorder, &ranks, &repeated, &footer.into_iter().collect::<Vec<_>>())?.into_iter().collect();
+    for (cell, order, repeated, mine) in cell_lists {
+        nib.variations = Some(mine);
+        lists.extend(trait_storage_list(nib, &cell, &order, &ranks, &repeated, &order)?);
+    }
+    Ok(lists)
 }
 
 /// The trait storage list of the root view `root`, if its views' default
@@ -3120,7 +3152,7 @@ fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&Stri
 /// in or out of their size classes). Where several views have variations,
 /// a record of two or more with one the device installs is refused (60
 /// probes of a root view's and a subview's, and a corpus storyboard).
-fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, repeated: &[String], footer: Option<&str>) -> Result<Option<Value>, String> {
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashMap<String, usize>, repeated: &[String], unsure: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
     if variations.is_empty() && attributes.is_empty() {
@@ -3236,16 +3268,17 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], ranks: &HashM
         Ok(Value::New(Object::new("_UIRelationshipTraitStorageRecord", vec![("UITraitCollection", traits), ("UIAddedObjects", added), ("UIRemovedObjects", removed)])))
     };
     for v in variations.into_iter().chain(again) {
-        // A table footer's constraints' ranks are established only where
-        // their decimal strings and numbers agree (50 probes of a header's
-        // and footer's variations: its ranks crossing ten differed once).
-        if footer == Some(v.view.as_str()) {
+        // A table footer's constraints' ranks, and those of a xib's cell
+        // beside its view, are established only where their decimal strings
+        // and numbers agree (100 probes of a header's and footer's
+        // variations, 40 of xib cells': crossing ten, three differed).
+        if unsure.contains(&v.view) {
             let crossing = |set: &[String]| {
                 let r: Vec<usize> = set.iter().filter_map(|c| ranks.get(c).copied()).collect();
                 r.iter().any(|&a| a < 10) && r.iter().any(|&b| b >= 10)
             };
             if crossing(&v.excluded) || v.classes.iter().any(|(_, a, r)| crossing(a) || crossing(r)) {
-                return fail("a table footer's size class record whose constraints' ranks cross ten is not supported by this ibtool");
+                return fail("a table footer's, or a xib's cell's, size class record whose constraints' ranks cross ten is not supported by this ibtool");
             }
         }
         // The view itself among the descendants first, but the root (a
@@ -8962,6 +8995,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         let guide = layout.is_some_and(|l| l.cell_guides.iter().any(|g| Some(g.as_str()) == r.attribute("id")));
                         let cell = table::xib_cell(&mut nib, module, *r, guide, vc_id)?;
                         scene.control_outlets.extend(cell.control_outlets);
+                        scene.view_outlets.extend(cell.outlets);
+                        scene.own_constraints.extend(cell.own_constraints);
                         scene.actions.extend(cell.actions);
                         roots.push((cell.names[0].clone(), cell.value, cell.first, cell.rest));
                         scene.subviews.extend(cell.names.iter().map(|n| (None, n.clone())));
@@ -9218,7 +9253,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
                 scene.own_constraints.iter().find(|c| &c.1 == name).map(|c| c.0.clone())
             };
-            let traits = encode_variations(&mut nib, &mut objects, holder, &root_name, view)?;
+            let lists = encode_variations(&mut nib, &mut objects, holder, &root_name, view)?;
             // An ARSCNView comes before the placeholders, top-level and in
             // the objects (a corpus storyboard, and as a SceneKit view it
             // doesn't: a probe).
@@ -9236,8 +9271,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 rename_references(&mut root, "upstream", "owner");
             }
             // A pre-iOS 8 xib's runtime nib has its idiom's variation alone.
-            if let Some(list) = traits.filter(|_| !idiom.is_some_and(|i| i.runtime)) {
-                let lists = nib.array("NSArray", vec![list]);
+            if !lists.is_empty() && !idiom.is_some_and(|i| i.runtime) {
+                let lists = nib.array("NSArray", lists);
                 root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
             }
             (root, upstream_used)
