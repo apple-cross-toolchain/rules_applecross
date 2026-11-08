@@ -947,7 +947,13 @@ with or without an extension, at the top or in a folder) are ignored
 compiling to nothing even when `--app-icon` names it, one probe) and,
 without a word, an image or icon whose file is missing (five probes:
 an icon set of only missing files compiles to nothing; one whose 1024 px
-image is missing but whose dark and tinted ones aren't is refused).
+image is missing but whose dark and tinted ones aren't is refused). An
+iPhone or iPad icon image of another size than its slot's (120x121 for
+40 pt @3x, say) is left out without a word too: the output is the same as
+without its entry (five probes: larger and smaller images, a size's only
+image, the 60 pt @3x image the iPhone XR's icon is made from, and the iPad
+bundle icon's; rules_apple's `app_icons_ios_with_bad_size`). Other idioms'
+are refused, as is a single-size icon's 1024 px image of another size.
 
 Refused: vector images (SVG, PDF) unless relaxed ([Vector
 images](#vector-images)), other properties, and image sets on other
