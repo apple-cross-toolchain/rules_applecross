@@ -1979,10 +1979,13 @@ A label's, plain view's, button's, text view's or control's (a switch or
 slider: three probes) `<accessibility>` is a
 `UIRuntimeAccessibilityConfiguration` in the nib's
 `UINibAccessibilityConfigurationsKey`, several views' (the root view's
-too, first: one probe) in the objects'
-order (siblings either way round, a container and its subview with its
-configuration before or after its subviews, a nested label after a
-sibling: six probes):
+too, first: one probe) in the order Xcode visits the views for actions
+(below): a storyboard's root view's subviews in document order, then from
+the last visited each one's own (a stack); a xib's in document order, each
+view before its subviews. That is the objects' order but where
+constraints pull views up the objects list, which doesn't move them here
+(six probes of siblings and containers, nine of pulled views, 100 random
+trees as storyboards and xibs, and a corpus storyboard):
 `UIAccessibileObject` (sic), then those given of `UIAccessibilityHint`,
 `UIAccessibilityIdentifier`, `UIAccessibilityLabel`, `UIAccessibilityTraits`
 (an `NSNumber` of UIAccessibilityTraits' bits: button 1, link 2, image 4,
@@ -1990,11 +1993,7 @@ static text 64, not enabled 256, header 65536, none 0) and
 `UIIsAccessibilityElement` (0 or 1); equal numbers are one object (14
 probes). In `Base.lproj` the hint and label are `NSLocalizableString`s
 keyed `<id>.accessibilityHint` and `<id>.accessibilityLabel`, as titles
-are; the identifier stays a string (one probe). Where constraints pull
-views up the objects list and only some configured views are under one
-of them, or they are under different ones, Xcode orders the
-configurations neither by the objects nor by depth (nine probes and a
-corpus storyboard): refused. Runtime attributes, switches (their frame pair) and accessibility
+are; the identifier stays a string (one probe). Runtime attributes, switches (their frame pair) and accessibility
 settings inside table headers, and accessibility settings inside cells, are
 refused, but for a prototype cell's own accessibility configuration (three
 probes, a corpus storyboard: it is the cell nib's, for the cell) when its

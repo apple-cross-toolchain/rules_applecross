@@ -9097,28 +9097,32 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
             }
             scene.pairs.sort_by_key(|p| listed(&p.0));
-            // Accessibility configurations go in the objects' order (twelve
-            // probes and corpus storyboards, views under one view
-            // constraints pull up the list among them); when only some are
-            // under such a view, or under different ones, Xcode orders them
-            // otherwise, as neither their order nor their depth says (nine
-            // probes and a corpus storyboard): refused.
-            let parent_of = |v: &String| scene.subviews.iter().find(|s| s.1 == *v).and_then(|s| s.0.clone());
-            let pulled_under = |v: &String| {
-                let mut at = Some(v.clone());
-                while let Some(x) = at {
-                    if pulled.contains(&x) || held_pulled.iter().any(|p| p.1 == x) {
-                        return Some(x);
-                    }
-                    at = parent_of(&x);
+            // The order Xcode visits the views, which orders actions with
+            // one selector and same-class views' outlets of one name: a
+            // storyboard's root view's subviews in document order, then,
+            // from the last visited, each one's own the same way (a stack);
+            // a xib's in document order, each view before its subviews
+            // (three probes, containers nested and not).
+            let mut visit: Vec<String> = Vec::new();
+            if xib {
+                for d in view.descendants().filter(|d| d.is_element() && d != &view && d.parent().is_some_and(|p| p.has_tag_name("subviews"))) {
+                    visit.push(view_name(attr(d, "id")?));
                 }
-                None
-            };
-            if scene.accessibility.windows(2).any(|w| pulled_under(&w[0].0) != pulled_under(&w[1].0)) {
-                return fail("accessibility configurations of views some of which constraints pull up the objects list are not supported by this ibtool");
+            } else {
+                let mut stack = vec![view];
+                while let Some(v) = stack.pop() {
+                    for s in children(v, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
+                        visit.push(view_name(attr(s, "id")?));
+                        stack.push(s);
+                    }
+                }
             }
-            let position = |name: &String| order.iter().position(|o| o == name).unwrap_or(usize::MAX);
-            scene.accessibility.sort_by_key(|a| position(&a.0));
+            // Accessibility configurations go in that order too, the root
+            // view's first (twelve probes and corpus storyboards, and nine
+            // of views constraints pull up the objects list, whose order
+            // that list doesn't give).
+            let visited_at = |name: &String| if *name == root_name { Some(0) } else { visit.iter().position(|v| v == name).map(|i| i + 1) };
+            scene.accessibility.sort_by_key(|a| visited_at(&a.0).unwrap_or(usize::MAX));
 
             // Outlets, `view` among them, then actions, each in byte order of
             // their names.
@@ -9148,26 +9152,6 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 let v = view.document().descendants().find(|d| d.is_element() && d.attribute("id") == Some(id))?;
                 Some(uikit_class(v.tag_name().name()))
             };
-            // The order Xcode visits the views, which orders actions with
-            // one selector and same-class views' outlets of one name: a
-            // storyboard's root view's subviews in document order, then,
-            // from the last visited, each one's own the same way (a stack);
-            // a xib's in document order, each view before its subviews
-            // (three probes, containers nested and not).
-            let mut visit: Vec<String> = Vec::new();
-            if xib {
-                for d in view.descendants().filter(|d| d.is_element() && d != &view && d.parent().is_some_and(|p| p.has_tag_name("subviews"))) {
-                    visit.push(view_name(attr(d, "id")?));
-                }
-            } else {
-                let mut stack = vec![view];
-                while let Some(v) = stack.pop() {
-                    for s in children(v, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
-                        visit.push(view_name(attr(s, "id")?));
-                        stack.push(s);
-                    }
-                }
-            }
             // Then, between views of one class, in the order Xcode visits
             // them, as actions with one selector (two of the corpus's).
             let visit_of = |source: &str| visit.iter().position(|v| v == source);
