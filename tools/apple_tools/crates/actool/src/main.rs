@@ -762,7 +762,7 @@ fn stack_icon(o: &Options, out_dir: &Path, platform: &str, scan: &Scan, outputs:
         platform: platform.into(),
     };
     let car_path = out_dir.join("Assets.car");
-    std::fs::write(&car_path, catalog.to_bytes()).map_err(|e| e.to_string())?;
+    std::fs::write(&car_path, catalog.to_bytes()?).map_err(|e| e.to_string())?;
     let mut outputs = std::mem::take(outputs);
     outputs.push(car_path);
     let entries = vec![("CFBundleIcons", Value::dict([("CFBundlePrimaryIcon", Value::string(stack.name.clone()))]))];
@@ -904,7 +904,7 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         return Err("this catalog's number of identifiers puts its bitmap keys in an order not established for this actool".into());
     }
     let car_path = out_dir.join("Assets.car");
-    std::fs::write(&car_path, catalog.to_bytes()).map_err(|e| e.to_string())?;
+    std::fs::write(&car_path, catalog.to_bytes()?).map_err(|e| e.to_string())?;
     outputs.push(car_path);
     outputs.sort();
 

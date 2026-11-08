@@ -94,7 +94,16 @@ impl Tree {
     /// holds the entries, four zero bytes, and then, when every key has the
     /// same length (which the header records), a copy of every key; keys
     /// of different lengths are recorded as length 0xffffffff, uncopied.
-    pub fn finish(&self, bom: &mut Bom, entries: &[(u32, u32, Vec<u8>)]) {
+    /// Entries that don't fit one page (Xcode's trees then have several,
+    /// not established here) are refused.
+    pub fn finish(&self, bom: &mut Bom, entries: &[(u32, u32, Vec<u8>)]) -> Result<(), String> {
+        if 12 + 8 * entries.len() + 4 > self.block_size as usize {
+            return Err(format!(
+                "a catalog whose Assets.car needs more than one {}-byte page for a tree ({} entries) is not supported by this actool",
+                self.block_size,
+                entries.len()
+            ));
+        }
         let fixed = entries.windows(2).all(|w| w[0].2.len() == w[1].2.len());
         let copied = !self.inline_keys && fixed;
         let key_length = if self.inline_keys {
@@ -131,5 +140,24 @@ impl Tree {
             }
         }
         bom.set(self.page, p);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tree's entries fill one page; one entry more is refused rather
+    /// than written past it (Xcode's trees then have several pages).
+    #[test]
+    fn a_tree_that_needs_two_pages_is_refused() {
+        let fits = (1024 - 16) / 8;
+        let entries = |n: usize| (0..n as u32).map(|i| (i, i, Vec::new())).collect::<Vec<_>>();
+        let mut bom = Bom::new();
+        let tree = Tree::reserve(&mut bom, 1024, true);
+        assert!(tree.finish(&mut bom, &entries(fits)).is_ok());
+        let error = tree.finish(&mut bom, &entries(fits + 1)).unwrap_err();
+        assert!(error.contains("more than one 1024-byte page"), "{error}");
     }
 }
