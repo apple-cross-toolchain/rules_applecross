@@ -623,17 +623,26 @@ filegroup(
 # with Apple clang passing here too:
 # - unknown-attributes: SDK macros (e.g. os/signpost.h) use Apple-only
 #   attributes such as stack_protector_ignore, reported where they expand.
+# - deprecated-attributes: upstream deprecates lifetime_capture_by(this),
+#   which libraries (e.g. abseil) still spell that way.
+# - ignored-attributes: an LLVM that knows stack_protector_ignore reports it
+#   ignored under -fstack-protector-all, also where os/trace_base.h's os_log
+#   macros expand.
 # - unknown-warning-option: Apple-only warning groups (e.g. objc-load-method)
 #   in #pragma clang diagnostic.
+# - unused-but-set-global: an upstream-only warning.
 # - mismatched-parameter-types: upstream also flags __kindof generic block
 #   parameters that Apple clang accepts.
 cc_args(
     name = "applecross_apple_clang_compat",
     actions = ["@rules_cc//cc/toolchains/actions:compile_actions"],
     args = [
+        "-Wno-error=deprecated-attributes",
+        "-Wno-error=ignored-attributes",
         "-Wno-error=mismatched-parameter-types",
         "-Wno-error=unknown-attributes",
         "-Wno-error=unknown-warning-option",
+        "-Wno-error=unused-but-set-global",
     ],
 )
 
