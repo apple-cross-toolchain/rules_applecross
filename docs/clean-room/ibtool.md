@@ -678,8 +678,13 @@ other values of the attributes these use, is refused. Observed:
   corpus storyboards, a prototype cell's among them, whose nib then has
   its trait storage list as a xib's cell's does. Variations for size
   classes are refused but for those and attributes' (below), as are
-  variations anywhere but in a plain controller's view nib, a xib's cell's
-  nib or a prototype cell's. There the cell is the trait storage list's top-level object,
+  variations anywhere but in a plain controller's view nib, a table view
+  controller's table's header and footer views, a xib's cell's nib or a
+  prototype cell's. A table's are as a plain controller's, the table the
+  top-level object, but its footer's storage comes before its header's, as
+  the table lists them, and a footer's record whose constraints' ranks
+  cross ten is refused (100 probes of a header's and a footer's
+  variations, and a corpus storyboard's headers). There the cell is the trait storage list's top-level object,
   and each view's excluded constraints are encoded where the objects list
   them, in their places among its others (a corpus xib and a probe);
   several excluded from one view are refused. A visual effect view's content view counts among the views in
@@ -1798,7 +1803,11 @@ A table's header and footer views (`<view key="tableHeaderView">`,
 table's `UITableHeaderView` and `UITableFooterView`, after
 `UIInsetsContentViewsToSafeArea`. Xcode lays them out itself: the header
 view at the top, as wide as the table is laid out, whatever its frame
-says; the footer view keeps its x, width and height and is right under the
+says, an older document's frame inset (`<frame key="frameInset"
+height="125" maxX="225"/>`, with or without `minX` and `minY`) giving it
+only its height (six probes and a corpus storyboard); the footer view
+keeps its x, width and height (a frame inset with `maxX` is refused: one
+probe has it take the table's width less both insets) and is right under the
 header view (or at the top) in a plain table, or in a grouped or inset
 grouped one under the header view (35 points without one) and a section
 footer height (17 when automatic). Rows, section headers and estimates
