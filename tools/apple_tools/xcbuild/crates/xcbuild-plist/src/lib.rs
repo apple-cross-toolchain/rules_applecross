@@ -110,15 +110,52 @@ pub fn identify_format(data: &[u8]) -> Option<PlistFormat> {
         return Some(PlistFormat::Json);
     }
 
-    // ASCII/OpenStep format
-    if !trimmed.is_empty() {
-        let first = trimmed[0];
-        if first == b'"' || first.is_ascii_alphanumeric() || first == b'(' {
-            return Some(PlistFormat::Ascii);
-        }
+    // ASCII/OpenStep format, which may start with comments (.strings files do).
+    let trimmed = skip_comments(trimmed);
+    if trimmed.is_empty() {
+        return if trimmed.len() < data.len() { Some(PlistFormat::Ascii) } else { None };
+    }
+    let first = trimmed[0];
+    if first == b'"'
+        || first == b'\''
+        || first == b'('
+        || first == b'<'
+        || first.is_ascii_alphanumeric()
+        || b"_$/:.-".contains(&first)
+    {
+        return Some(PlistFormat::Ascii);
     }
 
     None
+}
+
+fn skip_comments(mut data: &[u8]) -> &[u8] {
+    loop {
+        if data.starts_with(b"//") {
+            let end = data.iter().position(|&c| c == b'\n').map_or(data.len(), |i| i + 1);
+            data = &data[end..];
+        } else if data.starts_with(b"/*") {
+            let end = data[2..].windows(2).position(|w| w == b"*/").map_or(data.len(), |i| i + 4);
+            data = &data[end..];
+        } else {
+            return data;
+        }
+        data = skip_whitespace_and_bom(data);
+    }
+}
+
+/// UTF-16 text (with a byte order mark), as .strings files often are, as UTF-8.
+fn utf16_to_utf8(data: &[u8]) -> Option<Vec<u8>> {
+    let little = match data {
+        [0xFF, 0xFE, ..] => true,
+        [0xFE, 0xFF, ..] => false,
+        _ => return None,
+    };
+    let units: Vec<u16> = data[2..]
+        .chunks_exact(2)
+        .map(|c| if little { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) })
+        .collect();
+    String::from_utf16(&units).ok().map(String::into_bytes)
 }
 
 fn skip_whitespace_and_bom(data: &[u8]) -> &[u8] {
@@ -134,6 +171,9 @@ fn skip_whitespace_and_bom(data: &[u8]) -> &[u8] {
 
 /// Deserialize plist data in any supported format.
 pub fn deserialize(data: &[u8]) -> Result<(Value, PlistFormat), PlistError> {
+    if let Some(utf8) = utf16_to_utf8(data) {
+        return deserialize(&utf8);
+    }
     let format = identify_format(data).ok_or(PlistError::UnknownFormat)?;
     let value = deserialize_with_format(data, format)?;
     Ok((value, format))
@@ -147,6 +187,7 @@ pub fn deserialize_with_format(data: &[u8], format: PlistFormat) -> Result<Value
             Ok(value)
         }
         PlistFormat::Ascii => {
+            let data = data.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(data);
             let text =
                 std::str::from_utf8(data).map_err(|e| PlistError::AsciiParse(e.to_string()))?;
             ascii::parse(text).map_err(|e| PlistError::AsciiParse(e.to_string()))
@@ -655,6 +696,23 @@ pub fn create_value(obj_type: ObjectType, value_str: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_strings_file_with_leading_comment() {
+        let (value, format) = deserialize(b"/* c */\n\"a\" = \"b\";\n").unwrap();
+        assert_eq!(format, PlistFormat::Ascii);
+        assert_eq!(value.as_dictionary().unwrap().get("a"), Some(&Value::String("b".into())));
+    }
+
+    #[test]
+    fn test_utf16_strings_file() {
+        let mut data = vec![0xFF, 0xFE];
+        for unit in "\"a\" = \"b\";".encode_utf16() {
+            data.extend_from_slice(&unit.to_le_bytes());
+        }
+        let (value, _) = deserialize(&data).unwrap();
+        assert_eq!(value.as_dictionary().unwrap().get("a"), Some(&Value::String("b".into())));
+    }
 
     #[test]
     fn test_identify_xml() {
