@@ -36,6 +36,9 @@ struct Item {
     dimension2: u16,
     filename: String,
     image: image::Rgba,
+    /// Its 16-bit rendition's pixels, for a wide-gamut image's colours
+    /// outside sRGB (image::decode_png_extended).
+    extended: Option<Vec<u16>>,
 }
 
 /// A device's entry in the partial Info.plist's icons: the bundle's flat
@@ -248,22 +251,32 @@ fn compile_full(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: b
             return Err(format!("{}: two images for one size and scale", s.filename));
         }
         seen.push((s.idiom, s.subtype, s.size.to_bits(), s.scale));
-        let img = match &s.image {
-            Some(img) => img.clone(),
+        let (img, extended) = match &s.image {
+            Some(img) => (img.clone(), None),
             None => {
                 let bytes = std::fs::read(&s.file).map_err(|e| format!("{}: {e}", s.file.display()))?;
-                image::decode_png_srgb(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?
+                image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", s.file.display()))?
             }
         };
         let px = (s.size * s.scale as f64).round() as usize;
         if img.width != px || img.height != px {
             return Err(format!("{}: is {}x{} but should be {px}x{px}", s.file.display(), img.width, img.height));
         }
-        items.push(Item { scale: s.scale, idiom: idiom_value(s.idiom), subtype: s.subtype, dimension2: rank(s.size), filename: s.filename.clone(), image: img });
+        items.push(Item { scale: s.scale, idiom: idiom_value(s.idiom), subtype: s.subtype, dimension2: rank(s.size), filename: s.filename.clone(), image: img, extended });
     }
     if let Some(s) = xr {
-        let img = items.iter().find(|i| i.filename == s.filename && i.scale == 3 && i.idiom == car::IDIOM_PHONE).unwrap().image.clone();
-        items.push(Item { scale: 2, idiom: car::IDIOM_PHONE, subtype: 1792, dimension2: rank(90.0), filename: s.filename.clone(), image: img });
+        let from = items.iter().find(|i| i.filename == s.filename && i.scale == 3 && i.idiom == car::IDIOM_PHONE).unwrap();
+        let (image, extended) = (from.image.clone(), from.extended.clone());
+        items.push(Item { scale: 2, idiom: car::IDIOM_PHONE, subtype: 1792, dimension2: rank(90.0), filename: s.filename.clone(), image, extended });
+    }
+    // A wide-gamut icon's colours outside sRGB add a 16-bit rendition (gamut
+    // 1) beside each 8-bit one, in atlases of their own laid out as the
+    // 8-bit ones (a probe of all iOS sizes, a corpus icon set). A set mixing
+    // them with sRGB icons, and grey, macOS, run-length coded or deferred
+    // ones, aren't established.
+    let wide = items.iter().any(|i| i.extended.is_some());
+    if wide && (items.iter().any(|i| i.extended.is_none()) || mac || icns && items.iter().any(|i| i.image.is_gray())) {
+        return Err(format!("{name}: wide-gamut icons beside sRGB, grey or macOS ones are not supported by this actool"));
     }
 
     // Xcode stores grey icons as GA8: their atlases are named `S.O.1`, and
@@ -325,6 +338,9 @@ fn compile_full(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: b
         // Packed with image sets' images: those under the cap go to them;
         // larger ones are stored on their own, as here.
         if !mac && subtype == 0 && defer.contains(&(scale, idiom)) {
+            if wide {
+                return Err(format!("{name}: wide-gamut icons packed with image sets are not supported by this actool"));
+            }
             let (big, small): (Vec<&Item>, Vec<&Item>) = group.into_iter().partition(|i| i.image.width * i.image.height > cap);
             for i in small {
                 if !opaque_image(&i.image) || gray {
@@ -407,6 +423,20 @@ fn compile_full(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: b
                 car::packed_csi(&atlas_name, aw, ah, scale, &pixels, atlas_version)
             };
             renditions.push(Rendition { attrs: key.clone(), csi });
+            if wide {
+                let mut halves = vec![0u16; 4 * (aw * ah) as usize];
+                let mut key16 = key.clone();
+                key16.push((car::ATTR_GAMUT, 1));
+                for (i, (x, y)) in atlas.iter().zip(&positions) {
+                    let (w, h) = (i.image.width as u32, i.image.height as u32);
+                    place_n(&mut halves, aw as usize, 4, ah, i.extended.as_ref().expect("a wide icon"), *x, *y, w, h);
+                    let mut attrs = image_attrs(i);
+                    attrs.push((car::ATTR_GAMUT, 1));
+                    renditions.push(Rendition { attrs, csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, 0, car::Pixels::Half, &key16, None) });
+                }
+                let name16 = format!("ZZZZPackedAsset-{scale}.{}.0-gamut1", opaque as u8);
+                renditions.push(Rendition { attrs: key16, csi: car::packed16_csi(&name16, aw, ah, scale, &halves, atlas_version) });
+            }
         }
         standalone.sort_by_key(|i| i.dimension2);
         for i in standalone {
@@ -427,6 +457,14 @@ fn compile_full(name: &str, identifier: u16, slots: &[Slot], phone: bool, pad: b
                 car::icon_image_csi(&i.filename, w, h, scale, &i.image.premultiplied_bgra(), image_version)
             };
             renditions.push(Rendition { attrs: image_attrs(i), csi });
+            if let Some(halves) = &i.extended {
+                if w < 40 {
+                    return Err(format!("{}: a wide-gamut icon under 40 pixels stored on its own is not supported by this actool", i.filename));
+                }
+                let mut attrs = image_attrs(i);
+                attrs.push((car::ATTR_GAMUT, 1));
+                renditions.push(Rendition { attrs, csi: car::icon_image16_csi(&i.filename, w, h, scale, halves, car::MlecVersions::opacity(opaque_image(&i.image))) });
+            }
         }
     }
 

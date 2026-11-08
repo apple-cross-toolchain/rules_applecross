@@ -524,6 +524,47 @@ pub fn icon_image_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u
     csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format: b"BGRA", color_space: 1, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
 }
 
+/// An icon's 16-bit rendition (a wide-gamut image's, gamut 1): `halves`
+/// premultiplied extended-sRGB half floats, RGBA, top row first.
+pub fn icon_image16_csi(name: &str, width: u32, height: u32, scale: u32, halves: &[u16], versions: MlecVersions) -> Vec<u8> {
+    let row = Pixels::Half.row(width, false) as usize;
+    let t = icon_image_tlvs(width, height, row);
+    let rows = half_rows(halves, width as usize, height as usize, row);
+    let payload = lzfse_bitmap(&rows, row, height as usize, versions);
+    let (pixel_format, color_space) = Pixels::Half.format();
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_ICON_IMAGE, name }, &t, &payload)
+}
+
+/// An icon atlas's 16-bit counterpart (gamut 1): `halves` its pixels, as
+/// [`icon_image16_csi`]'s, rows bottom-up as the 8-bit atlas's.
+pub fn packed16_csi(name: &str, width: u32, height: u32, scale: u32, halves: &[u16], versions: MlecVersions) -> Vec<u8> {
+    let row = Pixels::Half.row(width, false) as usize;
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, 0, 0] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    tlv(&mut t, 0x3ef, &(row as u32).to_le_bytes());
+    let rows = half_rows(halves, width as usize, height as usize, row);
+    let payload = lzfse_bitmap(&rows, row, height as usize, versions);
+    let (pixel_format, color_space) = Pixels::Half.format();
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_PACKED_IMAGE, name }, &t, &payload)
+}
+
+/// Half-float pixels as little-endian rows of `row` bytes.
+fn half_rows(halves: &[u16], width: usize, height: usize, row: usize) -> Vec<u8> {
+    let mut out = vec![0u8; row * height];
+    for y in 0..height {
+        for (i, h) in halves[y * width * 4..(y + 1) * width * 4].iter().enumerate() {
+            out[y * row + 2 * i..y * row + 2 * i + 2].copy_from_slice(&h.to_le_bytes());
+        }
+    }
+    out
+}
+
 /// An iOS icon under 40 pixels wide, its bitmap run-length coded.
 pub fn icon_image_rle_csi(name: &str, width: u32, height: u32, scale: u32, bgra: &[u8], opaque: bool) -> Vec<u8> {
     let t = icon_image_tlvs(width, height, stride(width as usize));

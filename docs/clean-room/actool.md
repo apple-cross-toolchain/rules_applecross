@@ -757,13 +757,27 @@ A second rendition of the image, keyed with display gamut (attribute 24)
 27.0: single images (tiny to 1000x700, opaque and
 translucent, Display P3, Adobe RGB, ROMM, ITU-2020, DCI-P3, ACEScg and
 display profiles) and atlases (both gamuts, translucent and opaque, two
-8-bit atlases with one 16-bit). App icons and image stacks that would need
-the rendition are refused, as are macOS catalogs (their key format isn't
+8-bit atlases with one 16-bit). Image stacks that would need the rendition
+are refused, as are macOS catalogs (their key format isn't
 established), images of more than 4 MiB as BGRA, and two 16-bit atlases'
 order, which wasn't compared byte for byte. Images whose rows' predictor
 ties (1 against 2 or 3 with identical residuals) are refused as at 8 bits;
 Xcode breaks those either way (176 such rows in the probes), by a rule not
 established.
+
+An iOS app icon set's wide-gamut icons get the rendition too, beside each
+8-bit one, keyed with gamut 1: an atlas of their own (`ZZZZPackedAsset-
+<scale>.<opaque>.0-gamut1`) for each 8-bit atlas, laid out the same and
+linked the same, and a 16-bit icon image for each icon stored on its own,
+the 1024 pt App Store icon among them. Both are stored as the 8-bit icons
+are, the half floats in rows of eight bytes a pixel rounded up to 32,
+LZFSE-compressed in one stream or chunks as an 8-bit icon's bytes would
+be, not as `dmp2`. The multi-size entries aren't repeated. Observed with
+every iOS size, opaque and translucent, from Display P3 and from a profile
+of its colorants and curves alone, and a corpus icon set. A set mixing
+wide-gamut icons with sRGB, grey or macOS ones, icons packed with image
+sets' images, and one stored on its own under 40 pixels (run-length
+coded at 8 bits) are refused.
 
 ### Conversion
 
