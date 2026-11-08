@@ -1,0 +1,4 @@
+before-ios8-font-variation~ipad.nib/objects-8.0+.nib ddf2176cb75d66c487127f510fd937003fc7ccab146b9058a1b602fbcdea54cb
+before-ios8-font-variation~ipad.nib/runtime.nib d63fcf63d2d75a585c3a563bf400b3402df703eb910e108422cc8a68370e624a
+before-ios8-font-variation~iphone.nib/objects-8.0+.nib 569f39a3ccda42316fc715af6f09888da77f2074edec50c8cec5b0b573fb4264
+before-ios8-font-variation~iphone.nib/runtime.nib e1087ca3950b411caffff4406c0743775ec0e6fd3d465386b829db852bf06b59

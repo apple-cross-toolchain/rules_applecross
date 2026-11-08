@@ -24,10 +24,22 @@ def compile_xib(tool, xib, out, env=None):
     return r.returncode, r.stdout + r.stderr
 
 
-def digest(path):
-    """The nib's SHA-256, or None where there's no file (Xcode compiles
-    these xibs to a single nib)."""
-    if not os.path.isfile(path):
-        return None
+def sha256(path):
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
+
+
+def digest(path):
+    """The nib's SHA-256; for a xib deploying before iOS 8, compiled into a
+    nib directory for each idiom beside it (`X~iphone.nib/runtime.nib`,
+    ...), a line for each of their files, its path and SHA-256, sorted.
+    None where there's neither."""
+    if os.path.isfile(path):
+        return sha256(path)
+    parent = os.path.dirname(path)
+    lines = []
+    for root, _, files in os.walk(parent):
+        for name in files:
+            full = os.path.join(root, name)
+            lines.append("%s %s" % (os.path.relpath(full, parent), sha256(full)))
+    return "\n".join(sorted(lines)) or None

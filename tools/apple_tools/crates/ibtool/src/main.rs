@@ -40,6 +40,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let mut inputs = Vec::new();
     let mut minimum_deployment_target: Option<String> = None;
     let mut module: Option<String> = None;
+    // The target devices, iPad or not, in the order given.
+    let mut devices: Vec<bool> = Vec::new();
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut value = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
@@ -49,7 +51,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
             "--link" => link_dir = Some(PathBuf::from(value(&a)?)),
             "--minimum-deployment-target" => minimum_deployment_target = Some(value(&a)?),
             "--module" => module = Some(value(&a)?),
-            "--output-format" | "--target-device" => {
+            "--target-device" => {
+                let device = value(&a)?;
+                let pad = device == "ipad";
+                if !devices.contains(&pad) {
+                    devices.push(pad);
+                }
+            }
+            "--output-format" => {
                 value(&a)?;
             }
             "--errors" | "--warnings" | "--notices" | "--auto-activate-custom-fonts" => {}
@@ -91,6 +100,23 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         let xml = std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
         let localizable = input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"));
+        // Deploying before iOS 8: a nib directory for each idiom, beside
+        // the nib asked for (`X~iphone.nib/runtime.nib`, ...).
+        match xib::compile_idioms(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable, &devices) {
+            Ok(None) => {}
+            Ok(Some(idioms)) => {
+                let stem = out.file_stem().ok_or("--compile needs a file name")?.to_string_lossy().into_owned();
+                for (suffix, files) in idioms {
+                    let dir = out.with_file_name(format!("{stem}{suffix}.nib"));
+                    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                    for (name, data) in files {
+                        std::fs::write(dir.join(name), data).map_err(|e| format!("{}: {e}", dir.display()))?;
+                    }
+                }
+                return Ok(());
+            }
+            Err(e) => return skip(format!("{}: {e}", input.display())),
+        }
         return match xib::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable) {
             Ok(nib) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
             Err(e) => skip(format!("{}: {e}", input.display())),

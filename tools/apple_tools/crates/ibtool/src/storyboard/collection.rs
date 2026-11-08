@@ -146,7 +146,7 @@ fn collection_values(
     // is its own (with colorMatched).
     if let Some(c) = child(cv, "color", "backgroundColor") {
         let background = if nib.color_matched && opaque_grey_white(c)? {
-            nib.system_color("systemBackgroundColor", &SystemColor::Gray([1.0, 1.0]))
+            nib.system_color("systemBackgroundColor", &SystemColor::Gray([1.0, 1.0]))?
         } else {
             color(nib, c)?
         };
