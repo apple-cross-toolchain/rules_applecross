@@ -135,6 +135,8 @@ struct Collected {
     laid_out: HashMap<String, Frame>,
     /// Views' accessibility identifiers: (view id, identifier).
     accessibility: Vec<(String, String)>,
+    /// Stack views, whose early decoding connectors lead the connections.
+    stacks: Vec<String>,
 }
 
 /// An autoresizing mask's bits, as NSView's: flexible left margin 1, width
@@ -277,7 +279,10 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         c.accessibility.push((attr(n, "id")?.to_string(), attr(a, "identifier")?.to_string()));
     }
     let mut values = Vec::new();
-    values.push(("NSNextResponder", next_responder.map_or(Value::Nil, |r| reference(r.to_string()))));
+    // A view's next responder and superview are conditional: encoded
+    // where the view is reached first (a stack view, through its connector),
+    // they are defined later (probes).
+    values.push(("NSNextResponder", next_responder.map_or(Value::Nil, |r| Value::Conditional(r.to_string()))));
     values.push(("NSNibTouchBar", Value::Nil));
     // Hidden, the top bit (a probe's button, scrollers).
     let hidden = if n.attribute("hidden") == Some("YES") { 0x8000_0000_u32 as i32 as i64 } else { 0 };
@@ -303,6 +308,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "wkWebView" => web_view(nib, c, s, module, name)?,
                 "collectionView" => collection_view(nib, c, s, module, name)?,
                 "slider" => slider(nib, c, s, module, name)?,
+                "stackView" => stack_view(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -321,7 +327,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         values.push(("NSFrame", nib.string(&format!("{{{{{}, {}}}, {{{}, {}}}}}", g(f.x), g(f.y), g(f.w), g(f.h)))));
     }
     if next_responder.is_some() {
-        values.push(("NSSuperview", reference(parent.to_string())));
+        values.push(("NSSuperview", Value::Conditional(parent.to_string())));
     }
     if n.attribute("wantsLayer").is_some() {
         values.push(("NSViewIsLayerTreeHost", Value::Bool(true)));
@@ -330,7 +336,9 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     // A view controller's view leaves it out: the controller sizes it (a
     // probe, a corpus storyboard).
     let controller_view = n.attribute("key") == Some("view") && n.parent_element().is_some_and(|p| p.has_tag_name("viewController"));
-    if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id)) && !controller_view {
+    // A stack view's arranged views are constrained by it (a probe).
+    let arranged = n.parent_element().and_then(|p| p.parent_element()).is_some_and(|g| g.has_tag_name("stackView"));
+    if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id) || arranged) && !controller_view {
         values.push(("NSDoNotTranslateAutoresizingMask", Value::Bool(true)));
     }
     // Its constraints follow its subviews' in the objects' list.
@@ -1422,9 +1430,17 @@ fn connections(nib: &mut Nib, doc: &Document, sources: &[String], first_responde
         for id in &sorted {
             let id = *id;
             let source = by_id.get(id).ok_or("a connection's source")?;
+            // One source's outlets by their labels as bytes (four probes).
+            let mut items: Vec<Node> = Vec::new();
             for list in children(*source, "connections") {
                 only_children(list, &["outlet", "action"])?;
-                for o in list.children().filter(|c| c.has_tag_name(kind)) {
+                items.extend(list.children().filter(|c| c.has_tag_name(kind)));
+            }
+            if kind == "outlet" {
+                items.sort_by_key(|o| o.attribute("property").unwrap_or_default().as_bytes().to_vec());
+            }
+            {
+                for o in items {
                     let connector = if o.has_tag_name("outlet") {
                         only_attributes(o, &[("property", None), ("destination", None), ("id", None)])?;
                         Object::new(
@@ -1476,7 +1492,14 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
         parents.push(reference(parent.clone()));
         keys.push(c.definitions.remove(object).unwrap_or_else(|| reference(object.clone())));
     }
+    // A stack view's connector asking to be decoded early, first and by the
+    // stack's id, without an object id of its own (three probes).
     let mut connection_values = Vec::new();
+    c.stacks.sort();
+    for id in &c.stacks {
+        let label = nib.string("Encoding NSStackView requires being decoded before other connections with an early decoding order priority of 999990.");
+        connection_values.push(Value::New(Object::new("NSNibConnector", vec![("NSSource", reference(object_name(id))), ("NSLabel", label)])));
+    }
     for (name, value) in connections {
         oids.push(reference(name));
         connection_values.push(value);
@@ -1565,6 +1588,7 @@ fn new_collected(sources: Vec<String>) -> Collected {
         at_origin: Vec::new(),
         laid_out: HashMap::new(),
         accessibility: Vec::new(),
+        stacks: Vec::new(),
     }
 }
 
@@ -3848,6 +3872,153 @@ fn slider(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     values.push(("NSControlWritingDirection", Value::Int(-1)));
     values.push(("NSControlSendActionMask", Value::Int(if has("continuous") { 70 } else { 4 })));
     Ok(Value::New(Object::new("NSSlider", values).named(name)))
+}
+
+/// A stack view with a flat hierarchy (about 20 probes): its subviews are
+/// its arranged views; then its orientation, alignments (horizontal: top 3
+/// and 1, centerY 10 and 3, bottom 4 and 4, firstBaseline 12 and 2;
+/// vertical: leading 5 and 1, centerX 9 and 3, trailing 6 and 4), clipping
+/// resistance, hugging, spacing, distribution (fill 0 to equalCentering 4),
+/// edge insets, a container holding its arranged views, and whether it
+/// detaches hidden views. Custom spacing isn't archived (two probes);
+/// visibility priorities other than 1000 aren't established.
+fn stack_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("userLabel", None),
+            ("distribution", None),
+            ("orientation", None),
+            ("alignment", None),
+            ("spacing", None),
+            ("horizontalStackHuggingPriority", None),
+            ("verticalStackHuggingPriority", None),
+            ("horizontalClippingResistancePriority", None),
+            ("verticalClippingResistancePriority", None),
+            ("detachesHiddenViews", Some("YES")),
+            ("horizontalHuggingPriority", None),
+            ("verticalHuggingPriority", None),
+            ("horizontalCompressionResistancePriority", None),
+            ("verticalCompressionResistancePriority", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+        ],
+    )?;
+    only_children(
+        n,
+        &[
+            "rect",
+            "autoresizingMask",
+            "subviews",
+            "visibilityPriorities",
+            "customSpacing",
+            "edgeInsets",
+            "constraints",
+            "accessibility",
+        ],
+    )?;
+    for v in children(n, "visibilityPriorities").flat_map(|l| l.children().filter(|c| c.is_element())) {
+        if v.attribute("value") != Some("1000") {
+            return fail("a stack view's visibility priority other than 1000 is not supported by this ibtool");
+        }
+    }
+    // It lays its views out, so only relax_ibtool_layout compiles it.
+    if !layout_relaxed() {
+        return fail("a stack view lays its views out as Xcode compiles, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
+    }
+    let id = attr(n, "id")?;
+    let name = object_name(id);
+    c.parents.push((name.clone(), parent.to_string()));
+    c.stacks.push(id.to_string());
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
+    let horizontal = match n.attribute("orientation") {
+        Some("horizontal") => true,
+        Some("vertical") => false,
+        other => return fail(format!("a stack view's orientation {} is not supported by this ibtool", other.unwrap_or("default"))),
+    };
+    let (alignment, secondary) = match (horizontal, n.attribute("alignment")) {
+        (true, Some("top")) => (3, 1),
+        (true, Some("centerY")) => (10, 3),
+        (true, Some("bottom")) => (4, 4),
+        (true, Some("firstBaseline")) => (12, 2),
+        (false, Some("leading")) => (5, 1),
+        (false, Some("centerX")) => (9, 3),
+        (false, Some("trailing")) => (6, 4),
+        (_, other) => return fail(format!("a stack view's alignment {} is not supported by this ibtool", other.unwrap_or("default"))),
+    };
+    let distribution = match n.attribute("distribution") {
+        Some("fill") => 0,
+        Some("fillEqually") => 1,
+        Some("fillProportionally") => 2,
+        Some("equalSpacing") => 3,
+        Some("equalCentering") => 4,
+        other => return fail(format!("a stack view's distribution {} is not supported by this ibtool", other.unwrap_or("default"))),
+    };
+    let priority = |a: &str, default: Option<&str>| -> Result<f64, String> { number(n.attribute(a).or(default).ok_or_else(|| format!("a stack view without {a} is not supported by this ibtool"))?) };
+    let priority_f = |a: &str, default: Option<&str>| -> Result<f32, String> { Ok(priority(a, default)? as f32) };
+    values.push(("NSStackViewOrientation", Value::Int(if horizontal { 0 } else { 1 })));
+    values.push(("NSStackViewSecondaryAlignment", Value::Int(secondary)));
+    values.push(("NSStackViewAlignment", Value::Int(alignment)));
+    values.push(("NSStackViewVerticalClippingResistance", Value::Float(priority_f("verticalClippingResistancePriority", Some("1000"))?)));
+    values.push((
+        "NSStackViewHorizontalClippingResistance",
+        Value::Float(priority_f("horizontalClippingResistancePriority", Some("1000"))?),
+    ));
+    values.push(("NSStackViewVerticalHugging", Value::Float(priority_f("verticalStackHuggingPriority", None)?)));
+    values.push(("NSStackViewHorizontalHugging", Value::Float(priority_f("horizontalStackHuggingPriority", None)?)));
+    // Its numbers as floats (a probe).
+    values.push((
+        "NSStackViewSpacing",
+        Value::Float(number(n.attribute("spacing").ok_or("a stack view without spacing is not supported by this ibtool")?)? as f32),
+    ));
+    if distribution == 3 {
+        values.push(("NSStackViewHasEqualSpacing", Value::Bool(true)));
+    }
+    values.push(("NSStackViewdistribution", Value::Int(distribution)));
+    let insets = child(n, "edgeInsets", "edgeInsets");
+    if let Some(i) = insets {
+        only_attributes(i, &[("key", None), ("left", None), ("right", None), ("top", None), ("bottom", None)])?;
+    }
+    for (key, side) in [
+        ("NSStackViewEdgeInsets.top", "top"),
+        ("NSStackViewEdgeInsets.left", "left"),
+        ("NSStackViewEdgeInsets.right", "right"),
+        ("NSStackViewEdgeInsets.bottom", "bottom"),
+    ] {
+        let v = match insets.and_then(|i| i.attribute(side)) {
+            Some(v) => number(v)?,
+            None => 0.0,
+        };
+        values.push((key, Value::Float(v as f32)));
+    }
+    let arranged: Vec<Value> = children(n, "subviews")
+        .flat_map(|s| s.children().filter(|c| c.is_element()))
+        .map(|v| Ok(reference(object_name(attr(v, "id")?))))
+        .collect::<Result<_, String>>()?;
+    let size = nib.string("{0, 0}");
+    let container = Object::new(
+        "NSStackViewContainer",
+        vec![
+            ("NSNextResponder", Value::Nil),
+            ("NSNibTouchBar", Value::Nil),
+            ("NSvFlags", Value::Int(256)),
+            ("NSFrameSize", size),
+            ("NSViewWantsBestResolutionOpenGLSurface", Value::Bool(true)),
+            ("NSDoNotTranslateAutoresizingMask", Value::Bool(true)),
+            ("IBNSSafeAreaLayoutGuide", Value::Nil),
+            ("IBNSLayoutMarginsGuide", Value::Nil),
+            ("IBNSClipsToBounds", Value::Int(0)),
+            ("NSStackViewContainerStackView", reference(name.clone())),
+            ("NSStackViewContainerViewToCustomAfterSpaceMap", Value::Nil),
+            ("NSStackViewContainerVisibilityPriorities", Value::Nil),
+            ("NSStackViewContainerNonDroppedViews", nib.array("NSMutableArray", arranged)),
+        ],
+    );
+    values.push(("NSStackViewBeginningContainer", Value::New(container)));
+    values.push(("NSStackViewDetachesHiddenViews", Value::Bool(n.attribute("detachesHiddenViews").is_some())));
+    values.push(("NSStackViewHasFlatViewHierarchy", Value::Bool(true)));
+    Ok(Value::New(Object::new("NSStackView", values).named(name)))
 }
 
 /// A SceneKit view as Xcode's game templates make it: a view, not looping,
