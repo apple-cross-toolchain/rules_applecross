@@ -104,16 +104,28 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
         // an error, which fails rules_apple's build. It reports it whatever
         // the images' idioms and appearances for iOS, macOS and tvOS (369 of
         // 369 sets of the holdouts); for watchOS and visionOS only for some,
-        // not established: refused for every platform.
+        // not established: refused for every platform. For iOS and tvOS an
+        // iPad or TV image at 3x and a vision one at 1x don't count (80
+        // random sets on each, with and without appearances, where they
+        // decided it; other idioms' other scales count, as before).
         let bitmaps: Vec<&serde_json::Value> = listed.iter().filter(present).collect();
-        if bitmaps.iter().any(|e| !e["scale"].is_string()) && bitmaps.iter().any(|e| e["scale"].is_string()) {
+        let ios_or_tv = own.is_none() || platform == "atv";
+        let counts = |e: &&serde_json::Value| {
+            let exempt = (e["scale"] == "3x" && (e["idiom"] == "ipad" || e["idiom"] == "tv")) || (e["scale"] == "1x" && e["idiom"] == "vision");
+            e["scale"].is_string() && !(ios_or_tv && exempt)
+        };
+        if bitmaps.iter().any(|e| !e["scale"].is_string()) && bitmaps.iter().any(counts) {
             return Err(format!("{}: error: Image set has a child with bitmap content and the \"Any\" scale. The image set also has children with specific scales and content. Please remove the content with specific scales or change the content of the \"Any\" scale to vector content.", dir.display()));
         }
         // Left out: images at 3x but for iOS (any idiom; five probes), what
         // crate::colorset::own_leaves_out leaves out, and watchOS's and
         // visionOS's own images at 1x (one without a scale is kept; eight).
+        // For iOS, iPad images at 3x and CarPlay ones at 1x, scales those
+        // devices don't have (a probe of every idiom and scale against the
+        // set without it, and eleven random sets).
         let left_out = |e: &serde_json::Value| {
             (own.is_some() && e["scale"] == "3x")
+                || (own.is_none() && ((e["idiom"] == "ipad" && e["scale"] == "3x") || (e["idiom"] == "car" && e["scale"] == "1x")))
                 || crate::colorset::own_leaves_out(platform, e)
                 || (own.is_some_and(|(name, _)| ["watch", "vision"].contains(&name) && e["idiom"] == name) && e["scale"] == "1x")
         };
@@ -155,7 +167,9 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
                 (Some("iphone"), None) => 1,
                 (Some("ipad"), None) => 2,
                 (Some("car"), None) => 4,
-                (Some("watch" | "mac" | "tv"), None) => continue,
+                // Other platforms' images, visionOS's too (seven catalogs, the
+                // same without them).
+                (Some("watch" | "mac" | "tv" | "vision"), None) => continue,
                 _ => return Err(format!("{}: images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"])),
             };
             if idiom != 0 && own.is_none() && !phone_and_pad {
