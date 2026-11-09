@@ -133,7 +133,18 @@ of a level of the boundary.
     dense polygons and the glyphs. Dense polygons go from 319 misses to 52;
     Rg&8 from 54 to 11; small text from 95 to 8.
   - But either rule over-corrects triangles (113 to 258), so neither is
-    the mechanism. These didn't help: any rounding of closing edges,
+    the mechanism.
+  - A cleaner probe (`colin.py`): split one side of a quadrilateral into n
+    collinear segments. CG's output on the opening side hardly changes with
+    n (at most 3 pixels), while the model drifts. Splitting the closing
+    side, the model follows CG exactly up to n = 30. Long opening edges are
+    exact (0 of about 15,000 edge pixels), so the steppers are right; the
+    difference is what happens at vertices. The misses that remain sit
+    where one edge's stepped end and the next edge's start are a unit apart,
+    and on the closing edge's band point in a row holding an opening-side
+    vertex. That band point fits rounded up there but not in general. These
+    didn't help: chaining edges through vertices on either side, band
+    points on only one side, and truncating toward zero. These didn't help: any rounding of closing edges,
     side-dependent vertex rounding, and float32 curve subdivision.
 
 ## Remaining before exact fills

@@ -26,7 +26,7 @@ fn knob(name: &str) -> String { std::env::var(name).unwrap_or_else(|_| "floor".i
 fn rdiv(a: i64, b: i64, mode: &str, side: i32) -> i64 {
     let f = floor_div(a, b);
     let c = -floor_div(-a, b);
-    match mode { "out" => if side > 0 { f } else { c }, "in" => if side > 0 { c } else { f }, "ceil" => c, "round" => floor_div(2 * a + b, 2 * b), _ => f }
+    match mode { "trunc" => a / b, "out" => if side > 0 { f } else { c }, "in" => if side > 0 { c } else { f }, "ceil" => c, "round" => floor_div(2 * a + b, 2 * b), _ => f }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -192,19 +192,23 @@ fn stepper(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32) -> Vec<(i6
 /// An edge's pieces bottom to top, each with its row: from the lower vertex
 /// through its row crossings, the points at `breaks` (vertex ys, in units)
 /// and its column crossings to where the row stepper ends.
-fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32) -> Vec<(Fixed, Fixed, i64)> {
-    let ((bx, by), (tx, ty)) = (bottom, top);
+fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<i64>, end_out: &mut i64) -> Vec<(Fixed, Fixed, i64)> {
+    let ((vbx, by), (tx, ty)) = (bottom, top);
+    let bx = start_x.unwrap_or(vbx);
     let rows = stepper(by, bx, ty, tx, &knob("CG_START"), side);
     let cols: std::collections::HashMap<i64, i64> = stepper(bx, by, tx, ty, &knob("CG_CSTART"), side).into_iter().collect();
     let mr = (tx - bx) * UNIT / (ty - by);
     let (ky, kx) = rows.last().map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
     let end = (kx + rdiv((ty - ky) * mr, UNIT, &knob("CG_END"), side), ty);
+    *end_out = end.0;
     let mut ends: Vec<Fixed> = Vec::with_capacity(rows.len() + 2);
     ends.push((bx, by));
     ends.extend(rows.iter().map(|&(k, x)| (x, k * UNIT)));
     ends.push(end);
+    let bandside = std::env::var("CG_BANDSIDE").ok();
+    let skip_bands = match bandside.as_deref() { Some("open") => side < 0, Some("close") => side > 0, Some("none") => true, _ => false };
     for &yv in breaks {
-        if by < yv && yv < ty {
+        if by < yv && yv < ty && !skip_bands {
             let (ky, kx) = rows.iter().rev().find(|&&(k, _)| k * UNIT <= yv).map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
             let stepped = kx + rdiv((yv - ky) * mr, UNIT, &knob("CG_BAND"), side);
             let xv = if std::env::var("CG_BANDX").as_deref() == Ok("poly") {
@@ -302,6 +306,7 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
     }
     let u = UNIT as f64;
     let mut edges = Vec::new();
+    let mut specs: Vec<(Fixed, Fixed, i32, i32)> = Vec::new();
     for (pi, p) in polys.iter().enumerate() {
         let area2: i128 = (0..p.len()).map(|i| { let (a, b) = (p[(i + p.len() - 1) % p.len()], p[i]); a.0 as i128 * b.1 as i128 - b.0 as i128 * a.1 as i128 }).sum();
         let orient: i32 = if area2 > 0 { 1 } else { -1 };
@@ -320,13 +325,27 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
             }
             let (bottom, top, dir) = if b.1 > a.1 { (a, b, 1) } else { (b, a, -1) };
             let side = -dir * orient;
-            let pieces = pieces(bottom, top, &breaks, side)
-                .into_iter()
-                .map(|(a, b, r)| ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r))
-                .collect();
-            edges.push(Edge { bottom, top, dir, pieces });
+            specs.push((bottom, top, dir, side));
         }
     }
+    let chain = std::env::var("CG_CHAIN").ok();
+    let mut order: Vec<usize> = (0..specs.len()).collect();
+    order.sort_by_key(|&i| specs[i].0 .1);
+    let mut ends_at: std::collections::HashMap<Fixed, i64> = std::collections::HashMap::new();
+    let mut built: Vec<Option<Edge>> = (0..specs.len()).map(|_| None).collect();
+    for &i in &order {
+        let (bottom, top, dir, side) = specs[i];
+        let chained = match chain.as_deref() { Some("open") => side > 0, Some("close") => side < 0, Some("all") => true, _ => false };
+        let start = if chained { ends_at.get(&bottom).copied() } else { None };
+        let mut endx = 0;
+        let pcs = pieces(bottom, top, &breaks, side, start, &mut endx)
+            .into_iter()
+            .map(|(a, b, r)| ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r))
+            .collect();
+        if chained { ends_at.insert(top, endx); }
+        built[i] = Some(Edge { bottom, top, dir, pieces: pcs });
+    }
+    edges.extend(built.into_iter().flatten());
     // Band cuts where two edges cross.
     let to_f = |p: Fixed| (p.0 as f64 / u, p.1 as f64 / u);
     let mut cuts: Vec<f64> = Vec::new();
