@@ -252,7 +252,32 @@ of a level of the boundary.
 
   Corpus fills: 1615/1625, 3245/3285, 4977/5011 at 1×, 2×, 3× (99.4, 98.8,
   99.3%).
-- **What's left:**
+- **The piece rule (19:20Z).** In a row split into bands, an opening
+  piece inside one pixel column contributes
+  `ceil(h · (W − x_top)) + ½ · h · (x_top − x_bottom)`. That is, the
+  rectangle right of its upper end rounds up to 1/4096 px² and the
+  triangle stays exact (`band1.py`: 28 of 30 sloped band-split edges at
+  every shift).
+  - A vertical edge is the case with no triangle (16 of 16).
+  - In rows without bands the rectangle is a whole number of units, which
+    is why those rows looked exact.
+  - Closing pieces are exact, and an opening piece whose pixel holds a
+    closing piece in the same band is exact.
+
+  With this (`rust/cgfill.rs`, `cleanrun.py`):
+
+  | Case | Wrong |
+  | --- | --- |
+  | Suite | 172 (was 329) |
+  | Triangles | 62 |
+  | Two subpaths | 53 |
+  | Dense polygons | 11, 10, 19 |
+  | Glyphs (Rg&8, Qa@, 11 px, Sg, AXWNZ) | 2, 3, 8, 3, 1 |
+  | Side vertices | 38 / 3744 |
+
+  Corpus fills are wrong on 5 of 1625, 13 of 3285 and 11 of 5011 edge
+  pixels at 1×, 2× and 3× (99.6–99.8% exact).
+- **What's left (older notes, before the piece rule):**
   - **Sloped edges at a vertex inside the row.** Axis-aligned L-shapes are
     exact (0 of 93,329 swept pixels, `lshape.py`), and top vertices of
     wedges are exact. Bottom vertices miss 20 of 2253 and side vertices 72

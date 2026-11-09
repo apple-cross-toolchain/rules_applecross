@@ -357,6 +357,8 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 let banded = vb.len() > 2 || sub.len() > 2;
                 let mut open_part = vec![0.0f64; w];
                 let mut close_part = vec![0.0f64; w];
+                let mut piece_part = vec![0.0f64; w];
+                let mut piece_exact = vec![0.0f64; w];
                 let mut winding = 0;
                 for &(_, i) in &active {
                     let e = &edges[i];
@@ -396,6 +398,30 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                             for x in x0..=(x1 as usize) {
                                 let xf = x as f64;
                                 let right = d - (integral(a, b, xf + 1.0) - integral(a, b, xf));
+                                let mode = std::env::var("CG_PIECE").unwrap_or_else(|_| "rectonly".to_string());
+                                let cmode = std::env::var("CG_CPIECE").unwrap_or_default();
+                                if !cmode.is_empty() && role < 0.0 && x0 as i64 == x1 && banded {
+                                    let (lo_p, hi_p) = if a.1 <= b.1 { (a, b) } else { (b, a) };
+                                    let h = hi_p.1 - lo_p.1;
+                                    let rect = h * (xf + 1.0 - hi_p.0);
+                                    let tri = 0.5 * h * (hi_p.0 - lo_p.0);
+                                    let q = |v: f64| match cmode.as_str() { "ceil" => (v * 4096.0 - 1e-7).ceil() / 4096.0, "floor" => (v * 4096.0 + 1e-7).floor() / 4096.0, "round" => (v * 4096.0).round() / 4096.0, _ => v };
+                                    close_part[x] -= q(rect) + tri;
+                                    continue;
+                                }
+                                if !mode.is_empty() && role > 0.0 && x0 as i64 == x1 {
+                                    // area right of a piece inside one column: rectangle right of its upper
+                                    // end plus the signed triangle; one of them rounded up to 1/4096 px²
+                                    let (lo_p, hi_p) = if a.1 <= b.1 { (a, b) } else { (b, a) };
+                                    let h = hi_p.1 - lo_p.1;
+                                    let rect = h * (xf + 1.0 - hi_p.0);
+                                    let tri = 0.5 * h * (hi_p.0 - lo_p.0);
+                                    let at_vertex = lo_p.1 == e.bottom.1 as f64 / u || hi_p.1 == e.top.1 as f64 / u;
+                                    let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0;
+                                    let v = if at_vertex && mode != "rectonly" { rect + c(tri) } else if banded || mode == "all" { c(rect) + tri } else { right };
+                                    if close_part.is_empty() || true { piece_part[x] += v; piece_exact[x] += right; }
+                                    continue;
+                                }
                                 if banded && role > 0.0 && one_column {
                                     open_part[x] += right;
                                 } else if banded && role < 0.0 {
@@ -411,6 +437,10 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     }
                 }
                 for x in 0..w {
+                    if piece_part[x] != 0.0 || piece_exact[x] != 0.0 {
+                        let span = std::env::var("CG_PIECE_SPAN").unwrap_or_else(|_| "exact".to_string());
+                        row[x] += if span == "exact" && close_part[x] != 0.0 { piece_exact[x] } else { piece_part[x] };
+                    }
                     let (o, c) = (open_part[x], close_part[x]);
                     if o != 0.0 && c == 0.0 {
                         row[x] += (o * 4096.0 - 1e-7).ceil() / 4096.0;
