@@ -26,12 +26,16 @@ def target(case):
 def compile_xib(tool, xib, out, env=None):
     """Runs `tool` (a command list) on `xib` as rules_apple's compile_xib
     does (on a storyboard, as its compile_storyboard does, into `out`'s
-    directory), for an iPhone and iPad app of the case's target; returns
-    (status, output)."""
+    directory), for an iPhone and iPad app of the case's target, or an
+    AppKit one for a Mac app of macOS 14; returns (status, output)."""
     case = os.path.splitext(os.path.basename(xib))[0]
     output = ["--compilation-directory", os.path.dirname(out)] if xib.endswith(".storyboard") else ["--compile", out]
-    args = tool + output + ["--minimum-deployment-target", target(case), "--target-device", "iphone",
-                            "--target-device", "ipad", "--module", "App", "--output-format", "human-readable-text", xib]
+    # An AppKit document compiles for a Mac app of macOS 14.
+    with open(xib) as f:
+        appkit = 'targetRuntime="MacOSX.Cocoa"' in f.read()
+    devices = ["--minimum-deployment-target", "14.0", "--target-device", "mac"] if appkit else [
+        "--minimum-deployment-target", target(case), "--target-device", "iphone", "--target-device", "ipad"]
+    args = tool + output + devices + ["--module", "App", "--output-format", "human-readable-text", xib]
     r = subprocess.run(args, capture_output=True, text=True, env=env)
     return r.returncode, r.stdout + r.stderr
 

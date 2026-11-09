@@ -240,8 +240,9 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     Ok(values)
 }
 
-/// The constraints a view holds, in the order CoreFoundation's hash table
-/// gives their ids (two probes of three and two), as `NSLayoutConstraint`s:
+/// The constraints a view holds, by their first item's place in the
+/// document (the view itself first), in document order for one item (three
+/// probes of two to four), as `NSLayoutConstraint`s:
 /// a missing first item is the view; attributes by NSLayoutAttribute,
 /// relations by NSLayoutRelation (-1, 0, 1); the constant twice; the
 /// priority when not required.
@@ -251,8 +252,11 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
         return Ok(None);
     }
     let ids: Vec<&str> = list.iter().map(|k| attr(*k, "id")).collect::<Result<_, _>>()?;
+    let place = |id: &str| n.document().descendants().position(|d| d.attribute("id") == Some(id)).unwrap_or(usize::MAX);
+    let mut order: Vec<usize> = (0..list.len()).collect();
+    order.sort_by_key(|&i| list[i].attribute("firstItem").map_or_else(|| place(n.attribute("id").unwrap_or_default()), place));
     let mut items = Vec::new();
-    for i in cf::hash::table_order(&ids) {
+    for i in order {
         let k = list[i];
         if !k.has_tag_name("constraint") {
             return fail(format!("<{}> in a view's constraints is not supported by this ibtool", k.tag_name().name()));

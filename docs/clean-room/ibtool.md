@@ -2698,3 +2698,119 @@ order they were inserted (foundation-hashing.md): for the compiled plist,
 an order verified only for these key sets, so other items are refused;
 linking reads the plist back and writes it again, each dictionary created
 whole from its keys in the order read, which reproduces the linked file.
+
+## AppKit
+
+A macOS document (`targetRuntime="MacOSX.Cocoa"`) compiles to a NIBArchive
+like UIKit's, without UIKit's `LNE` trailer. Observed with Xcode 27.2,
+compiling for `--target-device mac`, by probes and a corpus of 124
+documents (Xcode's macOS templates and real projects' xibs and
+storyboards).
+
+**The object data.** The root is an `NSObject` holding `IB.objectdata` and
+`IB.systemFontUpdateVersion` 1. Its `NSIBObjectData` holds, in order:
+- `NSRoot`: the File's Owner, an `NSCustomObject` of its class (`NSObject`
+  without one; a custom class adds an `IBClassReference` of its name,
+  module and module provider);
+- `NSVisibleWindows`: a set of the windows not `visibleAtLaunch="NO"` (a
+  storyboard's never: its window controllers show them);
+- `NSConnections`;
+- `NSObjectsKeys` and `NSObjectsValues`: every object and its parent, in
+  depth-first order (a view, its subviews and their constraints, then its
+  own constraints; a menu, each item and its submenu);
+- `NSOidsKeys` and `NSOidsValues`: the root, the objects and the
+  connections, numbered from 1;
+- the accessibility connectors (empty) and two keys sharing one empty
+  array.
+
+Every object is defined where the encoder first meets it. A menu item's
+`NSMenu` is a conditional reference: it doesn't define the menu.
+
+**Placeholders.** The First Responder isn't archived; actions targeting it
+leave `NSDestination` out. The Application placeholder is an
+`NSCustomObject` named `NSApplication`, referring to its class
+(`IBClassReference` of `NSObject`) when that is its class. A custom object
+of an AppKit class (`NSFontManager`) is an `NSCustomObject` of it; one of
+the app's own classes is an `NSClassSwapper` for `NSObject`, made with
+`init` (`NSInitializeWithInit`) when the document says
+`customObjectInstantitationMethod="direct"`.
+
+**Connections**, in a xib: outlets, then actions, each by their source's
+id as bytes, in document order for one source (Xcode's main menu
+template's 87). A storyboard's nibs list them in an order that varies from
+run to run; this ibtool keeps the xib's. `toggleSourceList:` is archived
+as `toggleSidebar:`.
+
+**Windows** are `NSWindowTemplate`s: the style mask; backing 2; the content
+rectangle, centred on the screen rectangle along an axis without a strut;
+`NSWTFlags`; title, an empty subtitle, the class; the content sizes'
+limits, then the content view, the screen rectangle, the frame's limits
+(the content's plus a 32-point title bar when titled), the autosave name,
+restorability and, in a xib, empty full-screen sizes. `NSWTFlags`: deferred
+0x20000000 (the default), not released when closed 0x40000000, shadowless
+0x1000, hidden on deactivation 0x80000000, tooltips while inactive 0x2000
+and recalculating the key view loop 0x800 (defaults), and the initial
+position's struts in bits 19 to 22: per axis both bits without a strut or
+with both, one with one (left keeps 0x80000, right 0x100000, top 0x200000,
+bottom 0x400000), and none for a left and a bottom strut alone (64
+probes). A custom window class adds its `IBClassReference` last.
+
+**Views.** An `NSView`'s keys: next responder, touch bar, `NSvFlags` (256
+and the autoresizing mask; without a mask, flexible right and bottom
+margins), subviews, `NSFrameSize` at the origin or `NSFrame`, superview, layer
+hosting, best-resolution OpenGL, `NSDoNotTranslateAutoresizingMask` when it
+doesn't translate its mask and constraints refer to it, its constraints,
+content hugging and compression resistance as strings when other than the
+class's own (250 each, a text field's vertical hugging 750; 750 each), and
+the safe-area, margins and clipping keys. A custom view, or a view of a
+custom class, is an `NSClassSwapper` for it.
+
+**Constraints** (`NSLayoutConstraint`): items, attributes twice
+(NSLayoutAttribute), the relation, the constant twice when given, the
+priority when not required. A view's are ordered by their first item's
+place in the document, the view itself first (three probes).
+
+**Layout.** Xcode lays constrained views out again with Auto Layout as it
+compiles, with the Mac's control metrics and text measurement: 133 of the
+corpus's 227 text field and button frames differ from their documents'.
+Strict, this ibtool refuses constrained controls sized by their content;
+`--config=relax_ibtool_layout` compiles them with the document's frames,
+which only their first layout at run time uses.
+
+**Menus.** An `NSMenu`: title, items, and a system menu's name
+(`_NSMainMenu`, `_NSAppleMenu`, `_NSServicesMenu`, `_NSRecentDocumentsMenu`,
+`_NSFontMenu`, `_NSWindowsMenu`, `_NSHelpMenu`). An `NSMenuItem`: its menu,
+disabled and separator flags, key equivalent localization and mirroring,
+title, key equivalent, its modifiers (shift 1 << 17, control 1 << 18,
+option 1 << 19, command 1 << 20; command for a key equivalent without a
+mask), the mnemonic location 0x7fffffff, the system's checkmark and mixed
+state images, its tag, and for a submenu `submenuAction:` targeting it. A
+storyboard's items opening a submenu are allowed in limited app mode.
+
+**Text fields.** The cell's flags, from 28 probes: `NSCellFlags` 0x4000000,
+0x40 unless wrapping, scrollable 0x100000, selectable 0x200001, editable
+0x10200001, bezel 0x400000, `state="on"` the top bit; `NSCellFlags2`: the
+alignment in bits 26 to 28 (left 0, right 1, center 2, justified 3, natural
+4), the line break mode in bits 9 to 11 (word wrapping without one), small
+0x20000 and mini 0x40000 sizes, sending on end editing 0x400000, no focus
+ring 0x8000, no undo 0x1000, truncating the last line 0x100, single line
+0x40. System fonts are `.AppleSystemUIFont…` with each metafont's size and
+`NSfFlags`; named fonts flags 16. A System catalog colour carries the
+colour it resolves to, in Generic Gray Gamma 2.2 or sRGB with the profile
+embedded: the Mac's own profiles, which the SDK archive carries
+(`tools/package-sdks.sh`) rather than this repository.
+
+**Storyboards.** `Info.plist`: the main menu's nib name `MainMenu` (whether
+or not there is one), the controllers' nib names, the entry point, the
+window controllers' UUIDs and the version, inserted in that order. The
+application scene is `MainMenu.nib`; a window controller
+`NSWindowController-<id>.nib`, holding its window, its content view
+controller (an `NSClassSwapper` naming its view's nib) and storyboard
+placeholders, with the window's delegate its controller whether the
+document connects it or not; the content controller's view
+`<controller>-view-<view>.nib`. Xcode makes each controller's
+`uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
+derives a UUID from the document and the controller's id.
+
+Refused: other elements and attributes (scroll views, buttons, boxes and
+other controls, bindings, other segues and controllers, other colours).
