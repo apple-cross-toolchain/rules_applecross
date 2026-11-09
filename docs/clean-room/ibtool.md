@@ -2800,6 +2800,38 @@ colour it resolves to, in Generic Gray Gamma 2.2 or sRGB with the profile
 embedded: the Mac's own profiles, which the SDK archive carries
 (`tools/package-sdks.sh`) rather than this repository.
 
+**Buttons** (around 100 probes). An `NSButton`'s view keys, with a bordered
+non-square button's content hugging always archived, then `NSEnabled`, the
+cell, and the control keys (`NSControlTextAlignment` as `NSTextAlignment`:
+left 0, centre 1, right 2). Its `NSButtonCell`: the cell flags as a text
+field's, the state the top bit; title and font; `NSButtonFlags`, its behaviour (push in
+0x80000000, change contents 0x40000000, background 0x20000000, gray
+0x10000000, light by contents 0x8000000, background 0x4000000, gray
+0x2000000, not dimming the image 0x1000), the image position in bits 19
+to 22 (above 1, below 3, right or trailing 5, left or leading 7, only 8,
+overlapping 9), a border 0x800000, the inset in bits 13 and up, and 0x100
+for a check box or radio button; `NSButtonFlags2`, the bezel's bits, the
+image scaling in bits 6 and 7 and the key equivalent's modifiers from bit
+8; the bezel style; the check box's and radio button's
+`NSButtonImageSource` (`NSSwitch`, `NSRadioButton`); alternate title, key
+equivalent, a periodic delay of 400 and interval of 75; and
+`NSAuxButtonType` (7 for a momentary push button, 3 a check box, 4 a radio
+button). The other button types and the inline bezel are refused.
+
+**Scroll views**, as Xcode archives those it doesn't lay out again: no
+border, hidden scrollers that hide themselves, no content insets, and a
+document view (a plain or custom view) no larger than the clip view. With
+a border, a scroller showing, or a larger document, Xcode tiles it with
+AppKit's scroller metrics, and this ibtool refuses it. The scroll view's
+subviews are its clip view and two scrollers; `NSsFlags` 0x20a00, with the
+horizontal and vertical scrollers 0x20 and 0x10, predominant-axis
+scrolling 0x10000 and content insets 0x100000; the line and page scroll
+amounts as big-endian floats (vertical, then horizontal); magnification
+0.25 to 4. The clip view holds the document view at its origin and the
+control background colour, drawing it (4) and copying on scroll (2). The
+scrollers are layer-backed and target the scroll view with
+`_doScroller:`.
+
 **Storyboards.** `Info.plist`: the main menu's nib name `MainMenu` (whether
 or not there is one), the controllers' nib names, the entry point, the
 window controllers' UUIDs and the version, inserted in that order. The
@@ -2808,9 +2840,17 @@ application scene is `MainMenu.nib`; a window controller
 controller (an `NSClassSwapper` naming its view's nib) and storyboard
 placeholders, with the window's delegate its controller whether the
 document connects it or not; the content controller's view
-`<controller>-view-<view>.nib`. Xcode makes each controller's
+`<controller>-view-<view>.nib`. When the controller has outlets, or its
+view's objects connect to it, the view's nib stands it in with an
+`NSNibExternalObjectPlaceholder` named `UpstreamPlaceholder-1`, after the
+Application placeholder, and the controller's
+`NSExternalObjectsTableForViewLoading` maps that name to it (an empty
+dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
-derives a UUID from the document and the controller's id.
+derives a UUID from the document and the controller's id. A view
+controller with a storyboard identifier has its own nib of that name,
+holding it and a storyboard placeholder.
 
-Refused: other elements and attributes (scroll views, buttons, boxes and
-other controls, bindings, other segues and controllers, other colours).
+Refused: other elements and attributes (boxes, image views, collection
+views and other controls, scroll views Xcode tiles, bindings, other segues
+and controllers, other colours).
