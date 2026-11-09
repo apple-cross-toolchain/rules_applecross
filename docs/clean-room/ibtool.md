@@ -2736,9 +2736,9 @@ the app's own classes is an `NSClassSwapper` for `NSObject`, made with
 `customObjectInstantitationMethod="direct"`.
 
 **Connections**, from any object including views, in a xib: outlets, then
-actions, each by their source's
-id as bytes, in document order for one source (Xcode's main menu
-template's 87). A storyboard's nibs list them in an order that varies from
+actions, each by their source's id as bytes (Xcode's main menu template's
+87); one source's outlets by their labels as bytes (four probes), its
+actions in document order. A storyboard's nibs list them in an order that varies from
 run to run; this ibtool keeps the xib's. `toggleSourceList:` is archived
 as `toggleSidebar:`.
 
@@ -2907,6 +2907,25 @@ one), an alternate increment of 0, the tick marks' count and position
 allowed, and the orientation. A continuous slider sends its action on
 dragging too (`NSControlSendActionMask` 70). A slider's height is its own,
 so a constrained one is laid out by Xcode, as a content-sized control is.
+
+**Stack views** (about 20 probes), with a flat hierarchy: their subviews
+are the arranged views (which, constrained by the stack, all say
+`NSDoNotTranslateAutoresizingMask`), then `NSStackViewOrientation`, the
+secondary and primary alignments (horizontal: top 1 and 3, centerY 3 and
+10, bottom 4 and 4, firstBaseline 2 and 12; vertical: leading 1 and 5,
+centerX 3 and 9, trailing 4 and 6), clipping resistance and hugging,
+spacing (with `NSStackViewHasEqualSpacing` for equal spacing), the
+distribution (fill 0, fill equally 1, fill proportionally 2, equal spacing
+3, equal centering 4) and edge insets, all numbers as floats; an
+`NSStackViewContainer` (outside the objects list) holding the arranged
+views; whether it detaches hidden views; a flat hierarchy. Custom spacing
+isn't archived. Each stack view adds an `NSNibConnector` asking to be
+decoded early, first among the connections by the stack's id and without
+an object id. A view's next responder and superview are conditional
+references, so a stack reached first through its connector has its
+superview defined later. A stack lays its views out, so only
+`relax_ibtool_layout` compiles it; gravity areas and visibility priorities
+other than 1000 are refused.
 
 **Image views** (about 15 probes). An `NSImageView`'s view keys, with
 `NSDragTypes` before its frame: a set of eight pasteboard types (PDF,
