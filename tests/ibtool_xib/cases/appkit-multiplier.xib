@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="23504" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" customObjectInstantitationMethod="direct">
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="23504"/>
+    </dependencies>
+    <objects>
+        <customObject id="-2" userLabel="File's Owner"/>
+        <customObject id="-1" userLabel="First Responder" customClass="FirstResponder"/>
+        <customObject id="-3" userLabel="Application" customClass="NSObject"/>
+        <customView id="con-ta-ine">
+            <rect key="frame" x="0.0" y="0.0" width="480" height="272"/>
+            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+            <subviews>
+                <customView translatesAutoresizingMaskIntoConstraints="NO" id="vAx-aa-bbb">
+                    <rect key="frame" x="20" y="192" width="100" height="60"/>
+                    <constraints>
+                        <constraint firstAttribute="height" secondItem="vAx-aa-bbb" secondAttribute="width" multiplier="3:5" id="k01-aa-bbb"/>
+                    </constraints>
+                </customView>
+                <customView translatesAutoresizingMaskIntoConstraints="NO" id="vBx-aa-bbb">
+                    <rect key="frame" x="140" y="222" width="30" height="30"/>
+                </customView>
+            </subviews>
+            <constraints>
+                <constraint firstItem="vAx-aa-bbb" firstAttribute="leading" secondItem="con-ta-ine" secondAttribute="leading" constant="20" id="k02-aa-bbb"/>
+                <constraint firstItem="vAx-aa-bbb" firstAttribute="top" secondItem="con-ta-ine" secondAttribute="top" constant="20" id="k03-aa-bbb"/>
+                <constraint firstItem="vAx-aa-bbb" firstAttribute="width" constant="100" id="k04-aa-bbb"/>
+                <constraint firstItem="vBx-aa-bbb" firstAttribute="leading" secondItem="vAx-aa-bbb" secondAttribute="trailing" constant="20" id="k05-aa-bbb"/>
+                <constraint firstItem="vBx-aa-bbb" firstAttribute="top" secondItem="vAx-aa-bbb" secondAttribute="top" id="k06-aa-bbb"/>
+                <constraint firstItem="vBx-aa-bbb" firstAttribute="width" secondItem="vAx-aa-bbb" secondAttribute="width" multiplier="0.3" id="k07-aa-bbb"/>
+                <constraint firstItem="vBx-aa-bbb" firstAttribute="height" secondItem="vAx-aa-bbb" secondAttribute="height" multiplier="0.5" id="k08-aa-bbb"/>
+            </constraints>
+        </customView>
+    </objects>
+</document>

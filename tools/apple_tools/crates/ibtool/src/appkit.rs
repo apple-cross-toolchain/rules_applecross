@@ -36,6 +36,19 @@ impl Nib {
         Value::New(make().named(name))
     }
 
+    /// Removes `key` from `values`; a shared object defined there is built
+    /// anew where next used, rather than referred to.
+    fn remove(&mut self, values: &mut Vec<(&'static str, Value)>, key: &str) {
+        for (_, v) in values.iter().filter(|v| v.0 == key) {
+            if let Value::New(o) = v {
+                if let Some(name) = &o.name {
+                    self.shared.retain(|_, n| n != name);
+                }
+            }
+        }
+        values.retain(|v| v.0 != key);
+    }
+
     fn string(&mut self, s: &str) -> Value {
         self.shared(format!("s:{s}"), || Object::new("NSString", vec![("NS.bytes", Value::Data(s.as_bytes().to_vec()))]))
     }
@@ -161,11 +174,18 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     // a plain view of a custom class; a plain view an NSView (constraint
     // probes, templates).
     let swapped = n.has_tag_name("customView") || n.attribute("customClass").is_some();
+    // A container view is a plain view; its embed segue's template finds it
+    // through its controller (four probes).
+    let container = n.has_tag_name("containerView");
+    if container && (n.attribute("customClass").is_some() || embed_segue(n)?.is_none()) {
+        return fail("a container view with a class, or without one embed segue, is not supported by this ibtool");
+    }
     only_attributes(
         n,
         &[
             ("key", None),
             ("id", None),
+            ("hidden", Some("YES")),
             ("wantsLayer", Some("YES")),
             ("customClass", None),
             ("customModule", None),
@@ -177,7 +197,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     canvas_location_only(n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
-    if children(n, "connections").next().is_some() {
+    if children(n, "connections").next().is_some() && !container {
         c.connection_sources.push(attr(n, "id")?.to_string());
     }
     let mut values = Vec::new();
@@ -205,13 +225,13 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     if let Some(content) = content {
         let content = view(nib, c, content, module, name, Some(name))?;
         values.push(("NSSubviews", nib.array("NSMutableArray", vec![content])));
-    } else if !subviews.is_empty() || n.has_tag_name("button") || n.has_tag_name("box") || n.has_tag_name("imageView") {
+    } else if !subviews.is_empty() || ["button", "popUpButton", "box", "imageView"].iter().any(|t| n.has_tag_name(*t)) {
         let mut items = Vec::new();
         for s in subviews {
             items.push(match s.tag_name().name() {
-                "view" | "customView" => view(nib, c, s, module, name, Some(name))?,
+                "view" | "customView" | "containerView" => view(nib, c, s, module, name, Some(name))?,
                 "textField" => text_field(nib, c, s, module, name)?,
-                "button" => button(nib, c, s, module, name)?,
+                "button" | "popUpButton" => button(nib, c, s, module, name)?,
                 "scrollView" => scroll_view(nib, c, s, module, name)?,
                 "box" => box_view(nib, c, s, module, name)?,
                 "imageView" => image_view(nib, c, s, module, name)?,
@@ -343,6 +363,7 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
             (Some(f), None) if k.attribute("secondItem").is_none() => (subview(f)?, false, first_attribute, 0, 0.0),
             (Some(f), None) => (subview(f)?, false, second_attribute()?, 0, 0.0),
             (None, Some(s)) => (subview(s)?, false, first_attribute, 0, 0.0),
+            (Some(f), Some(s)) if f == s => return fail("a view's constraint relating a subview to itself is not supported by this ibtool"),
             (Some(f), Some(s)) => {
                 subview(s)?;
                 let names = (attr(*k, "firstAttribute")?, k.attribute("secondAttribute").unwrap_or_default());
@@ -379,6 +400,20 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
         ka.0.total_cmp(&kb.0).then(ka.1.cmp(&kb.1)).then(ka.2.cmp(&kb.2)).then(ka.3.cmp(&kb.3)).then(ka.4.total_cmp(&kb.4))
     });
     Ok(order)
+}
+
+/// A constraint's multiplier: a number, or a ratio `a:b`.
+fn multiplier(m: &str) -> Result<f64, String> {
+    match m.split_once(':') {
+        Some((a, b)) => {
+            let (a, b) = (number(a)?, number(b)?);
+            if b == 0.0 {
+                return fail(format!("a multiplier {m} dividing by zero"));
+            }
+            Ok(a / b)
+        }
+        None => number(m),
+    }
 }
 
 /// Whether `relax_ibtool_layout` compiles constrained views with their
@@ -438,7 +473,8 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
                 None => 0.0,
             },
         };
-        let wanted = second + k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+        let factor = k.attribute("multiplier").map(multiplier).transpose()?.unwrap_or(1.0);
+        let wanted = factor * second + k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
         let agrees = match k.attribute("relation") {
             None => (first - wanted).abs() < 0.001,
             Some("greaterThanOrEqual") => first > wanted - 0.001,
@@ -485,6 +521,7 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
                 ("secondAttribute", None),
                 ("constant", None),
                 ("symbolic", Some("YES")),
+                ("multiplier", None),
                 ("priority", None),
                 ("id", None),
             ],
@@ -520,6 +557,11 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
             Some("greaterThanOrEqual") => values.push(("NSRelation", Value::Int(1))),
             Some("lessThanOrEqual") => values.push(("NSRelation", Value::Int(-1))),
             Some(other) => return fail(format!("constraint relation {other} is not supported by this ibtool")),
+        }
+        // A multiplier, rounded to a float (four probes; a ratio as its
+        // quotient).
+        if let Some(m) = k.attribute("multiplier") {
+            values.push(("NSMultiplier", Value::Double(multiplier(m)? as f32 as f64)));
         }
         if let Some(second) = k.attribute("secondItem") {
             let a = attribute(attr(k, "secondAttribute")?)?;
@@ -807,7 +849,7 @@ fn menu(nib: &mut Nib, c: &mut Collected, n: Node, parent: &str) -> Result<Value
     for list in children(n, "items") {
         only_children(list, &["menuItem"])?;
         for i in children(list, "menuItem") {
-            items.push(menu_item(nib, c, i, &name)?);
+            items.push(menu_item(nib, c, i, &name, None)?);
         }
     }
     let title = nib.text(attr(n, "id")?, "title", n.attribute("title").unwrap_or(""));
@@ -826,6 +868,35 @@ fn menu(nib: &mut Nib, c: &mut Collected, n: Node, parent: &str) -> Result<Value
         values.push(("NSName", nib.string(system)));
     }
     Ok(Value::New(Object::new("NSMenu", values).named(name)))
+}
+
+/// A pop-up button's menu, and its selected item and that item's index: the
+/// cell holds the item, defined there, and the menu refers to it (five
+/// probes).
+fn popup_menu(nib: &mut Nib, c: &mut Collected, n: Node, cell_name: &str, selected: Option<&str>) -> Result<(Value, Option<(Value, usize)>), String> {
+    only_attributes(n, &[("key", None), ("id", None)])?;
+    only_children(n, &["items"])?;
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), cell_name.to_string()));
+    let mut items = Vec::new();
+    let mut chosen = None;
+    for list in children(n, "items") {
+        only_children(list, &["menuItem"])?;
+        for i in children(list, "menuItem") {
+            if Some(attr(i, "id")?) == selected {
+                chosen = Some(items.len());
+            }
+            items.push(menu_item(nib, c, i, &name, Some(cell_name))?);
+        }
+    }
+    let chosen = match (selected, chosen) {
+        (Some(id), Some(at)) => Some((std::mem::replace(&mut items[at], reference(object_name(id))), at)),
+        (Some(_), None) => return fail("a pop-up button's selected item outside its menu"),
+        (None, _) => None,
+    };
+    let title = nib.string("");
+    let menu = Value::New(Object::new("NSMenu", vec![("NSTitle", title), ("NSMenuItems", nib.array("NSMutableArray", items))]).named(name));
+    Ok((menu, chosen))
 }
 
 /// A title: its attribute, or a `<string key="title">` (one with leading
@@ -894,7 +965,7 @@ fn modifier_mask(n: Node) -> Result<i64, String> {
 /// A menu item: its menu (by a conditional reference), title, key
 /// equivalent and the system's check and mixed-state images; one with a
 /// submenu opens it with `submenuAction:`, targeting it.
-fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Result<Value, String> {
+fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str, popup_cell: Option<&str>) -> Result<Value, String> {
     only_attributes(
         n,
         &[
@@ -903,9 +974,13 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Resu
             ("tag", None),
             ("isSeparatorItem", Some("YES")),
             ("enabled", Some("NO")),
+            ("state", Some("on")),
             ("id", None),
         ],
     )?;
+    if popup_cell.is_none() && n.attribute("state").is_some() {
+        return fail("a menu item's state outside a pop-up button is not supported by this ibtool");
+    }
     only_children(n, &["modifierMask", "menu", "connections", "string"])?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), menu_name.to_string()));
@@ -928,11 +1003,19 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Resu
     let title = title(n)?;
     values.push(("NSTitle", nib.text(attr(n, "id")?, "title", &title)));
     values.push(("NSKeyEquiv", nib.string(n.attribute("keyEquivalent").unwrap_or(""))));
-    let mask = modifier_mask(n)?;
+    // A pop-up button's items have command without a mask, key equivalent
+    // or not (four probes).
+    let mask = match (popup_cell, child(n, "modifierMask", "keyEquivalentModifierMask")) {
+        (Some(_), None) => 1 << 20,
+        _ => modifier_mask(n)?,
+    };
     if mask != 0 {
         values.push(("NSKeyEquivModMask", Value::Int(mask)));
     }
     values.push(("NSMnemonicLoc", Value::Int(0x7fff_ffff)));
+    if n.attribute("state").is_some() {
+        values.push(("NSState", Value::Int(1)));
+    }
     values.push(("NSOnImage", system_image(nib, "NSMenuCheckmark", "{18, 16}")));
     values.push(("NSMixedImage", system_image(nib, "NSMenuMixedState", "{18, 4}")));
     if let Some(tag) = n.attribute("tag") {
@@ -946,6 +1029,14 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Resu
         values.push(("NSSubmenu", reference(submenu_name)));
     } else if submenus.len() > 1 {
         return fail("a menu item with several submenus");
+    }
+    // A pop-up button's items select themselves through its cell.
+    if let Some(cell) = popup_cell {
+        if !submenus.is_empty() {
+            return fail("a pop-up button's submenu is not supported by this ibtool");
+        }
+        values.push(("NSAction", nib.string("_popUpItemAction:")));
+        values.push(("NSTarget", reference(cell.to_string())));
     }
     values.push(("NSHiddenInRepresentation", Value::Bool(false)));
     Ok(Value::New(Object::new("NSMenuItem", values).named(name)))
@@ -1222,7 +1313,9 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
     if root.attribute("targetRuntime") != Some("MacOSX.Cocoa") {
         return fail("an AppKit storyboard for another runtime than MacOSX.Cocoa is not supported by this ibtool");
     }
-    only_children(root, &["dependencies", "scenes", "resources"])?;
+    // Inferred metrics' tie breakers are the editor's (a corpus storyboard
+    // compiles the same without them).
+    only_children(root, &["dependencies", "scenes", "resources", "inferredMetricsTieBreakers"])?;
     let mut files = Vec::new();
     let mut nib_names: Vec<(String, String)> = Vec::new();
     let mut uuids: Vec<(String, String)> = Vec::new();
@@ -1235,9 +1328,17 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
         .filter(|d| d.has_tag_name("segue") && d.attribute("relationship") == Some("window.shadowedContentViewController"))
         .filter_map(|d| d.attribute("destination"))
         .collect();
+    // The controllers embed segues lead to.
+    let embedded: Vec<&str> = doc
+        .descendants()
+        .filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed"))
+        .filter_map(|d| d.attribute("destination"))
+        .collect();
     for s in doc.descendants().filter(|d| d.has_tag_name("segue")) {
-        if s.attribute("relationship") != Some("window.shadowedContentViewController") || s.attribute("kind") != Some("relationship") {
-            return fail("segues other than a window's content relationship are not supported by this ibtool");
+        let content = s.attribute("relationship") == Some("window.shadowedContentViewController") && s.attribute("kind") == Some("relationship");
+        let embed = s.attribute("kind") == Some("embed") && s.parent().and_then(|l| l.parent()).is_some_and(|v| v.has_tag_name("containerView"));
+        if !content && !embed {
+            return fail("segues other than a window's content relationship or a container view's embedding are not supported by this ibtool");
         }
     }
     for scenes in children(root, "scenes") {
@@ -1276,13 +1377,27 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                 }
+                // An embedded view controller: its nib, named for its id, and
+                // its view's (four probes).
+                "viewController" if embedded.contains(&attr(*controller, "id")?) => {
+                    let id = attr(*controller, "id")?;
+                    if !others.is_empty() || controller.attribute("storyboardIdentifier").is_some() || content_controllers.contains(&id) {
+                        return fail("an embedded view controller with an identifier, objects beside it or a window is not supported by this ibtool");
+                    }
+                    let identifier = format!("NSViewController-{id}");
+                    files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, false)?));
+                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push((format!("{name}.nib"), bytes));
+                    nib_names.push((identifier.clone(), identifier.clone()));
+                    uuids.push((identifier, uuid(xml, id)));
+                }
                 // An identified view controller: its nib and its view's.
                 "viewController" if controller.attribute("storyboardIdentifier").is_some() => {
                     if !others.is_empty() {
                         return fail("objects beside a view controller are not supported by this ibtool");
                     }
                     let identifier = attr(*controller, "storyboardIdentifier")?;
-                    files.push((format!("{identifier}.nib"), identified_controller_nib(&doc, xml, *controller, module, localizable)?));
+                    files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, true)?));
                     let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                     nib_names.push((identifier.to_string(), identifier.to_string()));
@@ -1462,7 +1577,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     c.definitions.insert(placeholder, value);
     storyboard_placeholder(&mut nib, &mut c, &wc_placeholder, &root_name);
 
-    let (vc_value, _) = content_controller(&mut nib, xml, vc, module, &vc_name, false)?;
+    let (vc_value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, false)?;
     let wc_uuid = uuid(xml, wc_id);
     let wc_object = Object::new(
         "NSWindowController",
@@ -1490,6 +1605,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
         let label = nib.string("delegate");
         connections.push(outlet(format!("{window_name} delegate outlet"), &window_name, &wc_name, label));
     }
+    add_templates(&mut nib, &mut c, &mut connections, &templates, &vc_name, &vc_placeholder);
     let label = nib.string("storyboard");
     connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &vc_placeholder, label));
     let label = nib.string("storyboard");
@@ -1514,7 +1630,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
 /// identifier. In its own nib it is always swapped, requiring the swapper
 /// for connections; as a window's content without a class, it is a plain
 /// NSViewController (eight probes, a template, rules_apple's example).
-fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str, own_nib: bool) -> Result<(Value, String), String> {
+fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str, own_nib: bool) -> Result<(Value, Vec<String>), String> {
     only_attributes(
         vc,
         &[
@@ -1538,6 +1654,29 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
         values.push(("NSOriginalClassName", nib.string("NSViewController")));
     }
     values.push(("NSNibName", nib.string(&nib_name)));
+    // Its embed segues' templates, made as its view loads (four probes).
+    let segues = embeds(vc);
+    let mut templates = Vec::new();
+    if !segues.is_empty() && (vc.attribute("storyboardIdentifier").is_some() || vc.attribute("title").is_some()) {
+        return fail("an identified or titled view controller's embed segues are not supported by this ibtool");
+    }
+    for segue in &segues {
+        let template_name = object_name(&format!("{} template", attr(*segue, "id")?));
+        let mut t = Vec::new();
+        if let Some(identifier) = segue.attribute("identifier") {
+            t.push(("NSIdentifier", nib.string(identifier)));
+        }
+        t.push(("NSTrigger", nib.string("IBSegueTriggerViewDidLoad")));
+        t.push(("NSDestinationControllerIdentifier", nib.string(&format!("NSViewController-{}", attr(*segue, "destination")?))));
+        t.push(("NSContainerView", Value::Nil));
+        templates.push((template_name.clone(), Value::New(Object::new("NSStoryboardEmbedSegueTemplate", t).named(template_name))));
+    }
+    let template_names: Vec<String> = templates.iter().map(|t| t.0.clone()).collect();
+    let template_names_out = template_names.clone();
+    if !templates.is_empty() {
+        let list = templates.into_iter().map(|t| t.1).collect();
+        values.push(("NSStoryboardSegueTemplates", nib.array("NSArray", list)));
+    }
     if let Some(identifier) = vc.attribute("storyboardIdentifier") {
         values.push(("NSStoryboardIdentifier", nib.string(identifier)));
     }
@@ -1548,9 +1687,14 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     // Its view's nib names it as its upstream placeholder when connections
     // need it there (Xcode's SpriteKit template).
     let mut table = vec![("NSInlinedValue", Value::Bool(true))];
+    let mut upstream: Vec<String> = Vec::new();
     if uses_upstream(vc) {
-        table.push(("UINibEncoderEmptyKey", nib.string("UpstreamPlaceholder-1")));
-        table.push(("UINibEncoderEmptyKey", reference(name.to_string())));
+        upstream.push(name.to_string());
+    }
+    upstream.extend(template_names);
+    for (i, target) in upstream.into_iter().enumerate() {
+        table.push(("UINibEncoderEmptyKey", nib.string(&format!("UpstreamPlaceholder-{}", i + 1))));
+        table.push(("UINibEncoderEmptyKey", reference(target)));
     }
     values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", table))));
     values.push(("showSeguePresentationStyle", Value::Int(0)));
@@ -1559,20 +1703,35 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
         values.push(("connectionsRequireClassSwapperForStoryboardCompilation", Value::Bool(true)));
     }
     let class = if swapped { "NSClassSwapper" } else { "NSViewController" };
-    Ok((Value::New(Object::new(class, values).named(name.to_string())), nib_name))
+    Ok((Value::New(Object::new(class, values).named(name.to_string())), template_names_out))
 }
 
-/// A view controller with a storyboard identifier: its own nib, named by
-/// it, holding the controller (its scene controller) and a storyboard
-/// placeholder (a probe).
-fn identified_controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+/// A controller's embed segue templates in its nib: listed after it, in
+/// reverse order (three probes), each with outlets to the controller and to
+/// its storyboard placeholder.
+fn add_templates(nib: &mut Nib, c: &mut Collected, connections: &mut Vec<(String, Value)>, templates: &[String], vc_name: &str, storyboard: &str) {
+    let at = c.parents.iter().position(|p| p.0 == vc_name).map_or(c.parents.len(), |i| i + 1);
+    for t in templates {
+        c.parents.insert(at, (t.clone(), vc_name.to_string()));
+        let label = nib.string("controller");
+        connections.push(outlet(format!("{t} controller outlet"), t, vc_name, label));
+        let label = nib.string("storyboard");
+        connections.push(outlet(format!("{t} storyboard outlet"), t, storyboard, label));
+    }
+}
+
+/// A view controller's own nib: one with a storyboard identifier, named by
+/// it, or one a container view embeds, named `NSViewController-<id>`
+/// (`identified` false), holding the controller (its scene controller) and
+/// a storyboard placeholder (probes).
+fn controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, localizable: bool, identified: bool) -> Result<Vec<u8>, String> {
     let mut nib = new_nib(doc, localizable, true);
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(Vec::new());
     let vc_name = object_name(attr(vc, "id")?);
     c.parents.push((vc_name.clone(), root_name.clone()));
-    let (value, _) = content_controller(&mut nib, xml, vc, module, &vc_name, true)?;
+    let (value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, identified)?;
     c.definitions.insert(vc_name.clone(), value);
     let placeholder = object_name("application placeholder");
     c.parents.push((placeholder.clone(), root_name.clone()));
@@ -1582,6 +1741,7 @@ fn identified_controller_nib(doc: &Document, xml: &str, vc: Node, module: Option
     storyboard_placeholder(&mut nib, &mut c, &storyboard, &root_name);
     let label = nib.string("sceneController");
     let mut connections = vec![outlet(format!("{vc_name} scene controller"), &root_name, &vc_name, label)];
+    add_templates(&mut nib, &mut c, &mut connections, &templates, &vc_name, &storyboard);
     let label = nib.string("storyboard");
     connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &storyboard, label));
     assemble(&mut nib, root_object, &root_name, c, connections)
@@ -1609,17 +1769,33 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
     c.parents.push((placeholder.clone(), root_name.clone()));
     let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
     c.definitions.insert(placeholder, value);
+    // Upstream placeholders: the controller's, then each embed segue's
+    // template, numbered from 1, after the Application placeholder; each
+    // template's container view is its outlet (four probes).
+    let mut placeholders = Vec::new();
     if upstream {
-        let name = object_name(attr(vc, "id")?);
+        placeholders.push((object_name(attr(vc, "id")?), None));
+    }
+    for segue in embeds(vc) {
+        let container = segue.parent().and_then(|l| l.parent()).ok_or("an embed segue outside a container view")?;
+        placeholders.push((object_name(&format!("{} template", attr(segue, "id")?)), Some(object_name(attr(container, "id")?))));
+    }
+    let mut embed_outlets = Vec::new();
+    for (i, (name, container)) in placeholders.into_iter().enumerate() {
         c.parents.push((name.clone(), root_name.clone()));
-        let identifier = nib.string("UpstreamPlaceholder-1");
+        let identifier = nib.string(&format!("UpstreamPlaceholder-{}", i + 1));
         c.definitions.insert(
             name.clone(),
-            Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name)),
+            Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name.clone())),
         );
+        if let Some(container) = container {
+            let label = nib.string("containerView");
+            embed_outlets.push(outlet(format!("{name} container outlet"), &name, &container, label));
+        }
     }
     let label = nib.string("view");
     let mut connections = vec![outlet(format!("{view_name} view outlet"), &root_name, &view_name, label)];
+    connections.extend(embed_outlets);
     connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
     let name = format!("{}-view-{}", attr(vc, "id")?, attr(view_node, "id")?);
     Ok((name, assemble(&mut nib, root_object, &root_name, c, connections)?))
@@ -1731,9 +1907,19 @@ fn appearance_font(nib: &mut Nib, n: Node, button: Option<f64>) -> Result<Value,
 }
 
 fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    font_as(nib, n, None)
+}
+
+/// A font, with a metafont read as another (`meta`: a pop-up button's menu
+/// font is the message font, two probes).
+fn font_as(nib: &mut Nib, n: Node, meta: Option<(&str, &str)>) -> Result<Value, String> {
     only_attributes(n, &[("key", None), ("metaFont", None), ("size", None), ("name", None), ("family", None)])?;
     let size = n.attribute("size").map(number).transpose()?;
-    let (name, default, flags): (&str, f64, i64) = match (n.attribute("metaFont"), n.attribute("name")) {
+    let metafont = n.attribute("metaFont").map(|m| match meta {
+        Some((from, to)) if m == from => to,
+        _ => m,
+    });
+    let (name, default, flags): (&str, f64, i64) = match (metafont, n.attribute("name")) {
         (Some(meta), None) => match meta {
             "system" => (".AppleSystemUIFont", 13.0, 0x414),
             "systemBold" => (".AppleSystemUIFontBold", 13.0, 0x818),
@@ -1965,15 +2151,18 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "buttonCell", "constraints", "connections"])?;
+    only_children(n, &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections"])?;
     content_sized(nib, n)?;
+    // A pop-up button is a button whose cell holds a menu (about 10
+    // probes).
+    let popup = n.has_tag_name("popUpButton");
     let id = attr(n, "id")?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
     if children(n, "connections").next().is_some() {
         c.connection_sources.push(id.to_string());
     }
-    let cell = child(n, "buttonCell", "cell").ok_or("a button without a cell")?;
+    let cell = child(n, if popup { "popUpButtonCell" } else { "buttonCell" }, "cell").ok_or("a button without a cell")?;
     // Its cell comes before its own constraints in the objects' list (a
     // probe).
     c.parents.push((object_name(attr(cell, "id")?), name.clone()));
@@ -1987,7 +2176,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("title", None),
             ("alternateTitle", None),
             ("alignment", None),
-            ("borderStyle", Some("border")),
+            ("borderStyle", Some(if popup { "borderAndBezel" } else { "border" })),
             ("imagePosition", None),
             ("imageScaling", None),
             ("inset", None),
@@ -1995,9 +2184,21 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("controlSize", None),
             ("keyEquivalent", None),
             ("lineBreakMode", None),
+            ("enabled", Some("NO")),
+            ("selectedItem", None),
+            ("arrowPosition", None),
         ],
     )?;
-    only_children(cell, &["behavior", "font", "modifierMask", "string"])?;
+    if !popup && ["enabled", "selectedItem", "arrowPosition"].iter().any(|a| cell.attribute(*a).is_some()) {
+        return fail("a button cell's enabled, selectedItem or arrowPosition attribute is not supported by this ibtool");
+    }
+    only_children(cell, &["behavior", "font", "modifierMask", "string", "menu", "connections"])?;
+    if children(cell, "connections").next().is_some() {
+        c.connection_sources.push(attr(cell, "id")?.to_string());
+    }
+    if popup != child(cell, "menu", "menu").is_some() {
+        return fail("a pop-up button without a menu, or a button with one, is not supported by this ibtool");
+    }
     let cell_id = attr(cell, "id")?;
     let cell_name = object_name(cell_id);
     let has = |a: &str| cell.attribute(a).is_some();
@@ -2041,6 +2242,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let kind = cell.attribute("type").unwrap_or("push");
     let (aux, image_source) = match (behaviors.as_slice(), kind) {
         (["lightByBackground", "lightByGray", "pushIn"], _) => (7, None),
+        (["lightByBackground", "lightByGray"], "push" | "bevel") if popup => (0, None),
         (["changeContents", "doesNotDimImage", "lightByContents"], "check") => (3, Some("NSSwitch")),
         (["changeContents", "doesNotDimImage", "lightByContents"], "radio") => (4, Some("NSRadioButton")),
         _ => return fail(format!("a {kind} button behaving as {} is not supported by this ibtool", behaviors.join(" "))),
@@ -2120,6 +2322,13 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     if has("state") {
         flags |= 0x8000_0000;
     }
+    // A pop-up button's border and bezel, and its cell disabled.
+    if popup && has("borderStyle") {
+        flags |= 0x40_0000;
+    }
+    if has("enabled") {
+        flags |= 0x2000_0000;
+    }
     let control_size = match cell.attribute("controlSize") {
         None | Some("regular") => 0,
         Some("small") => {
@@ -2138,7 +2347,14 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         ("NSCellFlags", Value::Int(signed(flags))),
         ("NSCellFlags2", Value::Int(signed(flags2))),
         ("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))),
-        ("NSSupport", appearance_font(nib, font_node, Some([13.0, 11.0, 9.0][control_size as usize]))?),
+        (
+            "NSSupport",
+            if popup && font_node.attribute("usesAppearanceFont").is_none() {
+                font_as(nib, font_node, Some(("menu", "message")))?
+            } else {
+                appearance_font(nib, font_node, Some([13.0, 11.0, 9.0][control_size as usize]))?
+            },
+        ),
         ("NSControlView", reference(name.clone())),
         ("NSButtonFlags", Value::Int(signed(flags_b))),
         ("NSButtonFlags2", Value::Int(signed(flags_b2))),
@@ -2153,6 +2369,27 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     cell_values.push(("NSPeriodicDelay", Value::Int(400)));
     cell_values.push(("NSPeriodicInterval", Value::Int(75)));
     cell_values.push(("NSAuxButtonType", Value::Int(aux)));
+    if popup {
+        let menu_node = child(cell, "menu", "menu").expect("checked");
+        let (menu, selected) = popup_menu(nib, c, menu_node, &cell_name, cell.attribute("selectedItem"))?;
+        let index = selected.as_ref().map_or(-1, |s| s.1 as i64);
+        cell_values.push(("NSMenuItem", selected.map_or(Value::Nil, |s| s.0)));
+        cell_values.push(("NSMenuItemRespectAlignment", Value::Bool(true)));
+        cell_values.push(("NSMenu", menu));
+        // The selected item's index unless the first.
+        if index != 0 {
+            cell_values.push(("NSSelectedIndex", Value::Int(index)));
+        }
+        cell_values.push(("NSPreferredEdge", Value::Int(1)));
+        cell_values.push(("NSUsesItemFromMenu", Value::Bool(true)));
+        cell_values.push(("NSAltersState", Value::Bool(true)));
+        let arrow = match cell.attribute("arrowPosition") {
+            None | Some("arrowAtBottom") => 2,
+            Some("arrowAtCenter") => 1,
+            Some(other) => return fail(format!("arrow position {other} is not supported by this ibtool")),
+        };
+        cell_values.push(("NSArrowPosition", Value::Int(arrow)));
+    }
 
     // Content hugging: a bordered button of a rounded kind has its own, 250
     // and 750, and archives any other, even 250 each (probes); square and
@@ -2166,7 +2403,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             n.attribute("verticalHuggingPriority").unwrap_or("250")
         );
         let at = values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key");
-        values.retain(|v| v.0 != "NSHuggingPriority");
+        nib.remove(&mut values, "NSHuggingPriority");
         let at = at.min(values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key"));
         let at = if values.iter().any(|v| v.0 == "NSAntiCompressionPriority") { at - 1 } else { at };
         if hugging != "{250, 750}" {
@@ -2174,7 +2411,10 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         }
     }
     values.push(("NSEnabled", Value::Bool(true)));
-    values.push(("NSCell", Value::New(Object::new("NSButtonCell", cell_values).named(cell_name))));
+    values.push((
+        "NSCell",
+        Value::New(Object::new(if popup { "NSPopUpButtonCell" } else { "NSButtonCell" }, cell_values).named(cell_name)),
+    ));
     values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
     values.push(("NSControlSize", Value::Int(control_size)));
     values.push(("NSControlContinuous", Value::Bool(false)));
@@ -2185,7 +2425,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     values.push(("NSControlWritingDirection", Value::Int(-1)));
     values.push(("NSControlSendActionMask", Value::Int(4)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
-    Ok(Value::New(Object::new("NSButton", values).named(name)))
+    Ok(Value::New(Object::new(if popup { "NSPopUpButton" } else { "NSButton" }, values).named(name)))
 }
 
 /// A scroll view, as Xcode archives one it doesn't tile again: no border,
@@ -2375,7 +2615,7 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
-    values.retain(|v| v.0 != "NSHuggingPriority");
+    nib.remove(&mut values, "NSHuggingPriority");
     // Layer-backed whether or not it says so (a probe).
     if !values.iter().any(|v| v.0 == "NSViewIsLayerTreeHost") {
         let at = values.iter().position(|v| v.0 == "NSViewWantsBestResolutionOpenGLSurface").expect("its OpenGL key");
@@ -2671,6 +2911,27 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     values.push(("NSImageViewPlaceholderPrecedence", Value::Int(0)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
     Ok(Value::New(Object::new("NSImageView", values).named(name)))
+}
+
+/// A container view's embed segue: its only connection.
+fn embed_segue<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> {
+    let all: Vec<Node> = children(n, "connections").flat_map(|l| l.children().filter(|c| c.is_element())).collect();
+    match all.as_slice() {
+        [] => Ok(None),
+        [s] if s.has_tag_name("segue") && s.attribute("kind") == Some("embed") => {
+            only_attributes(*s, &[("destination", None), ("kind", None), ("identifier", None), ("id", None)])?;
+            Ok(Some(*s))
+        }
+        _ => fail("a container view's connections other than one embed segue are not supported by this ibtool"),
+    }
+}
+
+/// The embed segues of a view controller's view, in document order.
+fn embeds<'a, 'i>(vc: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
+    children(vc, "view")
+        .flat_map(|v| v.descendants())
+        .filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed"))
+        .collect()
 }
 
 /// Whether a view controller's view nib needs it as an upstream placeholder:

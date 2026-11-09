@@ -2773,7 +2773,9 @@ custom class, is an `NSClassSwapper` for it.
 **Constraints** (`NSLayoutConstraint`): items, attributes twice
 (NSLayoutAttribute), the relation, the constant twice when given (a
 symbolic one, the standard space, as `NSSymbolicConstant` `NSSpace` in their
-place), the priority when not required. A view's are in an order of their own (about
+place), the priority when not required; a multiplier (`NSMultiplier`, after
+the relation; a ratio `a:b` as its quotient) rounded to a float and
+archived as a double. A view's are in an order of their own (about
 60 probes and a corpus storyboard, none from the document's order):
 - first the view's own, relating none of its subviews;
 - then each subview's (those whose first item it is, or whose second
@@ -2871,6 +2873,19 @@ whatever its frame says; in a storyboard it clips to its bounds. A primary
 or secondary box puts its content below its title, measured with the
 Mac's fonts, and is refused.
 
+**Pop-up buttons** (about 15 probes) are buttons whose
+`NSPopUpButtonCell` holds a menu. The cell's flags add border and bezel
+0x400000 and disabled 0x20000000 to a button's; push and bevel pop-ups
+without pushing in are button type 0. After the button keys: the selected
+item (`NSMenuItem`, defined there, or nil), `NSMenuItemRespectAlignment`,
+the menu (an untitled `NSMenu` referring to the selected item), the
+selected index unless 0 (-1 with none), the preferred edge 1, using the
+item from the menu, altering state, and the arrow position (bottom 2,
+centre 1). Its items are menu items with command as their modifiers, the
+selected item's state on, and `_popUpItemAction:` targeting the cell. A
+pop-up cell's menu font is the message font. A cell's connections come
+from the cell.
+
 **Image views** (about 15 probes). An `NSImageView`'s view keys, with
 `NSDragTypes` before its frame: a set of eight pasteboard types (PDF,
 PICT, PNG, file names, TIFF, file promises, and a dynamic type), always
@@ -2921,7 +2936,25 @@ Application placeholder, and the controller's
 `NSExternalObjectsTableForViewLoading` maps that name to it (an empty
 dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
-derives a UUID from the document and the controller's id. A view
+derives a UUID from the document and the controller's id.
+
+**Container views** (seven probes). A container view is a plain view.
+Its embed segue makes the parent controller hold an
+`NSStoryboardSegueTemplates` array, after its nib name, of
+`NSStoryboardEmbedSegueTemplate`s (the segue's identifier if any, the
+trigger `IBSegueTriggerViewDidLoad`, the destination
+`NSViewController-<id>`, and a nil container view). The templates are in
+document order in the array, but listed in reverse after the controller
+in the objects list, each with outlets to the controller (`controller`)
+and to its storyboard placeholder (`storyboard`). The controller's
+external objects table maps `UpstreamPlaceholder-<n>` to itself (when it
+needs one) and then to each template. Its view's nib has a placeholder of
+each, with a template's `containerView` outlet to its container view. The
+embedded controller has its own nib, `NSViewController-<id>`, in the
+Info.plist's nib names and UUIDs, holding it as a window's content
+controller is held (a plain `NSViewController` without a class). Xcode's
+UUIDs change from run to run, so these are checked by probes, not by
+`tests/ibtool_xib`. A view
 controller with a storyboard identifier has its own nib of that name,
 holding it and a storyboard placeholder, and requiring its class swapper
 for connections whether or not it has a class.
