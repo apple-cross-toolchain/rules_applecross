@@ -121,6 +121,21 @@ of a level of the boundary.
   path exactly. A thin diagonal one is within ±1 of the 1 px outline's fill
   along its length, but its ends differ (`thin.swift`).
 
+- **The residual, narrowed** (`dense.py`, `suite.py`, and the knobs in
+  `rust/cgfill_base.rs`):
+  - It grows with vertex density. Regular polygons of radius 10 miss 0.4%
+    of edge pixels at 8 vertices and 22% at 512.
+  - The model is always one level low.
+  - The misses are only on edges that open a span (the shape's left side),
+    for either winding. Edges that close a span are exact.
+  - Flooring an opening piece's left area at 1/4096 px², or adding half a
+    unit per opening piece, in rows a vertex splits into bands, fixes the
+    dense polygons and the glyphs. Dense polygons go from 319 misses to 52;
+    Rg&8 from 54 to 11; small text from 95 to 8.
+  - But either rule over-corrects triangles (113 to 258), so neither is
+    the mechanism. These didn't help: any rounding of closing edges,
+    side-dependent vertex rounding, and float32 curve subdivision.
+
 ## Remaining before exact fills
 
 - The vertex-row residual above. It matters most for curves.

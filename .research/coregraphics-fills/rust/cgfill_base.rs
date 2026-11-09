@@ -107,7 +107,9 @@ fn flatten(q: [Point; 4], depth: u32, out: &mut Vec<Point>) {
     if measure(&q) <= tol() || depth > 12 {
         return;
     }
-    let mid = |a: Point, b: Point| Point { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
+    let f32m = std::env::var("CG_F32FLAT").is_ok();
+    let mid = |a: Point, b: Point| if f32m { Point { x: ((a.x as f32 + b.x as f32) * 0.5) as f64, y: ((a.y as f32 + b.y as f32) * 0.5) as f64 } } else { Point { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 } };
+    let q = if f32m { q.map(|p| Point { x: p.x as f32 as f64, y: p.y as f32 as f64 }) } else { q };
     let (a, b, c) = (mid(q[0], q[1]), mid(q[1], q[2]), mid(q[2], q[3]));
     let (l, r) = (mid(a, b), mid(b, c));
     let f = mid(l, r);
@@ -285,12 +287,9 @@ fn clip_y(a: (f64, f64), b: (f64, f64), lo: Option<f64>, hi: Option<f64>) -> Opt
 /// The 8-bit coverage of `polys` filled by `rule` on a `w` x `h` canvas, rows
 /// bottom first.
 pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec<u8>> {
-    let polys: Vec<Vec<Fixed>> = polys
-        .iter()
-        .map(|p| clip(p, w as f64, h as f64))
-        .filter(|p| !p.is_empty())
-        .map(|p| p.iter().map(|q| (fixed(q.x), fixed(q.y))).collect())
-        .collect();
+    let clipped: Vec<Vec<Point>> = polys.iter().map(|p| clip(p, w as f64, h as f64)).filter(|p| !p.is_empty()).collect();
+    let raws: Vec<Vec<f64>> = clipped.iter().map(|p| p.iter().map(|q| (q.x as f32) as f64 * UNIT as f64).collect()).collect();
+    let polys: Vec<Vec<Fixed>> = clipped.iter().map(|p| p.iter().map(|q| (fixed(q.x), fixed(q.y))).collect()).collect();
     let mut breaks: Vec<i64> = polys.iter().flatten().map(|p| p.1).collect();
     breaks.sort_unstable();
     breaks.dedup();
@@ -303,13 +302,21 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
     }
     let u = UNIT as f64;
     let mut edges = Vec::new();
-    for p in &polys {
+    for (pi, p) in polys.iter().enumerate() {
         let area2: i128 = (0..p.len()).map(|i| { let (a, b) = (p[(i + p.len() - 1) % p.len()], p[i]); a.0 as i128 * b.1 as i128 - b.0 as i128 * a.1 as i128 }).sum();
         let orient: i32 = if area2 > 0 { 1 } else { -1 };
         for i in 0..p.len() {
             let (a, b) = (p[i], p[(i + 1) % p.len()]);
             if a.1 == b.1 {
                 continue;
+            }
+            let (mut a, mut b) = (a, b);
+            let side0 = -(if b.1 > a.1 { 1 } else { -1 }) * orient;
+            if let Ok(mode) = std::env::var("CG_VXO") {
+                if side0 > 0 {
+                    let rq = |r: f64| match mode.as_str() { "floor" => r.floor() as i64, "ceil" => r.ceil() as i64, "m1" => (r + 0.5).floor() as i64 - 1, "p1" => (r + 0.5).floor() as i64 + 1, _ => (r + 0.5).floor() as i64 };
+                    a.0 = rq(raws[pi][i]); b.0 = rq(raws[pi][(i + 1) % p.len()]);
+                }
             }
             let (bottom, top, dir) = if b.1 > a.1 { (a, b, 1) } else { (b, a, -1) };
             let side = -dir * orient;
@@ -380,6 +387,9 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     if role == 0.0 {
                         continue;
                     }
+                    let per_edge = std::env::var("CG_PQ_EDGE").is_ok();
+                    let mut parts: Vec<f64> = vec![0.0; if per_edge { w } else { 0 }];
+                    let mut touched: Vec<usize> = Vec::new();
                     for &(a, b, r) in &e.pieces {
                         if r != y as i64 {
                             continue;
@@ -397,12 +407,25 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         if x1 >= 0 {
                             for x in x0..=(x1 as usize) {
                                 let xf = x as f64;
-                                row[x] += role * (d - (integral(a, b, xf + 1.0) - integral(a, b, xf)));
+                                let part = integral(a, b, xf + 1.0) - integral(a, b, xf);
+                                if per_edge { if !touched.contains(&x) { touched.push(x); } parts[x] += part; row[x] += role * d; continue; }
+                                let vpiece = a.1 == e.bottom.1 as f64 / u || b.1 == e.top.1 as f64 / u;
+                                let vmode = std::env::var("CG_PQ_V").ok();
+                                let applies = match vmode.as_deref() { Some("bottom") => a.1 == e.bottom.1 as f64 / u, Some("top") => b.1 == e.top.1 as f64 / u, Some("multiband") => vb.len() > 2, Some("multiband_or_v") => vb.len() > 2 || vpiece, Some(_) => vpiece, None => true };
+                                let part = match std::env::var("CG_PQ").ok().filter(|_| applies && (role > 0.0 || std::env::var("CG_PQ_BOTH").is_ok())) { Some(v) => { let (u, m) = v.split_once(':').unwrap(); let u: f64 = u.parse().unwrap(); match m { "ceil" => (part * u).ceil() / u, "floor" => (part * u).floor() / u, "round" => (part * u).round() / u, "trunc" => (part * u).trunc() / u, _ => part } } None => part };
+                                let part = if role < 0.0 && applies { match std::env::var("CG_PQC").ok() { Some(v) => { let (uu, m) = v.split_once(':').unwrap(); let uu: f64 = uu.parse().unwrap(); match m { "ceil" => (part * uu).ceil() / uu, "floor" => (part * uu).floor() / uu, "round" => (part * uu).round() / uu, _ => part } } None => part } } else { part };
+                                let padd: f64 = if applies && role > 0.0 { std::env::var("CG_PADD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0) / 4096.0 } else { 0.0 };
+                                row[x] += role * (d - part) + padd;
                             }
                         }
                         for v in row.iter_mut().skip((x1 + 1).max(0) as usize) {
                             *v += role * d;
                         }
+                    }
+                    for &x in &touched {
+                        let part = parts[x];
+                        let part = match std::env::var("CG_PQ").ok().filter(|_| role > 0.0 || std::env::var("CG_PQ_BOTH").is_ok()) { Some(v) => { let (u, m) = v.split_once(':').unwrap(); let u: f64 = u.parse().unwrap(); match m { "ceil" => (part * u).ceil() / u, "floor" => (part * u).floor() / u, "round" => (part * u).round() / u, _ => part } } None => part };
+                        row[x] -= role * part;
                     }
                 }
             }
