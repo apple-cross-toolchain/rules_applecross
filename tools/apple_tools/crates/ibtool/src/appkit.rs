@@ -112,8 +112,10 @@ struct Collected {
 /// An autoresizing mask's bits, as NSView's: flexible left margin 1, width
 /// 2, right margin 4, bottom margin 8, height 16, top margin 32.
 fn autoresizing_mask(n: Node) -> Result<i64, String> {
+    // Without one, flexible right and bottom margins (a constraint probe's
+    // subview).
     let Some(m) = child(n, "autoresizingMask", "autoresizingMask") else {
-        return fail(format!("<{}> without an autoresizing mask is not supported by this ibtool", n.tag_name().name()));
+        return Ok(4 | 8);
     };
     only_attributes(
         m,
@@ -145,7 +147,10 @@ fn autoresizing_mask(n: Node) -> Result<i64, String> {
 
 /// A view and its subviews: an `NSView`, or for a top-level custom view an
 /// `NSClassSwapper` for its class.
-fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str, next_responder: Option<&str>, swapped: bool) -> Result<Value, String> {
+fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str, next_responder: Option<&str>) -> Result<Value, String> {
+    // A custom view is an NSClassSwapper for its class, at any depth; a
+    // plain view an NSView (constraint probes, templates).
+    let swapped = n.has_tag_name("customView");
     only_attributes(
         n,
         &[
@@ -155,9 +160,10 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
             ("customClass", None),
             ("customModule", None),
             ("customModuleProvider", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "subviews"])?;
+    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints"])?;
     let id = attr(n, "id")?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
@@ -167,7 +173,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         values.push(("NSClassName", nib.string(&class)));
         values.push(("NSOriginalClassName", nib.string("NSView")));
     } else if class != "NSView" {
-        return fail("a custom class on a view other than a top-level one is not supported by this ibtool");
+        return fail("a custom class on a plain view is not supported by this ibtool");
     }
     values.push(("NSNextResponder", next_responder.map_or(Value::Nil, reference)));
     values.push(("NSNibTouchBar", Value::Nil));
@@ -181,7 +187,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
             if !matches!(s.tag_name().name(), "view" | "customView") {
                 return fail(format!("a subview <{}> is not supported by this ibtool", s.tag_name().name()));
             }
-            items.push(view(nib, c, s, module, &name, Some(&name), false)?);
+            items.push(view(nib, c, s, module, &name, Some(&name))?);
         }
         values.push(("NSSubviews", nib.array("NSMutableArray", items)));
     }
@@ -198,10 +204,86 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         values.push(("NSViewIsLayerTreeHost", Value::Bool(true)));
     }
     values.push(("NSViewWantsBestResolutionOpenGLSurface", Value::Bool(true)));
+    if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+        values.push(("NSDoNotTranslateAutoresizingMask", Value::Bool(true)));
+    }
+    // Its constraints follow its subviews' in the objects' list.
+    if let Some(constraints) = view_constraints(nib, c, n, &name)? {
+        values.push(("NSViewConstraints", constraints));
+    }
     values.push(("IBNSSafeAreaLayoutGuide", Value::Nil));
     values.push(("IBNSLayoutMarginsGuide", Value::Nil));
     values.push(("IBNSClipsToBounds", Value::Int(0)));
     Ok(Value::New(Object::new(if swapped { "NSClassSwapper" } else { "NSView" }, values).named(name)))
+}
+
+/// The constraints a view holds, in the order CoreFoundation's hash table
+/// gives their ids (two probes of three and two), as `NSLayoutConstraint`s:
+/// a missing first item is the view; attributes by NSLayoutAttribute,
+/// relations by NSLayoutRelation (-1, 0, 1); the constant twice; the
+/// priority when not required.
+fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Result<Option<Value>, String> {
+    let list: Vec<Node> = children(n, "constraints").flat_map(|l| l.children().filter(|c| c.is_element())).collect();
+    if list.is_empty() {
+        return Ok(None);
+    }
+    let ids: Vec<&str> = list.iter().map(|k| attr(*k, "id")).collect::<Result<_, _>>()?;
+    let mut items = Vec::new();
+    for i in cf::hash::table_order(&ids) {
+        let k = list[i];
+        if !k.has_tag_name("constraint") {
+            return fail(format!("<{}> in a view's constraints is not supported by this ibtool", k.tag_name().name()));
+        }
+        only_attributes(
+            k,
+            &[("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("constant", None), ("priority", None), ("id", None)],
+        )?;
+        let attribute = |a: &str| -> Result<i64, String> {
+            Ok(match a {
+                "left" => 1,
+                "right" => 2,
+                "top" => 3,
+                "bottom" => 4,
+                "leading" => 5,
+                "trailing" => 6,
+                "width" => 7,
+                "height" => 8,
+                "centerX" => 9,
+                "centerY" => 10,
+                "baseline" | "lastBaseline" => 11,
+                "firstBaseline" => 12,
+                other => return fail(format!("constraint attribute {other} is not supported by this ibtool")),
+            })
+        };
+        let constraint_name = object_name(ids[i]);
+        c.parents.push((constraint_name.clone(), name.to_string()));
+        let first = k.attribute("firstItem").map_or(name.to_string(), object_name);
+        let first_attribute = attribute(attr(k, "firstAttribute")?)?;
+        let mut values = vec![("NSFirstItem", reference(first)), ("NSFirstAttributeV2", Value::Int(first_attribute)), ("NSFirstAttribute", Value::Int(first_attribute))];
+        match k.attribute("relation") {
+            None => {}
+            Some("greaterThanOrEqual") => values.push(("NSRelation", Value::Int(1))),
+            Some("lessThanOrEqual") => values.push(("NSRelation", Value::Int(-1))),
+            Some(other) => return fail(format!("constraint relation {other} is not supported by this ibtool")),
+        }
+        if let Some(second) = k.attribute("secondItem") {
+            let a = attribute(attr(k, "secondAttribute")?)?;
+            values.push(("NSSecondItem", reference(object_name(second))));
+            values.push(("NSSecondAttributeV2", Value::Int(a)));
+            values.push(("NSSecondAttribute", Value::Int(a)));
+        } else if k.attribute("secondAttribute").is_some() {
+            return fail("a constraint's second attribute without a second item");
+        }
+        let constant = number(k.attribute("constant").ok_or("a constraint without a constant is not supported by this ibtool")?)?;
+        values.push(("NSConstantV2", Value::Double(constant)));
+        values.push(("NSShouldBeArchived", Value::Bool(true)));
+        if let Some(p) = k.attribute("priority") {
+            values.push(("NSPriority", Value::Int(p.parse().map_err(|_| format!("not a priority: {p}"))?)));
+        }
+        values.push(("NSConstant", Value::Double(constant)));
+        items.push(Value::New(Object::new("NSLayoutConstraint", values).named(constraint_name)));
+    }
+    Ok(Some(nib.array("NSArray", items)))
 }
 
 /// A window's position flags in `NSWTFlags` (bits 19 to 22), from its
@@ -361,7 +443,7 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         values.push(("NSWindowContentMinSize", size(nib, min, 0.0)));
     }
     let content = match content_view {
-        Some(v) => view(nib, c, v, module, &name, None, false)?,
+        Some(v) => view(nib, c, v, module, &name, None)?,
         None => {
             let view_name = format!("{name} content view");
             c.parents.push((view_name.clone(), name.clone()));
@@ -763,7 +845,7 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
             "customObject" => custom_object(&mut nib, &mut c, *t, module, &owner_name, direct)?,
             _ => {
                 c.connection_sources.push(attr(*t, "id")?.to_string());
-                view(&mut nib, &mut c, *t, module, &owner_name, None, true)?
+                view(&mut nib, &mut c, *t, module, &owner_name, None)?
             }
         };
         c.definitions.insert(object_name(attr(*t, "id")?), value);
@@ -1080,7 +1162,7 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(Vec::new());
     let view_name = object_name(attr(view_node, "id")?);
-    let value = view(&mut nib, &mut c, view_node, module, &root_name, None, false)?;
+    let value = view(&mut nib, &mut c, view_node, module, &root_name, None)?;
     c.definitions.insert(view_name.clone(), value);
     let placeholder = object_name("application placeholder");
     c.parents.push((placeholder.clone(), root_name.clone()));
