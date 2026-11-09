@@ -263,6 +263,14 @@ of a level of the boundary.
     fractions, the piece height, the first crossing's remainder, the
     slope's remainder, a vertical shift, or stepping from the far end. Row
     totals almost never change, so it's a sub-unit effect.
+  - **An isolated sloped piece at a vertex, solved.** This is a piece
+    whose vertex's other edge is horizontal (`startk.py`, `slide.py`).
+    CG's area right of it is h · (W − x_top), exact, plus the signed
+    triangle ½ · h · (x_top − x_bottom) rounded up to 1/4096 px². That
+    fits 20 of 20 start pieces and 15 of 19 end pieces at every shift.
+    Applied to every vertex piece it scores worse (chain vertices, wedge
+    tips, and vertical band pieces follow other rules), so the prototype
+    doesn't use it yet.
   - **Banded rows where the opening edge crosses columns** are left exact:
     floor, round and ceil all score worse.
   - **Thin strokes (≤ 1 px)** match none of: the perpendicular strip
