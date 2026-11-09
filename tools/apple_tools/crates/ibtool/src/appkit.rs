@@ -267,7 +267,12 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
     let mut order: Vec<usize> = (0..list.len()).collect();
     // Then horizontal attributes before vertical ones (a template's centre
     // before its top; probes' leading before top, width before height).
-    let vertical = |k: Node| matches!(k.attribute("firstAttribute"), Some("top" | "bottom" | "height" | "centerY" | "baseline" | "lastBaseline" | "firstBaseline"));
+    let vertical = |k: Node| {
+        matches!(
+            k.attribute("firstAttribute"),
+            Some("top" | "bottom" | "height" | "centerY" | "baseline" | "lastBaseline" | "firstBaseline")
+        )
+    };
     order.sort_by_key(|&i| (list[i].attribute("firstItem").map_or_else(|| place(n.attribute("id").unwrap_or_default()), place), vertical(list[i])));
     let mut items = Vec::new();
     for i in order {
@@ -277,7 +282,16 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
         }
         only_attributes(
             k,
-            &[("firstItem", None), ("firstAttribute", None), ("relation", None), ("secondItem", None), ("secondAttribute", None), ("constant", None), ("priority", None), ("id", None)],
+            &[
+                ("firstItem", None),
+                ("firstAttribute", None),
+                ("relation", None),
+                ("secondItem", None),
+                ("secondAttribute", None),
+                ("constant", None),
+                ("priority", None),
+                ("id", None),
+            ],
         )?;
         let attribute = |a: &str| -> Result<i64, String> {
             Ok(match a {
@@ -300,7 +314,11 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
         c.parents.push((constraint_name.clone(), name.to_string()));
         let first = k.attribute("firstItem").map_or(name.to_string(), object_name);
         let first_attribute = attribute(attr(k, "firstAttribute")?)?;
-        let mut values = vec![("NSFirstItem", reference(first)), ("NSFirstAttributeV2", Value::Int(first_attribute)), ("NSFirstAttribute", Value::Int(first_attribute))];
+        let mut values = vec![
+            ("NSFirstItem", reference(first)),
+            ("NSFirstAttributeV2", Value::Int(first_attribute)),
+            ("NSFirstAttribute", Value::Int(first_attribute)),
+        ];
         match k.attribute("relation") {
             None => {}
             Some("greaterThanOrEqual") => values.push(("NSRelation", Value::Int(1))),
@@ -538,7 +556,11 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     }
     // A custom class's reference last (three corpus xibs).
     if n.attribute("customClass").is_some() {
-        let class = class_values(nib, n, module, None)?.into_iter().find(|v| v.0 == "IBClassReference").map(|v| v.1).ok_or("a custom class's reference")?;
+        let class = class_values(nib, n, module, None)?
+            .into_iter()
+            .find(|v| v.0 == "IBClassReference")
+            .map(|v| v.1)
+            .ok_or("a custom class's reference")?;
         values.push(("IBClassReference", class));
     }
     Ok(Value::New(Object::new("NSWindowTemplate", values).named(name)))
@@ -851,7 +873,13 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
 }
 
 fn new_nib(doc: &Document, localizable: bool, storyboard: bool) -> Nib {
-    Nib { shared: HashMap::new(), next: 0, localizable, storyboard, constrained: constrained(doc) }
+    Nib {
+        shared: HashMap::new(),
+        next: 0,
+        localizable,
+        storyboard,
+        constrained: constrained(doc),
+    }
 }
 
 /// The ids of the views constraints position: their items, and the view
@@ -869,7 +897,13 @@ fn constrained(doc: &Document) -> std::collections::HashSet<String> {
 }
 
 fn new_collected(sources: Vec<String>) -> Collected {
-    Collected { parents: Vec::new(), visible: Vec::new(), connection_sources: sources, definitions: HashMap::new(), at_origin: Vec::new() }
+    Collected {
+        parents: Vec::new(),
+        visible: Vec::new(),
+        connection_sources: sources,
+        definitions: HashMap::new(),
+        at_origin: Vec::new(),
+    }
 }
 
 /// Compiles an AppKit xib to its nib.
@@ -899,7 +933,10 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
         }
     }
     let owner = owner.ok_or("a xib without a File's Owner")?;
-    only_attributes(owner, &[("id", None), ("userLabel", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+    only_attributes(
+        owner,
+        &[("id", None), ("userLabel", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)],
+    )?;
     only_children(owner, &["connections"])?;
     let owner_name = object_name("-2");
     let root_object = Object::new("NSCustomObject", class_values(&mut nib, owner, module, None)?).named(owner_name.clone());
@@ -1128,7 +1165,10 @@ fn uuid(xml: &str, id: &str) -> String {
 fn storyboard_placeholder(nib: &mut Nib, c: &mut Collected, name: &str, parent: &str) {
     c.parents.push((name.to_string(), parent.to_string()));
     let identifier = nib.string("NSStoryboardPlaceholder");
-    c.definitions.insert(name.to_string(), Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name.to_string())));
+    c.definitions.insert(
+        name.to_string(),
+        Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name.to_string())),
+    );
 }
 
 fn outlet(name: String, source: &str, destination: &str, label: Value) -> (String, Value) {
@@ -1165,7 +1205,10 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     let [segue] = segues.as_slice() else {
         return fail("a window controller without one content segue is not supported by this ibtool");
     };
-    let vc = doc.descendants().find(|d| d.attribute("id") == segue.attribute("destination") && d.attribute("sceneMemberID") == Some("viewController")).ok_or("a content segue's destination")?;
+    let vc = doc
+        .descendants()
+        .find(|d| d.attribute("id") == segue.attribute("destination") && d.attribute("sceneMemberID") == Some("viewController"))
+        .ok_or("a content segue's destination")?;
     if !vc.has_tag_name("viewController") {
         return fail("a window's content controller other than a view controller is not supported by this ibtool");
     }
@@ -1208,7 +1251,9 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
     // The window's delegate is its controller, connected or not (Xcode's
     // game templates leave it out of the document).
-    let has_delegate = children(window_node, "connections").flat_map(|l| children(l, "outlet")).any(|o| o.attribute("property") == Some("delegate"));
+    let has_delegate = children(window_node, "connections")
+        .flat_map(|l| children(l, "outlet"))
+        .any(|o| o.attribute("property") == Some("delegate"));
     if !has_delegate {
         let label = nib.string("delegate");
         connections.push(outlet(format!("{window_name} delegate outlet"), &window_name, &wc_name, label));
@@ -1223,7 +1268,11 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     let key_path = nib.string("contentViewController");
     let key_paths = nib.array("NSArray", vec![key_path]);
     let runtime = format!("{wc_name} content controller");
-    let connector = Object::new("NSIBUserDefinedRuntimeAttributesConnector", vec![("NSObject", reference(window_name)), ("NSValues", values), ("NSKeyPaths", key_paths)]).named(runtime.clone());
+    let connector = Object::new(
+        "NSIBUserDefinedRuntimeAttributesConnector",
+        vec![("NSObject", reference(window_name)), ("NSValues", values), ("NSKeyPaths", key_paths)],
+    )
+    .named(runtime.clone());
     connections.push((runtime, Value::New(connector)));
     Ok((assemble(&mut nib, root_object, &root_name, c, connections)?, wc_uuid))
 }
@@ -1233,7 +1282,18 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
 /// itself, which connections then require), naming its view's nib and its
 /// identifier (two probes, a template).
 fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str) -> Result<(Value, String), String> {
-    only_attributes(vc, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("sceneMemberID", None), ("storyboardIdentifier", None), ("title", None)])?;
+    only_attributes(
+        vc,
+        &[
+            ("id", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
+            ("sceneMemberID", None),
+            ("storyboardIdentifier", None),
+            ("title", None),
+        ],
+    )?;
     let view = children(vc, "view").next().ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
     let mut values = vec![
@@ -1315,7 +1375,10 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
         let name = object_name(attr(vc, "id")?);
         c.parents.push((name.clone(), root_name.clone()));
         let identifier = nib.string("UpstreamPlaceholder-1");
-        c.definitions.insert(name.clone(), Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name)));
+        c.definitions.insert(
+            name.clone(),
+            Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name)),
+        );
     }
     let label = nib.string("view");
     let mut connections = vec![outlet(format!("{view_name} view outlet"), &root_name, &view_name, label)];
@@ -1362,7 +1425,11 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
         None => {
             let icc = profile(gray)?;
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(icc))]));
-            let values = if gray { vec![("NSID", Value::Int(9)), ("NSModel", Value::Int(0)), ("NSICC", data)] } else { vec![("NSID", Value::Int(7)), ("NSICC", data)] };
+            let values = if gray {
+                vec![("NSID", Value::Int(9)), ("NSModel", Value::Int(0)), ("NSICC", data)]
+            } else {
+                vec![("NSID", Value::Int(7)), ("NSICC", data)]
+            };
             nib.shared(format!("colorspace:{gray}"), || Object::new("NSColorSpace", values))
         }
     };
@@ -1383,7 +1450,17 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     );
     let catalog = nib.string("System");
     let color_name = nib.string(name);
-    Ok(nib.shared(key, || Object::new("NSColor", vec![("NSColorSpace", Value::Int(6)), ("NSCatalogName", catalog), ("NSColorName", color_name), ("NSColor", Value::New(fallback))])))
+    Ok(nib.shared(key, || {
+        Object::new(
+            "NSColor",
+            vec![
+                ("NSColorSpace", Value::Int(6)),
+                ("NSCatalogName", catalog),
+                ("NSColorName", color_name),
+                ("NSColor", Value::New(fallback)),
+            ],
+        )
+    }))
 }
 
 /// A font: a system font by its metafont (AppKit's private names, its
@@ -1420,7 +1497,9 @@ fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
     };
     let size = size.unwrap_or(default);
     let font_name = nib.string(name);
-    Ok(nib.shared(format!("font:{name}:{size}:{flags}"), || Object::new("NSFont", vec![("NSName", font_name), ("NSSize", Value::Double(size)), ("NSfFlags", Value::Int(flags))])))
+    Ok(nib.shared(format!("font:{name}:{size}:{flags}"), || {
+        Object::new("NSFont", vec![("NSName", font_name), ("NSSize", Value::Double(size)), ("NSfFlags", Value::Int(flags))])
+    }))
 }
 
 /// Refuses a control Auto Layout sizes by its content, when constraints
@@ -1431,8 +1510,7 @@ fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
 /// which only the first layout at run time uses.
 fn content_sized(nib: &Nib, n: Node) -> Result<(), String> {
     let constrained = n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id));
-    let relaxed = std::env::var("RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT").is_ok_and(|v| v == "1")
-        || std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").is_ok_and(|v| v == "relaxed");
+    let relaxed = std::env::var("RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT").is_ok_and(|v| v == "1") || std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").is_ok_and(|v| v == "relaxed");
     if constrained && !relaxed {
         return fail(format!(
             "a constrained <{}> is laid out again by Xcode's Auto Layout as it compiles, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frame",
@@ -1525,7 +1603,13 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     if has("state") {
         flags |= 0x8000_0000;
     }
-    for (a, bit) in [("sendsActionOnEndEditing", 0x40_0000), ("focusRingType", 0x8000), ("allowsUndo", 0x1000), ("truncatesLastVisibleLine", 0x100), ("usesSingleLineMode", 0x40)] {
+    for (a, bit) in [
+        ("sendsActionOnEndEditing", 0x40_0000),
+        ("focusRingType", 0x8000),
+        ("allowsUndo", 0x1000),
+        ("truncatesLastVisibleLine", 0x100),
+        ("usesSingleLineMode", 0x40),
+    ] {
         if has(a) {
             flags2 |= bit;
         }
@@ -1791,7 +1875,11 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let square = matches!(bezel_name, "regularSquare" | "shadowlessSquare" | "smallSquare" | "texturedSquare");
     let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
     if has("borderStyle") && !square {
-        let hugging = format!("{{{}, {}}}", n.attribute("horizontalHuggingPriority").unwrap_or("250"), n.attribute("verticalHuggingPriority").unwrap_or("250"));
+        let hugging = format!(
+            "{{{}, {}}}",
+            n.attribute("horizontalHuggingPriority").unwrap_or("250"),
+            n.attribute("verticalHuggingPriority").unwrap_or("250")
+        );
         if hugging == "{250, 750}" {
             return fail("a rounded button's hugging of 250 and 750 is not supported by this ibtool");
         }
@@ -1964,7 +2052,15 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
 fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str, horizontal: bool) -> Result<Value, String> {
     only_attributes(
         n,
-        &[("key", None), ("id", None), ("hidden", Some("YES")), ("wantsLayer", Some("YES")), ("verticalHuggingPriority", Some("750")), ("doubleValue", None), ("horizontal", None)],
+        &[
+            ("key", None),
+            ("id", None),
+            ("hidden", Some("YES")),
+            ("wantsLayer", Some("YES")),
+            ("verticalHuggingPriority", Some("750")),
+            ("doubleValue", None),
+            ("horizontal", None),
+        ],
     )?;
     only_children(n, &["rect", "autoresizingMask"])?;
     if n.attribute("hidden").is_none() {
@@ -2011,5 +2107,7 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
 fn uses_upstream(vc: Node) -> bool {
     let id = vc.attribute("id");
     children(vc, "connections").next().is_some()
-        || children(vc, "view").flat_map(|v| v.descendants()).any(|d| (d.has_tag_name("outlet") && d.attribute("destination") == id) || (d.has_tag_name("action") && d.attribute("target") == id))
+        || children(vc, "view")
+            .flat_map(|v| v.descendants())
+            .any(|d| (d.has_tag_name("outlet") && d.attribute("destination") == id) || (d.has_tag_name("action") && d.attribute("target") == id))
 }
