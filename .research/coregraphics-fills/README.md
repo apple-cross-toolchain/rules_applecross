@@ -7,11 +7,57 @@ hold only PDFs. This is a time-boxed probe, black-box throughout: CoreGraphics'
 public API from Swift on the Mac. It is not for merging, and the actool is
 unchanged.
 
-Status (2026-11-09 19:00Z, day-two box under way): banded rows now largely solved; see "Day two" below. The three-hour time-box (16:00Z to 19:00Z on 2026-11-09) found how
-CoreGraphics scan-converts general paths. On straight-edged shapes the
-model matches 99–100% of edge pixels; on glyph curves, 85–97%. Every
-remaining miss is off by one level, and most are within a few hundredths
-of a level of the boundary.
+Status (2026-11-09, tabled): the one-day box ended early by agreement
+because the remaining gaps were long-tail; it's tracked as an outstanding
+item. Measured against CoreGraphics' own drawing of the corpus PDFs at 1×,
+2× and 3×:
+
+| | wrong pixels | of edge pixels |
+| --- | --- | --- |
+| Fills (`rust/cgfill.rs`) | 0 / 1 / 0 | all fills |
+| Wide strokes, my own outlines filled (`rust/cgstroke.rs`) | 11 / 16 / 15 | 6,529 / 15,302 / 23,914 |
+| Thin strokes (w ≤ 1) | one block wrong (logo-open live at 1×, 770 of 1,259) | |
+
+Open items (details in the sections below and in `strokes/README.md`):
+- **Cusp fan.** Where a curve turns tighter than the stroke's half-width,
+  CoreGraphics emits lines at dyadic sub-pieces of the cusp piece (2/16,
+  5/16, 7/16, not gap-based). I emit cubics there.
+- **Fallback handles.** Which offset pieces use the fallback point instead
+  of regular handles; it isn't the sign of either handle length.
+- **The 2% window.** About 2% of convex-curve sides are rejected within a
+  band of widths, with every error measure small.
+- **Thin-stroke start offset.** Sloped width-1 lines are decoded except a
+  whole 1/256 step in the start offset (it alternates with slope parity up
+  to 128/4096), crossing columns, line ends and curves.
+- **Vertex residual.** Single pixels at same-lean triangle apices with
+  reversed stepped tops; CoreGraphics adds 0.6–1.2/4096 px² in some of
+  these and not others.
+
+### What wiring it into actool as an opt-in would take
+
+Not done; this is the estimate.
+- **Drawing.** Today `crates/actool/src/vector.rs` renders PDFs with hayro
+  and SVGs with resvg. An opt-in (for example `--config=actool_cg_raster`,
+  still relaxed) would give hayro's interpreter a device of our own. It
+  collects each fill and stroke path in device space (CTM applied, as the
+  corpus scripts do), with the clip and the colour. Fills go to `cgfill`;
+  strokes over 1 px to `cgstroke` and then `cgfill`.
+- **Compositing.** Clips are mask × fill, `(a·b + 127) // 255`, inside the
+  mask's integer box. Colours become `floor(v·255 + 0.5)` sRGB, then 8-bit
+  premultiplied source-over, as established above. CMYK and ICC colour
+  spaces need the profile path and are out of scope at first.
+- **Gaps to refuse or keep relaxed.** Thin strokes (until decoded), text,
+  images inside PDFs, shadings and transparency groups. A PDF using any of
+  these stays on today's relaxed drawing.
+- **Code.** Move `cgfill.rs` and `cgstroke.rs` into the actool crate,
+  drop their environment knobs (keep the measured defaults), and port the
+  rectangle fast path in as well.
+- **Measurement.** The corpus's 46 PDF-only relaxed catalogs, compared as
+  decoded pixels and then as dmp2 bytes. The SVG drawing (CoreSVG) is
+  separate and unexamined.
+- **Size.** Roughly two to three days for the device and compositing, plus
+  the corpus run. That would bring most PDF-only catalogs to exact pixels,
+  except those using thin strokes or the open cases above.
 
 ## Established
 
