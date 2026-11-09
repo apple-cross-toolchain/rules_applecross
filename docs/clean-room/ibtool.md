@@ -3094,9 +3094,10 @@ app class's is.
   `NSStoryboardSegueDestinationOptions`, as a window controller does.
 - `simulatedAppContext` changes Xcode's layout of the text in it, so only
   `relax_ibtool_layout` compiles it.
-- A window with a hidden title has `NSWindowTitleVisibility` 1, and with a
-  transparent title bar `NSTitlebarAppearsTransparent`, after its
-  full-screen sizes.
+- After a window's full-screen sizes come its toolbar style as
+  `NSWindowToolbarStyle` (expanded 1, preference 2, unified 3; automatic,
+  the default, left out), `NSWindowTitleVisibility` 1 with a hidden title,
+  and `NSTitlebarAppearsTransparent` with a transparent title bar.
 - A window controller of a custom class is an `NSClassSwapper` for
   `NSWindowController`.
 - An older xib's Application placeholder may have outlets (its delegate).

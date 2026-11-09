@@ -799,6 +799,7 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("restorable", Some("NO")),
             ("titlebarAppearsTransparent", Some("YES")),
             ("titleVisibility", Some("hidden")),
+            ("toolbarStyle", None),
             ("key", Some("window")),
             ("id", None),
             ("customClass", None),
@@ -979,8 +980,16 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         values.push(("NSMinFullScreenContentSize", nib.string("{0, 0}")));
         values.push(("NSMaxFullScreenContentSize", nib.string("{0, 0}")));
     }
-    // A hidden title and a transparent title bar, after the full-screen
-    // sizes (two probes).
+    // Its toolbar style, then a hidden title and a transparent title bar,
+    // after the full-screen sizes (six probes); automatic, the default, is
+    // left out.
+    match n.attribute("toolbarStyle") {
+        None | Some("automatic") => {}
+        Some("expanded") => values.push(("NSWindowToolbarStyle", Value::Int(1))),
+        Some("preference") => values.push(("NSWindowToolbarStyle", Value::Int(2))),
+        Some("unified") => values.push(("NSWindowToolbarStyle", Value::Int(3))),
+        Some(other) => return fail(format!("the window toolbar style {other} is not supported by this ibtool")),
+    }
     if n.attribute("titleVisibility").is_some() {
         values.push(("NSWindowTitleVisibility", Value::Int(1)));
     }
