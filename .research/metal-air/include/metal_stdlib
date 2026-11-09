@@ -28,6 +28,7 @@
 #endif
 #define thread
 #define __AIR(name) __asm__(name)
+#define METAL_FUNC inline __attribute__((always_inline))
 
 typedef unsigned char uchar;
 typedef unsigned short ushort;
@@ -63,13 +64,24 @@ struct __vbuild {
 };
 template <class T, int N> struct __packed;
 template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
-template <class V> __attribute__((always_inline)) inline V __vec() { return V{}; }
-template <class V, class A> __attribute__((always_inline)) inline V __vec(A a) {
-  if constexpr (__elem<A>::n == 1) { V r = (typename __elem<V>::type)a; return r; }
+template <bool B, class T = void> struct enable_if {};
+template <class T> struct enable_if<true, T> { typedef T type; };
+template <int... I> struct __seq {};
+template <int N, int... I> struct __mkseq : __mkseq<N - 1, N - 1, I...> {};
+template <int... I> struct __mkseq<0, I...> { typedef __seq<I...> type; };
+template <class V> constexpr V __vec() { return V{}; }
+// Scalars only: brace construction, which clang can constant-evaluate (program-scope constants).
+template <class V, int... I, class S> constexpr V __splat(__seq<I...>, S s) { return V{((void)I, (typename __elem<V>::type)s)...}; }
+template <class V, class A> constexpr V __vec(A a) {
+  if constexpr (__elem<A>::n == 1) return __splat<V>(typename __mkseq<__elem<V>::n>::type(), a);
   else { V r; for (int k = 0; k < __elem<V>::n; k++) r[k] = (typename __elem<V>::type)a[k]; return r; }
 }
-template <class V, class A, class B, class... R> __attribute__((always_inline)) inline V __vec(A a, B b, R... r) {
-  __vbuild<V> v; v.put(a); v.put(b); (v.put(r), ...); return v.v;
+template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R... r) {
+  if constexpr (__elem<A>::n == 1 && __elem<B>::n == 1 && (... && (__elem<R>::n == 1)) && 2 + sizeof...(R) == __elem<V>::n) {
+    typedef typename __elem<V>::type E; return V{(E)a, (E)b, (E)r...};
+  } else {
+    __vbuild<V> v; v.put(a); v.put(b); (v.put(r), ...); return v.v;
+  }
 }
 
 enum class mem_flags { mem_none = 0, mem_device = 1, mem_threadgroup = 2, mem_texture = 4, mem_threadgroup_imageblock = 8, mem_object_data = 16 };
@@ -108,97 +120,73 @@ typedef _atomic<int> atomic_int;
   __attribute__((always_inline)) inline int atomic_fetch_##op##_explicit(device atomic_int *a, int v, memory_order o) { return __msl_atomic_##op##_s_i32((int *)&a->__s, v, int(o)); }
 __MSL_ATOMIC(add) __MSL_ATOMIC(sub) __MSL_ATOMIC(min) __MSL_ATOMIC(max) __MSL_ATOMIC(and) __MSL_ATOMIC(or) __MSL_ATOMIC(xor)
 
-// ---- math. Observed names; fast_ variants under -ffast-math (rules_apple's default).
-#ifdef __FAST_MATH__
-#define __MSL_F(n) "air.fast_" #n
-#else
-#define __MSL_F(n) "air." #n
-#endif
-#define __MSL_MATH1(n, NAME) \
-  extern "C" float __air_##n##_f32(float) __AIR(NAME ".f32"); \
-  extern "C" float2 __air_##n##_v2f32(float2) __AIR(NAME ".v2f32"); \
-  extern "C" float3 __air_##n##_v3f32(float3) __AIR(NAME ".v3f32"); \
-  extern "C" float4 __air_##n##_v4f32(float4) __AIR(NAME ".v4f32"); \
-  __attribute__((always_inline)) inline float n(float x) { return __air_##n##_f32(x); } \
-  __attribute__((always_inline)) inline float2 n(float2 x) { return __air_##n##_v2f32(x); } \
-  __attribute__((always_inline)) inline float3 n(float3 x) { return __air_##n##_v3f32(x); } \
-  __attribute__((always_inline)) inline float4 n(float4 x) { return __air_##n##_v4f32(x); }
-#define __MSL_MATH2(n, NAME) \
-  extern "C" float __air_##n##_f32(float, float) __AIR(NAME ".f32"); \
-  extern "C" float2 __air_##n##_v2f32(float2, float2) __AIR(NAME ".v2f32"); \
-  extern "C" float3 __air_##n##_v3f32(float3, float3) __AIR(NAME ".v3f32"); \
-  extern "C" float4 __air_##n##_v4f32(float4, float4) __AIR(NAME ".v4f32"); \
-  __attribute__((always_inline)) inline float n(float x, float y) { return __air_##n##_f32(x, y); } \
-  __attribute__((always_inline)) inline float2 n(float2 x, float2 y) { return __air_##n##_v2f32(x, y); } \
-  __attribute__((always_inline)) inline float3 n(float3 x, float3 y) { return __air_##n##_v3f32(x, y); } \
-  __attribute__((always_inline)) inline float4 n(float4 x, float4 y) { return __air_##n##_v4f32(x, y); } \
-  __attribute__((always_inline)) inline float2 n(float2 x, float y) { return __air_##n##_v2f32(x, y); } \
-  __attribute__((always_inline)) inline float3 n(float3 x, float y) { return __air_##n##_v3f32(x, y); } \
-  __attribute__((always_inline)) inline float4 n(float4 x, float y) { return __air_##n##_v4f32(x, y); }
-#define __MSL_MATH3(n, NAME) \
-  extern "C" float __air_##n##_f32(float, float, float) __AIR(NAME ".f32"); \
-  extern "C" float2 __air_##n##_v2f32(float2, float2, float2) __AIR(NAME ".v2f32"); \
-  extern "C" float3 __air_##n##_v3f32(float3, float3, float3) __AIR(NAME ".v3f32"); \
-  extern "C" float4 __air_##n##_v4f32(float4, float4, float4) __AIR(NAME ".v4f32"); \
-  __attribute__((always_inline)) inline float n(float x, float y, float z) { return __air_##n##_f32(x, y, z); } \
-  __attribute__((always_inline)) inline float2 n(float2 x, float2 y, float2 z) { return __air_##n##_v2f32(x, y, z); } \
-  __attribute__((always_inline)) inline float3 n(float3 x, float3 y, float3 z) { return __air_##n##_v3f32(x, y, z); } \
-  __attribute__((always_inline)) inline float4 n(float4 x, float4 y, float4 z) { return __air_##n##_v4f32(x, y, z); } \
-  __attribute__((always_inline)) inline float2 n(float2 x, float2 y, float z) { return __air_##n##_v2f32(x, y, z); } \
-  __attribute__((always_inline)) inline float3 n(float3 x, float3 y, float z) { return __air_##n##_v3f32(x, y, z); } \
-  __attribute__((always_inline)) inline float4 n(float4 x, float4 y, float z) { return __air_##n##_v4f32(x, y, z); } \
-  __attribute__((always_inline)) inline float2 n(float2 x, float y, float z) { return __air_##n##_v2f32(x, y, z); } \
-  __attribute__((always_inline)) inline float3 n(float3 x, float y, float z) { return __air_##n##_v3f32(x, y, z); } \
-  __attribute__((always_inline)) inline float4 n(float4 x, float y, float z) { return __air_##n##_v4f32(x, y, z); }
-__MSL_MATH1(sin, __MSL_F(sin)) __MSL_MATH1(cos, __MSL_F(cos)) __MSL_MATH1(sqrt, __MSL_F(sqrt))
-__MSL_MATH1(rsqrt, __MSL_F(rsqrt)) __MSL_MATH1(fabs, __MSL_F(fabs)) __MSL_MATH1(exp, __MSL_F(exp))
-__MSL_MATH1(log, __MSL_F(log))
-__MSL_MATH2(pow, __MSL_F(pow))
-__MSL_MATH2(fmax, __MSL_F(fmax)) __MSL_MATH2(fmin, __MSL_F(fmin))
-__MSL_MATH1(floor, __MSL_F(floor)) __MSL_MATH1(dfdx, "air.dfdx") __MSL_MATH1(dfdy, "air.dfdy") __MSL_MATH1(fwidth, "air.fwidth")
-__MSL_MATH3(fmax3, __MSL_F(fmax3)) __MSL_MATH3(fmin3, __MSL_F(fmin3))
-// max/min on floats are fmax/fmin (observed); on integers, plain comparisons.
-#define __MSL_ALIAS2(n, to) \
-  __attribute__((always_inline)) inline float n(float x, float y) { return to(x, y); } \
-  __attribute__((always_inline)) inline float2 n(float2 x, float2 y) { return to(x, y); } \
-  __attribute__((always_inline)) inline float3 n(float3 x, float3 y) { return to(x, y); } \
-  __attribute__((always_inline)) inline float4 n(float4 x, float4 y) { return to(x, y); } \
-  __attribute__((always_inline)) inline float2 n(float2 x, float y) { return to(x, y); } \
-  __attribute__((always_inline)) inline float3 n(float3 x, float y) { return to(x, y); } \
-  __attribute__((always_inline)) inline float4 n(float4 x, float y) { return to(x, y); }
-__MSL_ALIAS2(max, fmax) __MSL_ALIAS2(min, fmin)
+// ---- bool vectors: fields x..w, built from a bool (splat) or a comparison
+// mask (nonzero is true); converting to a number gives 0 or 1, as in MSL.
+template <int N> struct __boolvec;
+#define __MSL_BOOLVEC_OPS(N) \
+  __boolvec() = default; \
+  __attribute__((always_inline)) __boolvec(bool b) { for (int k = 0; k < N; k++) (*this)[k] = b; } \
+  template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
+  __attribute__((always_inline)) __boolvec(V m) { for (int k = 0; k < N; k++) (*this)[k] = m[k] != 0; } \
+  __attribute__((always_inline)) bool &operator[](int k) { return (&x)[k]; } \
+  __attribute__((always_inline)) bool operator[](int k) const { return (&x)[k]; }
+template <> struct __boolvec<2> { bool x, y; __MSL_BOOLVEC_OPS(2) };
+template <> struct __boolvec<3> { bool x, y, z; __MSL_BOOLVEC_OPS(3) };
+template <> struct __boolvec<4> { bool x, y, z, w; __MSL_BOOLVEC_OPS(4) };
+template <int N> struct __elem<__boolvec<N>> { typedef bool type; static constexpr int n = N; };
+template <int N> __attribute__((always_inline)) inline bool any(__boolvec<N> b) { bool r = false; for (int k = 0; k < N; k++) r = r || b[k]; return r; }
+template <int N> __attribute__((always_inline)) inline bool all(__boolvec<N> b) { bool r = true; for (int k = 0; k < N; k++) r = r && b[k]; return r; }
+template <class V, int N> __attribute__((always_inline)) inline V select(V a, V b, __boolvec<N> c) { V r = a; for (int k = 0; k < N; k++) if (c[k]) r[k] = b[k]; return r; }
+template <class V> __attribute__((always_inline)) inline V select(V a, V b, bool c) { return c ? b : a; }
 
-__attribute__((always_inline)) inline float max3(float a, float b, float c) { return fmax3(a, b, c); }
-__attribute__((always_inline)) inline float min3(float a, float b, float c) { return fmin3(a, b, c); }
-#define __MSL_IMINMAX(T) \
-  __attribute__((always_inline)) inline T max(T a, T b) { return a > b ? a : b; } \
-  __attribute__((always_inline)) inline T min(T a, T b) { return a < b ? a : b; } \
-  __attribute__((always_inline)) inline T max3(T a, T b, T c) { return max(max(a, b), c); } \
-  __attribute__((always_inline)) inline T min3(T a, T b, T c) { return min(min(a, b), c); }
-__MSL_IMINMAX(int) __MSL_IMINMAX(uint) __MSL_IMINMAX(short) __MSL_IMINMAX(ushort)
-__MSL_MATH3(clamp, __MSL_F(clamp)) __MSL_MATH3(fma, "air.fma") __MSL_MATH3(mix, "air.mix")
-// smoothstep (MSL specification): edges may be scalars for vector x
-template <class V, class E0, class E1> __attribute__((always_inline)) inline V smoothstep(E0 e0, E1 e1, V x) {
-  typedef typename __elem<V>::type E;
-  V a, b;
-  if constexpr (__elem<E0>::n == 1) a = (E)e0; else a = e0;
-  if constexpr (__elem<E1>::n == 1) b = (E)e1; else b = e1;
-  V t = clamp((x - a) / (b - a), (E)0, (E)1);
-  return t * t * ((E)3 - (E)2 * t);
-}
-// fract: x - floor(x), kept below 1 (MSL specification)
-#define __MSL_FRACT(V) __attribute__((always_inline)) inline V fract(V x) { return fmin(x - floor(x), 0x1.fffffep-1f); }
-__MSL_FRACT(float) __MSL_FRACT(float2) __MSL_FRACT(float3) __MSL_FRACT(float4)
-#define __MSL_DOT(N) extern "C" float __air_dot_v##N##f32(float##N, float##N) __AIR("air.dot.v" #N "f32"); \
-  __attribute__((always_inline)) inline float dot(float##N a, float##N b) { return __air_dot_v##N##f32(a, b); } \
-  __attribute__((always_inline)) inline float##N normalize(float##N v) { return v * rsqrt(dot(v, v)); } \
-  __attribute__((always_inline)) inline float length(float##N v) { return sqrt(dot(v, v)); }
-__MSL_DOT(2) __MSL_DOT(3) __MSL_DOT(4)
-__attribute__((always_inline)) inline float abs(float x) { return fabs(x); }
-__attribute__((always_inline)) inline float2 abs(float2 x) { return fabs(x); }
-__attribute__((always_inline)) inline float3 abs(float3 x) { return fabs(x); }
-__attribute__((always_inline)) inline float4 abs(float4 x) { return fabs(x); }
-__attribute__((always_inline)) inline int abs(int x) { return x < 0 ? -x : x; }
+// ---- type traits (MSL specification, <metal_type_traits>)
+template <bool B, class T, class F> struct conditional { typedef T type; };
+template <class T, class F> struct conditional<false, T, F> { typedef F type; };
+template <class T, class U> struct is_same { static constexpr bool value = false; };
+template <class T> struct is_same<T, T> { static constexpr bool value = true; };
+template <class T> struct remove_cv { typedef T type; };
+template <class T> struct remove_cv<const T> { typedef T type; };
+template <class T> struct make_scalar { typedef typename __elem<T>::type type; };
+template <class T> struct is_vector { static constexpr bool value = __elem<T>::n > 1; };
+template <class T> struct vec_elements { static constexpr int value = __elem<T>::n; };
+template <class T> struct is_floating_point { static constexpr bool value = is_same<T, float>::value || is_same<T, half>::value; };
+template <class T> struct is_integral { static constexpr bool value = !is_floating_point<T>::value && __elem<T>::n == 1 && !is_same<T, bool>::value; };
+template <class T> struct is_scalar { static constexpr bool value = __elem<T>::n == 1; };
+template <class T, int N> struct __vec_alias { typedef __vector<T, N> type; };
+template <class T> struct __vec_alias<T, 1> { typedef T type; };
+template <class T, int N> using vec = typename __vec_alias<T, N>::type;
+
+// ---- constants (MSL specification)
+#define M_E_F 2.71828182845904523536028747135266250f
+#define M_LOG2E_F 1.44269504088896340735992468100189214f
+#define M_LOG10E_F 0.434294481903251827651128918916605082f
+#define M_LN2_F 0.693147180559945309417232121458176568f
+#define M_LN10_F 2.30258509299404568401799145468436421f
+#define M_PI_F 3.14159265358979323846264338327950288f
+#define M_PI_2_F 1.57079632679489661923132169163975144f
+#define M_PI_4_F 0.785398163397448309615660845819875721f
+#define M_1_PI_F 0.318309886183790671537767526745028724f
+#define M_2_PI_F 0.636619772367581343075535053490057448f
+#define M_2_SQRTPI_F 1.12837916709551257389615890312154517f
+#define M_SQRT2_F 1.41421356237309504880168872420969808f
+#define M_SQRT1_2_F 0.707106781186547524400844362104849039f
+#define M_PI_H ((half)M_PI_F)
+#define M_PI_2_H ((half)M_PI_2_F)
+#define M_E_H ((half)M_E_F)
+#define MAXFLOAT 3.40282346638528859811704183484516925e+38f
+#define MAXHALF ((half)65504.0f)
+#define INFINITY __builtin_inff()
+#define NAN __builtin_nanf("")
+
+// ---- math: generated from the observed AIR names (gen_math.py)
+#include "__metal_math.h"
+
+// refract (MSL specification)
+#define __MSL_REFRACT(V, S) __attribute__((always_inline)) inline V refract(V i, V n, S eta) { \
+  S k = (S)1 - eta * eta * ((S)1 - dot(n, i) * dot(n, i)); \
+  return k < (S)0 ? (V)(S)0 : eta * i - (eta * dot(n, i) + sqrt(k)) * n; }
+__MSL_REFRACT(float2, float) __MSL_REFRACT(float3, float) __MSL_REFRACT(float4, float)
+__MSL_REFRACT(half2, half) __MSL_REFRACT(half3, half) __MSL_REFRACT(half4, half)
 
 // ---- matrices: column-major, columns[c] is a vector of R elements.
 template <bool B> struct __enable_cols {};
@@ -211,6 +199,7 @@ template <class T, int C, int R> struct matrix;
 template <class T, int R> struct matrix<T, 2, R> { __vector<T, R> __c0, __c1; __MSL_MATRIX_OPS(2) };
 template <class T, int R> struct matrix<T, 3, R> { __vector<T, R> __c0, __c1, __c2; __MSL_MATRIX_OPS(3) };
 template <class T, int R> struct matrix<T, 4, R> { __vector<T, R> __c0, __c1, __c2, __c3; __MSL_MATRIX_OPS(4) };
+template <class T, int C, int R> struct __elem<matrix<T, C, R>> { typedef T type; static constexpr int n = -1; };
 template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(const matrix<T, C, R> &m, __vector<T, C> v) {
   __vector<T, R> r = m[0] * v[0];
   for (int c = 1; c < C; c++) r += m[c] * v[c];
@@ -231,25 +220,34 @@ template <class T, int K, int C, int R> __attribute__((always_inline)) inline ma
 template <class X, class... R> __attribute__((always_inline)) inline X __first(X x, R...) { return x; }
 template <class M> struct __mat_traits;
 template <class T, int C, int R> struct __mat_traits<matrix<T, C, R>> { typedef T E; static constexpr int c = C, r = R; };
-template <class M, class... A> __attribute__((always_inline)) inline M __mat(A... a) {
-  typedef __mat_traits<M> tr;
-  M m;
-  if constexpr (sizeof...(A) == tr::c) {
-    int i = 0; ((m[i++] = a), ...);
-  } else if constexpr (sizeof...(A) == 1) {
-    typename tr::E d = (typename tr::E)__first(a...);
+template <class C, int... J, class E> constexpr C __col(const E *v, int base, __seq<J...>) { return C{v[base + J]...}; }
+template <class M, int... I, class... A> constexpr M __mat_scalars(__seq<I...>, A... a) {
+  typedef __mat_traits<M> tr; typedef typename tr::E E; typedef __vector<E, tr::r> C;
+  E v[] = {(E)a...};
+  return M{__col<C>(v, I * tr::r, typename __mkseq<tr::r>::type())...};
+}
+template <class M, class... A> constexpr M __mat(A... a) {
+  typedef __mat_traits<M> tr; typedef __vector<typename tr::E, tr::r> C;
+  if constexpr (sizeof...(A) == tr::c && (... && (__elem<A>::n == tr::r))) {
+    return M{C(a)...};
+  } else if constexpr (sizeof...(A) == 1 && (... && (__elem<A>::n == 1))) {
+    M m{}; typename tr::E d = (typename tr::E)__first(a...);
     for (int c = 0; c < tr::c; c++) { m[c] = (typename tr::E)0; if (c < tr::r) m[c][c] = d; }
+    return m;
+  } else if constexpr (sizeof...(A) == 1) {
+    M m{}; auto s = __first(a...);   // another matrix: convert column by column
+    for (int c = 0; c < tr::c; c++) for (int r = 0; r < tr::r; r++) m[c][r] = (typename tr::E)s[c][r];
+    return m;
   } else {
-    typename tr::E v[] = {(typename tr::E)a...};
-    for (int c = 0; c < tr::c; c++) for (int r = 0; r < tr::r; r++) m[c][r] = v[c * tr::r + r];
+    return __mat_scalars<M>(typename __mkseq<tr::c>::type(), a...);
   }
-  return m;
 }
 #define __MSL_MAT(T) typedef matrix<T, 2, 2> T##2x2; typedef matrix<T, 2, 3> T##2x3; typedef matrix<T, 2, 4> T##2x4; \
   typedef matrix<T, 3, 2> T##3x2; typedef matrix<T, 3, 3> T##3x3; typedef matrix<T, 3, 4> T##3x4; \
   typedef matrix<T, 4, 2> T##4x2; typedef matrix<T, 4, 3> T##4x3; typedef matrix<T, 4, 4> T##4x4;
 __MSL_MAT(float) __MSL_MAT(half)
 }  // namespace metal
+typedef metal::__boolvec<2> bool2; typedef metal::__boolvec<3> bool3; typedef metal::__boolvec<4> bool4;
 using metal::float2x2; using metal::float3x3; using metal::float4x4; using metal::float2x3; using metal::float3x4;
 using metal::float4x3; using metal::float2x4; using metal::float3x2; using metal::float4x2;
 using metal::half2x2; using metal::half3x3; using metal::half4x4;

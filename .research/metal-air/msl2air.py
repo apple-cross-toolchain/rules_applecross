@@ -131,7 +131,7 @@ def half_bits(x):
 def sampler_state(args):
     st = dict(s=1, t=1, r=1, mag=0, min=0, mip=0, coord=0, cmp=8, aniso=1, lodmin=0.0, lodmax=65504.0, border=0)
     for a in split_args(args):
-        a = a.replace('metal::', '').strip()
+        a = re.sub(r'\s*::\s*', '::', a.replace('metal::', '')).strip()
         m = re.match(r'(\w+)::(\w+)$', a)
         if m:
             kind, val = m.groups()
@@ -176,6 +176,9 @@ def rewrite_samplers(src, air):
         decls.append('extern "C" __attribute__((address_space(2))) unsigned long __msl_sampler_%d%s;' % (k, '[2]' if air >= (2, 7) else ''))
         return 'const metal::sampler %s = {(%s _sampler_t *)&__msl_sampler_%d};' % (m.group(1), AS2, k)
     src = re.sub(r'\bconstexpr\s+sampler\s+(\w+)\s*\(((?:[^()]|\([^()]*\))*)\)\s*;', one, src)
+    # constexpr sampler s;  and  constexpr sampler s = sampler(args);
+    src = re.sub(r'\bconstexpr\s+(?:metal::)?sampler\s+(\w+)\s*=\s*(?:metal::)?sampler\s*\(((?:[^()]|\([^()]*\))*)\)\s*;', one, src)
+    src = re.sub(r'\bconstexpr\s+(?:metal::)?sampler\s+(\w+)\s*()(?:\{\s*\})?\s*;', one, src)
     return '\n'.join(decls) + ('\n' if decls else '') + src
 
 def sampler_ir(ir, air):
@@ -266,7 +269,7 @@ def stage_functions(tree):
                         params.append(dict(name=pn, type=pt, desugared=pd,
                                            attrs=[a[4:] for a in annotations(p) if a.startswith('msl:')]))
                 fattrs = [a[4:] for a in ann if a.startswith('msl:')]
-                out.append(dict(name=name, stage=stage[0], type=ftype, params=params, attrs=fattrs))
+                out.append(dict(name=name, stage=stage[0], type=ftype, params=params, attrs=fattrs, ns=ns))
     walk(tree, '')
     return out
 
@@ -697,7 +700,7 @@ def entry_points(funcs):
                 ps.append('%s %s' % (t, p['name'])); args.append(p['name'])
         ret = ret_type(f)
         rf = ret_fields(f)
-        call = '::%s(%s)' % (f['name'], ', '.join(args))
+        call = '::%s%s(%s)' % (f.get('ns', ''), f['name'], ', '.join(args))
         if rf:
             out.append('struct __attribute__((packed)) __ret_%s { %s };' % (f['name'], ' '.join('%s f%d;' % (fld['type'], k) for k, fld in enumerate(rf))))
             body = '%s __o = %s; __ret_%s __r; %s return __r;' % (ret, call, f['name'], ' '.join('__r.f%d = __o.%s;' % (k, fld['name']) for k, fld in enumerate(rf)))
@@ -849,7 +852,8 @@ def prepare_flat(ir, entries):
             continue
         ty = global_type(rest)
         ir = ir.replace(m.group(0), '@%s = %s%saddrspace(2) %s %s, align %s' % (name, link, ua, kind, rest, align))
-        ir = re.sub(r'%s\* @%s\b' % (re.escape(ty), re.escape(name)), '%s* addrspacecast (%s addrspace(2)* @%s to %s*)' % (ty, ty, name, ty), ir)
+        ir = re.sub(r'%s\*((?: (?:noundef|nonnull|readonly|nocapture|align \d+|dereferenceable\(\d+\)))*) @%s\b' % (re.escape(ty), re.escape(name)),
+                    lambda u: '%s*%s addrspacecast (%s addrspace(2)* @%s to %s*)' % (ty, u.group(1), ty, name, ty), ir)
     return ir
 
 def global_type(rest):
@@ -988,6 +992,7 @@ def main(argv):
               '-I', HERE + '/include', '-include', 'metal_stdlib', '-I', os.path.dirname(os.path.abspath(src)),
               '-D__METAL_VERSION__=%d' % (lang_v[0] * 100 + lang_v[1] * 10)] + incs
         pp += ['-D__METAL_MACOS__'] if os_name == 'macosx' else ['-D__METAL_IOS__'] if os_name == 'ios' else []
+        pp += ['-D__MSL_TARGET_%s' % {'macosx': 'MACOS', 'ios': 'IOS', 'tvos': 'TVOS', 'xros': 'XROS'}[os_name]] + (['-D__MSL_TARGET_SIMULATOR'] if sim else [])
         def preprocessed(ast_mode):
             r = subprocess.run(pp + (['-D__MSL_AST'] if ast_mode else []) + [src], capture_output=True, text=True)
             if r.returncode:

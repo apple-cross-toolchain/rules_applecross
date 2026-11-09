@@ -144,7 +144,34 @@ The plan, sent to the Manager:
     - The metallib orders functions by stage: kernels, then vertex, then
       fragment.
     - GPU: still 22 of 22 identical after these changes.
+  - **Math library from a probe** (`probes/p30_math.metal`, 555 kernels
+    on four targets): each MSL math function's AIR name for float, half
+    and integer types.
+    - float uses `air.fast_<fn>` under fast math, except `sign`, `mix`,
+      `fma` and `dot`; half never does.
+    - Integers use `air.<op>.<s|u>.<type>`.
+    - `gen_math.py` generates `include/__metal_math.h` from the table (722
+      functions). Geometric functions are built from `dot`/`sqrt`/`rsqrt`
+      as Xcode does; `cross`, `step`, `refract` and `smoothstep` follow
+      the specification.
+    - Threadgroup atomics: `air.atomic.local.*` with scope 1.
+  - **More stdlib:**
+    - type traits and constants, bool vectors;
+    - constexpr vector and matrix construction, so program-scope constants
+      are constant-initialised;
+    - matrix conversion, `METAL_FUNC`, `TargetConditionals.h`;
+    - shaders inside namespaces.
+  - **Public corpus** (GPUImage3 BSD-3, MetalPetal MIT; downloaded to
+    /tmp, not committed; `measure.sh`): 93 of 95 shaders compile. One
+    needs texture queries beyond 2D; one needs an include path the
+    measurement doesn't give.
+    - `probes/p31_textures.metal` records every texture kind's methods (135
+      AIR functions) for the next step.
+    - llama.cpp's kernels are templates instantiated with `[[host_name]]`,
+      which isn't supported yet.
   - **Still to do:**
+    - the texture library from p31;
+    - template kernels (`host_name`);
     - a Rust port;
     - runtime checks for argument buffers, framebuffer fetch and MRT;
     - unprobed intrinsic variants (int simd, threadgroup atomics, more
