@@ -1764,6 +1764,12 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
         .filter(|d| d.has_tag_name("segue") && d.attribute("relationship") == Some("window.shadowedContentViewController"))
         .filter_map(|d| d.attribute("destination"))
         .collect();
+    // The view controllers split view controllers' items lead to.
+    let split_items: Vec<&str> = doc
+        .descendants()
+        .filter(|d| d.has_tag_name("segue") && d.attribute("relationship") == Some("splitItems"))
+        .filter_map(|d| d.attribute("destination"))
+        .collect();
     // The controllers embed segues lead to.
     let embedded: Vec<&str> = doc
         .descendants()
@@ -1773,7 +1779,8 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
     for s in doc.descendants().filter(|d| d.has_tag_name("segue")) {
         let content = s.attribute("relationship") == Some("window.shadowedContentViewController") && s.attribute("kind") == Some("relationship");
         let embed = s.attribute("kind") == Some("embed") && s.parent().and_then(|l| l.parent()).is_some_and(|v| v.has_tag_name("containerView"));
-        if !content && !embed {
+        let item = s.attribute("relationship") == Some("splitItems") && s.parent().and_then(|l| l.parent()).is_some_and(|v| v.has_tag_name("splitViewController"));
+        if !content && !embed && !item {
             return fail("segues other than a window's content relationship or a container view's embedding are not supported by this ibtool");
         }
     }
@@ -1813,9 +1820,16 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                         entry = Some(identifier);
                     }
                 }
-                // A window's content controller: its view's nib (the window
-                // controller's holds the controller).
-                "viewController" if content_controllers.contains(&attr(*controller, "id")?) => {
+                // A window's split view controller: the window controller's
+                // nib holds it (probes).
+                "splitViewController" if content_controllers.contains(&attr(*controller, "id")?) => {
+                    if !others.is_empty() || split_items.contains(&attr(*controller, "id")?) {
+                        return fail("a split view controller with objects beside it or in another split view is not supported by this ibtool");
+                    }
+                }
+                // A window's content controller, or a split view item's: its
+                // view's nib (the window controller's holds the controller).
+                "viewController" if content_controllers.contains(&attr(*controller, "id")?) || split_items.contains(&attr(*controller, "id")?) => {
                     if !others.is_empty() || controller.attribute("storyboardIdentifier").is_some() {
                         return fail("a content controller with an identifier or objects beside it is not supported by this ibtool");
                     }
@@ -1826,8 +1840,8 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                 // its view's (four probes).
                 "viewController" if embedded.contains(&attr(*controller, "id")?) => {
                     let id = attr(*controller, "id")?;
-                    if !others.is_empty() || controller.attribute("storyboardIdentifier").is_some() || content_controllers.contains(&id) {
-                        return fail("an embedded view controller with an identifier, objects beside it or a window is not supported by this ibtool");
+                    if !others.is_empty() || controller.attribute("storyboardIdentifier").is_some() || content_controllers.contains(&id) || split_items.contains(&id) {
+                        return fail("an embedded view controller with an identifier, objects beside it, a window or a split view is not supported by this ibtool");
                     }
                     let identifier = format!("NSViewController-{id}");
                     files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, false)?));
@@ -2028,9 +2042,12 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
         .descendants()
         .find(|d| d.attribute("id") == segue.attribute("destination") && d.attribute("sceneMemberID") == Some("viewController"))
         .ok_or("a content segue's destination")?;
-    if !vc.has_tag_name("viewController") {
-        return fail("a window's content controller other than a view controller is not supported by this ibtool");
+    let split = vc.has_tag_name("splitViewController");
+    if !vc.has_tag_name("viewController") && !split {
+        return fail("a window's content controller other than a view or split view controller is not supported by this ibtool");
     }
+    // A split view controller's items and their view controllers.
+    let items = if split { split_items(doc, vc)? } else { Vec::new() };
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(vec![attr(window_node, "id")?.to_string()]);
@@ -2038,18 +2055,34 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     let vc_name = object_name(attr(vc, "id")?);
     let vc_placeholder = format!("{vc_name} storyboard");
     let wc_placeholder = format!("{wc_name} storyboard");
+    // The split items' controllers' placeholders in reverse, then the
+    // content controller's; the items' controllers themselves after them
+    // (probes).
+    for (_, item_vc) in items.iter().rev() {
+        storyboard_placeholder(&mut nib, &mut c, &format!("{} storyboard", object_name(attr(*item_vc, "id")?)), &root_name);
+    }
     storyboard_placeholder(&mut nib, &mut c, &vc_placeholder, &root_name);
+    for (_, item_vc) in &items {
+        c.parents.push((object_name(attr(*item_vc, "id")?), root_name.clone()));
+    }
     c.parents.push((wc_name.clone(), root_name.clone()));
     let window_value = window(&mut nib, &mut c, window_node, module, &wc_name)?;
     let window_name = object_name(attr(window_node, "id")?);
     c.parents.push((vc_name.clone(), window_name.clone()));
+    let mut split_connections = Vec::new();
+    let (vc_value, templates) = if split {
+        let (value, connections) = split_controller(&mut nib, &mut c, xml, vc, &items, module, &vc_name)?;
+        split_connections = connections;
+        (value, Vec::new())
+    } else {
+        content_controller(&mut nib, xml, vc, module, &vc_name, false)?
+    };
     let placeholder = object_name("application placeholder");
     c.parents.push((placeholder.clone(), root_name.clone()));
     let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
     c.definitions.insert(placeholder, value);
     storyboard_placeholder(&mut nib, &mut c, &wc_placeholder, &root_name);
 
-    let (vc_value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, false)?;
     let wc_uuid = uuid(xml, wc_id);
     let mut wc_values = vec![("IBWindowTemplate", window_value), ("IBWindowTemplateContentViewController", vc_value)];
     // Its identifier, when it has one (Xcode's document app template).
@@ -2081,18 +2114,26 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     let label = nib.string("sceneController");
     let mut connections = vec![outlet(format!("{wc_name} scene controller"), &root_name, &wc_name, label)];
     connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
-    // The window's delegate is its controller, connected or not (Xcode's
-    // game templates leave it out of the document).
+    // The window's delegate is its controller, connected or not, in a
+    // document Interface Builder saved before tools version 13148 (Xcode's
+    // game templates leave it out of the document; bisected with probes);
+    // in a later one only when connected.
     let has_delegate = children(window_node, "connections")
         .flat_map(|l| children(l, "outlet"))
         .any(|o| o.attribute("property") == Some("delegate"));
-    if !has_delegate {
+    let tools = number(attr(doc.root_element(), "toolsVersion")?)?;
+    if !has_delegate && tools < 13148.0 {
         let label = nib.string("delegate");
         connections.push(outlet(format!("{window_name} delegate outlet"), &window_name, &wc_name, label));
     }
     add_templates(&mut nib, &mut c, &mut connections, &templates, &vc_name, &vc_placeholder);
     let label = nib.string("storyboard");
     connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &vc_placeholder, label));
+    for (_, item_vc) in &items {
+        let name = object_name(attr(*item_vc, "id")?);
+        let label = nib.string("storyboard");
+        connections.push(outlet(format!("{name} storyboard outlet"), &name, &format!("{name} storyboard"), label));
+    }
     let label = nib.string("storyboard");
     connections.push(outlet(format!("{wc_name} storyboard outlet"), &wc_name, &wc_placeholder, label));
     let label = nib.string("window");
@@ -2106,8 +2147,223 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
         vec![("NSObject", reference(window_name)), ("NSValues", values), ("NSKeyPaths", key_paths)],
     )
     .named(runtime.clone());
+    connections.extend(split_connections);
     connections.push((runtime, Value::New(connector)));
     Ok((assemble(&mut nib, root_object, &root_name, c, connections)?, wc_uuid))
+}
+
+/// A split view controller's items, each with the view controller of the
+/// splitItems segue in the same place in document order (probes).
+fn split_items<'a, 'i>(doc: &'a Document<'i>, ctrl: Node<'a, 'i>) -> Result<Vec<(Node<'a, 'i>, Node<'a, 'i>)>, String> {
+    let items: Vec<Node> = children(ctrl, "splitViewItems").flat_map(|l| children(l, "splitViewItem")).collect();
+    let segues: Vec<Node> = children(ctrl, "connections").flat_map(|l| children(l, "segue")).collect();
+    if items.len() != segues.len() || items.is_empty() {
+        return fail("a split view controller whose items and splitItems segues differ in number is not supported by this ibtool");
+    }
+    let mut out = Vec::new();
+    for (item, segue) in items.into_iter().zip(segues) {
+        only_attributes(segue, &[("destination", None), ("kind", Some("relationship")), ("relationship", Some("splitItems")), ("id", None)])?;
+        let vc = doc
+            .descendants()
+            .find(|d| d.attribute("id") == segue.attribute("destination") && d.attribute("sceneMemberID") == Some("viewController"))
+            .ok_or("a splitItems segue's destination")?;
+        if !vc.has_tag_name("viewController") {
+            return fail("a split view item other than a view controller is not supported by this ibtool");
+        }
+        out.push((item, vc));
+    }
+    Ok(out)
+}
+
+/// A window's split view controller (about 15 probes, two corpus
+/// storyboards): `NSSplitViewController` tracking its items, `NSIsVertical`
+/// false whatever its split view's, and its split view; each item an
+/// `NSSplitViewItem`. Its connections: each item's `viewController` outlet
+/// to its controller, the document's outlets, and runtime attributes: each
+/// item's `collapsed`, `canCollapse` and `holdingPriority`, and the
+/// controller's `splitViewItems`, the array it tracks them in. Lists its
+/// split view and its items, in reverse, under it.
+fn split_controller(nib: &mut Nib, c: &mut Collected, xml: &str, ctrl: Node, items: &[(Node, Node)], module: Option<&str>, name: &str) -> Result<(Value, Vec<(String, Value)>), String> {
+    only_attributes(ctrl, &[("id", None), ("sceneMemberID", None)])?;
+    only_children(ctrl, &["splitViewItems", "splitView", "connections"])?;
+    let id = attr(ctrl, "id")?;
+    let split_node = child(ctrl, "splitView", "splitView").ok_or("a split view controller without a split view")?;
+    only_attributes(
+        split_node,
+        &[
+            ("key", None),
+            ("id", None),
+            ("vertical", Some("YES")),
+            ("dividerStyle", None),
+            ("autosaveName", None),
+            ("arrangesAllSubviews", Some("NO")),
+        ],
+    )?;
+    only_children(split_node, &["rect", "autoresizingMask", "connections"])?;
+    let split_name = object_name(attr(split_node, "id")?);
+    c.parents.push((split_name.clone(), name.to_string()));
+    for (item, _) in items.iter().rev() {
+        c.parents.push((object_name(attr(*item, "id")?), name.to_string()));
+    }
+
+    // The split view: no superview; vertical, then its divider (thick, the
+    // default, left out), autosave name and arranging.
+    let mut values = view_values(nib, c, split_node, module, &split_name, name, None)?;
+    if split_node.attribute("vertical").is_some() {
+        values.push(("NSIsVertical", Value::Bool(true)));
+    }
+    match split_node.attribute("dividerStyle") {
+        None | Some("thick") => {}
+        Some("thin") => values.push(("NSDividerStyle", Value::Int(2))),
+        Some("paneSplitter") => values.push(("NSDividerStyle", Value::Int(3))),
+        Some(other) => return fail(format!("divider style {other} is not supported by this ibtool")),
+    }
+    if let Some(autosave) = split_node.attribute("autosaveName") {
+        values.push(("NSAutosaveName", nib.string(autosave)));
+    }
+    if split_node.attribute("arrangesAllSubviews").is_some() {
+        values.push(("NSArrangedSubviews", nib.array("NSMutableArray", Vec::new())));
+        values.push(("NSDoesNotArrangeAllSubviews", Value::Bool(true)));
+    }
+    let split_value = Value::New(Object::new("NSSplitView", values).named(split_name.clone()));
+
+    // The items: a behaviour sets their holding priority and collapsing,
+    // whatever the document says (sidebar 260, can collapse; content list
+    // 255; inspector 261, can collapse).
+    let mut connections = Vec::new();
+    let mut runtime = Vec::new();
+    for (item, item_vc) in items {
+        only_attributes(
+            *item,
+            &[
+                ("id", None),
+                ("behavior", None),
+                ("holdingPriority", None),
+                ("canCollapse", None),
+                ("collapsed", Some("YES")),
+                ("separatorStyle", None),
+            ],
+        )?;
+        let can_collapse = match item.attribute("canCollapse") {
+            None | Some("NO") => false,
+            Some("YES") => true,
+            Some(other) => return fail(format!("canCollapse=\"{other}\" on <splitViewItem> is not supported by this ibtool")),
+        };
+        only_children(*item, &[])?;
+        let item_name = object_name(attr(*item, "id")?);
+        let behavior = match item.attribute("behavior") {
+            None => None,
+            Some("sidebar") => Some((1, 260.0, true)),
+            Some("contentList") => Some((2, 255.0, false)),
+            Some("inspector") => Some((3, 261.0, true)),
+            Some(other) => return fail(format!("split view item behaviour {other} is not supported by this ibtool")),
+        };
+        let collapsed = item.attribute("collapsed").is_some();
+        let mut v = Vec::new();
+        let (priority, can_collapse) = match behavior {
+            Some((b, priority, can_collapse)) => {
+                v.push(("NSSplitViewItemBehavior", Value::Int(b)));
+                (priority, can_collapse)
+            }
+            None => {
+                let priority = item.attribute("holdingPriority").map(number).transpose()?.unwrap_or(250.0);
+                if priority != 250.0 {
+                    v.push(("NSSplitViewItemHoldingPriority", Value::Float(priority as f32)));
+                }
+                if can_collapse {
+                    v.push(("NSSplitViewItemCanCollapseFromDrag", Value::Bool(true)));
+                    v.push(("NSSplitViewItemCanCollapseFromDoubleClick", Value::Bool(true)));
+                }
+                (priority, can_collapse)
+            }
+        };
+        if collapsed {
+            v.push(("NSSplitViewItemHoldingCollapsed", Value::Bool(true)));
+        }
+        v.push(("NSSplitViewItemViewController", Value::Nil));
+        match item.attribute("separatorStyle") {
+            None => {}
+            Some("none") => v.push(("NSSplitViewItemTitlebarSeparatorStyle", Value::Int(1))),
+            Some("line") => v.push(("NSSplitViewItemTitlebarSeparatorStyle", Value::Int(2))),
+            Some("shadow") => v.push(("NSSplitViewItemTitlebarSeparatorStyle", Value::Int(3))),
+            Some(other) => return fail(format!("split view item separator style {other} is not supported by this ibtool")),
+        }
+        c.definitions.insert(item_name.clone(), Value::New(Object::new("NSSplitViewItem", v).named(item_name.clone())));
+
+        // Its view controller, as a window's content controller.
+        let vc_name = object_name(attr(*item_vc, "id")?);
+        let (vc_value, templates) = content_controller(nib, xml, *item_vc, module, &vc_name, false)?;
+        if !templates.is_empty() {
+            return fail("a split view item's embed segues are not supported by this ibtool");
+        }
+        c.definitions.insert(vc_name.clone(), vc_value);
+        // Without a creation selector (probes).
+        let label = nib.string("viewController");
+        let connector = Object::new("NSNibOutletConnector", vec![("NSSource", reference(item_name.clone())), ("NSDestination", reference(vc_name.clone())), ("NSLabel", label)]);
+        let outlet_name = format!("{item_name} view controller outlet");
+        connections.push((outlet_name.clone(), Value::New(connector.named(outlet_name))));
+        let flag = |nib: &mut Nib, b: bool| {
+            let key = if b { "n:YES" } else { "n:NO" };
+            nib.shared(key.into(), || Object::new("NSNumber", vec![("NS.boolval", Value::Bool(b))]))
+        };
+        let collapsed = flag(nib, collapsed);
+        let can_collapse = flag(nib, can_collapse);
+        let priority = nib.shared(format!("d:{priority}"), || Object::new("NSNumber", vec![("NS.dblval", Value::Double(priority))]));
+        let values = nib.array("NSArray", vec![collapsed, can_collapse, priority]);
+        let key_paths = ["collapsed", "canCollapse", "holdingPriority"].iter().map(|k| nib.string(k)).collect();
+        let key_paths = nib.array("NSArray", key_paths);
+        let runtime_name = format!("{item_name} runtime attributes");
+        let connector = Object::new(
+            "NSIBUserDefinedRuntimeAttributesConnector",
+            vec![("NSObject", reference(item_name.clone())), ("NSValues", values), ("NSKeyPaths", key_paths)],
+        );
+        runtime.push((runtime_name.clone(), Value::New(connector.named(runtime_name))));
+    }
+
+    // The document's outlets: the controller's split view, the split view's
+    // delegate.
+    for (source, allowed) in [(ctrl, "splitView"), (split_node, "delegate")] {
+        for list in children(source, "connections") {
+            only_children(list, &["outlet", "segue"])?;
+            for o in children(list, "outlet") {
+                only_attributes(o, &[("property", Some(allowed)), ("destination", None), ("id", None)])?;
+                let expected = if allowed == "delegate" { id } else { attr(split_node, "id")? };
+                if attr(o, "destination")? != expected {
+                    return fail("a split view controller's outlets other than its split view and the split view's delegate are not supported by this ibtool");
+                }
+                let label = nib.string(allowed);
+                connections.push(outlet(object_name(attr(o, "id")?), &object_name(attr(source, "id")?), &object_name(attr(o, "destination")?), label));
+            }
+        }
+    }
+    if children(split_node, "connections").flat_map(|l| children(l, "segue")).next().is_some() {
+        return fail("a split view's segues are not supported by this ibtool");
+    }
+
+    // The items in document order, one array the controller tracks them in
+    // and its splitViewItems runtime attribute holds.
+    let tracking = object_name(&format!("{id}\0items"));
+    let mut list = vec![("NSInlinedValue", Value::Bool(true))];
+    for (item, _) in items {
+        list.push(("UINibEncoderEmptyKey", reference(object_name(attr(*item, "id")?))));
+    }
+    let tracked = Value::New(Object::new("NSArray", list).named(tracking.clone()));
+    let values = nib.array("NSArray", vec![reference(tracking)]);
+    let key_path = nib.string("splitViewItems");
+    let key_paths = nib.array("NSArray", vec![key_path]);
+    let runtime_name = format!("{name} split view items");
+    let connector = Object::new("NSIBUserDefinedRuntimeAttributesConnector", vec![("NSObject", reference(name.to_string())), ("NSValues", values), ("NSKeyPaths", key_paths)]);
+    runtime.push((runtime_name.clone(), Value::New(connector.named(runtime_name))));
+    connections.extend(runtime);
+
+    let values = vec![
+        ("showSeguePresentationStyle", Value::Int(0)),
+        ("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, id))),
+        ("privateRelationshipSegueTrackingItems", tracked),
+        ("NSIsVertical", Value::Bool(false)),
+        ("NSSplitView", split_value),
+    ];
+    Ok((Value::New(Object::new("NSSplitViewController", values).named(name.to_string())), connections))
 }
 
 /// A view controller as a window controller's or its own nib holds it:
@@ -2186,7 +2442,13 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
         table.push(("UINibEncoderEmptyKey", nib.string(&format!("UpstreamPlaceholder-{}", i + 1))));
         table.push(("UINibEncoderEmptyKey", reference(target)));
     }
-    values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", table))));
+    // An empty one is shared (a split view's items' controllers).
+    let table = if table.len() == 1 {
+        nib.shared("empty dictionary".into(), || Object::new("NSDictionary", table))
+    } else {
+        Value::New(Object::new("NSDictionary", table))
+    };
+    values.push(("NSExternalObjectsTableForViewLoading", table));
     // Shown as a single window: style 1, its UUID naming the single
     // instance, as a window controller's (rules_apple's Buttons example).
     values.push(("showSeguePresentationStyle", Value::Int(if single { 1 } else { 0 })));

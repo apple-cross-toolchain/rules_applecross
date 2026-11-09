@@ -2986,8 +2986,7 @@ application scene is `MainMenu.nib`; a window controller
 `NSWindowController-<id>.nib`, holding its window, its content view
 controller (an `NSClassSwapper` naming its view's nib, or without a class a
 plain `NSViewController`; each with its own `storyboard` outlet) and
-storyboard placeholders, with the window's delegate its controller whether the
-document connects it or not; the content controller's view
+storyboard placeholders; the content controller's view
 `<controller>-view-<view>.nib`. When the controller has outlets, or its
 view's objects connect to it, the view's nib stands it in with an
 `NSNibExternalObjectPlaceholder` named `UpstreamPlaceholder-1`, after the
@@ -2995,7 +2994,48 @@ Application placeholder, and the controller's
 `NSExternalObjectsTableForViewLoading` maps that name to it (an empty
 dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
-derives a UUID from the document and the controller's id.
+derives a UUID from the document and the controller's id. The window's
+delegate is its controller, whether the document connects it or not, in a
+document Interface Builder saved before tools version 13148; in a later one,
+only when connected (bisected with probes: the document's `toolsVersion`
+decides, not the plug-in's version).
+
+**Split view controllers** (about 20 probes, two corpus storyboards). A
+window's content may be a split view controller, which has no nib of its
+own: the window controller's nib holds it, and each item's view controller
+gets its view's nib, as a content controller does. Items pair with the
+controller's `splitItems` segues in document order.
+
+- **The controller** is an `NSSplitViewController`: presentation style 0,
+  its UUID, `privateRelationshipSegueTrackingItems` (its items in document
+  order), `NSIsVertical` false whatever the split view says, and the split
+  view. It is listed under the window, then the split view and its items,
+  in reverse document order, under it.
+- **The split view** is an `NSSplitView` without a superview: the view's
+  keys, `NSIsVertical` when vertical, the divider style (thin 2, pane
+  splitter 3; thick, the default, left out), `NSAutosaveName`, and with
+  `arrangesAllSubviews="NO"` an empty `NSMutableArray` of
+  `NSArrangedSubviews` and `NSDoesNotArrangeAllSubviews`.
+- **An item** is an `NSSplitViewItem`: its behaviour (sidebar 1, content
+  list 2, inspector 3) or, without one, its holding priority as a float
+  when not 250 and, when it can collapse, `CanCollapseFromDrag` and
+  `CanCollapseFromDoubleClick`; then `HoldingCollapsed` when collapsed,
+  `NSSplitViewItemViewController` nil, and the titlebar separator style
+  (none 1, line 2, shadow 3). A behaviour sets the holding priority and
+  collapsing whatever the document says: sidebar 260 and collapsible,
+  content list 255, inspector 261 and collapsible.
+- **Objects list:** the items' controllers' storyboard placeholders in
+  reverse, then the split view controller's; then the items' controllers,
+  under the root.
+- **Connections:** each item's `viewController` outlet to its controller,
+  without a creation selector; the document's outlets (the controller's
+  `splitView`, the split view's `delegate`); `storyboard` outlets for each
+  controller.
+- **Runtime attributes:** each item's `collapsed`, `canCollapse` and
+  `holdingPriority` (a double); the controller's `splitViewItems`, holding
+  the very array it tracks its items in.
+
+The items' controllers share one empty `NSExternalObjectsTableForViewLoading`.
 
 A window controller with a storyboard identifier is named by it: its nib,
 and its Info.plist keys sharing one string, with
