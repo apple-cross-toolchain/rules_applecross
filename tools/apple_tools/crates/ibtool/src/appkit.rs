@@ -133,6 +133,8 @@ struct Collected {
     /// Views Xcode lays out whatever their frames say (a box's content
     /// view).
     laid_out: HashMap<String, Frame>,
+    /// Views' accessibility identifiers: (view id, identifier).
+    accessibility: Vec<(String, String)>,
 }
 
 /// An autoresizing mask's bits, as NSView's: flexible left margin 1, width
@@ -181,6 +183,11 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     // A container view is a plain view; its embed segue's template finds it
     // through its controller (four probes).
     let container = n.has_tag_name("containerView");
+    // The context Interface Builder simulates changes Xcode's layout of the
+    // text in it (rules_apple's HelloToday example, a probe).
+    if n.attribute("simulatedAppContext").is_some() && !layout_relaxed() {
+        return fail("a simulated app context is laid out by Xcode with its own metrics, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
+    }
     if container && (n.attribute("customClass").is_some() || embed_segue(n)?.is_none()) {
         return fail("a container view with a class, or without one embed segue, is not supported by this ibtool");
     }
@@ -189,6 +196,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         &[
             ("key", None),
             ("id", None),
+            ("simulatedAppContext", None),
             ("autoresizesSubviews", Some("NO")),
             ("hidden", Some("YES")),
             ("wantsLayer", Some("YES")),
@@ -198,7 +206,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point", "connections"])?;
+    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point", "connections", "accessibility"])?;
     canvas_location_only(n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
@@ -263,6 +271,11 @@ fn superview<'p>(n: Node, parent: &'p str) -> Option<&'p str> {
 /// The keys every view archives, in order, from its next responder to its
 /// clipping; its subviews and constraints join the objects' list.
 fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, name: &str, parent: &str, next_responder: Option<&str>) -> Result<Vec<(&'static str, Value)>, String> {
+    if let Some(a) = children(n, "accessibility").next() {
+        only_attributes(a, &[("identifier", None)])?;
+        only_children(a, &[])?;
+        c.accessibility.push((attr(n, "id")?.to_string(), attr(a, "identifier")?.to_string()));
+    }
     let mut values = Vec::new();
     values.push(("NSNextResponder", next_responder.map_or(Value::Nil, |r| reference(r.to_string()))));
     values.push(("NSNibTouchBar", Value::Nil));
@@ -1418,6 +1431,37 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
         connection_values.push(value);
     }
     let numbers: Vec<Value> = (1..=oids.len() as i64).map(|i| nib.int_number(i)).collect();
+    // Accessibility identifiers: a connector each, by the view's id as
+    // bytes, numbered after the other objects (a rules_apple example, three
+    // probes).
+    c.accessibility.sort();
+    let mut ax_connectors = Vec::new();
+    let mut ax_keys = Vec::new();
+    let mut ax_numbers = Vec::new();
+    for (i, (id, identifier)) in c.accessibility.iter().enumerate() {
+        let name = format!("{} accessibility", object_name(id));
+        let kind = Value::New(Object::new("NSMutableString", vec![("NS.bytes", Value::Data(b"AXIdentifier".to_vec()))]));
+        let value = nib.string(identifier);
+        ax_connectors.push(Value::New(
+            Object::new(
+                "NSNibAXAttributeConnector",
+                vec![
+                    ("AXDestinationArchiveKey", reference(object_name(id))),
+                    ("AXAttributeTypeArchiveKey", kind),
+                    ("AXAttributeValueArchiveKey", value),
+                ],
+            )
+            .named(name.clone()),
+        ));
+        ax_keys.push(reference(name));
+        ax_numbers.push(nib.int_number(numbers.len() as i64 + 1 + i as i64));
+    }
+    let (ax_keys, ax_values) = if ax_keys.is_empty() {
+        let empty = nib.empty_array();
+        (empty, nib.empty_array())
+    } else {
+        (nib.array("NSArray", ax_keys), nib.array("NSArray", ax_numbers))
+    };
     let data = Object::new(
         "NSIBObjectData",
         vec![
@@ -1428,9 +1472,9 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
             ("NSObjectsValues", nib.array("NSArray", parents)),
             ("NSOidsKeys", nib.array("NSArray", oids)),
             ("NSOidsValues", nib.array("NSArray", numbers)),
-            ("NSAccessibilityConnectors", nib.array("NSMutableArray", Vec::new())),
-            ("NSAccessibilityOidsKeys", nib.empty_array()),
-            ("NSAccessibilityOidsValues", nib.empty_array()),
+            ("NSAccessibilityConnectors", nib.array("NSMutableArray", ax_connectors)),
+            ("NSAccessibilityOidsKeys", ax_keys),
+            ("NSAccessibilityOidsValues", ax_values),
         ],
     );
     nib::archive_appkit(Object::new("NSObject", vec![("IB.objectdata", Value::New(data)), ("IB.systemFontUpdateVersion", Value::Int(1))]))
@@ -1469,6 +1513,7 @@ fn new_collected(sources: Vec<String>) -> Collected {
         definitions: HashMap::new(),
         at_origin: Vec::new(),
         laid_out: HashMap::new(),
+        accessibility: Vec::new(),
     }
 }
 
@@ -1938,8 +1983,13 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
             ("sceneMemberID", None),
             ("storyboardIdentifier", None),
             ("title", None),
+            ("showSeguePresentationStyle", Some("single")),
         ],
     )?;
+    let single = vc.attribute("showSeguePresentationStyle").is_some();
+    if single && own_nib {
+        return fail("an identified view controller shown as a single window is not supported by this ibtool");
+    }
     let view = controller_view(vc).ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
     // A window's content controller without a class is a plain
@@ -1994,8 +2044,22 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
         table.push(("UINibEncoderEmptyKey", reference(target)));
     }
     values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", table))));
-    values.push(("showSeguePresentationStyle", Value::Int(0)));
-    values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, attr(vc, "id")?))));
+    // Shown as a single window: style 1, its UUID naming the single
+    // instance, as a window controller's (rules_apple's Buttons example).
+    values.push(("showSeguePresentationStyle", Value::Int(if single { 1 } else { 0 })));
+    let vc_uuid = uuid(xml, attr(vc, "id")?);
+    values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&vc_uuid)));
+    if single {
+        let key = nib.string("NSSingleInstancePresentationIdentifier");
+        let id = nib.string(&vc_uuid);
+        values.push((
+            "NSStoryboardSegueDestinationOptions",
+            Value::New(Object::new(
+                "NSDictionary",
+                vec![("NSInlinedValue", Value::Bool(true)), ("UINibEncoderEmptyKey", key), ("UINibEncoderEmptyKey", id)],
+            )),
+        ));
+    }
     if own_nib {
         values.push(("connectionsRequireClassSwapperForStoryboardCompilation", Value::Bool(true)));
     }
@@ -2345,7 +2409,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("preferredMaxLayoutWidth", None),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints", "point"])?;
+    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints", "point", "accessibility"])?;
     canvas_location_only(n)?;
     let id = attr(n, "id")?;
     content_sized(nib, n)?;
@@ -2536,7 +2600,10 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point"])?;
+    only_children(
+        n,
+        &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point", "accessibility"],
+    )?;
     canvas_location_only(n)?;
     content_sized(nib, n)?;
     // A pop-up button is a button whose cell holds a menu (about 10
@@ -2857,7 +2924,7 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "clipView", "edgeInsets", "scroller", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "clipView", "edgeInsets", "scroller", "constraints", "accessibility"])?;
     if n.attribute("borderType").is_none() || n.attribute("autohidesScrollers").is_none() {
         return fail("a scroll view with a border or scrollers that don't hide themselves is laid out by Xcode, which this ibtool doesn't reproduce");
     }
@@ -3087,7 +3154,7 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "view", "color", "constraints", "point"])?;
+    only_children(n, &["rect", "autoresizingMask", "view", "color", "constraints", "point", "accessibility"])?;
     canvas_location_only(n)?;
     let id = attr(n, "id")?;
     let name = object_name(id);
@@ -3226,7 +3293,7 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("userLabel", None),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints", "point"])?;
+    only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints", "point", "accessibility"])?;
     canvas_location_only(n)?;
     // Its image sizes it.
     content_sized(nib, n)?;

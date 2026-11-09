@@ -2991,6 +2991,14 @@ app class's is.
 - A text field cell's placeholder (`NSPlaceholderString`) follows its font,
   and its title may be a `<string key="title">` element.
 - A menu item's `NSIndent` follows its disabled flag.
+- A view's accessibility identifier is an `NSNibAXAttributeConnector` (the
+  view, a new `NSMutableString` `AXIdentifier`, the identifier) in
+  `NSAccessibilityConnectors`, by the view's id as bytes, listed again in
+  `NSAccessibilityOidsKeys` with ids numbered after the other objects'.
+- A view controller shown as a single window has presentation style 1 and
+  `NSStoryboardSegueDestinationOptions`, as a window controller does.
+- `simulatedAppContext` changes Xcode's layout of the text in it, so only
+  `relax_ibtool_layout` compiles it.
 
 **Collection views** (about ten probes), as a scroll view's document:
 an `NSCollectionView`'s view keys, then its `_NSCollectionViewCore` (the
