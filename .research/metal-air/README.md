@@ -27,27 +27,29 @@ The kernel `kernel void k(device float *a [[buffer(0)]], uint i
    the AIR and language versions. It is hard-coded for this kernel so far.
 4. `llvm-as` from LLVM 15 writes the bitcode. For an `apple` triple it
    adds the `0B17C0DE` wrapper itself.
-5. `mtlb.py` writes the metallib. Given Xcode's own module, it rebuilds
-   Xcode's `.metallib` byte for byte:
-   - header: `MTLB`, six u16s, then nine u64s (total size, then offset and
-     length of the function list, public metadata, private metadata and
-     the module);
-   - one entry per function: tags NAME, TYPE (2 = kernel), HASH (SHA-256
-     of the wrapped module, padded to 16 bytes), MDSZ, OFFT, VERS;
-   - then `ENDT` tags and the metadata sections.
+5. `mtlb.py` writes the metallib (the format is in [FORMAT.md](FORMAT.md)).
 
 On a `mac` slot (macOS 27.0.1, paravirtual GPU), `run.swift` loaded this
 metallib with `makeLibrary(data:)`, listed `k`, and ran it. The output
 buffer was identical to the one from Xcode's metallib of the same source.
 
-## Next
+## Status
 
 The plan, sent to the Manager:
-- **M0:** probe a shader suite and the corpus with Xcode on a macOS VM, to
-  learn the metadata for each feature and what changes with the deployment
-  target.
-- **M1:** generate the metadata from the source instead of hard-coding it,
-  plus a Rust writer.
+
+- **M0, done:** probed our own shaders (`probes/`, `samplers.sh`) and a
+  local corpus with Xcode on a leased macOS VM. [FORMAT.md](FORMAT.md) has
+  the results:
+  - the metallib container (multi-function, vertex and fragment,
+    function-constant metadata), with all 358 reference files rebuilt
+    byte for byte by `mtlb.py` (`rebuild.py`);
+  - the AIR versions per target;
+  - the argument descriptors for each feature;
+  - function constants;
+  - the constexpr-sampler encoding;
+  - what changes with the deployment target.
+- **M1, next:** generate the metadata from the source instead of
+  hard-coding it, plus a Rust writer.
 - **M2:** a stdlib subset for compute.
 - **M3:** graphics functions.
 - **M4:** replace the relax_metal stub.
