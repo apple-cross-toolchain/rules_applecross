@@ -1248,7 +1248,14 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     if let Some(title) = vc.attribute("title") {
         values.push(("NSTitle", nib.text(attr(vc, "id")?, "title", title)));
     }
-    values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))));
+    // Its view's nib names it as its upstream placeholder when connections
+    // need it there (Xcode's SpriteKit template).
+    let mut table = vec![("NSInlinedValue", Value::Bool(true))];
+    if uses_upstream(vc) {
+        table.push(("UINibEncoderEmptyKey", nib.string("UpstreamPlaceholder-1")));
+        table.push(("UINibEncoderEmptyKey", reference(name.to_string())));
+    }
+    values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", table))));
     values.push(("showSeguePresentationStyle", Value::Int(0)));
     values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, attr(vc, "id")?))));
     if vc.attribute("customClass").is_none() {
@@ -1286,14 +1293,15 @@ fn identified_controller_nib(doc: &Document, xml: &str, vc: Node, module: Option
 /// `view` outlet is the view.
 fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(String, Vec<u8>), String> {
     only_children(vc, &["view", "connections"])?;
-    // A controller's own connections go through an upstream placeholder
-    // in its view's nib (Xcode's SpriteKit template), not established.
-    if children(vc, "connections").next().is_some() {
-        return fail("a view controller's connections are not supported by this ibtool");
+    // The controller's own connections, and those to it, go through an
+    // upstream placeholder standing for it (Xcode's SpriteKit template).
+    let upstream = uses_upstream(vc);
+    if children(vc, "connections").flat_map(|l| l.children().filter(|c| c.is_element())).any(|c| !c.has_tag_name("outlet")) {
+        return fail("a view controller's connections other than outlets are not supported by this ibtool");
     }
     let mut nib = new_nib(doc, localizable, true);
     let view_node = children(vc, "view").next().ok_or("a view controller without a view")?;
-    let root_name = object_name(attr(vc, "id")?);
+    let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(vec![attr(vc, "id")?.to_string()]);
     let view_name = object_name(attr(view_node, "id")?);
@@ -1303,6 +1311,12 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
     c.parents.push((placeholder.clone(), root_name.clone()));
     let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
     c.definitions.insert(placeholder, value);
+    if upstream {
+        let name = object_name(attr(vc, "id")?);
+        c.parents.push((name.clone(), root_name.clone()));
+        let identifier = nib.string("UpstreamPlaceholder-1");
+        c.definitions.insert(name.clone(), Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name)));
+    }
     let label = nib.string("view");
     let mut connections = vec![outlet(format!("{view_name} view outlet"), &root_name, &view_name, label)];
     connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
@@ -1990,4 +2004,12 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
         values.push(("NSCurValue", Value::Double(number(d)?)));
     }
     Ok(Value::New(Object::new("NSScroller", values).named(name)))
+}
+
+/// Whether a view controller's view nib needs it as an upstream placeholder:
+/// it has connections, or its view's objects connect to it.
+fn uses_upstream(vc: Node) -> bool {
+    let id = vc.attribute("id");
+    children(vc, "connections").next().is_some()
+        || children(vc, "view").flat_map(|v| v.descendants()).any(|d| (d.has_tag_name("outlet") && d.attribute("destination") == id) || (d.has_tag_name("action") && d.attribute("target") == id))
 }

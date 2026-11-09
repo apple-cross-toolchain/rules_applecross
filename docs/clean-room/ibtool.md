@@ -2808,7 +2808,12 @@ application scene is `MainMenu.nib`; a window controller
 controller (an `NSClassSwapper` naming its view's nib) and storyboard
 placeholders, with the window's delegate its controller whether the
 document connects it or not; the content controller's view
-`<controller>-view-<view>.nib`. Xcode makes each controller's
+`<controller>-view-<view>.nib`. When the controller has outlets, or its
+view's objects connect to it, the view's nib stands it in with an
+`NSNibExternalObjectPlaceholder` named `UpstreamPlaceholder-1`, after the
+Application placeholder, and the controller's
+`NSExternalObjectsTableForViewLoading` maps that name to it (an empty
+dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
 derives a UUID from the document and the controller's id.
 
