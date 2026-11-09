@@ -14,6 +14,7 @@ mod directions;
 mod dmp2;
 mod icon;
 mod iconset;
+mod md5;
 mod image;
 mod imageset;
 mod launchimage;

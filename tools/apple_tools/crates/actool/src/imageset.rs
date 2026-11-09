@@ -336,8 +336,8 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
 /// The JPEG Xcode stores for an image set's JPEG, and its size: the file
 /// without its comments, when it holds only what is established to be kept
 /// as it is (JFIF, tables, frame, restart interval, scan, and the standard
-/// sRGB profile); other metadata Xcode rewrites, and other profiles it
-/// converts.
+/// sRGB profiles); other metadata Xcode passes through ImageIO, which writes
+/// it back in its own form, and other profiles it converts.
 fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32, u16), String> {
     const SRGB_PROFILE_LEN: usize = 3144;
     if !j.starts_with(&[0xff, 0xd8]) {
@@ -346,6 +346,15 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32, u16), String> {
     let mut out = j[..2].to_vec();
     let mut size = None;
     let mut orientation = 1;
+    // The metadata, which ImageIO writes back in its own order whatever the
+    // file's: JFIF, Exif, the colour profile, Photoshop's, Adobe's (six
+    // probes, two of the corpus's JPEGs), before the tables.
+    let mut slots: [Option<Vec<u8>>; 5] = Default::default();
+    let mut flushed = false;
+    // Exif entries that XMP or IPTC properties map to, which must already
+    // hold the same values.
+    let mut merged: Merged = Vec::new();
+    let mut entries: Vec<Entry> = Vec::new();
     let mut i = 2;
     loop {
         if i + 4 > j.len() || j[i] != 0xff {
@@ -354,49 +363,78 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32, u16), String> {
         let marker = j[i + 1];
         let len = u16::from_be_bytes([j[i + 2], j[i + 3]]) as usize;
         let segment = j.get(i..i + 2 + len).ok_or("a truncated JPEG")?;
+        let metadata = (0xe0..=0xef).contains(&marker) || marker == 0xfe;
+        if metadata && flushed {
+            return Err("a JPEG with metadata after its tables is not supported by this actool".into());
+        }
+        if !metadata && !flushed {
+            flushed = true;
+            for slot in slots.iter_mut() {
+                if let Some(s) = slot.take() {
+                    out.extend(s);
+                }
+            }
+        }
+        let mut fill = |k: usize, s: Vec<u8>| -> Result<(), String> {
+            if slots[k].replace(s).is_some() {
+                return Err("a JPEG with two segments of the same metadata is not supported by this actool".into());
+            }
+            Ok(())
+        };
         match marker {
             // The scan and what follows it, as they are.
             0xda => {
                 out.extend_from_slice(&j[i..]);
                 break;
             }
-            // Xcode passes metadata through ImageIO, which rewrites Exif,
-            // and turns XMP's properties into Exif and IPTC. Comments and
-            // Ducky (APP12) segments are dropped, Adobe (APP14) segments
-            // kept, and these, established, as they are; others are refused
-            // (ten probes, and the corpus's JPEGs).
+            // Comments and Ducky (APP12) segments are dropped, Adobe (APP14)
+            // segments kept, and these, established, as they are; others
+            // are refused (ten probes, and the corpus's JPEGs).
             0xfe | 0xec => {}
-            0xee if segment.get(4..9) == Some(b"Adobe") => out.extend_from_slice(segment),
-            // XMP without properties is dropped.
-            0xe1 if segment.get(4..33) == Some(b"http://ns.adobe.com/xap/1.0/\0") => {
-                if segment.windows(15).any(|w| w == b"rdf:Description") {
-                    return Err("a JPEG with XMP properties (which Xcode turns into Exif and IPTC) is not supported by this actool".into());
-                }
-            }
+            0xee if segment.get(4..9) == Some(b"Adobe") => fill(4, segment.to_vec())?,
+            // XMP is dropped: its properties that ImageIO maps to Exif
+            // entries must agree with them.
+            0xe1 if segment.get(4..33) == Some(b"http://ns.adobe.com/xap/1.0/\0") => merged.extend(xmp_to_exif(&segment[33..])?),
             // Exif with no entries is dropped; other Exif ImageIO writes
             // back as `exif` gives it, its orientation recorded.
             0xe1 if segment.get(4..10) == Some(b"Exif\0\0") => match exif(&segment[10..]) {
                 Some(Exif::Empty) => {}
-                Some(Exif::Tiff(tiff, o)) => {
+                Some(Exif::Tiff(tiff, o, all)) => {
                     orientation = o;
-                    out.extend_from_slice(&[0xff, 0xe1]);
-                    out.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
-                    out.extend_from_slice(b"Exif\0\0");
-                    out.extend(tiff);
+                    entries = all;
+                    let mut s = vec![0xff, 0xe1];
+                    s.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
+                    s.extend_from_slice(b"Exif\0\0");
+                    s.extend(tiff);
+                    fill(1, s)?;
                 }
                 None => return Err("a JPEG with Exif entries other than those established (which Xcode rewrites) is not supported by this actool".into()),
             },
             // Photoshop's (APP13) of only an empty IPTC record and its
-            // digest is dropped (one probe, one of the corpus's).
+            // digest is dropped (one probe, one of the corpus's); other IPTC
+            // is written back as `iptc` gives it.
             0xed if segment.get(4..18) == Some(b"Photoshop 3.0\0") && is_empty_iptc(&segment[18..]) => {}
-            0xe0 if segment.get(4..9) == Some(b"JFIF\0") => out.extend_from_slice(segment),
+            0xed if segment.get(4..18) == Some(b"Photoshop 3.0\0") => {
+                let (resources, needs) = iptc(&segment[18..])?;
+                merged.extend(needs);
+                let mut s = vec![0xff, 0xed];
+                s.extend_from_slice(&((resources.len() + 16) as u16).to_be_bytes());
+                s.extend_from_slice(b"Photoshop 3.0\0");
+                s.extend(resources);
+                fill(3, s)?;
+            }
+            0xe0 if segment.get(4..9) == Some(b"JFIF\0") => fill(0, segment.to_vec())?,
+            // Apple's sRGB profile, the ICC's black-scaled sRGB and
+            // Facebook's compact sRGB "c2" (two of the corpus's JPEGs) are
+            // kept as they are.
             0xe2 if segment.get(4..16) == Some(b"ICC_PROFILE\0") => {
                 let profile = &segment[18..];
                 let srgb = profile.len() == SRGB_PROFILE_LEN && profile.windows(17).any(|w| w == b"sRGB IEC61966-2.1");
-                if !srgb || segment[16..18] != [1, 1] {
+                let known = matches!((profile.len(), fnv1a(profile)), (3048, 0x131b_e18b_256c_1005) | (524, 0xef9b_4700_d18b_5f9a));
+                if !(srgb || known) || segment[16..18] != [1, 1] {
                     return Err("a JPEG with a colour profile other than sRGB's is not supported by this actool".into());
                 }
-                out.extend_from_slice(segment);
+                fill(2, segment.to_vec())?;
             }
             0xc0 | 0xc2 => {
                 let h = u16::from_be_bytes([segment[5], segment[6]]) as u32;
@@ -409,8 +447,190 @@ fn stored_jpeg(j: &[u8]) -> Result<(Vec<u8>, u32, u32, u16), String> {
         }
         i += 2 + len;
     }
+    for (tag, value) in merged {
+        if !entries.iter().any(|e| e.0 == tag && e.3 == value) {
+            return Err("a JPEG whose XMP or IPTC Xcode would merge into its Exif is not supported by this actool".into());
+        }
+    }
     let (w, h) = size.ok_or("a JPEG without a frame")?;
     Ok((out, w, h, orientation))
+}
+
+/// Exif entries, as tag and value, that XMP or IPTC properties map to.
+type Merged = Vec<(u16, Vec<u8>)>;
+
+/// 64-bit FNV-1a, to recognise a colour profile.
+fn fnv1a(b: &[u8]) -> u64 {
+    b.iter().fold(0xcbf2_9ce4_8422_2325, |h, &x| (h ^ x as u64).wrapping_mul(0x0100_0000_01b3))
+}
+
+/// The Exif entries an XMP packet's properties map to, as ImageIO maps them
+/// (about 20 probes): `xmp:CreateDate` to DateTimeDigitized,
+/// `tiff:Orientation` to the orientation and `exif:PixelXDimension` to the
+/// pixel width. These properties are dropped: the creator tool, the
+/// modification and metadata dates, the document and instance ids and
+/// derivation, the format, Photoshop's colour mode, profile name,
+/// transmission reference, headline, city and credit, and the TIFF
+/// software. Others are refused.
+fn xmp_to_exif(packet: &[u8]) -> Result<Merged, String> {
+    let unsupported = || "a JPEG with XMP properties this actool hasn't established (which Xcode may turn into Exif and IPTC) is not supported by this actool".to_string();
+    let text = std::str::from_utf8(packet).map_err(|_| unsupported())?;
+    let (Some(a), Some(b)) = (text.find("<x:xmpmeta"), text.find("</x:xmpmeta>")) else {
+        return Err(unsupported());
+    };
+    let doc = roxmltree::Document::parse(&text[a..b + 12]).map_err(|_| unsupported())?;
+    const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+    const XMP: &str = "http://ns.adobe.com/xap/1.0/";
+    const MM: &str = "http://ns.adobe.com/xap/1.0/mm/";
+    const DC: &str = "http://purl.org/dc/elements/1.1/";
+    const PS: &str = "http://ns.adobe.com/photoshop/1.0/";
+    const TIFF: &str = "http://ns.adobe.com/tiff/1.0/";
+    const EXIF: &str = "http://ns.adobe.com/exif/1.0/";
+    let dropped = [
+        (XMP, "CreatorTool"),
+        (XMP, "ModifyDate"),
+        (XMP, "MetadataDate"),
+        (MM, "DocumentID"),
+        (MM, "InstanceID"),
+        (MM, "DerivedFrom"),
+        (DC, "format"),
+        (PS, "ColorMode"),
+        (PS, "ICCProfile"),
+        (PS, "TransmissionReference"),
+        (PS, "Headline"),
+        (PS, "City"),
+        (PS, "Credit"),
+        (TIFF, "Software"),
+    ];
+    let mut out = Vec::new();
+    for d in doc.descendants().filter(|d| d.tag_name().namespace() == Some(RDF) && d.tag_name().name() == "Description") {
+        let attributes = d.attributes().filter(|a| a.namespace() != Some(RDF)).map(|a| (a.namespace().unwrap_or(""), a.name(), Some(a.value())));
+        let children = d.children().filter(|c| c.is_element()).map(|c| (c.tag_name().namespace().unwrap_or(""), c.tag_name().name(), c.text()));
+        for (ns, name, value) in attributes.chain(children) {
+            if dropped.contains(&(ns, name)) {
+                continue;
+            }
+            let value = value.map(str::trim).ok_or_else(unsupported)?;
+            out.push(match (ns, name) {
+                (XMP, "CreateDate") => (0x9004, xmp_date(value).ok_or_else(unsupported)?),
+                (TIFF, "Orientation") => (0x112, value.parse::<u16>().map_err(|_| unsupported())?.to_be_bytes().to_vec()),
+                (EXIF, "PixelXDimension") => (0xa002, value.parse::<u32>().map_err(|_| unsupported())?.to_be_bytes().to_vec()),
+                _ => return Err(unsupported()),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// An XMP date with seconds (`2009-10-09T21:31:03`, any time zone) as an
+/// Exif one, its NUL included; the zone is dropped (a probe).
+fn xmp_date(v: &str) -> Option<Vec<u8>> {
+    let b = v.as_bytes();
+    let digits = |r: std::ops::Range<usize>| b.get(r).is_some_and(|d| d.iter().all(u8::is_ascii_digit));
+    let ok = digits(0..4)
+        && b.get(4) == Some(&b'-')
+        && digits(5..7)
+        && b.get(7) == Some(&b'-')
+        && digits(8..10)
+        && b.get(10) == Some(&b'T')
+        && digits(11..13)
+        && b.get(13) == Some(&b':')
+        && digits(14..16)
+        && b.get(16) == Some(&b':')
+        && digits(17..19);
+    let zone = &v[19.min(v.len())..];
+    let zone_ok = zone.is_empty() || zone == "Z" || (zone.len() == 6 && (zone.starts_with('+') || zone.starts_with('-')) && zone.as_bytes()[3] == b':');
+    if !ok || !zone_ok {
+        return None;
+    }
+    Some(format!("{}:{}:{} {}\0", &v[0..4], &v[5..7], &v[8..10], &v[11..19]).into_bytes())
+}
+
+/// Photoshop image resources as ImageIO writes them back (about 15 probes,
+/// two of the corpus's JPEGs): the IPTC record (0x404) rewritten, its
+/// character set UTF-8 and record version 2 first, then the other datasets;
+/// its digest (0x425), when there is one, the MD5 of the new record. Other
+/// datasets are taken one, or two in an order established ({2:103, 2:40},
+/// {2:62, 2:63}); a record of one dataset and no header, which ImageIO
+/// keeps beside a rewritten one, and other resources are refused. Also the
+/// Exif entries the record's date and time map to.
+fn iptc(resources: &[u8]) -> Result<(Vec<u8>, Merged), String> {
+    let unsupported = |what: &str| format!("a JPEG with {what} (which Xcode rewrites) is not supported by this actool");
+    let mut i = 0;
+    let mut record = None;
+    let mut digest = false;
+    while i < resources.len() {
+        let r = resources.get(i..i + 12).ok_or_else(|| unsupported("Photoshop resources this actool can't read"))?;
+        if &r[..4] != b"8BIM" || r[6..8] != [0, 0] {
+            return Err(unsupported("Photoshop resources this actool can't read"));
+        }
+        let len = u32::from_be_bytes([r[8], r[9], r[10], r[11]]) as usize;
+        let data = resources.get(i + 12..i + 12 + len).ok_or_else(|| unsupported("Photoshop resources this actool can't read"))?;
+        match u16::from_be_bytes([r[4], r[5]]) {
+            0x404 if record.is_none() && !digest => record = Some(data),
+            0x425 if record.is_some() && !digest && len == 16 => digest = true,
+            _ => return Err(unsupported("Photoshop resources other than an IPTC record and its digest")),
+        }
+        i += 12 + len + len % 2;
+    }
+    let record = record.ok_or_else(|| unsupported("Photoshop resources without an IPTC record"))?;
+    let mut datasets = Vec::new();
+    let mut k = 0;
+    while k < record.len() {
+        let d = record
+            .get(k..k + 5)
+            .filter(|d| d[0] == 0x1c && d[3] & 0x80 == 0)
+            .ok_or_else(|| unsupported("an IPTC record this actool can't read"))?;
+        let len = u16::from_be_bytes([d[3], d[4]]) as usize;
+        let value = record.get(k + 5..k + 5 + len).ok_or_else(|| unsupported("an IPTC record this actool can't read"))?;
+        datasets.push(((d[1], d[2]), value));
+        k += 5 + len;
+    }
+    let header = datasets.iter().filter(|d| [(1, 90), (2, 0)].contains(&d.0)).count();
+    let others: Vec<_> = datasets.iter().filter(|d| ![(1, 90), (2, 0)].contains(&d.0)).collect();
+    let mut ids: Vec<(u8, u8)> = others.iter().map(|d| d.0).collect();
+    ids.sort();
+    let order: Vec<(u8, u8)> = match ids.as_slice() {
+        [one] if header > 0 && one.0 == 2 => vec![*one],
+        [(2, 40), (2, 103)] => vec![(2, 103), (2, 40)],
+        [(2, 62), (2, 63)] => vec![(2, 62), (2, 63)],
+        _ => return Err(unsupported("IPTC datasets whose order this actool hasn't established")),
+    };
+    // A value that isn't ASCII might be transcoded from another character
+    // set.
+    if datasets.iter().any(|d| d.0 != (1, 90) && d.0 != (2, 0) && !d.1.is_ascii()) {
+        return Err(unsupported("IPTC text other than ASCII"));
+    }
+    let mut new = b"\x1c\x01\x5a\x00\x03\x1b\x25\x47\x1c\x02\x00\x00\x02\x00\x02".to_vec();
+    for id in &order {
+        let value = others.iter().find(|d| d.0 == *id).unwrap().1;
+        new.extend_from_slice(&[0x1c, id.0, id.1]);
+        new.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        new.extend_from_slice(value);
+    }
+    let mut out = b"8BIM\x04\x04\0\0".to_vec();
+    out.extend_from_slice(&(new.len() as u32).to_be_bytes());
+    out.extend_from_slice(&new);
+    if new.len() % 2 == 1 {
+        out.push(0);
+    }
+    if digest {
+        out.extend_from_slice(b"8BIM\x04\x25\0\0\0\0\0\x10");
+        out.extend_from_slice(&crate::md5::digest(&new));
+    }
+    // Its date created and time created are DateTimeDigitized (two probes).
+    let mut needs = Vec::new();
+    if ids.contains(&(2, 62)) {
+        let date = others.iter().find(|d| d.0 == (2, 62)).unwrap().1;
+        let time = others.iter().find(|d| d.0 == (2, 63)).unwrap().1;
+        let ok = date.len() == 8 && date.is_ascii() && time.len() >= 6 && time.is_ascii();
+        if !ok {
+            return Err(unsupported("an IPTC date this actool can't read"));
+        }
+        let (d, t) = (std::str::from_utf8(date).unwrap(), std::str::from_utf8(time).unwrap());
+        needs.push((0x9004, format!("{}:{}:{} {}:{}:{}\0", &d[..4], &d[4..6], &d[6..8], &t[..2], &t[2..4], &t[4..6]).into_bytes()));
+    }
+    Ok((out, needs))
 }
 
 /// An IFD entry: tag, type, count and its value's bytes.
@@ -418,8 +638,9 @@ type Entry = (u16, u16, u32, Vec<u8>);
 
 enum Exif {
     Empty,
-    /// The TIFF as ImageIO writes it back, and the orientation.
-    Tiff(Vec<u8>, u16),
+    /// The TIFF as ImageIO writes it back, the orientation, and its entries
+    /// (not the Exif IFD's pointer).
+    Tiff(Vec<u8>, u16, Vec<Entry>),
 }
 
 /// An Exif TIFF as Xcode stores it: none if it has no entries, else as
@@ -456,6 +677,7 @@ fn exif(tiff: &[u8]) -> Option<Exif> {
                 let e = at + 2 + 12 * k;
                 let (tag, typ, count) = (u16_at(e)?, u16_at(e + 2)?, u32_at(e + 4)?);
                 let size = match typ {
+                    2 => 1,
                     3 => 2,
                     4 => 4,
                     5 => 8,
@@ -488,6 +710,8 @@ fn exif(tiff: &[u8]) -> Option<Exif> {
             (0x128, 3, 1) => first.push((tag, 3, 1, short(&v).to_be_bytes().to_vec())),
             (0x11a | 0x11b, 5, 1) => first.push((tag, 5, 1, kept_rational(long(&v[..4]), long(&v[4..]))?)),
             (0x213, 3, 1) => {}
+            (0x10e | 0x10f | 0x110 | 0x131 | 0x13b | 0x8298, 2, _) => first.push(ascii(tag, &v, false)?),
+            (0x132, 2, _) => first.push(ascii(tag, &v, true)?),
             (0x8769, 4, 1) => exif_ifd = Some(long(&v) as usize),
             _ => return None,
         }
@@ -497,6 +721,7 @@ fn exif(tiff: &[u8]) -> Option<Exif> {
             match (tag, typ, count) {
                 (0x9000 | 0xa000 | 0x9101, 7, 4) | (0x9286, 7, _) => second.push((tag, 7, count, v)),
                 (0xa001, 3, 1) => second.push((tag, 3, 1, short(&v).to_be_bytes().to_vec())),
+                (0x9003 | 0x9004, 2, _) => second.push(ascii(tag, &v, true)?),
                 (0xa002 | 0xa003, 3, 1) => second.push((tag, 4, 1, u32::from(short(&v)).to_be_bytes().to_vec())),
                 (0xa002 | 0xa003, 4, 1) => second.push((tag, 4, 1, long(&v).to_be_bytes().to_vec())),
                 _ => return None,
@@ -511,6 +736,7 @@ fn exif(tiff: &[u8]) -> Option<Exif> {
     }
     first.sort_by_key(|e| e.0);
     second.sort_by_key(|e| e.0);
+    let all: Vec<Entry> = first.iter().chain(&second).cloned().collect();
     let mut out = b"MM\0\x2a\0\0\0\x08".to_vec();
     let exif_at = 8 + ifd_len(&first, !second.is_empty());
     if !second.is_empty() {
@@ -521,7 +747,30 @@ fn exif(tiff: &[u8]) -> Option<Exif> {
     if !second.is_empty() {
         write_ifd(&mut out, &second);
     }
-    Some(Exif::Tiff(out, orientation))
+    Some(Exif::Tiff(out, orientation, all))
+}
+
+/// An ASCII entry as ImageIO writes it back: its text to the first NUL, and
+/// one NUL (`D90\0\0\0` is `D90\0`; two probes). Only NULs may follow the
+/// text, which isn't empty; a date must be one (ImageIO drops `ab`, a probe).
+fn ascii(tag: u16, v: &[u8], date: bool) -> Option<Entry> {
+    let end = v.iter().position(|&b| b == 0)?;
+    if end == 0 || v[end..].iter().any(|&b| b != 0) || !v[..end].is_ascii() {
+        return None;
+    }
+    let text = &v[..end];
+    let is_date = text.len() == 19
+        && text.iter().enumerate().all(|(k, &c)| match k {
+            4 | 7 | 13 | 16 => c == b':',
+            10 => c == b' ',
+            _ => c.is_ascii_digit(),
+        });
+    if date && !is_date {
+        return None;
+    }
+    let mut value = text.to_vec();
+    value.push(0);
+    Some((tag, 2, value.len() as u32, value))
 }
 
 /// The length of an IFD and its values as `write_ifd` writes it, counting

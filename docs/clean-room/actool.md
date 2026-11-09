@@ -1044,10 +1044,46 @@ This actool writes Exif of those entries so, and the orientation in the
 TLV as before. It takes rationals only where every earlier convergent of
 the fraction is more than 1e-6 off, so that it is written in lowest
 terms. Other entries, a second IFD (thumbnails), zero denominators and
-terms past a signed 32-bit integer are refused. So is XMP with
-properties: they become Exif and IPTC (an XMP orientation becomes Exif's;
-a title and byline, IPTC's). JPEGs with Adobe RGB or other profiles, which
-were re-encoded, are refused too.
+terms past a signed 32-bit integer are refused.
+
+ASCII entries (the image description, make, model, software, artist and
+copyright; the modification, original and digitized dates) are written
+back as their text up to the first NUL and one NUL: `D90\0\0\0` is
+`D90\0`, padded to an even length when stored after the IFD. A date that
+isn't one (`ab`) is dropped; this actool refuses it, and text followed by
+more than NULs (a copyright's second string).
+
+XMP is dropped, but ImageIO first maps some of its properties into Exif
+(about 20 probes): `xmp:CreateDate` becomes DateTimeDigitized (its time
+zone dropped), `tiff:Orientation` the orientation, `exif:PixelXDimension`
+the pixel width. These are dropped without effect: the creator tool, the
+modification and metadata dates, the document and instance ids and
+derivation, `dc:format`, Photoshop's colour mode, profile name,
+transmission reference, headline, city and credit, and `tiff:Software`.
+This actool takes XMP whose mapped properties the Exif already holds with
+the same value, and refuses other properties.
+
+ImageIO rewrites a Photoshop (APP13) IPTC record (about 15 probes, two of
+the corpus's JPEGs): its character set (1:90) becomes UTF-8 and its
+record version (2:00) 2, written first whatever was there; the other
+datasets follow in an order of ImageIO's own, not the file's ({2:103,
+2:40} as 103 then 40, {2:62, 2:63} as 62 then 63, but all four as 63, 62,
+103, 40); the digest (0x425) is recomputed, the MD5 of the new record;
+other resources stay in place. A record of one dataset and no header is
+kept beside a rewritten one. The record's date and time also become
+DateTimeDigitized. This actool takes at most two datasets besides the
+header, in the orders established, a date and time only when the Exif
+already holds them, only ASCII values, and the record and its digest
+alone; it refuses the rest.
+
+ImageIO writes the metadata back in its own order, whatever the file's:
+JFIF, Exif, the colour profile, Photoshop's, Adobe's, then the tables (six
+probes, two of the corpus's JPEGs). Besides Apple's sRGB profile, the
+ICC's 3,048-byte "sRGB IEC61966-2-1 black scaled" and Facebook's 524-byte
+compact "c2" are kept as they are (one corpus JPEG each), recognised by
+their exact bytes. JPEGs with Adobe RGB or other profiles, which were
+re-encoded, are refused, as is XMP that ImageIO merges into a Photoshop
+IPTC record already present (a corpus JPEG).
 
 ### Vector images
 
