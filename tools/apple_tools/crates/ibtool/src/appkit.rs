@@ -109,6 +109,9 @@ struct Collected {
     connection_sources: Vec<String>,
     /// The definitions of objects that the objects' list defines.
     definitions: HashMap<String, Value>,
+    /// Views placed at their superview's origin whatever their frames say
+    /// (a scroll view's document view).
+    at_origin: Vec<String>,
 }
 
 /// An autoresizing mask's bits, as NSView's: flexible left margin 1, width
@@ -186,7 +189,9 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     let mut values = Vec::new();
     values.push(("NSNextResponder", next_responder.map_or(Value::Nil, |r| reference(r.to_string()))));
     values.push(("NSNibTouchBar", Value::Nil));
-    values.push(("NSvFlags", Value::Int(256 | autoresizing_mask(n)?)));
+    // Hidden, the top bit (a probe's button, scrollers).
+    let hidden = if n.attribute("hidden") == Some("YES") { 0x8000_0000_u32 as i32 as i64 } else { 0 };
+    values.push(("NSvFlags", Value::Int(hidden | 256 | autoresizing_mask(n)?)));
     // Its subviews, then its frame.
     let subviews: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
     if !subviews.is_empty() || n.has_tag_name("button") {
@@ -196,12 +201,16 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "view" | "customView" => view(nib, c, s, module, name, Some(name))?,
                 "textField" => text_field(nib, c, s, module, name)?,
                 "button" => button(nib, c, s, module, name)?,
+                "scrollView" => scroll_view(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
         values.push(("NSSubviews", nib.array("NSMutableArray", items)));
     }
-    let f = frame(n, "frame")?;
+    let mut f = frame(n, "frame")?;
+    if n.attribute("id").is_some_and(|id| c.at_origin.iter().any(|o| o == id)) {
+        (f.x, f.y) = (0.0, 0.0);
+    }
     if f.x == 0.0 && f.y == 0.0 {
         values.push(("NSFrameSize", nib.string(&format!("{{{}, {}}}", g(f.w), g(f.h)))));
     } else {
@@ -860,7 +869,7 @@ fn constrained(doc: &Document) -> std::collections::HashSet<String> {
 }
 
 fn new_collected(sources: Vec<String>) -> Collected {
-    Collected { parents: Vec::new(), visible: Vec::new(), connection_sources: sources, definitions: HashMap::new() }
+    Collected { parents: Vec::new(), visible: Vec::new(), connection_sources: sources, definitions: HashMap::new(), at_origin: Vec::new() }
 }
 
 /// Compiles an AppKit xib to its nib.
@@ -1224,7 +1233,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
 /// itself, which connections then require), naming its view's nib and its
 /// identifier (two probes, a template).
 fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str) -> Result<(Value, String), String> {
-    only_attributes(vc, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("sceneMemberID", None), ("storyboardIdentifier", None)])?;
+    only_attributes(vc, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("sceneMemberID", None), ("storyboardIdentifier", None), ("title", None)])?;
     let view = children(vc, "view").next().ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
     let mut values = vec![
@@ -1234,6 +1243,10 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     ];
     if let Some(identifier) = vc.attribute("storyboardIdentifier") {
         values.push(("NSStoryboardIdentifier", nib.string(identifier)));
+    }
+    // Its title after its identifier (a probe).
+    if let Some(title) = vc.attribute("title") {
+        values.push(("NSTitle", nib.text(attr(vc, "id")?, "title", title)));
     }
     values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))));
     values.push(("showSeguePresentationStyle", Value::Int(0)));
@@ -1313,7 +1326,11 @@ fn profile(gray: bool) -> Result<Vec<u8>, String> {
 /// same).
 fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     only_attributes(n, &[("key", None), ("name", None), ("catalog", Some("System")), ("colorSpace", Some("catalog"))])?;
-    let name = attr(n, "name")?;
+    system_color(nib, attr(n, "name")?)
+}
+
+/// A System catalog colour by name.
+fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (white, components): (Option<&str>, &str) = match name {
         "textBackgroundColor" | "headerColor" => (Some("1"), "1 1"),
         "labelColor" | "controlTextColor" | "headerTextColor" | "selectedTextColor" | "textColor" => (Some("0"), "0 1"),
@@ -1784,4 +1801,193 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     values.push(("NSControlSendActionMask", Value::Int(4)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
     Ok(Value::New(Object::new("NSButton", values).named(name)))
+}
+
+/// A scroll view, as Xcode archives one it doesn't tile again: no border,
+/// scrollers hidden and hiding themselves, no content insets, a document
+/// view no larger than its clip view (20 probes: with a border, a scroller
+/// showing, insets or a larger document, Xcode lays it out with AppKit's
+/// scroller metrics, which this ibtool doesn't reproduce). `NSsFlags`:
+/// 0x20800, hiding scrollers 0x200, horizontal and vertical scrollers 0x20
+/// and 0x10 (the defaults), predominant-axis scrolling 0x10000 (the
+/// default), content insets given 0x100000.
+fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("wantsLayer", Some("YES")),
+            ("borderType", Some("none")),
+            ("autohidesScrollers", Some("YES")),
+            ("horizontalLineScroll", None),
+            ("horizontalPageScroll", None),
+            ("verticalLineScroll", None),
+            ("verticalPageScroll", None),
+            ("usesPredominantAxisScrolling", Some("NO")),
+            ("hasHorizontalScroller", Some("NO")),
+            ("hasVerticalScroller", Some("NO")),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "clipView", "edgeInsets", "scroller", "constraints"])?;
+    if n.attribute("borderType").is_none() || n.attribute("autohidesScrollers").is_none() {
+        return fail("a scroll view with a border or scrollers that don't hide themselves is laid out by Xcode, which this ibtool doesn't reproduce");
+    }
+    let id = attr(n, "id")?;
+    let name = object_name(id);
+    c.parents.push((name.clone(), parent.to_string()));
+    let frame_n = frame(n, "frame")?;
+    let clip = child(n, "clipView", "contentView").ok_or("a scroll view without a clip view")?;
+    only_attributes(clip, &[("key", None), ("id", None), ("drawsBackground", Some("NO")), ("copiesOnScroll", Some("NO"))])?;
+    only_children(clip, &["rect", "autoresizingMask", "subviews"])?;
+    let clip_frame = frame(clip, "frame")?;
+    if (clip_frame.x, clip_frame.y, clip_frame.w, clip_frame.h) != (0.0, 0.0, frame_n.w, frame_n.h) {
+        return fail("a clip view other than its scroll view's bounds is not supported by this ibtool");
+    }
+    let docs: Vec<Node> = children(clip, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
+    let [doc] = docs.as_slice() else {
+        return fail("a clip view without one document view is not supported by this ibtool");
+    };
+    if !matches!(doc.tag_name().name(), "view" | "customView") {
+        return fail(format!("a scroll view's document <{}> is not supported by this ibtool", doc.tag_name().name()));
+    }
+    let doc_frame = frame(*doc, "frame")?;
+    if doc_frame.w > clip_frame.w || doc_frame.h > clip_frame.h {
+        return fail("a document view larger than its clip view makes Xcode show a scroller, which this ibtool doesn't reproduce");
+    }
+    if let Some(insets) = child(n, "edgeInsets", "contentInsets") {
+        only_attributes(insets, &[("key", None), ("left", Some("0.0")), ("right", Some("0.0")), ("top", Some("0.0")), ("bottom", Some("0.0"))])?;
+    }
+    let mut scrollers = (None, None);
+    for sc in children(n, "scroller") {
+        match sc.attribute("key") {
+            Some("horizontalScroller") => scrollers.0 = Some(sc),
+            Some("verticalScroller") => scrollers.1 = Some(sc),
+            _ => return fail("a scroll view's scroller other than its two"),
+        }
+    }
+    let (Some(h), Some(v)) = scrollers else {
+        return fail("a scroll view without both scrollers is not supported by this ibtool");
+    };
+
+    // The clip view: its flags without its mask, the document view, the
+    // control background colour, drawing it (4) and copying on scroll
+    // (unless not, 2).
+    let clip_name = object_name(attr(clip, "id")?);
+    c.parents.push((clip_name.clone(), name.clone()));
+    let doc_name = object_name(attr(*doc, "id")?);
+    // The document view is at the clip view's origin (a probe).
+    c.at_origin.push(attr(*doc, "id")?.to_string());
+    let mut clip_values = view_values(nib, c, clip, module, &clip_name, &name, Some(&name))?;
+    for v in clip_values.iter_mut() {
+        if v.0 == "NSvFlags" {
+            v.1 = Value::Int(256);
+        }
+    }
+    let at = clip_values.iter().position(|v| v.0 == "NSSuperview").expect("its superview") + 1;
+    clip_values.insert(at, ("NSNextKeyView", reference(doc_name.clone())));
+    clip_values.push(("NSDocView", reference(doc_name)));
+    clip_values.push(("NSBGColor", system_color(nib, "controlBackgroundColor")?));
+    let mut cv_flags = 0;
+    if clip.attribute("drawsBackground").is_none() {
+        cv_flags |= 4;
+    }
+    if clip.attribute("copiesOnScroll").is_some() {
+        cv_flags |= 2;
+    }
+    if cv_flags != 0 {
+        clip_values.push(("NScvFlags", Value::Int(cv_flags)));
+    }
+    clip_values.push(("NSAutomaticallyAdjustsContentInsets", Value::Bool(true)));
+    let clip_value = Value::New(Object::new("NSClipView", clip_values).named(clip_name.clone()));
+    let h_value = scroller(nib, c, h, module, &name, true)?;
+    let v_value = scroller(nib, c, v, module, &name, false)?;
+
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let at = values.iter().position(|v| v.0 == "NSFrame" || v.0 == "NSFrameSize").expect("its frame");
+    values.insert(at, ("NSSubviews", nib.array("NSMutableArray", vec![clip_value, h_value, v_value])));
+    let at = values.iter().position(|v| v.0 == "NSSuperview").expect("its superview") + 1;
+    values.insert(at, ("NSNextKeyView", reference(clip_name.clone())));
+    let mut flags = 0x20800 | 0x200;
+    if n.attribute("hasHorizontalScroller").is_none() {
+        flags |= 0x20;
+    }
+    if n.attribute("hasVerticalScroller").is_none() {
+        flags |= 0x10;
+    }
+    if n.attribute("usesPredominantAxisScrolling").is_none() {
+        flags |= 0x1_0000;
+    }
+    if child(n, "edgeInsets", "contentInsets").is_some() {
+        flags |= 0x10_0000;
+    }
+    values.push(("NSsFlags", Value::Int(flags)));
+    values.push(("NSVScroller", reference(object_name(attr(v, "id")?))));
+    values.push(("NSHScroller", reference(object_name(attr(h, "id")?))));
+    values.push(("NSContentView", reference(clip_name)));
+    // Its line and page scrolls, as big-endian floats: vertical line and
+    // page, then horizontal (a probe), when given.
+    let amounts = ["verticalLineScroll", "verticalPageScroll", "horizontalLineScroll", "horizontalPageScroll"];
+    if amounts.iter().any(|a| n.attribute(*a).is_some()) {
+        let mut data = Vec::new();
+        for a in amounts {
+            let v = n.attribute(a).ok_or_else(|| format!("a scroll view without its {a} is not supported by this ibtool"))?;
+            data.extend_from_slice(&(number(v)? as f32).to_be_bytes());
+        }
+        values.push(("NSScrollAmts", Value::Data(data)));
+    }
+    values.push(("NSMinMagnification", Value::Double(0.25)));
+    values.push(("NSMaxMagnification", Value::Double(4.0)));
+    values.push(("NSMagnification", Value::Double(1.0)));
+    if child(n, "edgeInsets", "contentInsets").is_some() {
+        values.push(("NSContentInsets", nib.string("{0, 0, 0, 0}")));
+    }
+    Ok(Value::New(Object::new("NSScrollView", values).named(name)))
+}
+
+/// A scroll view's hidden scroller, targeting it with `_doScroller:`.
+fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str, horizontal: bool) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[("key", None), ("id", None), ("hidden", Some("YES")), ("wantsLayer", Some("YES")), ("verticalHuggingPriority", Some("750")), ("doubleValue", None), ("horizontal", None)],
+    )?;
+    only_children(n, &["rect", "autoresizingMask"])?;
+    if n.attribute("hidden").is_none() {
+        return fail("a scroller showing is laid out by Xcode, which this ibtool doesn't reproduce");
+    }
+    if n.attribute("horizontal") != Some(if horizontal { "YES" } else { "NO" }) {
+        return fail("a scroller of the other orientation");
+    }
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    values.retain(|v| v.0 != "NSHuggingPriority");
+    // Layer-backed whether or not it says so (a probe).
+    if !values.iter().any(|v| v.0 == "NSViewIsLayerTreeHost") {
+        let at = values.iter().position(|v| v.0 == "NSViewWantsBestResolutionOpenGLSurface").expect("its OpenGL key");
+        values.insert(at, ("NSViewIsLayerTreeHost", Value::Bool(true)));
+    }
+    let action = nib.string("_doScroller:");
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
+    values.push(("NSControlAction", action));
+    values.push(("NSControlTarget", reference(parent.to_string())));
+    values.push(("NSControlSize", Value::Int(0)));
+    values.push(("NSControlContinuous", Value::Bool(false)));
+    values.push(("NSControlRefusesFirstResponder", Value::Bool(false)));
+    values.push(("NSControlUsesSingleLineMode", Value::Bool(false)));
+    values.push(("NSControlTextAlignment", Value::Int(0)));
+    values.push(("NSControlLineBreakMode", Value::Int(0)));
+    values.push(("NSControlWritingDirection", Value::Int(0)));
+    values.push(("NSControlSendActionMask", Value::Int(4)));
+    if horizontal {
+        values.push(("NSsFlags", Value::Int(1)));
+    }
+    values.push(("NSTarget", reference(parent.to_string())));
+    let action = nib.string("_doScroller:");
+    values.push(("NSAction", action));
+    if let Some(d) = n.attribute("doubleValue") {
+        values.push(("NSCurValue", Value::Double(number(d)?)));
+    }
+    Ok(Value::New(Object::new("NSScroller", values).named(name)))
 }
