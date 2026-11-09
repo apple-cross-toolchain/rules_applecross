@@ -36,6 +36,19 @@ impl Nib {
         Value::New(make().named(name))
     }
 
+    /// Removes `key` from `values`; a shared object defined there is built
+    /// anew where next used, rather than referred to.
+    fn remove(&mut self, values: &mut Vec<(&'static str, Value)>, key: &str) {
+        for (_, v) in values.iter().filter(|v| v.0 == key) {
+            if let Value::New(o) = v {
+                if let Some(name) = &o.name {
+                    self.shared.retain(|_, n| n != name);
+                }
+            }
+        }
+        values.retain(|v| v.0 != key);
+    }
+
     fn string(&mut self, s: &str) -> Value {
         self.shared(format!("s:{s}"), || Object::new("NSString", vec![("NS.bytes", Value::Data(s.as_bytes().to_vec()))]))
     }
@@ -205,13 +218,13 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     if let Some(content) = content {
         let content = view(nib, c, content, module, name, Some(name))?;
         values.push(("NSSubviews", nib.array("NSMutableArray", vec![content])));
-    } else if !subviews.is_empty() || n.has_tag_name("button") || n.has_tag_name("box") || n.has_tag_name("imageView") {
+    } else if !subviews.is_empty() || ["button", "popUpButton", "box", "imageView"].iter().any(|t| n.has_tag_name(*t)) {
         let mut items = Vec::new();
         for s in subviews {
             items.push(match s.tag_name().name() {
                 "view" | "customView" => view(nib, c, s, module, name, Some(name))?,
                 "textField" => text_field(nib, c, s, module, name)?,
-                "button" => button(nib, c, s, module, name)?,
+                "button" | "popUpButton" => button(nib, c, s, module, name)?,
                 "scrollView" => scroll_view(nib, c, s, module, name)?,
                 "box" => box_view(nib, c, s, module, name)?,
                 "imageView" => image_view(nib, c, s, module, name)?,
@@ -343,6 +356,7 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
             (Some(f), None) if k.attribute("secondItem").is_none() => (subview(f)?, false, first_attribute, 0, 0.0),
             (Some(f), None) => (subview(f)?, false, second_attribute()?, 0, 0.0),
             (None, Some(s)) => (subview(s)?, false, first_attribute, 0, 0.0),
+            (Some(f), Some(s)) if f == s => return fail("a view's constraint relating a subview to itself is not supported by this ibtool"),
             (Some(f), Some(s)) => {
                 subview(s)?;
                 let names = (attr(*k, "firstAttribute")?, k.attribute("secondAttribute").unwrap_or_default());
@@ -379,6 +393,20 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
         ka.0.total_cmp(&kb.0).then(ka.1.cmp(&kb.1)).then(ka.2.cmp(&kb.2)).then(ka.3.cmp(&kb.3)).then(ka.4.total_cmp(&kb.4))
     });
     Ok(order)
+}
+
+/// A constraint's multiplier: a number, or a ratio `a:b`.
+fn multiplier(m: &str) -> Result<f64, String> {
+    match m.split_once(':') {
+        Some((a, b)) => {
+            let (a, b) = (number(a)?, number(b)?);
+            if b == 0.0 {
+                return fail(format!("a multiplier {m} dividing by zero"));
+            }
+            Ok(a / b)
+        }
+        None => number(m),
+    }
 }
 
 /// Whether `relax_ibtool_layout` compiles constrained views with their
@@ -438,7 +466,8 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
                 None => 0.0,
             },
         };
-        let wanted = second + k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+        let factor = k.attribute("multiplier").map(multiplier).transpose()?.unwrap_or(1.0);
+        let wanted = factor * second + k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
         let agrees = match k.attribute("relation") {
             None => (first - wanted).abs() < 0.001,
             Some("greaterThanOrEqual") => first > wanted - 0.001,
@@ -485,6 +514,7 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
                 ("secondAttribute", None),
                 ("constant", None),
                 ("symbolic", Some("YES")),
+                ("multiplier", None),
                 ("priority", None),
                 ("id", None),
             ],
@@ -520,6 +550,11 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
             Some("greaterThanOrEqual") => values.push(("NSRelation", Value::Int(1))),
             Some("lessThanOrEqual") => values.push(("NSRelation", Value::Int(-1))),
             Some(other) => return fail(format!("constraint relation {other} is not supported by this ibtool")),
+        }
+        // A multiplier, rounded to a float (four probes; a ratio as its
+        // quotient).
+        if let Some(m) = k.attribute("multiplier") {
+            values.push(("NSMultiplier", Value::Double(multiplier(m)? as f32 as f64)));
         }
         if let Some(second) = k.attribute("secondItem") {
             let a = attribute(attr(k, "secondAttribute")?)?;
@@ -807,7 +842,7 @@ fn menu(nib: &mut Nib, c: &mut Collected, n: Node, parent: &str) -> Result<Value
     for list in children(n, "items") {
         only_children(list, &["menuItem"])?;
         for i in children(list, "menuItem") {
-            items.push(menu_item(nib, c, i, &name)?);
+            items.push(menu_item(nib, c, i, &name, None)?);
         }
     }
     let title = nib.text(attr(n, "id")?, "title", n.attribute("title").unwrap_or(""));
@@ -826,6 +861,35 @@ fn menu(nib: &mut Nib, c: &mut Collected, n: Node, parent: &str) -> Result<Value
         values.push(("NSName", nib.string(system)));
     }
     Ok(Value::New(Object::new("NSMenu", values).named(name)))
+}
+
+/// A pop-up button's menu, and its selected item and that item's index: the
+/// cell holds the item, defined there, and the menu refers to it (five
+/// probes).
+fn popup_menu(nib: &mut Nib, c: &mut Collected, n: Node, cell_name: &str, selected: Option<&str>) -> Result<(Value, Option<(Value, usize)>), String> {
+    only_attributes(n, &[("key", None), ("id", None)])?;
+    only_children(n, &["items"])?;
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), cell_name.to_string()));
+    let mut items = Vec::new();
+    let mut chosen = None;
+    for list in children(n, "items") {
+        only_children(list, &["menuItem"])?;
+        for i in children(list, "menuItem") {
+            if Some(attr(i, "id")?) == selected {
+                chosen = Some(items.len());
+            }
+            items.push(menu_item(nib, c, i, &name, Some(cell_name))?);
+        }
+    }
+    let chosen = match (selected, chosen) {
+        (Some(id), Some(at)) => Some((std::mem::replace(&mut items[at], reference(object_name(id))), at)),
+        (Some(_), None) => return fail("a pop-up button's selected item outside its menu"),
+        (None, _) => None,
+    };
+    let title = nib.string("");
+    let menu = Value::New(Object::new("NSMenu", vec![("NSTitle", title), ("NSMenuItems", nib.array("NSMutableArray", items))]).named(name));
+    Ok((menu, chosen))
 }
 
 /// A title: its attribute, or a `<string key="title">` (one with leading
@@ -894,7 +958,7 @@ fn modifier_mask(n: Node) -> Result<i64, String> {
 /// A menu item: its menu (by a conditional reference), title, key
 /// equivalent and the system's check and mixed-state images; one with a
 /// submenu opens it with `submenuAction:`, targeting it.
-fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Result<Value, String> {
+fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str, popup_cell: Option<&str>) -> Result<Value, String> {
     only_attributes(
         n,
         &[
@@ -903,9 +967,13 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Resu
             ("tag", None),
             ("isSeparatorItem", Some("YES")),
             ("enabled", Some("NO")),
+            ("state", Some("on")),
             ("id", None),
         ],
     )?;
+    if popup_cell.is_none() && n.attribute("state").is_some() {
+        return fail("a menu item's state outside a pop-up button is not supported by this ibtool");
+    }
     only_children(n, &["modifierMask", "menu", "connections", "string"])?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), menu_name.to_string()));
@@ -928,11 +996,19 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Resu
     let title = title(n)?;
     values.push(("NSTitle", nib.text(attr(n, "id")?, "title", &title)));
     values.push(("NSKeyEquiv", nib.string(n.attribute("keyEquivalent").unwrap_or(""))));
-    let mask = modifier_mask(n)?;
+    // A pop-up button's items have command without a mask, key equivalent
+    // or not (four probes).
+    let mask = match (popup_cell, child(n, "modifierMask", "keyEquivalentModifierMask")) {
+        (Some(_), None) => 1 << 20,
+        _ => modifier_mask(n)?,
+    };
     if mask != 0 {
         values.push(("NSKeyEquivModMask", Value::Int(mask)));
     }
     values.push(("NSMnemonicLoc", Value::Int(0x7fff_ffff)));
+    if n.attribute("state").is_some() {
+        values.push(("NSState", Value::Int(1)));
+    }
     values.push(("NSOnImage", system_image(nib, "NSMenuCheckmark", "{18, 16}")));
     values.push(("NSMixedImage", system_image(nib, "NSMenuMixedState", "{18, 4}")));
     if let Some(tag) = n.attribute("tag") {
@@ -946,6 +1022,14 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Resu
         values.push(("NSSubmenu", reference(submenu_name)));
     } else if submenus.len() > 1 {
         return fail("a menu item with several submenus");
+    }
+    // A pop-up button's items select themselves through its cell.
+    if let Some(cell) = popup_cell {
+        if !submenus.is_empty() {
+            return fail("a pop-up button's submenu is not supported by this ibtool");
+        }
+        values.push(("NSAction", nib.string("_popUpItemAction:")));
+        values.push(("NSTarget", reference(cell.to_string())));
     }
     values.push(("NSHiddenInRepresentation", Value::Bool(false)));
     Ok(Value::New(Object::new("NSMenuItem", values).named(name)))
@@ -1222,7 +1306,9 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
     if root.attribute("targetRuntime") != Some("MacOSX.Cocoa") {
         return fail("an AppKit storyboard for another runtime than MacOSX.Cocoa is not supported by this ibtool");
     }
-    only_children(root, &["dependencies", "scenes", "resources"])?;
+    // Inferred metrics' tie breakers are the editor's (a corpus storyboard
+    // compiles the same without them).
+    only_children(root, &["dependencies", "scenes", "resources", "inferredMetricsTieBreakers"])?;
     let mut files = Vec::new();
     let mut nib_names: Vec<(String, String)> = Vec::new();
     let mut uuids: Vec<(String, String)> = Vec::new();
@@ -1731,9 +1817,19 @@ fn appearance_font(nib: &mut Nib, n: Node, button: Option<f64>) -> Result<Value,
 }
 
 fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    font_as(nib, n, None)
+}
+
+/// A font, with a metafont read as another (`meta`: a pop-up button's menu
+/// font is the message font, two probes).
+fn font_as(nib: &mut Nib, n: Node, meta: Option<(&str, &str)>) -> Result<Value, String> {
     only_attributes(n, &[("key", None), ("metaFont", None), ("size", None), ("name", None), ("family", None)])?;
     let size = n.attribute("size").map(number).transpose()?;
-    let (name, default, flags): (&str, f64, i64) = match (n.attribute("metaFont"), n.attribute("name")) {
+    let metafont = n.attribute("metaFont").map(|m| match meta {
+        Some((from, to)) if m == from => to,
+        _ => m,
+    });
+    let (name, default, flags): (&str, f64, i64) = match (metafont, n.attribute("name")) {
         (Some(meta), None) => match meta {
             "system" => (".AppleSystemUIFont", 13.0, 0x414),
             "systemBold" => (".AppleSystemUIFontBold", 13.0, 0x818),
@@ -1965,15 +2061,18 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "buttonCell", "constraints", "connections"])?;
+    only_children(n, &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections"])?;
     content_sized(nib, n)?;
+    // A pop-up button is a button whose cell holds a menu (about 10
+    // probes).
+    let popup = n.has_tag_name("popUpButton");
     let id = attr(n, "id")?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
     if children(n, "connections").next().is_some() {
         c.connection_sources.push(id.to_string());
     }
-    let cell = child(n, "buttonCell", "cell").ok_or("a button without a cell")?;
+    let cell = child(n, if popup { "popUpButtonCell" } else { "buttonCell" }, "cell").ok_or("a button without a cell")?;
     // Its cell comes before its own constraints in the objects' list (a
     // probe).
     c.parents.push((object_name(attr(cell, "id")?), name.clone()));
@@ -1987,7 +2086,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("title", None),
             ("alternateTitle", None),
             ("alignment", None),
-            ("borderStyle", Some("border")),
+            ("borderStyle", Some(if popup { "borderAndBezel" } else { "border" })),
             ("imagePosition", None),
             ("imageScaling", None),
             ("inset", None),
@@ -1995,9 +2094,21 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("controlSize", None),
             ("keyEquivalent", None),
             ("lineBreakMode", None),
+            ("enabled", Some("NO")),
+            ("selectedItem", None),
+            ("arrowPosition", None),
         ],
     )?;
-    only_children(cell, &["behavior", "font", "modifierMask", "string"])?;
+    if !popup && ["enabled", "selectedItem", "arrowPosition"].iter().any(|a| cell.attribute(*a).is_some()) {
+        return fail("a button cell's enabled, selectedItem or arrowPosition attribute is not supported by this ibtool");
+    }
+    only_children(cell, &["behavior", "font", "modifierMask", "string", "menu", "connections"])?;
+    if children(cell, "connections").next().is_some() {
+        c.connection_sources.push(attr(cell, "id")?.to_string());
+    }
+    if popup != child(cell, "menu", "menu").is_some() {
+        return fail("a pop-up button without a menu, or a button with one, is not supported by this ibtool");
+    }
     let cell_id = attr(cell, "id")?;
     let cell_name = object_name(cell_id);
     let has = |a: &str| cell.attribute(a).is_some();
@@ -2041,6 +2152,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let kind = cell.attribute("type").unwrap_or("push");
     let (aux, image_source) = match (behaviors.as_slice(), kind) {
         (["lightByBackground", "lightByGray", "pushIn"], _) => (7, None),
+        (["lightByBackground", "lightByGray"], "push" | "bevel") if popup => (0, None),
         (["changeContents", "doesNotDimImage", "lightByContents"], "check") => (3, Some("NSSwitch")),
         (["changeContents", "doesNotDimImage", "lightByContents"], "radio") => (4, Some("NSRadioButton")),
         _ => return fail(format!("a {kind} button behaving as {} is not supported by this ibtool", behaviors.join(" "))),
@@ -2120,6 +2232,13 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     if has("state") {
         flags |= 0x8000_0000;
     }
+    // A pop-up button's border and bezel, and its cell disabled.
+    if popup && has("borderStyle") {
+        flags |= 0x40_0000;
+    }
+    if has("enabled") {
+        flags |= 0x2000_0000;
+    }
     let control_size = match cell.attribute("controlSize") {
         None | Some("regular") => 0,
         Some("small") => {
@@ -2138,7 +2257,14 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         ("NSCellFlags", Value::Int(signed(flags))),
         ("NSCellFlags2", Value::Int(signed(flags2))),
         ("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))),
-        ("NSSupport", appearance_font(nib, font_node, Some([13.0, 11.0, 9.0][control_size as usize]))?),
+        (
+            "NSSupport",
+            if popup && font_node.attribute("usesAppearanceFont").is_none() {
+                font_as(nib, font_node, Some(("menu", "message")))?
+            } else {
+                appearance_font(nib, font_node, Some([13.0, 11.0, 9.0][control_size as usize]))?
+            },
+        ),
         ("NSControlView", reference(name.clone())),
         ("NSButtonFlags", Value::Int(signed(flags_b))),
         ("NSButtonFlags2", Value::Int(signed(flags_b2))),
@@ -2153,6 +2279,27 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     cell_values.push(("NSPeriodicDelay", Value::Int(400)));
     cell_values.push(("NSPeriodicInterval", Value::Int(75)));
     cell_values.push(("NSAuxButtonType", Value::Int(aux)));
+    if popup {
+        let menu_node = child(cell, "menu", "menu").expect("checked");
+        let (menu, selected) = popup_menu(nib, c, menu_node, &cell_name, cell.attribute("selectedItem"))?;
+        let index = selected.as_ref().map_or(-1, |s| s.1 as i64);
+        cell_values.push(("NSMenuItem", selected.map_or(Value::Nil, |s| s.0)));
+        cell_values.push(("NSMenuItemRespectAlignment", Value::Bool(true)));
+        cell_values.push(("NSMenu", menu));
+        // The selected item's index unless the first.
+        if index != 0 {
+            cell_values.push(("NSSelectedIndex", Value::Int(index)));
+        }
+        cell_values.push(("NSPreferredEdge", Value::Int(1)));
+        cell_values.push(("NSUsesItemFromMenu", Value::Bool(true)));
+        cell_values.push(("NSAltersState", Value::Bool(true)));
+        let arrow = match cell.attribute("arrowPosition") {
+            None | Some("arrowAtBottom") => 2,
+            Some("arrowAtCenter") => 1,
+            Some(other) => return fail(format!("arrow position {other} is not supported by this ibtool")),
+        };
+        cell_values.push(("NSArrowPosition", Value::Int(arrow)));
+    }
 
     // Content hugging: a bordered button of a rounded kind has its own, 250
     // and 750, and archives any other, even 250 each (probes); square and
@@ -2166,7 +2313,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             n.attribute("verticalHuggingPriority").unwrap_or("250")
         );
         let at = values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key");
-        values.retain(|v| v.0 != "NSHuggingPriority");
+        nib.remove(&mut values, "NSHuggingPriority");
         let at = at.min(values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key"));
         let at = if values.iter().any(|v| v.0 == "NSAntiCompressionPriority") { at - 1 } else { at };
         if hugging != "{250, 750}" {
@@ -2174,7 +2321,10 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         }
     }
     values.push(("NSEnabled", Value::Bool(true)));
-    values.push(("NSCell", Value::New(Object::new("NSButtonCell", cell_values).named(cell_name))));
+    values.push((
+        "NSCell",
+        Value::New(Object::new(if popup { "NSPopUpButtonCell" } else { "NSButtonCell" }, cell_values).named(cell_name)),
+    ));
     values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
     values.push(("NSControlSize", Value::Int(control_size)));
     values.push(("NSControlContinuous", Value::Bool(false)));
@@ -2185,7 +2335,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     values.push(("NSControlWritingDirection", Value::Int(-1)));
     values.push(("NSControlSendActionMask", Value::Int(4)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
-    Ok(Value::New(Object::new("NSButton", values).named(name)))
+    Ok(Value::New(Object::new(if popup { "NSPopUpButton" } else { "NSButton" }, values).named(name)))
 }
 
 /// A scroll view, as Xcode archives one it doesn't tile again: no border,
@@ -2375,7 +2525,7 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
-    values.retain(|v| v.0 != "NSHuggingPriority");
+    nib.remove(&mut values, "NSHuggingPriority");
     // Layer-backed whether or not it says so (a probe).
     if !values.iter().any(|v| v.0 == "NSViewIsLayerTreeHost") {
         let at = values.iter().position(|v| v.0 == "NSViewWantsBestResolutionOpenGLSurface").expect("its OpenGL key");
