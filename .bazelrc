@@ -46,6 +46,10 @@ build:relax_actool_xcbuild --action_env=RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD=1
 build:relax_docc --action_env=RULES_APPLECROSS_RELAX_DOCC=1
 # Interface Builder files this ibtool can't reproduce, left uncompiled.
 build:relax_ibtool --action_env=RULES_APPLECROSS_RELAX_IBTOOL=1
+# AppKit controls Auto Layout sizes by their content (text fields...), which
+# Xcode lays out again at compile time with the Mac's metrics: compiled with
+# the document's frames, which only their first layout uses.
+build:relax_ibtool_layout --action_env=RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT=1
 # Core Data models, whose VersionInfo.plist leaves out the entity version
 # hashes and checksums (Core Data computes them itself) and with no .omo;
 # generated classes with a fixed header line in place of the user and date.
@@ -79,6 +83,7 @@ build:relaxed --config=relax_actool_storage
 build:relaxed --config=relax_actool_xcbuild
 build:relaxed --config=relax_docc
 build:relaxed --config=relax_ibtool
+build:relaxed --config=relax_ibtool_layout
 build:relaxed --config=relax_momc
 build:relaxed --config=relax_pngcrush
 build:relaxed --config=relax_metal

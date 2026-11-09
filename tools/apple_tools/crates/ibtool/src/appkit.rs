@@ -1162,6 +1162,13 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     let label = nib.string("sceneController");
     let mut connections = vec![outlet(format!("{wc_name} scene controller"), &root_name, &wc_name, label)];
     connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
+    // The window's delegate is its controller, connected or not (Xcode's
+    // game templates leave it out of the document).
+    let has_delegate = children(window_node, "connections").flat_map(|l| children(l, "outlet")).any(|o| o.attribute("property") == Some("delegate"));
+    if !has_delegate {
+        let label = nib.string("delegate");
+        connections.push(outlet(format!("{window_name} delegate outlet"), &window_name, &wc_name, label));
+    }
     let label = nib.string("storyboard");
     connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &vc_placeholder, label));
     let label = nib.string("storyboard");
@@ -1318,6 +1325,25 @@ fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
     Ok(nib.shared(format!("font:{name}:{size}:{flags}"), || Object::new("NSFont", vec![("NSName", font_name), ("NSSize", Value::Double(size)), ("NSfFlags", Value::Int(flags))])))
 }
 
+/// Refuses a control Auto Layout sizes by its content, when constraints
+/// place it: Xcode lays such views out again as it compiles, with the Mac's
+/// control metrics and text measurement, so a document whose frames are
+/// older than those differs (133 of 227 text fields' and buttons' frames in
+/// the corpus). `--config=relax_ibtool_layout` keeps the document's frames,
+/// which only the first layout at run time uses.
+fn content_sized(nib: &Nib, n: Node) -> Result<(), String> {
+    let constrained = n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id));
+    let relaxed = std::env::var("RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT").is_ok_and(|v| v == "1")
+        || std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").is_ok_and(|v| v == "relaxed");
+    if constrained && !relaxed {
+        return fail(format!(
+            "a constrained <{}> is laid out again by Xcode's Auto Layout as it compiles, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frame",
+            n.tag_name().name()
+        ));
+    }
+    Ok(())
+}
+
 /// A text field and its cell (28 probes of the cell's attributes): the
 /// cell's flags and the control's alignment, line breaking and size.
 fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
@@ -1335,6 +1361,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     )?;
     only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints"])?;
     let id = attr(n, "id")?;
+    content_sized(nib, n)?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
