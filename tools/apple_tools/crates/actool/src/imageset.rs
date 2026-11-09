@@ -981,10 +981,13 @@ fn pack(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, gray: bool, i
         key.push((car::ATTR_DIMENSION1, index));
     }
     if appearance != 0 || idiom != 0 {
-        // An idiom's second atlas takes dimension1 1 (an iPhone icon set's
-        // atlas after iPhone image sets' translucent one, a probe).
-        if index > 0 && (appearance != 0 || index > 1) {
-            return Err(format!("more than one {scale}x atlas for an appearance, or more than two for an idiom, is not supported by this actool"));
+        // An idiom's atlases take dimension1 0, 1, 2, ... in turn, as the
+        // universal ones do (an iPhone icon set's atlas after iPhone image
+        // sets' translucent one, a probe; three and four for an idiom,
+        // opaque, translucent and grey, in seven random catalogs and a
+        // corpus one). An appearance's second isn't established.
+        if index > 0 && appearance != 0 {
+            return Err(format!("more than one {scale}x atlas for an appearance is not supported by this actool"));
         }
         if appearance != 0 && idiom != 0 {
             return Err("an atlas for both an appearance and an idiom is not supported by this actool".into());

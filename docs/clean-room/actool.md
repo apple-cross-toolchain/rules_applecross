@@ -936,15 +936,18 @@ blocks' order).
 With both `--target-device iphone` and `ipad`, an image may be for the
 iPhone, iPad or CarPlay idiom: its key has idiom 1, 2 or 4 (none for
 universal), and each idiom has atlases of its own, keyed by it, the link
-naming its key in attribute order. Watch, Mac, TV and vision images are
-left out, and so are iPad images at 3x and CarPlay ones at 1x, scales those
-devices don't have (a set of nothing else has no facet, a catalog of
-nothing else compiles to nothing): each compiled beside a universal 2x
-image gave the same output as without it, every other idiom and scale
-didn't, and seven visionOS test catalogs built for iOS were the same
-without their vision images. Other idioms, device idioms with other target
-devices, and atlases for both an appearance and an idiom are refused (13
-probes).
+naming its key in attribute order, numbered by `dimension1` in turn as the
+universal ones are: three and four for one idiom and scale (opaque,
+translucent and grey) in seven random catalogs, and an iPhone icon set's
+two atlases after iPhone image sets' grey one in a corpus catalog. Watch,
+Mac, TV and vision images are left out, and so are iPad images at 3x and
+CarPlay ones at 1x, scales those devices don't have (a set of nothing else
+has no facet, a catalog of nothing else compiles to nothing): each
+compiled beside a universal 2x image gave the same output as without it,
+every other idiom and scale didn't, and seven visionOS test catalogs built
+for iOS were the same without their vision images. Other idioms, device
+idioms with other target devices, and atlases for both an appearance and
+an idiom are refused (13 probes).
 
 Folders are scanned for image sets: a folder's assets are named as at the
 top, or with its name and a slash before theirs when its `Contents.json`
