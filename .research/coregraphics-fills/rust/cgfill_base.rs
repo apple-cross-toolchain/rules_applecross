@@ -192,14 +192,15 @@ fn stepper(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32) -> Vec<(i6
 /// An edge's pieces bottom to top, each with its row: from the lower vertex
 /// through its row crossings, the points at `breaks` (vertex ys, in units)
 /// and its column crossings to where the row stepper ends.
-fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<i64>, end_out: &mut i64) -> Vec<(Fixed, Fixed, i64)> {
+fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<i64>, end_out: &mut i64, exact_end: bool) -> Vec<(Fixed, Fixed, i64)> {
     let ((vbx, by), (tx, ty)) = (bottom, top);
     let bx = start_x.unwrap_or(vbx);
-    let rows = stepper(by, bx, ty, tx, &knob("CG_START"), side);
-    let cols: std::collections::HashMap<i64, i64> = stepper(bx, by, tx, ty, &knob("CG_CSTART"), side).into_iter().collect();
-    let mr = (tx - bx) * UNIT / (ty - by);
+    let sx = if std::env::var("CG_CHAINSLOPE").is_ok() { vbx } else { bx };
+    let rows = stepper(by, bx, ty, tx + (bx - sx), &knob("CG_START"), side);
+    let cols: std::collections::HashMap<i64, i64> = stepper(bx, by, tx + (bx - sx), ty, &knob("CG_CSTART"), side).into_iter().collect();
+    let mr = (tx - sx) * UNIT / (ty - by);
     let (ky, kx) = rows.last().map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
-    let end = (kx + rdiv((ty - ky) * mr, UNIT, &knob("CG_END"), side), ty);
+    let end = if exact_end { (tx, ty) } else { (kx + rdiv((ty - ky) * mr, UNIT, &knob("CG_END"), side), ty) };
     *end_out = end.0;
     let mut ends: Vec<Fixed> = Vec::with_capacity(rows.len() + 2);
     ends.push((bx, by));
@@ -210,7 +211,18 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
     for &yv in breaks {
         if by < yv && yv < ty && !skip_bands {
             let (ky, kx) = rows.iter().rev().find(|&&(k, _)| k * UNIT <= yv).map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
-            let stepped = kx + rdiv((yv - ky) * mr, UNIT, &knob("CG_BAND"), side);
+            let stepped = if std::env::var("CG_BANDFROM").as_deref() == Ok("line") {
+                vbx + rdiv((tx - vbx) * (yv - by), ty - by, &knob("CG_BAND"), side)
+            } else if std::env::var("CG_BANDFROM").as_deref() == Ok("above") {
+                // from the row crossing above (or the end)
+                let (ay, ax) = rows.iter().find(|&&(k, _)| k * UNIT >= yv).map(|&(k, x)| (k * UNIT, x)).unwrap_or((ty, end.0));
+                ax + rdiv((yv - ay) * mr, UNIT, &knob("CG_BAND"), side)
+            } else if std::env::var("CG_BANDFROM").as_deref() == Ok("nearest") {
+                let below = (ky, kx);
+                let above = rows.iter().find(|&&(k, _)| k * UNIT >= yv).map(|&(k, x)| (k * UNIT, x)).unwrap_or((ty, end.0));
+                let (ry, rx) = if yv - below.0 <= above.0 - yv { below } else { above };
+                rx + rdiv((yv - ry) * mr, UNIT, &knob("CG_BAND"), side)
+            } else { kx + rdiv((yv - ky) * mr, UNIT, &knob("CG_BAND"), side) };
             let xv = if std::env::var("CG_BANDX").as_deref() == Ok("poly") {
                 // on the polyline through the row crossings and column crossings
                 let mut pts: Vec<(i64, i64)> = vec![(bx, by)];
@@ -290,7 +302,31 @@ fn clip_y(a: (f64, f64), b: (f64, f64), lo: Option<f64>, hi: Option<f64>) -> Opt
 
 /// The 8-bit coverage of `polys` filled by `rule` on a `w` x `h` canvas, rows
 /// bottom first.
+/// A lone axis-aligned rectangle takes CoreGraphics' rectangle path: per axis,
+/// in 1/8192 of a pixel, the start edge snapped down to its 1/256 step and
+/// coverage (w - 1) >> 5; alpha floor(ax * ay / 255).
+fn rect_fast(polys: &[Vec<Point>], w: usize, h: usize) -> Option<Vec<Vec<u8>>> {
+    if std::env::var("CG_NORECT").is_ok() || polys.len() != 1 || polys[0].len() != 4 { return None; }
+    let p = &polys[0];
+    let xs: Vec<f64> = p.iter().map(|q| q.x).collect();
+    let ys: Vec<f64> = p.iter().map(|q| q.y).collect();
+    let axis = (0..4).all(|i| { let (a, b) = (p[i], p[(i + 1) % 4]); a.x == b.x || a.y == b.y });
+    let (x0, x1) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
+    let (y0, y1) = (ys.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MIN, f64::max));
+    if !axis || x0 == x1 || y0 == y1 { return None; }
+    let qm = |v: f64, m: &str| { let t = (v as f32) as f64 * 8192.0; match m { "floor" => t.floor() as i64, "ceil" => t.ceil() as i64, _ => (t + 0.5).floor() as i64 } };
+    let (ms, me) = (std::env::var("CG_RS").unwrap_or("floor".into()), std::env::var("CG_RE").unwrap_or("floor".into()));
+    let cov = |lo: f64, hi: f64, n: usize| -> Vec<i64> {
+        let (l, r) = (qm(lo.max(0.0), &ms), qm(hi.min(n as f64), &me));
+        let sl = (l + 1).div_euclid(32) * 32;
+        (0..n as i64).map(|i| { let (a, b) = (sl.max(i * 8192), r.min((i + 1) * 8192)); if b <= a { 0 } else { ((b - a - 1) >> 5).clamp(0, 255) } }).collect()
+    };
+    let (cx, cy) = (cov(x0, x1, w), cov(y0, y1, h));
+    Some(cy.iter().map(|&ay| cx.iter().map(|&ax| (ax * ay / 255) as u8).collect()).collect())
+}
+
 pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec<u8>> {
+    if let Some(r) = rect_fast(polys, w, h) { return r; }
     let clipped: Vec<Vec<Point>> = polys.iter().map(|p| clip(p, w as f64, h as f64)).filter(|p| !p.is_empty()).collect();
     let raws: Vec<Vec<f64>> = clipped.iter().map(|p| p.iter().map(|q| (q.x as f32) as f64 * UNIT as f64).collect()).collect();
     let polys: Vec<Vec<Fixed>> = clipped.iter().map(|p| p.iter().map(|q| (fixed(q.x), fixed(q.y))).collect()).collect();
@@ -329,6 +365,12 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
         }
     }
     let chain = std::env::var("CG_CHAIN").ok();
+    let open_bottoms: std::collections::HashSet<Fixed> = specs.iter().filter(|s| s.3 > 0).map(|s| s.0).collect();
+    let open_tops: std::collections::HashSet<Fixed> = specs.iter().filter(|s| s.3 > 0).map(|s| s.1).collect();
+    let chainset: std::collections::HashSet<(i64, i64)> = open_bottoms.intersection(&open_tops).copied().collect();
+    let close_bottoms: std::collections::HashSet<Fixed> = specs.iter().filter(|s| s.3 < 0).map(|s| s.0).collect();
+    let close_tops: std::collections::HashSet<Fixed> = specs.iter().filter(|s| s.3 < 0).map(|s| s.1).collect();
+    let cchainset: std::collections::HashSet<(i64, i64)> = close_bottoms.intersection(&close_tops).copied().collect();
     let mut order: Vec<usize> = (0..specs.len()).collect();
     order.sort_by_key(|&i| specs[i].0 .1);
     let mut ends_at: std::collections::HashMap<Fixed, i64> = std::collections::HashMap::new();
@@ -338,7 +380,9 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
         let chained = match chain.as_deref() { Some("open") => side > 0, Some("close") => side < 0, Some("all") => true, _ => false };
         let start = if chained { ends_at.get(&bottom).copied() } else { None };
         let mut endx = 0;
-        let pcs = pieces(bottom, top, &breaks, side, start, &mut endx)
+        let ec = std::env::var("CG_ENDCHAIN").ok();
+        let exact_end = match ec.as_deref() { Some("open") => side > 0 && chainset.contains(&top), Some("close") => side < 0 && cchainset.contains(&top), Some("all") => (side > 0 && chainset.contains(&top)) || (side < 0 && cchainset.contains(&top)), _ => false };
+        let pcs = pieces(bottom, top, &breaks, side, start, &mut endx, exact_end)
             .into_iter()
             .map(|(a, b, r)| ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r))
             .collect();
@@ -392,6 +436,9 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     .collect();
                 active.sort_by(|a, b| a.0.total_cmp(&b.0));
                 let mut winding = 0;
+                let bandq = std::env::var("CG_BQ").ok();
+                let multiband = vb.len() > 2 || sub.len() > 2;
+                let snap: Vec<f64> = if bandq.is_some() && (multiband || std::env::var("CG_BQ_ALL").is_ok()) { row.clone() } else { Vec::new() };
                 for &(_, i) in &active {
                     let e = &edges[i];
                     let before = winding;
@@ -430,7 +477,7 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                                 if per_edge { if !touched.contains(&x) { touched.push(x); } parts[x] += part; row[x] += role * d; continue; }
                                 let vpiece = a.1 == e.bottom.1 as f64 / u || b.1 == e.top.1 as f64 / u;
                                 let vmode = std::env::var("CG_PQ_V").ok();
-                                let applies = match vmode.as_deref() { Some("bottom") => a.1 == e.bottom.1 as f64 / u, Some("top") => b.1 == e.top.1 as f64 / u, Some("multiband") => vb.len() > 2, Some("multiband_or_v") => vb.len() > 2 || vpiece, Some(_) => vpiece, None => true };
+                                let applies = match vmode.as_deref() { Some("bottom") => a.1 == e.bottom.1 as f64 / u, Some("top") => b.1 == e.top.1 as f64 / u, Some("chain") => (a.1 == e.bottom.1 as f64 / u && chainset.contains(&e.bottom)) || (b.1 == e.top.1 as f64 / u && chainset.contains(&e.top)), Some("chainrow") => chainset.iter().any(|v| (v.1 as f64 / u).floor() as i64 == y as i64), Some("multiband") => vb.len() > 2, Some("multiband_or_v") => vb.len() > 2 || vpiece, Some(_) => vpiece, None => true };
                                 let part = match std::env::var("CG_PQ").ok().filter(|_| applies && (role > 0.0 || std::env::var("CG_PQ_BOTH").is_ok())) { Some(v) => { let (u, m) = v.split_once(':').unwrap(); let u: f64 = u.parse().unwrap(); match m { "ceil" => (part * u).ceil() / u, "floor" => (part * u).floor() / u, "round" => (part * u).round() / u, "trunc" => (part * u).trunc() / u, _ => part } } None => part };
                                 let part = if role < 0.0 && applies { match std::env::var("CG_PQC").ok() { Some(v) => { let (uu, m) = v.split_once(':').unwrap(); let uu: f64 = uu.parse().unwrap(); match m { "ceil" => (part * uu).ceil() / uu, "floor" => (part * uu).floor() / uu, "round" => (part * uu).round() / uu, _ => part } } None => part } } else { part };
                                 let padd: f64 = if applies && role > 0.0 { std::env::var("CG_PADD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0) / 4096.0 } else { 0.0 };
@@ -445,6 +492,15 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         let part = parts[x];
                         let part = match std::env::var("CG_PQ").ok().filter(|_| role > 0.0 || std::env::var("CG_PQ_BOTH").is_ok()) { Some(v) => { let (u, m) = v.split_once(':').unwrap(); let u: f64 = u.parse().unwrap(); match m { "ceil" => (part * u).ceil() / u, "floor" => (part * u).floor() / u, "round" => (part * u).round() / u, _ => part } } None => part };
                         row[x] -= role * part;
+                    }
+                }
+                if !snap.is_empty() {
+                    let (uu, m) = bandq.as_deref().unwrap().split_once(':').unwrap();
+                    let uu: f64 = uu.parse().unwrap();
+                    for x in 0..w {
+                        let dlt = row[x] - snap[x];
+                        let q = match m { "ceil" => (dlt * uu - 1e-9).ceil() / uu, "floor" => (dlt * uu + 1e-9).floor() / uu, "round" => (dlt * uu).round() / uu, "trunc" => (dlt * uu).trunc() / uu, _ => dlt };
+                        row[x] = snap[x] + q;
                     }
                 }
             }

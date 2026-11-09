@@ -23,12 +23,14 @@ of a level of the boundary.
 - **Colours and blending.** DeviceRGB and DeviceGray become sRGB as
   `floor(v·255 + 0.5)`, and fills composite as 8-bit source-over. CMYK goes
   through a profile.
-- **Rectangles take a fast path, solved.** A path that is a rectangle gets
-  coverage per axis: 8 bits, `(w − 1) >> 5`, where `w` is measured in
-  1/8192 of a pixel from the start edge snapped to its 1/256 step
-  (`floor((s + 1)/32)`). The end edge is exact. Alpha is
-  `floor(ax · ay / 255)`. This matches 400 of 400 random rectangles and every
-  strip (`span_table.json`, `rects.json`).
+- **Rectangles take a fast path, solved.** A lone axis-aligned
+  rectangle gets coverage per axis, 8 bits. Both edges are floored to
+  1/8192 of a pixel, from float32. The start edge snaps down to its 1/256
+  step (`floor((s + 1)/32) · 32`), and a pixel's coverage on that axis is
+  `(w − 1) >> 5`. Alpha is `floor(ax · ay / 255)`. This matches 0 wrong of
+  7721 edge pixels of random multi-pixel rectangles, as well as the single-pixel
+  rectangles and strips (`span_table.json`, `rects.json`). It's in the Rust
+  prototype (`rect_fast`).
 - **Other paths: fixed-point DDAs per edge and a band sweep.** Found by
   black-box probing with `cov` (`raster.py`, `fill_path`, is the model):
   1. Path coordinates go through float32, then round half up to 1/4096 of a
@@ -114,6 +116,9 @@ of a level of the boundary.
   than the model: outward, inward, ceil or round for the first crossings,
   ends and band points; band points on the polyline; and flattening by
   other measures, tolerances, or uniform halving.
+- **Corpus, with the rectangle path** (`corpus_rs.py`). Fills are right on
+  1607 of 1625 edge pixels at 1×, 3231 of 3285 at 2×, and 4948 of 5011 at
+  3× (98.4–98.9%). The misses are curves.
 - **Corpus strokes.** CG's outline filled by the model gets 6588 of 6884
   stroke edge pixels right (`pdfstrokes.py`). Straight strokes are exact;
   the misses are on curves.
@@ -146,6 +151,17 @@ of a level of the boundary.
     didn't help: chaining edges through vertices on either side, band
     points on only one side, and truncating toward zero. These didn't help: any rounding of closing edges,
     side-dependent vertex rounding, and float32 curve subdivision.
+
+- **The band point on a closing edge** (`sweep1.py`). One vertex is swept
+  along a straight opening edge, splitting it into two collinear segments.
+  Next to the vertex, CG's output is the same as for the unsplit edge (1200
+  of 1200 pixels). On the closing edge in that row it changes. There the
+  model is one low with the stepped, floored band point, and one high with
+  no band point; rounding to nearest leaves 17 low. So the closing edge
+  gets a band point a little right of the floored one. These didn't place
+  it: stepping from the row crossing above or the nearest one, the true
+  line, and quantizing each band's coverage per pixel at 1/4096 to 1/32768.
+  Where the band point sits looks like the key to the residual.
 
 ## Remaining before exact fills
 
