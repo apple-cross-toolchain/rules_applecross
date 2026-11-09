@@ -948,6 +948,8 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
     let mut files = Vec::new();
     let mut nib_names: Vec<(String, String)> = Vec::new();
     let mut uuids: Vec<(String, String)> = Vec::new();
+    // Identified view controllers' identifiers.
+    let mut identified: Vec<String> = Vec::new();
     let mut entry = None;
     // The controllers windows' content segues lead to.
     let content_controllers: Vec<&str> = doc
@@ -996,6 +998,19 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                 }
+                // An identified view controller: its nib and its view's.
+                "viewController" if controller.attribute("storyboardIdentifier").is_some() => {
+                    if !others.is_empty() {
+                        return fail("objects beside a view controller are not supported by this ibtool");
+                    }
+                    let identifier = attr(*controller, "storyboardIdentifier")?;
+                    files.push((format!("{identifier}.nib"), identified_controller_nib(&doc, xml, *controller, module, localizable)?));
+                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push((format!("{name}.nib"), bytes));
+                    nib_names.push((identifier.to_string(), identifier.to_string()));
+                    uuids.push((identifier.to_string(), uuid(xml, attr(*controller, "id")?)));
+                    identified.push(identifier.to_string());
+                }
                 "application" => {
                     let nib = main_menu(&doc, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
                     files.push(("MainMenu.nib".to_string(), nib));
@@ -1020,26 +1035,27 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
         return fail("an initial controller other than a window controller is not supported by this ibtool");
     }
     // Its keys in the order CoreFoundation's table gives them inserted so
-    // (two templates' Info.plists, with and without an entry point).
-    let mut info = vec![
-        ("NSStoryboardMainMenu", cf::Value::string("MainMenu")),
-        ("NSViewControllerIdentifiersToNibNames", cf::Value::dict(nib_names.into_iter().map(|(k, v)| (k, cf::Value::string(v))))),
-    ];
-    if let Some(e) = &entry {
-        info.push(("NSStoryboardDesignatedEntryPointIdentifier", cf::Value::string(e.clone())));
-    }
+    // (three probes' and templates' key sets).
+    let mut info = vec![("NSStoryboardMainMenu", cf::Value::string("MainMenu"))];
     if !uuids.is_empty() {
         info.push(("NSViewControllerIdentifiersToUUIDs", cf::Value::dict(uuids.into_iter().map(|(k, v)| (k, cf::Value::string(v))))));
     }
+    if let Some(e) = &entry {
+        info.push(("NSStoryboardDesignatedEntryPointIdentifier", cf::Value::string(e.clone())));
+    }
     info.push(("NSStoryboardVersion", cf::Value::Integer(1)));
+    info.push(("NSViewControllerIdentifiersToNibNames", cf::Value::dict(nib_names.into_iter().map(|(k, v)| (k, cf::Value::string(v))))));
     let info = cf::Value::dict(info);
     // The main menu's nib name is the string naming the main menu (a
-    // template).
+    // template); an identified controller's identifier is one string for
+    // its nib name's and UUID's keys (a probe), a window controller's
+    // generated name a new one each time.
     let share = |_: &cf::Value, at: &cf::binary::Position| {
         use cf::binary::Step;
         match at {
             [Step::Value(k)] => k == "NSStoryboardMainMenu",
-            [Step::Value(k), Step::Key(id)] => k == "NSViewControllerIdentifiersToNibNames" && id == "MainMenu",
+            [Step::Value(k), Step::Key(id)] if k == "NSViewControllerIdentifiersToNibNames" => id == "MainMenu" || identified.contains(id),
+            [Step::Value(k), Step::Key(id)] if k == "NSViewControllerIdentifiersToUUIDs" => identified.contains(id),
             _ => false,
         }
     };
@@ -1203,38 +1219,70 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     Ok((assemble(&mut nib, root_object, &root_name, c, connections)?, wc_uuid))
 }
 
-/// A content view controller as its window controller's nib holds it: its
-/// class swapped in for NSViewController, naming its view's nib.
+/// A view controller as a window controller's or its own nib holds it:
+/// its class swapped in for NSViewController (without one, NSViewController
+/// itself, which connections then require), naming its view's nib and its
+/// identifier (two probes, a template).
 fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str) -> Result<(Value, String), String> {
-    only_attributes(vc, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("sceneMemberID", None)])?;
-    if vc.attribute("customClass").is_none() {
-        return fail("a content controller without a custom class is not supported by this ibtool");
-    }
+    only_attributes(vc, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("sceneMemberID", None), ("storyboardIdentifier", None)])?;
     let view = children(vc, "view").next().ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
-    let values = vec![
+    let mut values = vec![
         ("NSClassName", nib.string(&runtime_class_name(vc, module, "NSViewController")?)),
         ("NSOriginalClassName", nib.string("NSViewController")),
         ("NSNibName", nib.string(&nib_name)),
-        ("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))),
-        ("showSeguePresentationStyle", Value::Int(0)),
-        ("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, attr(vc, "id")?))),
     ];
+    if let Some(identifier) = vc.attribute("storyboardIdentifier") {
+        values.push(("NSStoryboardIdentifier", nib.string(identifier)));
+    }
+    values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))));
+    values.push(("showSeguePresentationStyle", Value::Int(0)));
+    values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, attr(vc, "id")?))));
+    if vc.attribute("customClass").is_none() {
+        values.push(("connectionsRequireClassSwapperForStoryboardCompilation", Value::Bool(true)));
+    }
     Ok((Value::New(Object::new("NSClassSwapper", values).named(name.to_string())), nib_name))
+}
+
+/// A view controller with a storyboard identifier: its own nib, named by
+/// it, holding the controller (its scene controller) and a storyboard
+/// placeholder (a probe).
+fn identified_controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+    let mut nib = new_nib(doc, localizable, true);
+    let root_name = object_name("root");
+    let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
+    let mut c = new_collected(Vec::new());
+    let vc_name = object_name(attr(vc, "id")?);
+    c.parents.push((vc_name.clone(), root_name.clone()));
+    let (value, _) = content_controller(&mut nib, xml, vc, module, &vc_name)?;
+    c.definitions.insert(vc_name.clone(), value);
+    let placeholder = object_name("application placeholder");
+    c.parents.push((placeholder.clone(), root_name.clone()));
+    let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
+    c.definitions.insert(placeholder, value);
+    let storyboard = format!("{vc_name} storyboard");
+    storyboard_placeholder(&mut nib, &mut c, &storyboard, &root_name);
+    let label = nib.string("sceneController");
+    let mut connections = vec![outlet(format!("{vc_name} scene controller"), &root_name, &vc_name, label)];
+    let label = nib.string("storyboard");
+    connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &storyboard, label));
+    assemble(&mut nib, root_object, &root_name, c, connections)
 }
 
 /// A view controller's view nib: an NSObject root (the controller) whose
 /// `view` outlet is the view.
 fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(String, Vec<u8>), String> {
     only_children(vc, &["view", "connections"])?;
+    // A controller's own connections go through an upstream placeholder
+    // in its view's nib (Xcode's SpriteKit template), not established.
     if children(vc, "connections").next().is_some() {
         return fail("a view controller's connections are not supported by this ibtool");
     }
     let mut nib = new_nib(doc, localizable, true);
     let view_node = children(vc, "view").next().ok_or("a view controller without a view")?;
-    let root_name = object_name("root");
+    let root_name = object_name(attr(vc, "id")?);
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
-    let mut c = new_collected(Vec::new());
+    let mut c = new_collected(vec![attr(vc, "id")?.to_string()]);
     let view_name = object_name(attr(view_node, "id")?);
     let value = view(&mut nib, &mut c, view_node, module, &root_name, None)?;
     c.definitions.insert(view_name.clone(), value);
@@ -1496,6 +1544,14 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     values.push(("NSAllowsWritingTools", Value::Bool(true)));
     values.push(("NSTextFieldAllowsWritingToolsAffordance", Value::Bool(false)));
     values.push(("NS.resolvesNaturalAlignmentWithBaseWritingDirection", Value::Bool(false)));
+    // A storyboard's text field that isn't editable has the standard line
+    // break strategy, after its alignment rect insets' version (the
+    // corpus's 94 storyboard text fields; a xib's never has).
+    if nib.storyboard && !has("editable") {
+        let at = values.iter().position(|v| v.0 == "NSTextFieldAlignmentRectInsetsVersion").expect("the insets' version") + 1;
+        values.insert(at, ("NSTextFieldLineBreakStrategyVersion", Value::Int(2)));
+        values.insert(at + 1, ("NSLineBreakStrategy", Value::Int(0xffff)));
+    }
     Ok(Value::New(Object::new("NSTextField", values).named(name)))
 }
 
