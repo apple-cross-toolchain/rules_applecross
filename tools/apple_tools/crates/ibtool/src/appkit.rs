@@ -210,6 +210,29 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     Ok(Value::New(Object::new(if swapped { "NSClassSwapper" } else { "NSView" }, values).named(name)))
 }
 
+/// A control as its class: of another class than its AppKit one, an
+/// `NSClassSwapper` naming both before its keys; of its own, itself (corpus
+/// xibs' box and button).
+fn swapped(nib: &mut Nib, n: Node, module: Option<&str>, class: &'static str, mut values: Vec<(&'static str, Value)>, name: String) -> Result<Value, String> {
+    match n.attribute("customClass") {
+        Some(c) if c != class => {
+            let mut v = vec![("NSClassName", nib.string(&runtime_class_name(n, module, class)?)), ("NSOriginalClassName", nib.string(class))];
+            v.append(&mut values);
+            Ok(Value::New(Object::new("NSClassSwapper", v).named(name)))
+        }
+        _ => Ok(Value::New(Object::new(class, values).named(name))),
+    }
+}
+
+/// A view's superview, its next responder: none at a xib's top level.
+fn superview<'p>(n: Node, parent: &'p str) -> Option<&'p str> {
+    if n.parent_element().is_some_and(|p| p.has_tag_name("objects")) {
+        None
+    } else {
+        Some(parent)
+    }
+}
+
 /// The keys every view archives, in order, from its next responder to its
 /// clipping; its subviews and constraints join the objects' list.
 fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, name: &str, parent: &str, next_responder: Option<&str>) -> Result<Vec<(&'static str, Value)>, String> {
@@ -946,12 +969,159 @@ fn system_image(nib: &mut Nib, name: &str, size: &str) -> Value {
     })
 }
 
-/// An image from the app's catalogs, named in a control: an
-/// `NSCustomResource` of the size the document's resources give. AppKit's
-/// own images (namespace `system`) aren't established.
+/// AppKit's named images, which Interface Builder names in the `system`
+/// namespace, and the design sizes Xcode gives them from the Mac's images
+/// (macOS 27), whatever the document's resources say: NSImage.h's
+/// `NSImageName` constants as their values ("NS" and the constant's suffix),
+/// but for the retired `NSDotMac` (a probe of each).
+const SYSTEM_IMAGES: [(&str, &str); 138] = [
+    ("NSActionTemplate", "{19, 19}"),
+    ("NSAddTemplate", "{18, 16}"),
+    ("NSAdvanced", "{32, 32}"),
+    ("NSApplicationIcon", "{32, 32}"),
+    ("NSBluetoothTemplate", "{16, 20}"),
+    ("NSBonjour", "{32, 32}"),
+    ("NSBookmarksTemplate", "{22, 17}"),
+    ("NSCaution", "{32, 32}"),
+    ("NSColorPanel", "{32, 32}"),
+    ("NSColumnViewTemplate", "{24, 17}"),
+    ("NSComputer", "{32, 32}"),
+    ("NSEnterFullScreenTemplate", "{20, 18}"),
+    ("NSEveryone", "{32, 32}"),
+    ("NSExitFullScreenTemplate", "{20, 18}"),
+    ("NSFlowViewTemplate", "{18, 10}"),
+    ("NSFolder", "{32, 32}"),
+    ("NSFolderBurnable", "{32, 32}"),
+    ("NSFolderSmart", "{32, 32}"),
+    ("NSFollowLinkFreestandingTemplate", "{19, 19}"),
+    ("NSFontPanel", "{32, 32}"),
+    ("NSGoBackTemplate", "{12, 16}"),
+    ("NSGoForwardTemplate", "{12, 16}"),
+    ("NSGoLeftTemplate", "{12, 16}"),
+    ("NSGoRightTemplate", "{12, 16}"),
+    ("NSHomeTemplate", "{24, 20}"),
+    ("NSIChatTheaterTemplate", "{15, 13}"),
+    ("NSIconViewTemplate", "{19, 17}"),
+    ("NSInfo", "{32, 32}"),
+    ("NSInvalidDataFreestandingTemplate", "{19, 19}"),
+    ("NSLeftFacingTriangleTemplate", "{12, 16}"),
+    ("NSListViewTemplate", "{21, 14}"),
+    ("NSLockLockedTemplate", "{16, 18}"),
+    ("NSLockUnlockedTemplate", "{21, 18}"),
+    ("NSMenuMixedStateTemplate", "{18, 4}"),
+    ("NSMenuOnStateTemplate", "{18, 16}"),
+    ("NSMobileMe", "{32, 32}"),
+    ("NSMultipleDocuments", "{32, 32}"),
+    ("NSNetwork", "{32, 32}"),
+    ("NSPathTemplate", "{25, 14}"),
+    ("NSPreferencesGeneral", "{32, 32}"),
+    ("NSQuickLookTemplate", "{27, 16}"),
+    ("NSRefreshFreestandingTemplate", "{19, 19}"),
+    ("NSRefreshTemplate", "{17, 20}"),
+    ("NSRemoveTemplate", "{18, 4}"),
+    ("NSRevealFreestandingTemplate", "{19, 19}"),
+    ("NSRightFacingTriangleTemplate", "{12, 16}"),
+    ("NSShareTemplate", "{19, 22}"),
+    ("NSSlideshowTemplate", "{24, 17}"),
+    ("NSSmartBadgeTemplate", "{14, 14}"),
+    ("NSStatusAvailable", "{16, 16}"),
+    ("NSStatusNone", "{16, 16}"),
+    ("NSStatusPartiallyAvailable", "{16, 16}"),
+    ("NSStatusUnavailable", "{16, 16}"),
+    ("NSStopProgressFreestandingTemplate", "{19, 19}"),
+    ("NSStopProgressTemplate", "{17, 15}"),
+    ("NSTouchBarAddDetailTemplate", "{19, 19}"),
+    ("NSTouchBarAddTemplate", "{18, 16}"),
+    ("NSTouchBarAlarmTemplate", "{18, 19}"),
+    ("NSTouchBarAudioInputMuteTemplate", "{17, 20}"),
+    ("NSTouchBarAudioInputTemplate", "{16, 20}"),
+    ("NSTouchBarAudioOutputMuteTemplate", "{17, 20}"),
+    ("NSTouchBarAudioOutputVolumeHighTemplate", "{26, 18}"),
+    ("NSTouchBarAudioOutputVolumeLowTemplate", "{19, 17}"),
+    ("NSTouchBarAudioOutputVolumeMediumTemplate", "{23, 17}"),
+    ("NSTouchBarAudioOutputVolumeOffTemplate", "{16, 17}"),
+    ("NSTouchBarBookmarksTemplate", "{22, 17}"),
+    ("NSTouchBarColorPickerFill", "{18, 30}"),
+    ("NSTouchBarColorPickerFont", "{13, 30}"),
+    ("NSTouchBarColorPickerStroke", "{18, 30}"),
+    ("NSTouchBarCommunicationAudioTemplate", "{20, 18}"),
+    ("NSTouchBarCommunicationVideoTemplate", "{24, 16}"),
+    ("NSTouchBarComposeTemplate", "{21, 20}"),
+    ("NSTouchBarDeleteTemplate", "{18, 21}"),
+    ("NSTouchBarDownloadTemplate", "{19, 19}"),
+    ("NSTouchBarEnterFullScreenTemplate", "{20, 18}"),
+    ("NSTouchBarExitFullScreenTemplate", "{20, 18}"),
+    ("NSTouchBarFastForwardTemplate", "{24, 15}"),
+    ("NSTouchBarFolderCopyToTemplate", "{25, 18}"),
+    ("NSTouchBarFolderMoveToTemplate", "{23, 17}"),
+    ("NSTouchBarFolderTemplate", "{23, 17}"),
+    ("NSTouchBarGetInfoTemplate", "{19, 19}"),
+    ("NSTouchBarGoBackTemplate", "{12, 16}"),
+    ("NSTouchBarGoDownTemplate", "{18, 10}"),
+    ("NSTouchBarGoForwardTemplate", "{12, 16}"),
+    ("NSTouchBarGoUpTemplate", "{18, 10}"),
+    ("NSTouchBarHistoryTemplate", "{19, 19}"),
+    ("NSTouchBarIconViewTemplate", "{19, 17}"),
+    ("NSTouchBarListViewTemplate", "{21, 14}"),
+    ("NSTouchBarMailTemplate", "{24, 16}"),
+    ("NSTouchBarNewFolderTemplate", "{25, 19}"),
+    ("NSTouchBarNewMessageTemplate", "{21, 18}"),
+    ("NSTouchBarOpenInBrowserTemplate", "{19, 19}"),
+    ("NSTouchBarPauseTemplate", "{14, 16}"),
+    ("NSTouchBarPlayPauseTemplate", "{28, 15}"),
+    ("NSTouchBarPlayTemplate", "{14, 16}"),
+    ("NSTouchBarPlayheadTemplate", "{7, 30}"),
+    ("NSTouchBarQuickLookTemplate", "{27, 16}"),
+    ("NSTouchBarRecordStartTemplate", "{19, 19}"),
+    ("NSTouchBarRecordStopTemplate", "{18, 16}"),
+    ("NSTouchBarRefreshTemplate", "{17, 20}"),
+    ("NSTouchBarRemoveTemplate", "{18, 4}"),
+    ("NSTouchBarRewindTemplate", "{24, 15}"),
+    ("NSTouchBarRotateLeftTemplate", "{19, 20}"),
+    ("NSTouchBarRotateRightTemplate", "{19, 20}"),
+    ("NSTouchBarSearchTemplate", "{20, 19}"),
+    ("NSTouchBarShareTemplate", "{19, 22}"),
+    ("NSTouchBarSidebarTemplate", "{24, 17}"),
+    ("NSTouchBarSkipAhead15SecondsTemplate", "{19, 21}"),
+    ("NSTouchBarSkipAhead30SecondsTemplate", "{19, 21}"),
+    ("NSTouchBarSkipAheadTemplate", "{30, 15}"),
+    ("NSTouchBarSkipBack15SecondsTemplate", "{19, 21}"),
+    ("NSTouchBarSkipBack30SecondsTemplate", "{19, 21}"),
+    ("NSTouchBarSkipBackTemplate", "{30, 15}"),
+    ("NSTouchBarSkipToEndTemplate", "{19, 15}"),
+    ("NSTouchBarSkipToStartTemplate", "{19, 15}"),
+    ("NSTouchBarSlideshowTemplate", "{24, 17}"),
+    ("NSTouchBarTagIconTemplate", "{23, 21}"),
+    ("NSTouchBarTextBoldTemplate", "{14, 14}"),
+    ("NSTouchBarTextBoxTemplate", "{25, 17}"),
+    ("NSTouchBarTextCenterAlignTemplate", "{21, 16}"),
+    ("NSTouchBarTextItalicTemplate", "{13, 14}"),
+    ("NSTouchBarTextJustifiedAlignTemplate", "{21, 16}"),
+    ("NSTouchBarTextLeftAlignTemplate", "{21, 16}"),
+    ("NSTouchBarTextListTemplate", "{21, 14}"),
+    ("NSTouchBarTextRightAlignTemplate", "{21, 16}"),
+    ("NSTouchBarTextStrikethroughTemplate", "{18, 15}"),
+    ("NSTouchBarTextUnderlineTemplate", "{14, 17}"),
+    ("NSTouchBarUserAddTemplate", "{22, 20}"),
+    ("NSTouchBarUserGroupTemplate", "{27, 18}"),
+    ("NSTouchBarUserTemplate", "{18, 17}"),
+    ("NSTouchBarVolumeDownTemplate", "{19, 17}"),
+    ("NSTouchBarVolumeUpTemplate", "{26, 18}"),
+    ("NSTrashEmpty", "{32, 32}"),
+    ("NSTrashFull", "{32, 32}"),
+    ("NSUser", "{32, 32}"),
+    ("NSUserAccounts", "{32, 32}"),
+    ("NSUserGroup", "{32, 32}"),
+    ("NSUserGuest", "{32, 32}"),
+];
+
+/// An image named in a control: an `NSCustomResource` of the size the
+/// document's resources give, in the `system` namespace for AppKit's named
+/// images. Other names starting with NS aren't established.
 fn catalog_image(nib: &mut Nib, n: Node, image: &str) -> Result<Value, String> {
-    if image.starts_with("NS") {
-        return fail(format!("AppKit's image {image} in a control is not supported by this ibtool"));
+    let system = SYSTEM_IMAGES.iter().find(|i| i.0 == image).map(|i| i.1);
+    if image.starts_with("NS") && system.is_none() {
+        return fail(format!("the image {image} in a control is not supported by this ibtool"));
     }
     let resource = n
         .document()
@@ -959,7 +1129,26 @@ fn catalog_image(nib: &mut Nib, n: Node, image: &str) -> Result<Value, String> {
         .find(|d| d.has_tag_name("image") && d.parent_element().is_some_and(|p| p.has_tag_name("resources")) && d.attribute("name") == Some(image))
         .ok_or_else(|| format!("the image {image} without its size in the document's resources"))?;
     let size = format!("{{{}, {}}}", g(number(attr(resource, "width")?)?), g(number(attr(resource, "height")?)?));
-    Ok(system_image(nib, image, &size))
+    let Some(system_size) = system else {
+        return Ok(system_image(nib, image, &size));
+    };
+    let class = nib.string("NSImage");
+    let resource = nib.string(image);
+    let namespace = nib.string("system");
+    let size = nib.string(system_size);
+    let size = Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", size)]));
+    Ok(nib.shared(format!("resource:system:{image}"), || {
+        Object::new(
+            "NSCustomResource",
+            vec![
+                ("NSClassName", class),
+                ("NSResourceName", resource),
+                ("IBNamespaceID", namespace),
+                ("IBDesignSize", size),
+                ("IBDesignImageConfiguration", Value::Nil),
+            ],
+        )
+    }))
 }
 
 /// A key equivalent's modifiers, as NSEvent's flags: shift 1 << 17,
@@ -1268,7 +1457,7 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
                 only_children(o, &[])?;
             }
             ("customObject", Some("-3")) => application = Some(o),
-            ("customView" | "window" | "customObject" | "menu", _) => tops.push(o),
+            ("customView" | "window" | "customObject" | "menu" | "view" | "box" | "textField" | "button" | "popUpButton" | "imageView" | "scrollView" | "collectionViewItem", _) => tops.push(o),
             (tag, _) => return fail(format!("a xib's top-level <{tag}> is not supported by this ibtool")),
         }
     }
@@ -1294,6 +1483,14 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
             }
             "menu" => menu(&mut nib, &mut c, *t, &owner_name)?,
             "customObject" => custom_object(&mut nib, &mut c, *t, module, &owner_name, direct)?,
+            "collectionViewItem" => collection_item(&mut nib, &mut c, *t, module, &owner_name)?,
+            "box" | "textField" | "button" | "popUpButton" | "imageView" | "scrollView" => match t.tag_name().name() {
+                "box" => box_view(&mut nib, &mut c, *t, module, &owner_name)?,
+                "textField" => text_field(&mut nib, &mut c, *t, module, &owner_name)?,
+                "button" | "popUpButton" => button(&mut nib, &mut c, *t, module, &owner_name)?,
+                "imageView" => image_view(&mut nib, &mut c, *t, module, &owner_name)?,
+                _ => scroll_view(&mut nib, &mut c, *t, module, &owner_name)?,
+            },
             _ => {
                 c.connection_sources.push(attr(*t, "id")?.to_string());
                 view(&mut nib, &mut c, *t, module, &owner_name, None)?
@@ -1883,8 +2080,61 @@ fn profile(gray: bool) -> Result<Vec<u8>, String> {
 /// profile embedded (the corpus's 15 System colours, each always the
 /// same).
 fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    // Calibrated and device white and RGB: their components as `%.10g`
+    // text, alpha only when not 1 (eight probes).
+    let space = match n.attribute("colorSpace") {
+        Some("calibratedWhite") => Some((3, true)),
+        Some("deviceWhite") => Some((4, true)),
+        Some("calibratedRGB") => Some((1, false)),
+        Some("deviceRGB") => Some((2, false)),
+        _ => None,
+    };
+    if let Some((space, white)) = space {
+        let keys: &[&str] = if white { &["white"] } else { &["red", "green", "blue"] };
+        let mut allowed: Vec<(&str, Option<&str>)> = vec![("key", None), ("alpha", None), ("colorSpace", None)];
+        allowed.extend(keys.iter().map(|k| (*k, None)));
+        only_attributes(n, &allowed)?;
+        let mut text: Vec<String> = keys.iter().map(|k| Ok(general(number(attr(n, k)?)?, 10))).collect::<Result<_, String>>()?;
+        let alpha = number(attr(n, "alpha")?)?;
+        if alpha != 1.0 {
+            text.push(general(alpha, 10));
+        }
+        let mut bytes = text.join(" ").into_bytes();
+        bytes.push(0);
+        let key = if white { "NSWhite" } else { "NSRGB" };
+        return Ok(nib.shared(format!("color:{space}:{}", String::from_utf8_lossy(&bytes)), || {
+            Object::new("NSColor", vec![("NSColorSpace", Value::Int(space)), (key, Value::Data(bytes))])
+        }));
+    }
+    // Custom colour spaces (sRGB, gamma 2.2 grey, Display P3) also archive
+    // `NSLinearExposure`, which varies with the colour in a way not
+    // established (40 probes).
+    if n.attribute("colorSpace") == Some("custom") {
+        return fail(format!(
+            "a colour in the {} colour space is not supported by this ibtool",
+            n.attribute("customColorSpace").unwrap_or("custom")
+        ));
+    }
     only_attributes(n, &[("key", None), ("name", None), ("catalog", Some("System")), ("colorSpace", Some("catalog"))])?;
     system_color(nib, attr(n, "name")?)
+}
+
+/// `x` as C's `%.{digits}g` prints it: that many significant digits,
+/// trailing zeros dropped, in exponent form below 1e-4 or from 1e{digits}.
+fn general(x: f64, digits: i32) -> String {
+    if x == 0.0 {
+        return "0".into();
+    }
+    let sci = format!("{x:.*e}", (digits - 1) as usize);
+    let (mantissa, exponent) = sci.split_once('e').expect("an exponent");
+    let exponent: i32 = exponent.parse().expect("an exponent");
+    let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
+    if exponent < -4 || exponent >= digits {
+        let sign = if exponent < 0 { '-' } else { '+' };
+        format!("{}e{sign}{:02}", trim(mantissa.to_string()), exponent.abs())
+    } else {
+        trim(format!("{x:.*}", (digits - 1 - exponent) as usize))
+    }
 }
 
 /// A System catalog colour by name.
@@ -2045,6 +2295,9 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         n,
         &[
             ("id", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
             ("horizontalHuggingPriority", None),
             ("verticalHuggingPriority", None),
             ("horizontalCompressionResistancePriority", None),
@@ -2055,7 +2308,8 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("preferredMaxLayoutWidth", None),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints", "point"])?;
+    canvas_location_only(n)?;
     let id = attr(n, "id")?;
     content_sized(nib, n)?;
     let name = object_name(id);
@@ -2064,7 +2318,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     // corpus xib).
     let cell = child(n, "textFieldCell", "cell").ok_or("a text field without a cell")?;
     c.parents.push((object_name(attr(cell, "id")?), name.clone()));
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     only_attributes(
         cell,
         &[
@@ -2213,7 +2467,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         values.insert(at, ("NSTextFieldLineBreakStrategyVersion", Value::Int(2)));
         values.insert(at + 1, ("NSLineBreakStrategy", Value::Int(0xffff)));
     }
-    Ok(Value::New(Object::new("NSTextField", values).named(name)))
+    swapped(nib, n, module, "NSTextField", values, name)
 }
 
 /// A button and its cell (85 probes): the cell's flags as a text field's,
@@ -2228,6 +2482,10 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         n,
         &[
             ("id", None),
+            ("hidden", Some("YES")),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
             ("horizontalHuggingPriority", None),
             ("verticalHuggingPriority", None),
             ("horizontalCompressionResistancePriority", None),
@@ -2236,7 +2494,8 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections"])?;
+    only_children(n, &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point"])?;
+    canvas_location_only(n)?;
     content_sized(nib, n)?;
     // A pop-up button is a button whose cell holds a menu (about 10
     // probes).
@@ -2494,7 +2753,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     // and 750, and archives any other, even 250 each (probes); square and
     // borderless kinds as a view does.
     let square = matches!(bezel_name, "regularSquare" | "shadowlessSquare" | "smallSquare" | "texturedSquare");
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     if has("borderStyle") && !square {
         let hugging = format!(
             "{{{}, {}}}",
@@ -2524,7 +2783,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     values.push(("NSControlWritingDirection", Value::Int(-1)));
     values.push(("NSControlSendActionMask", Value::Int(4)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
-    Ok(Value::New(Object::new(if popup { "NSPopUpButton" } else { "NSButton" }, values).named(name)))
+    swapped(nib, n, module, if popup { "NSPopUpButton" } else { "NSButton" }, values, name)
 }
 
 /// A scroll view, as Xcode archives one it doesn't tile again: no border,
@@ -2638,7 +2897,7 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         vec![clip_value, h_value, v_value]
     };
 
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     let at = values.iter().position(|v| v.0 == "NSFrame" || v.0 == "NSFrameSize").expect("its frame");
     values.insert(at, ("NSSubviews", nib.array("NSMutableArray", scrollers)));
     let at = values.iter().position(|v| v.0 == "NSSuperview").expect("its superview") + 1;
@@ -2713,7 +2972,7 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     }
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     nib.remove(&mut values, "NSHuggingPriority");
     // Layer-backed whether or not it says so (a probe).
     if !values.iter().any(|v| v.0 == "NSViewIsLayerTreeHost") {
@@ -2755,6 +3014,9 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
         n,
         &[
             ("id", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
             ("boxType", None),
             ("borderType", None),
             ("borderWidth", None),
@@ -2770,7 +3032,8 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "view", "color", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "view", "color", "constraints", "point"])?;
+    canvas_location_only(n)?;
     let id = attr(n, "id")?;
     let name = object_name(id);
     let separator = match n.attribute("boxType") {
@@ -2821,7 +3084,7 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
             },
         );
     }
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     let offsets = if separator { "{5, 5}" } else { "{0, 0}" };
     values.push(("NSOffsets", nib.string(offsets)));
     // The title's cell: the small system font, the text background and
@@ -2882,7 +3145,7 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     if content.is_some() {
         values.push(("IBNSBoxIsUsingDocumentContentView", Value::Bool(true)));
     }
-    Ok(Value::New(Object::new("NSBox", values).named(name)))
+    swapped(nib, n, module, "NSBox", values, name)
 }
 
 /// An image view and its cell (about 15 probes): an editable control
@@ -2895,6 +3158,9 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         n,
         &[
             ("id", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
             ("hidden", Some("YES")),
             ("horizontalHuggingPriority", None),
             ("verticalHuggingPriority", None),
@@ -2905,7 +3171,8 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("userLabel", None),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints", "point"])?;
+    canvas_location_only(n)?;
     // Its image sizes it.
     content_sized(nib, n)?;
     let name = object_name(attr(n, "id")?);
@@ -2928,7 +3195,7 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     let cell_name = object_name(attr(cell, "id")?);
     // Its cell comes before its own constraints in the objects' list.
     c.parents.push((cell_name.clone(), name.clone()));
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     let types = [
         "Apple PDF pasteboard type",
         "Apple PICT pasteboard type",
@@ -3000,7 +3267,7 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     values.push(("NSEditable", Value::Bool(true)));
     values.push(("NSImageViewPlaceholderPrecedence", Value::Int(0)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
-    Ok(Value::New(Object::new("NSImageView", values).named(name)))
+    swapped(nib, n, module, "NSImageView", values, name)
 }
 
 /// A view controller's view: a view, or a SceneKit view (Xcode's SceneKit
@@ -3038,7 +3305,7 @@ fn web_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     }
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     let f = frame(n, "frame")?;
     let size = nib.string(&format!("{{{}, {}}}", g(f.w), g(f.h)));
     let internal = |nib: &mut Nib, class: &'static str, hidden: bool, size: Value| {
@@ -3125,6 +3392,27 @@ fn web_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     values.push(("allowsMagnification", Value::Bool(false)));
     values.push(("magnification", Value::Double(1.0)));
     Ok(Value::New(Object::new("WKWebView", values).named(name)))
+}
+
+/// A collection view item at a xib's top level: its class swapped in for
+/// NSCollectionViewItem, then its presentation style 0 (a corpus xib).
+fn collection_item(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(n, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+    only_children(n, &["connections"])?;
+    if n.attribute("customClass").is_none() {
+        return fail("a collection view item without a class is not supported by this ibtool");
+    }
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(attr(n, "id")?.to_string());
+    }
+    let values = vec![
+        ("NSClassName", nib.string(&runtime_class_name(n, module, "NSCollectionViewItem")?)),
+        ("NSOriginalClassName", nib.string("NSCollectionViewItem")),
+        ("showSeguePresentationStyle", Value::Int(0)),
+    ];
+    Ok(Value::New(Object::new("NSClassSwapper", values).named(name)))
 }
 
 /// A SceneKit view as Xcode's game templates make it: a view, not looping,
