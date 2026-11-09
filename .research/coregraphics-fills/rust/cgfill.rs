@@ -66,7 +66,14 @@ pub fn polygons(path: &[Element]) -> Vec<Vec<Point>> {
             Element::Line(p) => current.push(p),
             Element::Cubic(c1, c2, p) => {
                 let p0 = *current.last().unwrap_or(&p);
-                flatten([p0, c1, c2, p], 0, &mut current);
+                // control points as f32; the points between, in double, go straight to 1/4096
+                let f = |p: Point| Point { x: (p.x as f32) as f64, y: (p.y as f32) as f64 };
+                let start = current.len();
+                flatten([f(p0), f(c1), f(c2), f(p)], 0, &mut current);
+                if std::env::var("CG_FLATOLD").is_err() {
+                    let r = |v: f64| (v * UNIT as f64 + 0.5).floor() / UNIT as f64;
+                    for q in &mut current[start..] { *q = Point { x: r(q.x), y: r(q.y) }; }
+                }
                 current.push(p);
             }
             Element::Close => finish(&mut current, &mut out),
@@ -76,19 +83,66 @@ pub fn polygons(path: &[Element]) -> Vec<Vec<Point>> {
     out
 }
 
+fn uniform(q: [Point; 4], mode: &str, out: &mut Vec<Point>) {
+    let d = |a: Point, b: Point, c: Point| (a.x - 2.0 * b.x + c.x).abs().max((a.y - 2.0 * b.y + c.y).abs());
+    let dd = d(q[0], q[1], q[2]).max(d(q[1], q[2], q[3]));
+    let tol = std::env::var("CG_FLATTOL").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.05 / 0.75);
+    let mut k = 0;
+    while dd / 4f64.powi(k) > tol && k < 12 { k += 1; }
+    let n = 1usize << k;
+    if mode == "fd32" {
+        // forward differences in f32
+        let (ax, ay) = ((-q[0].x + 3.0 * q[1].x - 3.0 * q[2].x + q[3].x) as f32, (-q[0].y + 3.0 * q[1].y - 3.0 * q[2].y + q[3].y) as f32);
+        let (bx, by) = ((3.0 * q[0].x - 6.0 * q[1].x + 3.0 * q[2].x) as f32, (3.0 * q[0].y - 6.0 * q[1].y + 3.0 * q[2].y) as f32);
+        let (cx, cy) = ((3.0 * (q[1].x - q[0].x)) as f32, (3.0 * (q[1].y - q[0].y)) as f32);
+        let h = 1.0f32 / n as f32;
+        let (mut x, mut y) = (q[0].x as f32, q[0].y as f32);
+        let (mut d1x, mut d1y) = (ax * h * h * h + bx * h * h + cx * h, ay * h * h * h + by * h * h + cy * h);
+        let (mut d2x, mut d2y) = (6.0 * ax * h * h * h + 2.0 * bx * h * h, 6.0 * ay * h * h * h + 2.0 * by * h * h);
+        let (d3x, d3y) = (6.0 * ax * h * h * h, 6.0 * ay * h * h * h);
+        for _ in 1..n {
+            x += d1x; y += d1y; d1x += d2x; d1y += d2y; d2x += d3x; d2y += d3y;
+            out.push(Point { x: x as f64, y: y as f64 });
+        }
+        return;
+    }
+    for i in 1..n {
+        let t = i as f64 / n as f64; let u = 1.0 - t;
+        out.push(Point {
+            x: u * u * u * q[0].x + 3.0 * u * u * t * q[1].x + 3.0 * u * t * t * q[2].x + t * t * t * q[3].x,
+            y: u * u * u * q[0].y + 3.0 * u * u * t * q[1].y + 3.0 * u * t * t * q[2].y + t * t * t * q[3].y,
+        });
+    }
+}
+
 /// Pushes the points a cubic is halved at, in order, between its ends.
 fn flatten(q: [Point; 4], depth: u32, out: &mut Vec<Point>) {
     let d = |a: Point, b: Point, c: Point| (a.x - 2.0 * b.x + c.x).abs().max((a.y - 2.0 * b.y + c.y).abs());
     if d(q[0], q[1], q[2]).max(d(q[1], q[2], q[3])) <= 0.05 / 0.75 || depth > 12 {
         return;
     }
-    let mid = |a: Point, b: Point| Point { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
+    let fq = std::env::var("CG_FLATQ").unwrap_or_default();
+    let q = if fq.is_empty() { q } else { q.map(|p| quant(p, &fq)) };
+    let mid = |a: Point, b: Point| quant(Point { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 }, &fq);
     let (a, b, c) = (mid(q[0], q[1]), mid(q[1], q[2]), mid(q[2], q[3]));
     let (l, r) = (mid(a, b), mid(b, c));
     let f = mid(l, r);
     flatten([q[0], a, l, f], depth + 1, out);
     out.push(f);
     flatten([f, r, c, q[3]], depth + 1, out);
+}
+
+fn quant(p: Point, mode: &str) -> Point {
+    let f = |v: f64| match mode {
+        "f32" => (v as f32) as f64,
+        "fix" => ((v as f32) as f64 * UNIT as f64 + 0.5).floor() / UNIT as f64,
+        "fixt" => ((v as f32) as f64 * UNIT as f64).floor() / UNIT as f64,
+        "fix16" => ((v as f32) as f64 * 65536.0 + 0.5).floor() / 65536.0,
+        "fix16t" => ((v as f32) as f64 * 65536.0).floor() / 65536.0,
+        "fix256" => ((v as f32) as f64 * 256.0 + 0.5).floor() / 256.0,
+        _ => v,
+    };
+    Point { x: f(p.x), y: f(p.y) }
 }
 
 /// A coordinate in 1/4096 of a pixel, as CoreGraphics takes it.
@@ -426,7 +480,8 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         }
                     }
                     let one_column = xmin.floor() == (xmax - 1e-12).floor();
-                    let band_rule = role > 0.0 && std::env::var("CG_NOBANDRULE").is_err();
+                    let cband = std::env::var("CG_CBAND").unwrap_or_default();
+                    let band_rule = (role > 0.0 && std::env::var("CG_NOBANDRULE").is_err()) || (role < 0.0 && !cband.is_empty());
                     let mut edge_right: Vec<(usize, f64)> = Vec::new();
                     let (mut top_pt, mut bot_y) = ((0.0f64, f64::MIN), f64::MAX);
                     for &(a, b, r) in &e.pieces {
@@ -513,6 +568,12 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         let mut per: Vec<(usize, f64)> = Vec::new();
                         for &(x, r) in &edge_right { if let Some(p) = per.iter_mut().find(|p| p.0 == x) { p.1 += r; } else { per.push((x, r)); } }
                         for (x, r) in per {
+                            if role < 0.0 {
+                                let q = match cband.as_str() { "floor" => (rect * 4096.0 + 1e-7).floor() / 4096.0, "round" => (rect * 4096.0).round() / 4096.0, _ => (rect * 4096.0 - 1e-7).ceil() / 4096.0 };
+                                let v = if x == pt && banded { q + (r - rect) } else { r };
+                                close_part[x] -= v;
+                                continue;
+                            }
                             let v = if x == pt && banded { (rect * 4096.0 - 1e-7).ceil() / 4096.0 + (r - rect) } else { r };
                             piece_part[x] += v; piece_exact[x] += r;
                         }
