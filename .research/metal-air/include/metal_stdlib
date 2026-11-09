@@ -61,10 +61,12 @@ struct __vbuild {
     else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
   }
 };
+template <class T, int N> struct __packed;
+template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
 template <class V> __attribute__((always_inline)) inline V __vec() { return V{}; }
 template <class V, class A> __attribute__((always_inline)) inline V __vec(A a) {
   if constexpr (__elem<A>::n == 1) { V r = (typename __elem<V>::type)a; return r; }
-  else return __builtin_convertvector(a, V);
+  else { V r; for (int k = 0; k < __elem<V>::n; k++) r[k] = (typename __elem<V>::type)a[k]; return r; }
 }
 template <class V, class A, class B, class... R> __attribute__((always_inline)) inline V __vec(A a, B b, R... r) {
   __vbuild<V> v; v.put(a); v.put(b); (v.put(r), ...); return v.v;
@@ -84,6 +86,10 @@ __attribute__((always_inline)) inline void simdgroup_barrier(mem_flags f) { __ai
   __attribute__((always_inline)) inline float n(float x, ushort l) { return __air_##n##_f32(x, l); }
 __MSL_SIMD1(simd_sum) __MSL_SIMD1(simd_prefix_exclusive_sum)
 __MSL_SIMD2(simd_shuffle_down) __MSL_SIMD2(quad_broadcast)
+
+// ---- fragment functions
+extern "C" void __air_discard_fragment() __AIR("air.discard_fragment");
+__attribute__((always_inline)) inline void discard_fragment() { __air_discard_fragment(); }
 
 // ---- function constants (the driver rewrites is_function_constant_defined)
 extern "C" bool __air_is_function_constant_defined(__MSL_CONSTANT void *) __AIR("air.is_function_constant_defined");

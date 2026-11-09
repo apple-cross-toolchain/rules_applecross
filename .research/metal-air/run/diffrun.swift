@@ -6,8 +6,14 @@ import Foundation
 struct Buf: Decodable { let index: Int; let bytes: Int; let fill: String; let hex: String? }
 struct Tex: Decodable { let index: Int; let width: Int; let height: Int; let fill: String }
 struct Const: Decodable { let index: Int; let type: String; let value: Double }
+struct Attr: Decodable { let index: Int; let format: String; let offset: Int; let buffer: Int }
+struct Render: Decodable {
+    let vertex: String; let fragment: String; let count: Int; let width: Int; let height: Int
+    let attributes: [Attr]?; let stride: Int?
+    let vertexBuffers: [Buf]; let fragmentBuffers: [Buf]?; let fragmentTextures: [Tex]?; let fragmentSamplers: [Int]?
+}
 struct Spec: Decodable {
-    let function: String; let grid: [Int]; let group: [Int]
+    let function: String; let grid: [Int]; let group: [Int]; let render: Render?
     let buffers: [Buf]; let threadgroup: [[Int]]?; let textures: [Tex]?; let constants: [Const]?
 }
 
@@ -21,10 +27,66 @@ func fill(_ p: UnsafeMutableRawPointer, _ n: Int, _ how: String) {
     }
 }
 
+func makeBuffer(_ dev: MTLDevice, _ b: Buf) -> MTLBuffer {
+    let mb = dev.makeBuffer(length: b.bytes, options: .storageModeShared)!
+    if let hex = b.hex {
+        var bytes = [UInt8](); var i = hex.startIndex
+        while i < hex.endIndex { let j = hex.index(i, offsetBy: 2); bytes.append(UInt8(hex[i..<j], radix: 16)!); i = j }
+        memcpy(mb.contents(), bytes, bytes.count)
+    } else { fill(mb.contents(), b.bytes, b.fill) }
+    return mb
+}
+func makeTexture(_ dev: MTLDevice, _ t: Tex) -> MTLTexture {
+    let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: t.width, height: t.height, mipmapped: false)
+    d.usage = [.shaderRead, .shaderWrite, .renderTarget]; d.storageMode = .shared
+    let tex = dev.makeTexture(descriptor: d)!
+    var px = [Float](repeating: 0, count: t.width * t.height * 4)
+    px.withUnsafeMutableBytes { fill($0.baseAddress!, $0.count, t.fill) }
+    tex.replace(region: MTLRegionMake2D(0, 0, t.width, t.height), mipmapLevel: 0, withBytes: px, bytesPerRow: t.width * 16)
+    return tex
+}
+func render(_ dev: MTLDevice, _ lib: MTLLibrary, _ r: Render) throws -> [Data] {
+    let pd = MTLRenderPipelineDescriptor()
+    pd.vertexFunction = lib.makeFunction(name: r.vertex)!
+    pd.fragmentFunction = lib.makeFunction(name: r.fragment)!
+    pd.colorAttachments[0].pixelFormat = .rgba32Float
+    if let attrs = r.attributes {
+        let vd = MTLVertexDescriptor()
+        for a in attrs {
+            vd.attributes[a.index].format = a.format == "float2" ? .float2 : a.format == "float4" ? .float4 : .float3
+            vd.attributes[a.index].offset = a.offset; vd.attributes[a.index].bufferIndex = a.buffer
+        }
+        vd.layouts[0].stride = r.stride ?? 16
+        pd.vertexDescriptor = vd
+    }
+    let pso = try dev.makeRenderPipelineState(descriptor: pd)
+    let target = makeTexture(dev, Tex(index: 0, width: r.width, height: r.height, fill: "zero"))
+    let rp = MTLRenderPassDescriptor()
+    rp.colorAttachments[0].texture = target; rp.colorAttachments[0].loadAction = .clear; rp.colorAttachments[0].storeAction = .store
+    rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+    let q = dev.makeCommandQueue()!, cb = q.makeCommandBuffer()!, enc = cb.makeRenderCommandEncoder(descriptor: rp)!
+    enc.setRenderPipelineState(pso)
+    var keep: [AnyObject] = []
+    for b in r.vertexBuffers { let mb = makeBuffer(dev, b); enc.setVertexBuffer(mb, offset: 0, index: b.index); keep.append(mb) }
+    for b in r.fragmentBuffers ?? [] { let mb = makeBuffer(dev, b); enc.setFragmentBuffer(mb, offset: 0, index: b.index); keep.append(mb) }
+    for t in r.fragmentTextures ?? [] { let tex = makeTexture(dev, t); enc.setFragmentTexture(tex, index: t.index); keep.append(tex) }
+    for i in r.fragmentSamplers ?? [] {
+        let sd = MTLSamplerDescriptor(); sd.minFilter = .linear; sd.magFilter = .linear
+        let ss = dev.makeSamplerState(descriptor: sd)!; enc.setFragmentSamplerState(ss, index: i); keep.append(ss)
+    }
+    enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: r.count)
+    enc.endEncoding(); cb.commit(); cb.waitUntilCompleted()
+    if let e = cb.error { throw e }
+    var px = [Float](repeating: 0, count: r.width * r.height * 4)
+    target.getBytes(&px, bytesPerRow: r.width * 16, from: MTLRegionMake2D(0, 0, r.width, r.height), mipmapLevel: 0)
+    return [px.withUnsafeBytes { Data($0) }]
+}
+
 func run(_ dev: MTLDevice, _ libPath: String, _ s: Spec) throws -> [Data] {
     seed = 12345
     let data = try Data(contentsOf: URL(fileURLWithPath: libPath))
     let lib = try dev.makeLibrary(data: data.withUnsafeBytes { DispatchData(bytes: $0) })
+    if let r = s.render { return try render(dev, lib, r) }
     let fc = MTLFunctionConstantValues()
     for c in s.constants ?? [] {
         switch c.type {

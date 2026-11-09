@@ -100,13 +100,31 @@ The plan, sent to the Manager:
       macOS 27 metallibs gives bit-identical output to Xcode's metallib
       for the same source: 19 of 19 runs (`run/diffrun.swift` with
       `run/specs/`).
+  - **M3, vertex and fragment functions:**
+    - `[[stage_in]]` structs are flattened into AIR's parameters.
+    - The output struct is returned as a packed literal struct. spir64's
+      sret is undone on `instnamer`'d IR.
+    - Vertex outputs and fragment inputs get their `generated(...)` keys and
+      interpolation.
+    - Fragment outputs become render targets and depth;
+      `[[color(n)]]` inputs, `discard_fragment`, VATT/VATY.
+    - Version rules: `arg_unused` only from AIR 2.5, and
+      `generated(__air_placeholder__)` on vertex inputs at AIR 2.1. The
+      2.2 and 2.4 boundaries are unprobed.
+  - **Results now:**
+    - **Metadata:** all 20 compiling probes match on iOS 12, 16, 18, 27.2
+      and macOS 11, at both the metadata and the metallib level (98 files),
+      plus the sampler sweep and p21 at the metadata level.
+    - **GPU:** 22 of 22 runs are bit-identical to Xcode's metallib. That
+      includes three draws: stage_in attributes through a vertex
+      descriptor, sampling with a sampler argument, and a constexpr
+      sampler on a half texture.
   - **Still to do:**
-    - vertex and fragment functions (M3);
-    - VATT/VATY;
     - a Rust port;
-    - runtime checks for sampling and argument buffers;
+    - runtime checks for argument buffers, framebuffer fetch and MRT;
     - unprobed intrinsic variants (int simd, threadgroup atomics, more
-      math).
+      math, other texture forms), from the next macOS VM batch;
+    - the public corpus.
 - **M2:** a stdlib subset for compute.
 - **M3:** graphics functions.
 - **M4:** replace the relax_metal stub.

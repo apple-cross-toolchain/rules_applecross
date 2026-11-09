@@ -413,11 +413,16 @@ def arg_descriptor(md, i, p, layouts, air, used):
         slot = int(re.search(r'\((\d+)\)', a0).group(1))
         f = ['i32 %d' % i, s('air.sampler'), '!"air.location_index"', 'i32 %d' % slot, 'i32 1',
              '!"air.arg_type_name"', s('sampler'), '!"air.arg_name"', s(p['name'])]
+    elif kind == 'position':
+        f = ['i32 %d' % i, s('air.position'), s('air.center'), s('air.no_perspective'), '!"air.arg_type_name"', s(msl_name(t)), '!"air.arg_name"', s(p['name'])]
+    elif kind == 'color':
+        n = re.search(r'\((\d+)\)', a0).group(1)
+        f = ['i32 %d' % i, s('air.render_target'), 'i32 %s' % n, '!"air.arg_type_name"', s(msl_name(t)), '!"air.arg_name"', s(p['name'])]
     elif kind in BUILTINS:
         f = ['i32 %d' % i, s('air.' + kind), '!"air.arg_type_name"', s(msl_name(t)), '!"air.arg_name"', s(p['name'])]
     else:
         raise SystemExit(f'unsupported argument {p}')
-    if not used:
+    if not used and air >= (2, 5):
         f.append(s('air.arg_unused'))
     return md.add('!{' + ', '.join(f) + '}')
 
@@ -517,6 +522,72 @@ def retype_argbufs(code, funcs):
                               lambda m: 'const %s %s%s' % (sname, m.group(1), p['name']), code)
     return code
 
+# ---------------------------------------------------------------- vertex and fragment I/O
+INTERP = {'flat': ['air.flat'], 'center_perspective': ['air.center', 'air.perspective'],
+          'center_no_perspective': ['air.center', 'air.no_perspective'],
+          'centroid_perspective': ['air.centroid', 'air.perspective'],
+          'centroid_no_perspective': ['air.centroid', 'air.no_perspective'],
+          'sample_perspective': ['air.sample', 'air.perspective'], 'sample_no_perspective': ['air.sample', 'air.no_perspective']}
+
+def interp_of(attrs):
+    for a in attrs:
+        if a in INTERP:
+            return INTERP[a]
+    return None
+
+def generated_key(fld):
+    t = msl_name(fld['type'])
+    return 'generated(%d%s%s)' % (len(fld['name']), fld['name'], itanium(t))
+
+def output_descriptors(md, f, air):
+    rf = ret_fields(f)
+    out = []
+    if rf is None:
+        t = msl_name(ret_type(f))
+        if f['stage'] == 'fragment':
+            out.append(md.add('!{!"air.render_target", i32 0, i32 0, !"air.arg_type_name", %s}' % s(t)))
+        return md.add('!{' + ', '.join(out) + '}')
+    for fld in rf:
+        t, a = msl_name(fld['type']), fld['attrs']
+        tail = '!"air.arg_type_name", %s, !"air.arg_name", %s' % (s(t), s(fld['name']))
+        cm = [re.match(r'color\((\d+)\)', x) for x in a]
+        cm = [x for x in cm if x]
+        dm = [re.match(r'depth\((\w+)\)', x) for x in a]
+        dm = [x for x in dm if x]
+        if 'position' in a:
+            out.append(md.add('!{!"air.position", %s}' % tail))
+        elif 'point_size' in a:
+            out.append(md.add('!{!"air.point_size", %s}' % tail))
+        elif cm:
+            idx = [re.match(r'index\((\d+)\)', x) for x in a]
+            idx = [x for x in idx if x]
+            out.append(md.add('!{!"air.render_target", i32 %s, i32 %s, %s}' % (cm[0].group(1), idx[0].group(1) if idx else '0', tail)))
+        elif dm:
+            out.append(md.add('!{!"air.depth", !"air.depth_qualifier", %s, %s}' % (s('air.' + dm[0].group(1)), tail)))
+        else:
+            q = interp_of(a) if air <= (2, 1) else None
+            out.append(md.add('!{!"air.vertex_output", %s, %s%s}' % (s(generated_key(fld)), ', '.join(s(x) for x in (q or [])) + (', ' if q else ''), tail)))
+    return md.add('!{' + ', '.join(out) + '}')
+
+AIR_NOW = [(2, 9)]
+def stage_in_descriptor(md, i, fld, stage, used):
+    t, a = msl_name(fld['type']), fld['attrs']
+    tail = ['!"air.arg_type_name"', s(t), '!"air.arg_name"', s(fld['name'])]
+    if stage == 'vertex':
+        am = [re.match(r'attribute\((\d+)\)', x) for x in a]
+        am = [x for x in am if x]
+        f = ['i32 %d' % i, s('air.vertex_input'), '!"air.location_index"', 'i32 %s' % am[0].group(1), 'i32 1']
+        if AIR_NOW[0] <= (2, 1):  # 2.1 has it, 2.3 doesn't; 2.2 unprobed
+            f.append(s('generated(__air_placeholder__)'))
+        f += tail
+    elif 'position' in a:
+        f = ['i32 %d' % i, s('air.position'), s('air.center'), s('air.no_perspective')] + tail
+    else:
+        f = ['i32 %d' % i, s('air.fragment_input'), s(generated_key(fld))] + [s(x) for x in (interp_of(a) or INTERP['center_perspective'])] + tail
+    if not used and AIR_NOW[0] >= (2, 5):
+        f.append(s('air.arg_unused'))
+    return md.add('!{' + ', '.join(f) + '}')
+
 # ---------------------------------------------------------------- 3. entry points
 HANDLES = {'texture1d': '__MSL_DEVICE _texture_1d_t *', 'texture2d': '__MSL_DEVICE _texture_2d_t *',
            'texture2d_array': '__MSL_DEVICE _texture_2d_array_t *', 'texture3d': '__MSL_DEVICE _texture_3d_t *',
@@ -542,15 +613,46 @@ def explicit_as(t):
 def flat(t):
     return re.sub(r'\s+', ' ', re.sub(r'\b(device|constant|threadgroup|thread)\b', '', t)).strip()
 
+def stage_in_param(f):
+    for k, p in enumerate(f['params']):
+        if 'stage_in' in p['attrs']:
+            return k
+    return None
+
+def ret_type(f):
+    return f['type'].split('(')[0].strip()
+
+def ret_fields(f):
+    """The return struct's fields (vertex and fragment), or None for a plain value."""
+    r = msl_name(ret_type(f))
+    return RECORDS.get(r) if f['stage'] != 'kernel' and r in RECORDS else None
+
+def flat_params(f):
+    """AIR's parameter list: a [[stage_in]] struct's fields replace the struct."""
+    out = []
+    for k, p in enumerate(f['params']):
+        if 'stage_in' in p['attrs']:
+            for fld in RECORDS[msl_name(p['type'])]:
+                out.append(dict(fld, stage_in=True, struct=msl_name(p['type'])))
+        else:
+            out.append(p)
+    return out
+
 def entry_points(funcs):
     """extern "C" functions with AIR's signatures, calling the user's (flat) function."""
     out = ['namespace __air_entry {']
     for f in funcs:
-        ps, args = [], []
+        ps, args, pre = [], [], []
         for p in f['params']:
             h = handle_kind(p)
             t = p['type'].strip()
-            if h:
+            if 'stage_in' in p['attrs']:
+                sname = msl_name(t)
+                fl = RECORDS[sname]
+                for fld in fl:
+                    ps.append('%s __si_%s' % (fld['type'], fld['name']))
+                args.append('%s{%s}' % (sname, ', '.join('__si_' + fld['name'] for fld in fl)))
+            elif h:
                 ps.append('%s%s' % (HANDLES[h], p['name'])); args.append('%s{%s}' % (p['desugared'], p['name']))
             elif t.endswith('*'):
                 ps.append('%s %s' % (explicit_as(t), p['name'])); args.append('(%s)%s' % (flat(t), p['name']))
@@ -558,15 +660,46 @@ def entry_points(funcs):
                 ps.append('%s %s' % (explicit_as(t), p['name'])); args.append('*(%s *)&%s' % (flat(t[:-1]), p['name']))
             else:
                 ps.append('%s %s' % (t, p['name'])); args.append(p['name'])
-        ret = f['type'].split('(')[0].strip()
-        out.append('extern "C" %s %s(%s) { return ::%s(%s); }' % (ret, f['name'], ', '.join(ps), f['name'], ', '.join(args)))
+        ret = ret_type(f)
+        rf = ret_fields(f)
+        call = '::%s(%s)' % (f['name'], ', '.join(args))
+        if rf:
+            out.append('struct __attribute__((packed)) __ret_%s { %s };' % (f['name'], ' '.join('%s f%d;' % (fld['type'], k) for k, fld in enumerate(rf))))
+            body = '%s __o = %s; __ret_%s __r; %s return __r;' % (ret, call, f['name'], ' '.join('__r.f%d = __o.%s;' % (k, fld['name']) for k, fld in enumerate(rf)))
+            out.append('extern "C" __ret_%s %s(%s) { %s }' % (f['name'], f['name'], ', '.join(ps), body))
+        else:
+            out.append('extern "C" %s %s(%s) { return %s; }' % (ret, f['name'], ', '.join(ps), call))
     out.append('}')
     return '\n'.join(out) + '\n'
+
+def direct_struct_returns(ir, funcs):
+    """spir64 returns the packed output struct through sret; AIR returns it directly.
+    Runs on instnamer'd IR, so dropping the sret parameter renumbers nothing."""
+    for f in funcs:
+        if not ret_fields(f):
+            continue
+        m = re.search(r'^define (?:dso_local )?(?:spir_func )?void @%s\((%%"?struct\.[^*]*__ret_%s"?)\* noalias sret\([^)]*\) align (\d+) (%%[\w.]+)(?:, )?(.*)$' % (re.escape(f['name']), re.escape(f['name'])), ir, re.M)
+        if not m:
+            raise SystemExit('no sret entry for ' + f['name'])
+        sty, align, sret, rest = m.groups()
+        lit = re.search(r'^%s = type <?(\{.*\})>?$' % re.escape(sty), ir, re.M).group(1)
+        lit = '<' + lit + '>'
+        start, line_end = m.start(), ir.index('\n', m.start())
+        end = ir.index('\n}\n', start)
+        body = ir[line_end:end]
+        body = re.sub(r'^(\s*)ret void$', lambda r: '%s%%__rv.p = bitcast %s* %s to %s*\n%s%%__rv = load %s, %s* %%__rv.p, align %s\n%sret %s %%__rv'
+                      % (r.group(1), sty, sret, lit, r.group(1), lit, lit, align, r.group(1), lit), body, flags=re.M)
+        alloca = '\n  %s = alloca %s, align %s' % (sret, sty, align)
+        lm = re.match(r'\n([\w.]+:[^\n]*)', body)
+        body = ('\n' + lm.group(1) + alloca + body[lm.end():]) if lm else (alloca + body)
+        ir = ir[:start] + 'define %s @%s(%s' % (lit, f['name'], rest) + body + ir[end:]
+    return ir
 
 # ---------------------------------------------------------------- 5. IR -> AIR
 def to_air(ir, funcs, layouts, target, src_path, fcs=()):
     os_name, ver, sim = parse_target(target)
     air, lang = air_versions(os_name, ver)
+    AIR_NOW[0] = air
     tstr = '%s%d.%d.%d%s' % (os_name, ver[0], ver[1], ver[2], '-simulator' if sim else '')
     ir = re.sub(r'target datalayout = ".*"', 'target datalayout = "%s"' % DATALAYOUT, ir)
     ir = re.sub(r'target triple = ".*"', 'target triple = "air64_v2%d-apple-%s"' % (air[1], tstr), ir)
@@ -584,18 +717,21 @@ def to_air(ir, funcs, layouts, target, src_path, fcs=()):
     stages = {'kernel': [], 'vertex': [], 'fragment': []}
     for f in funcs:
         sig, body = find_define(ir, f['name'])
-        nparams = len(f['params'])
-        used = [re.search(r'%%%d\b' % k, body) is not None for k in range(nparams)]
-        descs = [arg_descriptor(md, k, p, layouts, air, used[k]) for k, p in enumerate(f['params'])]
-        fty = re.search(r'^define ([^@]*?)@%s\(' % re.escape(f['name']), ir, re.M).group(1).split()[-1]
-        argtys = ', '.join(re.sub(r'\s+(noalias|nocapture|noundef|readonly|writeonly|readnone|nonnull|align \d+|dereferenceable\(\d+\)|"air-buffer-no-alias")', '', a).rsplit(' %', 1)[0]
+        params = flat_params(f)
+        pnames = [a.rsplit(' ', 1)[-1] for a in split_args(sig)]
+        used = [re.search(r'%s\b' % re.escape(n), body) is not None for n in pnames]
+        descs = [stage_in_descriptor(md, k, p, f['stage'], used[k]) if p.get('stage_in') else arg_descriptor(md, k, p, layouts, air, used[k])
+                 for k, p in enumerate(params)]
+        f['used'] = used
+        fty = re.sub(r'^(?:(?:dso_local|local_unnamed_addr|noundef|zeroext|signext) )*', '', re.search(r'^define ([^@]*?) ?@%s\(' % re.escape(f['name']), ir, re.M).group(1))
+        argtys = ', '.join(re.sub(r'\s+(?:noalias|nocapture|noundef|readonly|writeonly|readnone|nonnull|zeroext|signext|inreg|immarg|returned|"[^"]*"|align \d+|dereferenceable(?:_or_null)?\(\d+\))', '', a).rsplit(' %', 1)[0]
                            for a in split_args(sig))
         extra = []
         for a in f['attrs']:
             m2 = re.match(r'max_total_threads_per_threadgroup\((\d+)\)', a)
             if m2:
                 extra.append(md.add('!{!"air.max_work_group_size", i32 %s}' % m2.group(1)))
-        node = '!{%s (%s)* @%s, %s, %s%s}' % (fty, argtys, f['name'], md.add('!{}'), md.add('!{' + ', '.join(descs) + '}'),
+        node = '!{%s (%s)* @%s, %s, %s%s}' % (fty, argtys, f['name'], output_descriptors(md, f, air), md.add('!{' + ', '.join(descs) + '}'),
                                               ''.join(', ' + e for e in extra))
         stages[f['stage']].append(md.add(node))
         # buffers get "air-buffer-no-alias"
@@ -761,13 +897,22 @@ def mtl_data_type(t):
 def tagged(tag, data):
     return tag + struct.pack('<H', len(data)) + data
 
-def public_md(ir, fname, fcs_defined_checked):
+def public_md(ir, fname, fcs_defined_checked, f=None):
     _, body = find_define(ir, fname)
+    tags = b''
+    if f is not None and f['stage'] == 'vertex':
+        attrs = [(k, p) for k, p in enumerate(flat_params(f)) if p.get('stage_in')]
+        if attrs:
+            vatt, vaty = struct.pack('<H', len(attrs)), struct.pack('<H', len(attrs))
+            for k, p in attrs:
+                loc = int(re.search(r'attribute\((\d+)\)', ' '.join(p['attrs'])).group(1))
+                vatt += p['name'].encode() + b'\0' + struct.pack('<H', loc | (0x8000 if f['used'][k] else 0))
+                vaty += bytes([mtl_data_type(msl_name(p['type']))])
+            tags += tagged(b'VATT', vatt) + tagged(b'VATY', vaty)
     used = []
     for name in FC_ORDER:
         if re.search(r'@_ZL%d%s\b' % (len(name), name), body):
             used.append(name)
-    tags = b''
     if used:
         idx = {n: int(re.search(r'MTL_FC_INIT_(\d+)_', g).group(1)) for n, g in FC_GLOBALS.items()}
         used.sort(key=lambda n: idx[n])
@@ -818,7 +963,8 @@ def main(argv):
         if r.returncode:
             sys.stderr.write(r.stderr); raise SystemExit(1)
         layouts = record_layouts(r.stdout)
-        ir1, fcs = function_constant_ir(direct_returns(open(llf + '.0').read()))
+        subprocess.run([LLVM + '/opt', '-passes=instnamer', '-S', '-o', llf + '.0n', llf + '.0'], check=True)
+        ir1, fcs = function_constant_ir(direct_returns(direct_struct_returns(open(llf + '.0n').read(), funcs)))
         ir1 = sampler_ir(ir1, air_v)
         ir1 = prepare_flat(ir1, [f['name'] for f in funcs])
         open(llf + '.1', 'w').write(ir1)
@@ -839,7 +985,7 @@ def main(argv):
         subprocess.run([LLVM + '/llvm-as', '-o', bc, out + '.ll'], check=True)
         module = mtlb.wrap(open(bc, 'rb').read())
         fl = [dict(name=f['name'], type={'vertex': 0, 'fragment': 1, 'kernel': 2}[f['stage']], module=module,
-                   air=air, lang=lang, pub=public_md(air_ll, f['name'], FC_CHECKED)) for f in funcs]
+                   air=air, lang=lang, pub=public_md(air_ll, f['name'], FC_CHECKED, f)) for f in funcs]
         open(out, 'wb').write(mtlb.metallib(fl, header(os_name, ver, sim, air)))
 
 if __name__ == '__main__':
