@@ -362,8 +362,11 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("frameAutosaveName", None),
             ("animationBehavior", Some("default")),
             ("visibleAtLaunch", Some("NO")),
-            // Not one-shot changes nothing (a probe).
+            // Not one-shot, or without a toolbar button, changes nothing (a
+            // probe of each).
             ("oneShot", Some("NO")),
+            ("showsToolbarButton", Some("NO")),
+            ("restorable", Some("NO")),
             ("key", Some("window")),
             ("id", None),
             ("customClass", None),
@@ -507,7 +510,8 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     if let Some(name) = n.attribute("frameAutosaveName") {
         values.push(("NSFrameAutosaveName", nib.string(name)));
     }
-    values.push(("NSWindowIsRestorable", Value::Bool(true)));
+    // Restorable unless it says not (a probe).
+    values.push(("NSWindowIsRestorable", Value::Bool(n.attribute("restorable").is_none())));
     // A xib's window has full-screen content sizes; a storyboard's doesn't
     // (Xcode's app template).
     if !nib.storyboard {
@@ -771,7 +775,13 @@ fn connections(nib: &mut Nib, doc: &Document, sources: &[String], first_responde
                         if target != first_responder {
                             values.push(("NSDestination", reference(object_name(target))));
                         }
-                        values.push(("NSLabel", nib.string(attr(o, "selector")?)));
+                        // An old storyboard's toggleSourceList: is AppKit's
+                        // toggleSidebar: (three corpus storyboards).
+                        let selector = match attr(o, "selector")? {
+                            "toggleSourceList:" => "toggleSidebar:",
+                            s => s,
+                        };
+                        values.push(("NSLabel", nib.string(selector)));
                         Object::new("NSNibControlConnector", values)
                     };
                     let name = object_name(attr(o, "id")?);
