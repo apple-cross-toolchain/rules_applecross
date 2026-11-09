@@ -199,11 +199,24 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
     let rows = stepper(by, bx, ty, tx + (bx - sx), &knob("CG_START"), side);
     let cols: std::collections::HashMap<i64, i64> = stepper(bx, by, tx + (bx - sx), ty, &knob("CG_CSTART"), side).into_iter().collect();
     let mr = (tx - sx) * UNIT / (ty - by);
+    let exact_acc = std::env::var("CG_ACC").is_ok();
+    // x at yv stepped from the stepper's exact state (its first step's fraction kept)
+    let xat = |yv: i64| -> i64 {
+        match rows.iter().rposition(|&(k, _)| k * UNIT <= yv) {
+            Some(i) => { let k = rows[i].0; let frac0 = rows[0].0 * UNIT - by; floor_div(bx * UNIT + frac0 * mr + i as i64 * mr * UNIT + (yv - k * UNIT) * mr, UNIT) }
+            None => floor_div(bx * UNIT + (yv - by) * mr, UNIT),
+        }
+    };
     let (ky, kx) = rows.last().map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
-    let end = if exact_end { (tx, ty) } else { (kx + rdiv((ty - ky) * mr, UNIT, &knob("CG_END"), side), ty) };
+    let ysnap = |v: i64, m: &str| -> i64 { let g: i64 = std::env::var("CG_YS_G").ok().and_then(|v| v.parse().ok()).unwrap_or(16); match m { "floor" => floor_div(v, g) * g, "ceil" => -floor_div(-v, g) * g, "floorm" => floor_div(v - 1, g) * g, _ => v } };
+    let tmode = std::env::var("CG_YS_TOP").unwrap_or_default();
+    let ty_e = ysnap(ty, &tmode);
+    let end = if exact_end { (tx, ty) } else if exact_acc { (xat(ty_e), ty_e) } else { (kx + rdiv((ty - ky) * mr, UNIT, &knob("CG_END"), side), ty) };
     *end_out = end.0;
     let mut ends: Vec<Fixed> = Vec::with_capacity(rows.len() + 2);
-    ends.push((bx, by));
+    let bmode = std::env::var("CG_YS_BOT").unwrap_or_default();
+    let by_s = ysnap(by, &bmode);
+    ends.push(if by_s != by { (floor_div(bx * UNIT + (by_s - by) * mr, UNIT), by_s) } else { (bx, by) });
     ends.extend(rows.iter().map(|&(k, x)| (x, k * UNIT)));
     ends.push(end);
     let bandside = std::env::var("CG_BANDSIDE").ok();
@@ -211,7 +224,7 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
     for &yv in breaks {
         if by < yv && yv < ty && !skip_bands {
             let (ky, kx) = rows.iter().rev().find(|&&(k, _)| k * UNIT <= yv).map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
-            let stepped = if std::env::var("CG_BANDFROM").as_deref() == Ok("line") {
+            let stepped = if exact_acc { xat(yv) } else if std::env::var("CG_BANDFROM").as_deref() == Ok("line") {
                 vbx + rdiv((tx - vbx) * (yv - by), ty - by, &knob("CG_BAND"), side)
             } else if std::env::var("CG_BANDFROM").as_deref() == Ok("above") {
                 // from the row crossing above (or the end)
@@ -234,7 +247,8 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
                 let (a, b) = (pts[i - 1], pts[i]);
                 if b.1 == a.1 { a.0 } else { a.0 + rdiv((b.0 - a.0) * (yv - a.1), b.1 - a.1, &knob("CG_BAND"), side) }
             } else { stepped };
-            ends.push((xv, yv));
+            let off: i64 = if side < 0 { std::env::var("CG_BANDOFF").ok().and_then(|v| v.parse().ok()).unwrap_or(0) } else { 0 };
+            ends.push((xv + off, yv));
         }
     }
     ends.sort_by_key(|p| p.1);
@@ -378,14 +392,18 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
     for &i in &order {
         let (bottom, top, dir, side) = specs[i];
         let chained = match chain.as_deref() { Some("open") => side > 0, Some("close") => side < 0, Some("all") => true, _ => false };
-        let start = if chained { ends_at.get(&bottom).copied() } else { None };
+        let mut start = if chained { ends_at.get(&bottom).copied() } else { None };
+        if side > 0 && chainset.contains(&bottom) {
+            if let Some(o) = std::env::var("CG_STARTOFF").ok().and_then(|v| v.parse::<i64>().ok()) { start = Some(bottom.0 + o); }
+        }
         let mut endx = 0;
         let ec = std::env::var("CG_ENDCHAIN").ok();
         let exact_end = match ec.as_deref() { Some("open") => side > 0 && chainset.contains(&top), Some("close") => side < 0 && cchainset.contains(&top), Some("all") => (side > 0 && chainset.contains(&top)) || (side < 0 && cchainset.contains(&top)), _ => false };
+        let endoff = if side > 0 && chainset.contains(&top) { std::env::var("CG_ENDOFF").ok().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) } else { 0 };
         let pcs = pieces(bottom, top, &breaks, side, start, &mut endx, exact_end)
             .into_iter()
-            .map(|(a, b, r)| ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r))
-            .collect();
+            .map(|(a, b, r)| { let b = if b.1 == top.1 { (b.0 + endoff, b.1) } else { b }; let a = if a.1 == top.1 { (a.0 + endoff, a.1) } else { a }; ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r) })
+            .collect::<Vec<_>>();
         if chained { ends_at.insert(top, endx); }
         built[i] = Some(Edge { bottom, top, dir, pieces: pcs });
     }

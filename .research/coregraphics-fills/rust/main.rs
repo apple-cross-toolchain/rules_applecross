@@ -1,5 +1,5 @@
 // cgprobe W H: reads cov commands (m l c h f e n) and prints the model's alpha, top row first, like cov.
-#[path = "/tmp/cgprobe/cgfill_base.rs"]
+#[path = "/tmp/cgprobe/cgfill.rs"]
 #[allow(dead_code)]
 mod cgfill;
 use cgfill::{coverage, polygons, Element, Point, Rule};

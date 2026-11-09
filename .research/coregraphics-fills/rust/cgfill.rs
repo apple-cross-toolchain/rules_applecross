@@ -7,9 +7,10 @@
 //! - Each edge is stepped from its lower end by two DDAs whose slopes are
 //!   truncated to 1/4096: x at each integer y (rows), and y at each integer x
 //!   (columns). The first crossing is the vertex plus the floor of the
-//!   fraction times the slope. The edge ends where the row stepper reaches its
-//!   top y, not at the vertex, and gets a point at every vertex y of the path
-//!   inside its span, stepped from the row crossing below.
+//!   fraction times the slope; the stepper keeps that fraction, so any x on
+//!   the edge is the floor of the line through the lower vertex at the
+//!   truncated slope. The edge ends there at its top y, not at the vertex,
+//!   and gets such a point at every vertex y of the path inside its span.
 //! - A column crossing belongs to the row whose two neighbouring points
 //!   bracket it in x, wherever its own y drifted.
 //! - Each row is swept in bands cut at every vertex y and every crossing of
@@ -161,16 +162,17 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64]) -> Vec<(Fixed, Fixed, i64)>
     let rows = stepper(by, bx, ty, tx);
     let cols: std::collections::HashMap<i64, i64> = stepper(bx, by, tx, ty).into_iter().collect();
     let mr = (tx - bx) * UNIT / (ty - by);
-    let (ky, kx) = rows.last().map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
-    let end = (kx + floor_div((ty - ky) * mr, UNIT), ty);
+    // Any other x on the edge is stepped from the stepper's exact state: the
+    // floor of the line through the lower vertex at the truncated slope.
+    let xat = |yv: i64| floor_div(bx * UNIT + (yv - by) * mr, UNIT);
+    let end = (xat(ty), ty);
     let mut ends: Vec<Fixed> = Vec::with_capacity(rows.len() + 2);
     ends.push((bx, by));
     ends.extend(rows.iter().map(|&(k, x)| (x, k * UNIT)));
     ends.push(end);
     for &yv in breaks {
         if by < yv && yv < ty {
-            let (ky, kx) = rows.iter().rev().find(|&&(k, _)| k * UNIT <= yv).map(|&(k, x)| (k * UNIT, x)).unwrap_or((by, bx));
-            ends.push((kx + floor_div((yv - ky) * mr, UNIT), yv));
+            ends.push((xat(yv), yv));
         }
     }
     ends.sort_by_key(|p| p.1);
@@ -238,7 +240,32 @@ fn clip_y(a: (f64, f64), b: (f64, f64), lo: Option<f64>, hi: Option<f64>) -> Opt
 
 /// The 8-bit coverage of `polys` filled by `rule` on a `w` x `h` canvas, rows
 /// bottom first.
+/// A lone axis-aligned rectangle takes CoreGraphics' rectangle path: per axis,
+/// in 1/8192 of a pixel, the start edge snapped down to its 1/256 step and
+/// coverage (w - 1) >> 5; alpha floor(ax * ay / 255).
+fn rect_fast(polys: &[Vec<Point>], w: usize, h: usize) -> Option<Vec<Vec<u8>>> {
+    if polys.len() != 1 || polys[0].len() != 4 { return None; }
+    let p = &polys[0];
+    let xs: Vec<f64> = p.iter().map(|q| q.x).collect();
+    let ys: Vec<f64> = p.iter().map(|q| q.y).collect();
+    let axis = (0..4).all(|i| { let (a, b) = (p[i], p[(i + 1) % 4]); a.x == b.x || a.y == b.y });
+    let (x0, x1) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
+    let (y0, y1) = (ys.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MIN, f64::max));
+    if !axis || x0 == x1 || y0 == y1 { return None; }
+    let q = |v: f64| ((v as f32) as f64 * 8192.0).floor() as i64;
+    let cov = |lo: f64, hi: f64, n: usize| -> Vec<i64> {
+        let (l, r) = (q(lo.max(0.0)), q(hi.min(n as f64)));
+        let sl = (l + 1).div_euclid(32) * 32;
+        (0..n as i64).map(|i| { let (a, b) = (sl.max(i * 8192), r.min((i + 1) * 8192)); if b <= a { 0 } else { ((b - a - 1) >> 5).clamp(0, 255) } }).collect()
+    };
+    let (cx, cy) = (cov(x0, x1, w), cov(y0, y1, h));
+    Some(cy.iter().map(|&ay| cx.iter().map(|&ax| (ax * ay / 255) as u8).collect()).collect())
+}
+
 pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec<u8>> {
+    if let Some(r) = rect_fast(polys, w, h) {
+        return r;
+    }
     let polys: Vec<Vec<Fixed>> = polys
         .iter()
         .map(|p| clip(p, w as f64, h as f64))

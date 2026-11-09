@@ -39,11 +39,12 @@ of a level of the boundary.
      Row crossings (x at each integer y) step by dx/dy truncated to 1/4096.
      Column crossings (y at each integer x) step by dy/dx truncated to
      1/4096. The first crossing is the vertex plus
-     `floor4096(frac · slope)`. The edge ends where the row stepper reaches
-     its top y, not at the vertex.
+     `floor4096(frac · slope)`. The stepper keeps that fraction, so any
+     other x on the edge (its end, and its band points) is the floor of the
+     line through the lower vertex at the truncated slope. The edge ends
+     there at its top y, not at the vertex.
   3. Each edge also gets a point at every vertex y of the path inside its
-     span. Its x is stepped from the previous row crossing, with the same
-     floor.
+     span, at that same floored x.
   4. Between consecutive points, a column crossing belongs to the row whose
      two row crossings bracket it in x, even when it has drifted outside
      that row in y.
@@ -161,7 +162,13 @@ of a level of the boundary.
   gets a band point a little right of the floored one. These didn't place
   it: stepping from the row crossing above or the nearest one, the true
   line, and quantizing each band's coverage per pixel at 1/4096 to 1/32768.
-  Where the band point sits looks like the key to the residual.
+  - **Solved:** the band point sits at the floor of the exact stepped value.
+    The stepper keeps the fraction its first step dropped (0.6045 for this
+    edge), and CG's data splits exactly at 1 − 0.6045. With that, this
+    sweep goes from 101 misses to 8, the suite from 996 to 986, and corpus
+    fills to 98.3–99.0%. The 8 left are the vertex's own pixel on the
+    opening side. Snapping edge y extents to 1/256 makes things far worse,
+    so vertex y stays at 1/4096.
 
 ## Remaining before exact fills
 
