@@ -336,7 +336,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         for s in subviews {
             items.push(match s.tag_name().name() {
                 "view" | "customView" | "containerView" => view(nib, c, s, module, name, Some(name))?,
-                "textField" => text_field(nib, c, s, module, name)?,
+                "textField" | "searchField" => text_field(nib, c, s, module, name)?,
                 "button" | "popUpButton" => button(nib, c, s, module, name)?,
                 "scrollView" => scroll_view(nib, c, s, module, name)?,
                 "box" => box_view(nib, c, s, module, name)?,
@@ -382,9 +382,9 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         values.push(("NSViewConstraints", constraints));
     }
     // Content hugging and compression resistance, as strings, when other
-    // than the class's own: hugging 250 each, a text field's vertical 750;
-    // resistance 750 each (two templates' labels, a probe's).
-    let text = n.has_tag_name("textField");
+    // than the class's own: hugging 250 each, a text or search field's
+    // vertical 750; resistance 750 each (two templates' labels, a probe's).
+    let text = n.has_tag_name("textField") || n.has_tag_name("searchField");
     // A priority the document leaves out is Interface Builder's default
     // (250 hugging, 750 resistance), whatever the class's own (a probe's
     // text field without them).
@@ -2308,7 +2308,10 @@ fn split_controller(nib: &mut Nib, c: &mut Collected, xml: &str, ctrl: Node, ite
         c.definitions.insert(vc_name.clone(), vc_value);
         // Without a creation selector (probes).
         let label = nib.string("viewController");
-        let connector = Object::new("NSNibOutletConnector", vec![("NSSource", reference(item_name.clone())), ("NSDestination", reference(vc_name.clone())), ("NSLabel", label)]);
+        let connector = Object::new(
+            "NSNibOutletConnector",
+            vec![("NSSource", reference(item_name.clone())), ("NSDestination", reference(vc_name.clone())), ("NSLabel", label)],
+        );
         let outlet_name = format!("{item_name} view controller outlet");
         connections.push((outlet_name.clone(), Value::New(connector.named(outlet_name))));
         let flag = |nib: &mut Nib, b: bool| {
@@ -2361,7 +2364,10 @@ fn split_controller(nib: &mut Nib, c: &mut Collected, xml: &str, ctrl: Node, ite
     let key_path = nib.string("splitViewItems");
     let key_paths = nib.array("NSArray", vec![key_path]);
     let runtime_name = format!("{name} split view items");
-    let connector = Object::new("NSIBUserDefinedRuntimeAttributesConnector", vec![("NSObject", reference(name.to_string())), ("NSValues", values), ("NSKeyPaths", key_paths)]);
+    let connector = Object::new(
+        "NSIBUserDefinedRuntimeAttributesConnector",
+        vec![("NSObject", reference(name.to_string())), ("NSValues", values), ("NSKeyPaths", key_paths)],
+    );
     runtime.push((runtime_name.clone(), Value::New(connector.named(runtime_name))));
     connections.extend(runtime);
 
@@ -2645,7 +2651,13 @@ fn general(x: f64, digits: i32) -> String {
     let sci = format!("{x:.*e}", (digits - 1) as usize);
     let (mantissa, exponent) = sci.split_once('e').expect("an exponent");
     let exponent: i32 = exponent.parse().expect("an exponent");
-    let trim = |s: String| if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
+    let trim = |s: String| {
+        if s.contains('.') {
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            s
+        }
+    };
     if exponent < -4 || exponent >= digits {
         let sign = if exponent < 0 { '-' } else { '+' };
         format!("{}e{sign}{:02}", trim(mantissa.to_string()), exponent.abs())
@@ -2850,62 +2862,88 @@ fn content_sized(nib: &Nib, n: Node) -> Result<(), String> {
 }
 
 /// A text field and its cell (28 probes of the cell's attributes): the
-/// cell's flags and the control's alignment, line breaking and size.
+/// cell's flags and the control's alignment, line breaking and size. A
+/// search field is one too, an `NSSearchField` with an `NSSearchFieldCell`
+/// (ten probes, a corpus xib): its cell adds its search and cancel buttons'
+/// cells, its recents, `NSSearchFieldFlags` and text completion after the
+/// text colour; the field doesn't allow Writing Tools.
 fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
-    only_attributes(
-        n,
-        &[
-            ("id", None),
-            ("customClass", None),
-            ("customModule", None),
-            ("customModuleProvider", None),
-            ("horizontalHuggingPriority", None),
-            ("verticalHuggingPriority", None),
-            ("horizontalCompressionResistancePriority", None),
-            ("verticalCompressionResistancePriority", None),
-            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
-            ("fixedFrame", Some("YES")),
-            ("allowsCharacterPickerTouchBarItem", None),
-            ("preferredMaxLayoutWidth", None),
-        ],
-    )?;
-    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints", "point", "accessibility"])?;
+    let search = n.has_tag_name("searchField");
+    let (class, cell_tag, cell_class) = if search {
+        ("NSSearchField", "searchFieldCell", "NSSearchFieldCell")
+    } else {
+        ("NSTextField", "textFieldCell", "NSTextFieldCell")
+    };
+    let mut allowed = if search { vec![("textCompletion", Some("NO"))] } else { Vec::new() };
+    allowed.extend([
+        ("id", None),
+        ("wantsLayer", Some("YES")),
+        ("customClass", None),
+        ("customModule", None),
+        ("customModuleProvider", None),
+        ("horizontalHuggingPriority", None),
+        ("verticalHuggingPriority", None),
+        ("horizontalCompressionResistancePriority", None),
+        ("verticalCompressionResistancePriority", None),
+        ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+        ("fixedFrame", Some("YES")),
+        ("allowsCharacterPickerTouchBarItem", None),
+        ("preferredMaxLayoutWidth", None),
+    ]);
+    only_attributes(n, &allowed)?;
+    only_children(n, &["rect", "autoresizingMask", cell_tag, "constraints", "point", "accessibility", "connections"])?;
     canvas_location_only(n)?;
     let id = attr(n, "id")?;
     content_sized(nib, n)?;
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(id.to_string());
+    }
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
     // Its cell comes before its own constraints in the objects' list (a
     // corpus xib).
-    let cell = child(n, "textFieldCell", "cell").ok_or("a text field without a cell")?;
+    let cell = child(n, cell_tag, "cell").ok_or("a text field without a cell")?;
     c.parents.push((object_name(attr(cell, "id")?), name.clone()));
     let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
-    only_attributes(
-        cell,
-        &[
-            ("key", None),
-            ("id", None),
-            ("customClass", None),
-            ("customModule", None),
-            ("customModuleProvider", None),
-            ("title", None),
-            ("placeholderString", None),
-            ("lineBreakMode", None),
-            ("alignment", None),
-            ("scrollable", Some("YES")),
-            ("sendsActionOnEndEditing", Some("YES")),
-            ("editable", Some("YES")),
-            ("selectable", Some("YES")),
-            ("drawsBackground", Some("YES")),
-            ("borderStyle", Some("bezel")),
-            ("controlSize", None),
-            ("state", Some("on")),
-            ("focusRingType", Some("none")),
-            ("allowsUndo", Some("NO")),
-            ("truncatesLastVisibleLine", Some("YES")),
-            ("usesSingleLineMode", Some("YES")),
-        ],
-    )?;
+    let mut allowed = vec![
+        ("key", None),
+        ("id", None),
+        ("customClass", None),
+        ("customModule", None),
+        ("customModuleProvider", None),
+        ("title", None),
+        ("placeholderString", None),
+        ("lineBreakMode", None),
+        ("alignment", None),
+        ("scrollable", Some("YES")),
+        ("sendsActionOnEndEditing", Some("YES")),
+        ("editable", Some("YES")),
+        ("selectable", Some("YES")),
+        ("drawsBackground", Some("YES")),
+        ("borderStyle", Some("bezel")),
+        ("controlSize", None),
+        ("state", Some("on")),
+        ("focusRingType", Some("none")),
+        ("allowsUndo", Some("NO")),
+        ("truncatesLastVisibleLine", Some("YES")),
+        ("usesSingleLineMode", Some("YES")),
+        ("bezelStyle", None),
+    ];
+    // A search field cell's own; centring its placeholder changes nothing
+    // (two probes).
+    if search {
+        allowed.extend([
+            ("sendsSearchStringImmediately", Some("YES")),
+            ("sendsWholeSearchString", Some("YES")),
+            ("maximumRecents", None),
+            ("recentsAutosaveName", None),
+            ("centersPlaceholder", None),
+        ]);
+    }
+    only_attributes(cell, &allowed)?;
+    if search && custom_class(cell, cell_class).is_some() {
+        return fail("a search field cell of a custom class is not supported by this ibtool");
+    }
     only_children(cell, &["font", "color", "string"])?;
     let cell_id = attr(cell, "id")?;
     let cell_name = object_name(cell_id);
@@ -2987,22 +3025,91 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         cell_values.push(("NSPlaceholderString", nib.text(cell_id, "placeholderString", p)));
     }
     cell_values.push(("NSControlView", reference(name.clone())));
-    if has("drawsBackground") {
+    // A round bezel instead of a background (square, the default, changes
+    // nothing; three probes).
+    let round = match cell.attribute("bezelStyle") {
+        None | Some("square") => false,
+        Some("round") => true,
+        Some(other) => return fail(format!("text field bezel style {other} is not supported by this ibtool")),
+    };
+    if round {
+        cell_values.push(("NSTextBezelStyle", Value::Int(1)));
+    } else if has("drawsBackground") {
         cell_values.push(("NSDrawsBackground", Value::Bool(true)));
     }
     let bg = child(cell, "color", "backgroundColor").ok_or("a text field cell without a background colour")?;
     cell_values.push(("NSBackgroundColor", color(nib, bg)?));
     let fg = child(cell, "color", "textColor").ok_or("a text field cell without a text colour")?;
     cell_values.push(("NSTextColor", color(nib, fg)?));
+    if search {
+        if n.attribute("textCompletion").is_some() {
+            cell_values.push(("NSAutomaticTextCompletionDisabled", Value::Bool(true)));
+        }
+        let button = |nib: &mut Nib, flags: i64, contents: Option<Value>, ax: Option<Value>, action: &str| {
+            let mut v = vec![("NSCellFlags", Value::Int(flags)), ("NSCellFlags2", Value::Int(0))];
+            if let Some(c) = contents {
+                v.push(("NSContents", c));
+            }
+            if let Some(a) = ax {
+                v.push(("NSAccessibilityOverriddenAttributes", a));
+            }
+            v.push(("NSControlView", reference(name.clone())));
+            v.push(("NSAction", nib.string(action)));
+            v.push(("NSTarget", reference(cell_name.clone())));
+            v.push(("NSButtonFlags", Value::Int(0x0840_4000)));
+            v.push(("NSButtonFlags2", Value::Int(0)));
+            v.push(("NSBezelStyle", Value::Int(0)));
+            v.push(("NSKeyEquivalent", nib.string("")));
+            v.push(("NSPeriodicDelay", Value::Int(400)));
+            v.push(("NSPeriodicInterval", Value::Int(75)));
+            v.push(("NSAuxButtonType", Value::Int(5)));
+            Value::New(Object::new("NSButtonCell", v))
+        };
+        let contents = nib.string("search");
+        let search_button = button(nib, 0, Some(contents), None, "_searchFieldSearch:");
+        // The cancel button's accessibility description, as an encoded
+        // attribute (type 1).
+        let description = nib.string("AXDescription");
+        let cancel = nib.string("cancel");
+        let kind = nib.string("NSAccessibilityEncodedAttributesValueType");
+        let one = nib.int_number(1);
+        let attributes = Value::New(Object::new(
+            "NSMutableDictionary",
+            vec![
+                ("NSInlinedValue", Value::Bool(true)),
+                ("UINibEncoderEmptyKey", description),
+                ("UINibEncoderEmptyKey", cancel),
+                ("UINibEncoderEmptyKey", kind),
+                ("UINibEncoderEmptyKey", one),
+            ],
+        ));
+        let ax = nib.array("NSMutableArray", vec![attributes]);
+        let cancel_button = button(nib, signed(0x8000_0000), None, Some(ax), "_searchFieldCancel:");
+        cell_values.push(("NSSearchButtonCell", search_button));
+        cell_values.push(("NSCancelButtonCell", cancel_button));
+        if let Some(autosave) = cell.attribute("recentsAutosaveName") {
+            cell_values.push(("NSRecentsAutosaveName", nib.string(autosave)));
+        }
+        let recents = cell.attribute("maximumRecents").map(number).transpose()?.unwrap_or(255.0);
+        cell_values.push(("NSMaximumRecents", Value::Int(recents as i64)));
+        if has("sendsWholeSearchString") {
+            cell_values.push(("NSSendsWholeSearchString", Value::Bool(true)));
+        }
+        // 6, and 8 sending the search string immediately (probes).
+        let search_flags: u32 = if has("sendsSearchStringImmediately") { 0xe } else { 6 };
+        cell_values.push(("NSSearchFieldFlags", Value::Data(search_flags.to_le_bytes().to_vec())));
+        cell_values.push(("NSAutomaticTextCompletionStored", Value::Bool(true)));
+    }
     values.push(("NSEnabled", Value::Bool(true)));
     // The Touch Bar's character picker when allowed, last; not allowing it
     // changes nothing (two probes).
     match n.attribute("allowsCharacterPickerTouchBarItem") {
         None | Some("NO") => {}
+        Some("YES") if search => return fail("a search field's character picker is not supported by this ibtool"),
         Some("YES") => cell_values.push(("NSCharacterPickerEnabled", Value::Bool(true))),
         Some(other) => return fail(format!("allowsCharacterPickerTouchBarItem=\"{other}\" is not supported by this ibtool")),
     }
-    let cell_class = if custom_class(cell, "NSTextFieldCell").is_some() { "NSClassSwapper" } else { "NSTextFieldCell" };
+    let cell_class = if custom_class(cell, cell_class).is_some() { "NSClassSwapper" } else { cell_class };
     values.push(("NSCell", Value::New(Object::new(cell_class, cell_values).named(cell_name))));
     // A localizable document's controls allow a logical (right-to-left)
     // layout direction (the corpus's 358 controls, exactly those in
@@ -3022,7 +3129,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         values.push(("NSPreferredMaxLayoutWidth", Value::Double(number(w)?)));
     }
     values.push(("NSTextFieldAlignmentRectInsetsVersion", Value::Int(2)));
-    values.push(("NSAllowsWritingTools", Value::Bool(true)));
+    values.push(("NSAllowsWritingTools", Value::Bool(!search)));
     values.push(("NSTextFieldAllowsWritingToolsAffordance", Value::Bool(false)));
     values.push(("NS.resolvesNaturalAlignmentWithBaseWritingDirection", Value::Bool(false)));
     // A storyboard's text field that isn't editable has the standard line
@@ -3033,7 +3140,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         values.insert(at, ("NSTextFieldLineBreakStrategyVersion", Value::Int(2)));
         values.insert(at + 1, ("NSLineBreakStrategy", Value::Int(0xffff)));
     }
-    swapped(nib, n, module, "NSTextField", values, name)
+    swapped(nib, n, module, class, values, name)
 }
 
 /// A button and its cell (85 probes): the cell's flags as a text field's,

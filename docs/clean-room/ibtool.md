@@ -2848,7 +2848,27 @@ not allowing it changes nothing. A key equivalent Interface Builder writes
 in base64 (`base64-UTF8`, without padding: the escape key) is decoded. A System catalog colour carries the
 colour it resolves to, in Generic Gray Gamma 2.2 or sRGB with the profile
 embedded: the Mac's own profiles, which the SDK archive carries
-(`tools/package-sdks.sh`) rather than this repository.
+(`tools/package-sdks.sh`) rather than this repository. A round bezel
+(`bezelStyle="round"`) is `NSTextBezelStyle` 1 after the control view, in
+place of `NSDrawsBackground`; a square one, the default, changes nothing.
+
+**Search fields** (ten probes, a corpus xib) are text fields: an
+`NSSearchField`, which doesn't allow Writing Tools, with the content
+hugging of a text field and an `NSSearchFieldCell`. After its text colour
+the cell has:
+
+- `NSAutomaticTextCompletionDisabled`, without text completion;
+- its search and cancel buttons' `NSButtonCell`s, targeting the cell with
+  `_searchFieldSearch:` and `_searchFieldCancel:`; the search button's
+  contents are `search`, and the cancel button's accessibility description
+  is `cancel`, an encoded attribute of type 1;
+- `NSRecentsAutosaveName`, `NSMaximumRecents` (255 by default), and
+  `NSSendsWholeSearchString` when it does;
+- `NSSearchFieldFlags`, four bytes: 6, plus 8 when it sends the search
+  string immediately;
+- `NSAutomaticTextCompletionStored`.
+
+Centring the placeholder changes nothing.
 
 **Buttons** (around 100 probes). An `NSButton`'s view keys, then
 `NSEnabled`, the cell, and the control keys (`NSControlTextAlignment` as
