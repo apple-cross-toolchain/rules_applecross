@@ -294,6 +294,13 @@ of a level of the boundary.
   and treated like vertex heights. Edges that share an endpoint are
   skipped. That took two subpaths from 42 to 19 and the suite to 52.
 
+  Curves: the control points go to f32, the cubic is halved in double
+  (while ¾·max|Δ²| > 1/20 px), and the points between are rounded half
+  up to 1/4096 directly, with no f32 step. CoreGraphics' own rendering of
+  600 random cubic blobs equals its rendering of that polygon in all 600
+  (flatcg4.py, variant f/d/fixd). The corpus fills are then exact but for
+  one pixel at 2× (userAvatar, off by one).
+
   Results before these refinements:
 
   | Case | Wrong |
