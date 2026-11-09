@@ -20,18 +20,22 @@ def seg_off(s,d):
         u=S1.unit(s[1],s[2]); n=(-u[1]*d,u[0]*d); return [('l',(s[2][0]+n[0],s[2][1]+n[1]))]
     q=list(s[1:]); u0,u3=seg_dirs(s)
     p0=(q[0][0]-u0[1]*d,q[0][1]+u0[0]*d); p3=(q[3][0]-u3[1]*d,q[3][1]+u3[0]*d)
-    m=bez(q,.5); t=d1(q,.5)
+    t=d1(q,.5)
     if math.hypot(*t)==0: t=(q[3][0]-q[0][0],q[3][1]-q[0][1])
-    tn=norm(t); m=(m[0]-tn[1]*d,m[1]+tn[0]*d)
+    um=norm(t); M=bez(q,.5)
+    ang=lambda a,b: math.atan2(a[0]*b[1]-a[1]*b[0],a[0]*b[0]+a[1]*b[1])
+    t1=math.tan(ang(u0,um)/2); t2=math.tan(ang(um,u3)/2)
+    if abs(t1)<1e-12 or abs(t2)<1e-12:
+        m=((q[1][0]+q[2][0])/2,(q[1][1]+q[2][1])/2); n=(-um[1]*d,um[0]*d); c=(m[0]+n[0],m[1]+n[1])
+        return [('c',c,c,p3)]
+    from offfit import inter
+    X1=inter(q[0],u0,M,um); X2=inter(q[3],u3,M,um)
     h1=(q[1][0]-q[0][0],q[1][1]-q[0][1]); h2=(q[2][0]-q[3][0],q[2][1]-q[3][1])
-    bx=(m[0]*8-4*p0[0]-4*p3[0])/3; by=(m[1]*8-4*p0[1]-4*p3[1])/3
-    det=h1[0]*h2[1]-h1[1]*h2[0]
-    if abs(det)>1e-12:
-        a1=(bx*h2[1]-by*h2[0])/det; a2=(h1[0]*by-h1[1]*bx)/det
-    else:
-        cx=h1[0]+h2[0]; cy=h1[1]+h2[1]
-        a1=a2=(bx*cx+by*cy)/(cx*cx+cy*cy) if cx*cx+cy*cy>0 else 1.0
-    return [('c',(p0[0]+a1*h1[0],p0[1]+a1*h1[1]),(p3[0]+a2*h2[0],p3[1]+a2*h2[1]),p3)]
+    L1=(2*(X1[0]-q[0][0])-h1[0]/2)*u0[0]+(2*(X1[1]-q[0][1])-h1[1]/2)*u0[1]
+    L2=-((2*(X2[0]-q[3][0])-h2[0]/2)*u3[0]+(2*(X2[1]-q[3][1])-h2[1]/2)*u3[1])
+    G=lambda a,b: (4/3)*a+(b*b-a*a)/(6*a*(1+b*b))
+    L1-=G(t1,t2)*d; L2-=G(t2,t1)*d
+    return [('c',(p0[0]+u0[0]*L1,p0[1]+u0[1]*L1),(p3[0]-u3[0]*L2,p3[1]-u3[1]*L2),p3)]
 def seg_start_off(s,d):
     u,_=seg_dirs(s); p=s[1]; return (p[0]-u[1]*d,p[1]+u[0]*d)
 def rev(s):
