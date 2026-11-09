@@ -60,20 +60,23 @@ polylines with every join and cap (`strokecmp.py SEED N CLOSED JOIN CAP`):
   but depends on rotation. The family (0,0),(3,λ),(7,−1),(10,0) splits at
   ½ (x'') and (2λ+1)/(3λ+3) (y''), exactly.
 - A handle whose zero-width refit length is negative is replaced by
-  (P1+P2)/2 offset by d along (roughly) the normal of B'(½); the exact
-  direction is about 1e-4 rad off every candidate I tried. Pieces with a
-  chord under about 0.1 px, and the piece between the two coordinate
-  pre-splits when its chord is under about 0.5 px, get C1 = C2 = that
-  point. These thresholds are fitted to the corpus, not measured.
-- With these rules, 11 of the 22 corpus curves that split match
-  CoreGraphics element for element (elemcmp.py). Open cases: pieces with
-  P2 = P3 that CoreGraphics rejects although every error measure I tried
-  is tiny, and curves whose outline contains runs of lines at offset
-  cusps.
-- Corpus pixels with my own outlines: blocks needing splits 40, 100 and
-  153 wrong at 1×, 2× and 3× (bubble tail 0/0/1, userAvatar 23/59/94,
-  icon-add 16/39/57, icon-setting 1/2/1); all other wide-stroke blocks 2,
-  1 and 0.
+  X = (8M' − P0' − P3')/6, where M' is B(½) offset by d along the normal
+  there: the point that makes a cubic with C1 = C2 = X pass through M'
+  (fbnorm.py, exact to 1e-13). Pieces with a chord under about 0.1 px, and
+  the piece between the two coordinate pre-splits when its chord is under
+  about 0.5 px, get C1 = C2 = X. These two thresholds are fitted to the
+  corpus, not measured.
+- The pre-split applies when the control polygon is S-shaped:
+  cross(P1−P0, P2−P1)·cross(P2−P1, P3−P2) ≤ 0, which includes straight
+  cubics.
+- With these rules, 15 of the 22 corpus curves that split match
+  CoreGraphics element for element to 1e-9 (elemcmp.py). Open cases:
+  curves that turn faster than the offset radius (CoreGraphics inserts
+  join-like runs of lines there), long chains of tiny pieces, and pieces
+  with P2 = P3 that CoreGraphics rejects although every error measure I
+  tried is tiny.
+- Corpus pixels with my own outlines: blocks needing splits 39, 101 and
+  158 wrong at 1×, 2× and 3×; all other wide-stroke blocks 2, 1 and 0.
 
 ## Thin strokes (w ≤ 1)
 

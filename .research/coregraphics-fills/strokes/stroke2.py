@@ -45,9 +45,9 @@ def seg_off(s,d):
     if s[0]=='l' or not SPLIT: return seg_off_one(s,d)
     q=list(s[1:])
     out=[]
-    from offs5 import inflections
-    try: has_infl=any(1e-9<t<1-1e-9 for t in inflections(q))
-    except Exception: has_infl=False
+    cr=lambda a,b:a[0]*b[1]-a[1]*b[0]
+    l0=(q[1][0]-q[0][0],q[1][1]-q[0][1]); l1=(q[2][0]-q[1][0],q[2][1]-q[1][1]); l2=(q[3][0]-q[2][0],q[3][1]-q[2][1])
+    has_infl=cr(l0,l1)*cr(l1,l2)<=0
     pre=_coord_infl(q) if has_infl else []
     def rec(a,b,depth=0):
         if b-a<1e-9: return
@@ -69,7 +69,9 @@ def seg_off_fb(s,d):
     p3=(q[3][0]-u3[1]*d,q[3][1]+u3[0]*d)
     t=d1(q,.5)
     if math.hypot(*t)==0: t=(q[3][0]-q[0][0],q[3][1]-q[0][1])
-    um=norm(t); m=((q[1][0]+q[2][0])/2,(q[1][1]+q[2][1])/2); fb=(m[0]-um[1]*d,m[1]+um[0]*d)
+    um=norm(t); M=bez(q,.5); Mo=(M[0]-um[1]*d,M[1]+um[0]*d)
+    p0=(q[0][0]-u0[1]*d,q[0][1]+u0[0]*d)
+    fb=((8*Mo[0]-p0[0]-p3[0])/6,(8*Mo[1]-p0[1]-p3[1])/6)
     return [('c',fb,fb,p3)]
 def seg_off_one(s,d):
     # elements for offset of s on the left side at distance d, excluding the start point
@@ -95,7 +97,8 @@ def seg_off_one(s,d):
     L1-=G(t1,t2)*d; L2-=G(t2,t1)*d
     c1=(p0[0]+u0[0]*L1,p0[1]+u0[1]*L1); c2=(p3[0]-u3[0]*L2,p3[1]-u3[1]*L2)
     if neg1 or neg2:
-        m=((q[1][0]+q[2][0])/2,(q[1][1]+q[2][1])/2); n=(-um[1]*d,um[0]*d); fb=(m[0]+n[0],m[1]+n[1])
+        Mo=(M[0]-um[1]*d,M[1]+um[0]*d)
+        fb=((8*Mo[0]-p0[0]-p3[0])/6,(8*Mo[1]-p0[1]-p3[1])/6)
         if neg1: c1=fb
         if neg2: c2=fb
     return [('c',c1,c2,p3)]
