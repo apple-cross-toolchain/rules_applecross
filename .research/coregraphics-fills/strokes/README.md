@@ -82,11 +82,25 @@ polylines with every join and cap (`strokecmp.py SEED N CLOSED JOIN CAP`):
 
 `rust/cgstroke.rs` ports this stroker (the probe's `s W J C` command
 strokes and fills; `S W J C` prints the outline). It matches
-copy(strokingWithWidth:) on 600 of 600 random polylines and on the same
-15 of 22 corpus curves as the Python (rsstroke.py). End to end, stroking
+copy(strokingWithWidth:) on 600 of 600 random polylines. Two more fitted
+rules are on top of the Python:
+- A piece with a control point on an endpoint and a chord over 1 px is
+  rejected. CoreGraphics does reject such pieces although every error
+  measure I tried is tiny, but the threshold varies with width and shape,
+  so this rule is fitted.
+- A piece whose zero-width refit has a negative handle is rejected,
+  except the middle piece and pieces under 0.1 px. This raises random
+  single curves from 111 to 119 of 400 matching.
+
+With these, 17 of 22 corpus curves that split match. End to end, stroking
 and filling in Rust against CoreGraphics' own stroke render, the corpus
-wide strokes are wrong in 41, 102 and 158 of 6,529, 15,302 and 23,914
-edge pixels at 1×, 2× and 3× (corprs.py).
+wide strokes are wrong in 25, 70 and 107 of 6,529, 15,302 and 23,914 edge
+pixels at 1×, 2× and 3× (corprs.py). The five curves that still differ:
+two that turn faster than the offset radius (CoreGraphics emits runs of
+lines there), two chains of tiny pieces with one extra split each, and
+one piece containing an inflection near its end that CoreGraphics halves
+with errors near 0.002. A further 2% of convex-curve sides are rejected
+within a band of widths for reasons I haven't found.
 
 ## Thin strokes (w ≤ 1)
 

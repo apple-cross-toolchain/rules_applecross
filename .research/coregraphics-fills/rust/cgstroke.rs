@@ -245,6 +245,20 @@ fn piece_one(q: &[P; 4], d: f64) -> El {
     }
     El::C(c1, c2, p3)
 }
+/// Whether the zero-width refit gives either handle a negative length.
+fn negative_handle(q: &[P; 4]) -> bool {
+    let (u0, u3) = seg_dirs(&Seg::Cubic(*q));
+    let mut t = d1(q, 0.5);
+    if t.0.hypot(t.1) == 0.0 { t = (q[3].0 - q[0].0, q[3].1 - q[0].1); }
+    let um = norm(t);
+    let m = bez(q, 0.5);
+    let (Some(x1), Some(x2)) = (inter(q[0], u0, m, um), inter(q[3], u3, m, um)) else { return false };
+    let h1 = (q[1].0 - q[0].0, q[1].1 - q[0].1);
+    let h2 = (q[2].0 - q[3].0, q[2].1 - q[3].1);
+    let l1 = (2.0 * (x1.0 - q[0].0) - h1.0 / 2.0) * u0.0 + (2.0 * (x1.1 - q[0].1) - h1.1 / 2.0) * u0.1;
+    let l2 = -((2.0 * (x2.0 - q[3].0) - h2.0 / 2.0) * u3.0 + (2.0 * (x2.1 - q[3].1) - h2.1 / 2.0) * u3.1);
+    l1 < 0.0 || l2 < 0.0
+}
 /// The point X with which a cubic C1 = C2 = X passes through the offset
 /// midpoint.
 fn fallback_point(_q: &[P; 4], d: f64, p0: P, p3: P, m: P, um: P) -> P {
@@ -266,8 +280,13 @@ fn fallback(q: &[P; 4], d: f64) -> El {
 /// parameters within 0.1 px of it.
 fn accept(q: &[P; 4], d: f64) -> bool {
     let El::C(c1, c2, c3) = piece_one(q, d) else { return false };
-    let (u0, _) = seg_dirs(&Seg::Cubic(*q));
+    let (u0, u3) = seg_dirs(&Seg::Cubic(*q));
     let c = [(q[0].0 - u0.1 * d, q[0].1 + u0.0 * d), c1, c2, c3];
+    if std::env::var("CG_REVREJ").is_ok() {
+        let a = (c[1].0 - c[0].0) * u0.0 + (c[1].1 - c[0].1) * u0.1;
+        let b = (c[3].0 - c[2].0) * u3.0 + (c[3].1 - c[2].1) * u3.1;
+        if (a < 0.0 || b < 0.0) && dist(q[0], q[3]) >= 0.1 { return false; }
+    }
     [0.1, 0.3, 0.5, 0.7, 0.9].iter().all(|&t| {
         let e = nearest(|x| bez(&c, x), off(q, t, d));
         !(e > 0.1)
@@ -309,7 +328,11 @@ fn seg_off(s: &Seg, d: f64) -> Vec<El> {
             return;
         }
         let sq = sub(q, a, b);
-        if depth >= 8 || accept(&sq, d) {
+        let degenerate = sq[1] == sq[0] || sq[2] == sq[3];
+        let big_degenerate = degenerate && dist(sq[0], sq[3]) > 1.0 && std::env::var("CG_NODEGEN").is_err();
+        let middle0 = pre.len() == 2 && (a - pre[0]).abs() < 1e-12 && (b - pre[1]).abs() < 1e-12;
+        let neg_reject = std::env::var("CG_NONEGREJ").is_err() && !middle0 && dist(sq[0], sq[3]) >= 0.1 && negative_handle(&sq);
+        if depth >= 8 || (!big_degenerate && !neg_reject && accept(&sq, d)) {
             let middle = pre.len() == 2 && (a - pre[0]).abs() < 1e-12 && (b - pre[1]).abs() < 1e-12;
             let chord = dist(sq[0], sq[3]);
             out.push(if (middle && chord < 0.5) || chord < 0.1 { fallback(&sq, d) } else { piece_one(&sq, d) });
