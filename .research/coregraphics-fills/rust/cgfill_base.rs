@@ -596,6 +596,11 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     let qf = |v: f64, m: &str| match m { "ceil" => (v - 1e-7).ceil(), "floor" => (v + 1e-7).floor(), "round" => v.round(), _ => v };
                     for x in 0..w {
                         let o = obuf[x]; let c = if cbuf.is_empty() { 0.0 } else { cbuf[x] };
+                        let bandmode = if std::env::var("CG_OQ_BYBAND").is_ok() { if bi == 0 { std::env::var("CG_OQ_B0").ok() } else { std::env::var("CG_OQ_B1").ok() } } else { None };
+                        if let (Some(bm), true) = (bandmode.as_deref(), o != 0.0 && c == 0.0) {
+                            row[x] += qf(o * 4096.0, bm) / 4096.0;
+                            continue;
+                        }
                         if o != 0.0 && c != 0.0 {
                             match span_mode.as_deref() {
                                 Some("net") => row[x] += qf((o + c) * 4096.0, m) / 4096.0,

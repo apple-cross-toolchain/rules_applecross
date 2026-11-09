@@ -252,9 +252,22 @@ of a level of the boundary.
 
   Corpus fills: 1615/1625, 3245/3285, 4977/5011 at 1×, 2×, 3× (99.4, 98.8,
   99.3%).
-- **What's left:** vertex pixels where edges start or end inside the pixel
-  (mostly one level low), and bands where the opening edge crosses columns
-  (left exact; floor, round and ceil all score worse).
+- **What's left:**
+  - **Sloped edges at a vertex inside the row.** Axis-aligned L-shapes are
+    exact (0 of 93,329 swept pixels, `lshape.py`), and top vertices of
+    wedges are exact. Bottom vertices miss 20 of 2253 and side vertices 72
+    of 3744 (`wsweep.py`). Isolated (`halfv.py`, `startk.py`, 400-step
+    sweeps), a lone sloped piece starting at a vertex is the exact area
+    plus a constant offset of 0 to 1 unit (1/4096 px²) per case (19 of 20
+    fit), with no rounding. The offset doesn't follow the vertex
+    fractions, the piece height, the first crossing's remainder, the
+    slope's remainder, a vertical shift, or stepping from the far end. Row
+    totals almost never change, so it's a sub-unit effect.
+  - **Banded rows where the opening edge crosses columns** are left exact:
+    floor, round and ceil all score worse.
+  - **Thin strokes (≤ 1 px)** match none of: the perpendicular strip
+    (250 of 384 sweep pixels wrong), vertical or horizontal strips, a
+    distance tent, scaling, or a constant offset.
 
 ## Remaining before exact fills
 
