@@ -2975,6 +2975,30 @@ configuration), its keys are:
 - back and forward gestures off, an empty user agent, link previews on,
   magnification off at 1.
 
+**Top-level objects.** A xib may hold controls at its top level
+(boxes, text fields, buttons, pop-up buttons, image views, scroll views),
+without a superview or next responder, and collection view items: an
+`NSClassSwapper` for `NSCollectionViewItem`, then
+`showSeguePresentationStyle` 0. A control of a custom class is an
+`NSClassSwapper` naming its AppKit class before its keys; of its own AppKit
+class, itself.
+
+**Images.** A control's named image is an `NSCustomResource`. AppKit's
+named images, NSImage.h's 138 `NSImageName` constants as their values
+(the retired `NSDotMac` aside), are in the `system` namespace, with the
+design sizes of the Mac's images (macOS 27), whatever the document's
+resources say; this ibtool holds those sizes in a table from one probe of
+all 138. Other images take the document's sizes and no namespace.
+
+**Colours.** Calibrated white and RGB (`NSColorSpace` 3 and 1) and device
+white and RGB (4 and 2) archive their components as `%.10g` text (`NSWhite`
+or `NSRGB`, ending in a NUL), alpha only when not 1. Custom colour spaces
+(sRGB, gamma 2.2 grey, Display P3) archive the components converted to
+calibrated ones, the colour space with its profile, the original
+components, and `NSLinearExposure` (`0` or `1`). That last value is fixed
+for each colour, whatever its order in the document, but no rule for it
+has been found (40 probes), so they are refused.
+
 **Container views** (seven probes). A container view is a plain view.
 Its embed segue makes the parent controller hold an
 `NSStoryboardSegueTemplates` array, after its nib name, of
