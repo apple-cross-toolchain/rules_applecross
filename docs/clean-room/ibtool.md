@@ -2764,7 +2764,9 @@ probes). A custom window class adds its `IBClassReference` last.
 and the autoresizing mask; without a mask, flexible right and bottom
 margins), subviews, `NSFrameSize` at the origin or `NSFrame`, superview, layer
 hosting, best-resolution OpenGL, `NSDoNotTranslateAutoresizingMask` when it
-doesn't translate its mask and constraints refer to it, its constraints,
+doesn't translate its mask and constraints refer to it (a storyboard
+controller's view only when it has constraints of its own, relating no
+other view, whatever the document says: three probes), its constraints,
 content hugging and compression resistance as strings when other than the
 class's own (250 each, a text field's vertical hugging 750; 750 each; a
 priority the document leaves out is Interface Builder's default, 250 or
@@ -2837,7 +2839,19 @@ alignment in bits 26 to 28 (left 0, right 1, center 2, justified 3, natural
 0x20000 and mini 0x40000 sizes, sending on end editing 0x400000, no focus
 ring 0x8000, no undo 0x1000, truncating the last line 0x100, single line
 0x40. System fonts are `.AppleSystemUIFont…` with each metafont's size and
-`NSfFlags`; named fonts flags 16. An appearance font (`usesAppearanceFont`)
+`NSfFlags`; named fonts flags 16. At another size than its own, a metafont
+is what AppKit's font cache gives (about 90 probes):
+
+- the system font's kinds (system, small, mini, cell title) are the system
+  font of that size, shared: 0xe1e at 9 points, 0xc1c at 11 and 0x1313 at
+  12 (the fonts made for the mini, small and cell title metafonts), 0x414
+  otherwise;
+- the bold ones are the bold system font, shared: 0xf1f at 9, 0xd1d at 11,
+  0x818 otherwise;
+- the weights (ultra light to black) keep their flags and are shared;
+- the others (menu, message, label, palette, tool tip, control content,
+  menu bar) keep their flags, but each use is a new `NSFont`, except the
+  message font at 12 points, the shared 0x1313 one. An appearance font (`usesAppearanceFont`)
 is a text field's system font at 13 points with
 `NSFontUsesAppearanceFontSize`, whatever its control size, and a button's
 plain system font of its control size (13, 11, 9). A control's cell comes
@@ -2933,6 +2947,13 @@ selected item's state on, and `_popUpItemAction:` targeting the cell. A
 pop-up cell's menu font is the message font, and its title is a plain
 string even where its items' titles are localizable (Base.lproj). A cell's connections come
 from the cell.
+
+**Progress indicators** (about 25 probes) are views: layer-backed whatever
+the document says, but for a regular-size indeterminate spinner without
+`wantsLayer`; their content hugging always archived. After the view's keys
+come `NSpiFlags` (0x4004, bezeled 1, indeterminate 2, small 0x100, mini
+0x200, large 0x300, spinning 0x1000, hidden when stopped 0x2000), then
+`NSMinValue`, `NSMaxValue` and `NSProgressIndicatorDoubleValue` when not 0.
 
 **Sliders** (about ten probes), linear: vertical when the frame is taller
 than wide; their own content hugging is 250 and 750 (750 and 250
@@ -3163,7 +3184,9 @@ as Interface Builder's colour picker makes them. For gamma 2.2 grey the
 exposure follows no rule found yet (0.1 and 0.25 give 1, 0.123 gives 0),
 so grey and Display P3 colours are refused.
 
-**Container views** (seven probes). A container view is a plain view.
+**Container views** (nine probes). A container view is a plain view.
+Without an embed segue it is any view: of a custom class, a class swapper
+whose original class is `IBNSContainerView`.
 Its embed segue makes the parent controller hold an
 `NSStoryboardSegueTemplates` array, after its nib name, of
 `NSStoryboardEmbedSegueTemplate`s (the segue's identifier if any, the
