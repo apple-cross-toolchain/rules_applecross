@@ -11,9 +11,21 @@
 #define kernel static __MSL_ATTR("msl.stage:kernel") __attribute__((always_inline))
 #define vertex static __MSL_ATTR("msl.stage:vertex") __attribute__((always_inline))
 #define fragment static __MSL_ATTR("msl.stage:fragment") __attribute__((always_inline))
+// Address spaces: the AST pass sees them (for the metadata); codegen compiles
+// flat and the driver infers them back from the entry points (MSL's member
+// functions and operators then work on objects in any address space).
+#define __MSL_DEVICE __attribute__((address_space(1)))
+#define __MSL_CONSTANT __attribute__((address_space(2)))
+#define __MSL_THREADGROUP __attribute__((address_space(3)))
+#ifdef __MSL_AST
 #define device __attribute__((address_space(1)))
 #define constant __attribute__((address_space(2)))
 #define threadgroup __attribute__((address_space(3)))
+#else
+#define device
+#define constant
+#define threadgroup
+#endif
 #define thread
 #define __AIR(name) __asm__(name)
 
@@ -60,24 +72,34 @@ template <class V, class A, class B, class... R> __attribute__((always_inline)) 
 
 enum class mem_flags { mem_none = 0, mem_device = 1, mem_threadgroup = 2, mem_texture = 4, mem_threadgroup_imageblock = 8, mem_object_data = 16 };
 // Barriers: (memory flags, 5, execution scope: 1 threadgroup, 4 simdgroup).
-extern "C" void __air_wg_barrier(int, int, int) __AIR("air.wg.barrier");
-extern "C" void __air_simdgroup_barrier(int, int, int) __AIR("air.simdgroup.barrier");
+extern "C" __attribute__((convergent)) void __air_wg_barrier(int, int, int) __AIR("air.wg.barrier");
+extern "C" __attribute__((convergent)) void __air_simdgroup_barrier(int, int, int) __AIR("air.simdgroup.barrier");
 __attribute__((always_inline)) inline void threadgroup_barrier(mem_flags f) { __air_wg_barrier(int(f), 5, 1); }
 __attribute__((always_inline)) inline void simdgroup_barrier(mem_flags f) { __air_simdgroup_barrier(int(f), 5, 4); }
 
+// ---- simdgroup and quadgroup functions (convergent; lane arguments are ushort)
+#define __MSL_SIMD1(n) extern "C" __attribute__((convergent)) float __air_##n##_f32(float) __AIR("air." #n ".f32"); \
+  __attribute__((always_inline)) inline float n(float x) { return __air_##n##_f32(x); }
+#define __MSL_SIMD2(n) extern "C" __attribute__((convergent)) float __air_##n##_f32(float, ushort) __AIR("air." #n ".f32"); \
+  __attribute__((always_inline)) inline float n(float x, ushort l) { return __air_##n##_f32(x, l); }
+__MSL_SIMD1(simd_sum) __MSL_SIMD1(simd_prefix_exclusive_sum)
+__MSL_SIMD2(simd_shuffle_down) __MSL_SIMD2(quad_broadcast)
+
 // ---- function constants (the driver rewrites is_function_constant_defined)
-extern "C" bool __air_is_function_constant_defined(constant void *) __AIR("air.is_function_constant_defined");
+extern "C" bool __air_is_function_constant_defined(__MSL_CONSTANT void *) __AIR("air.is_function_constant_defined");
 
 // ---- atomics (observed: air.atomic.global.<op>.<u|s>.i32(ptr, value, order, scope 2, 0, volatile))
 enum memory_order { memory_order_relaxed = 0 };
 template <class T> struct _atomic { T __s; };
 typedef _atomic<uint> atomic_uint;
 typedef _atomic<int> atomic_int;
+// The driver turns __msl_atomic_* calls into air.atomic.global.* or .local.*
+// once the pointer's address space is known.
 #define __MSL_ATOMIC(op) \
-  extern "C" uint __air_atomic_global_##op##_u(device uint *, uint, int, int, int, bool) __AIR("air.atomic.global." #op ".u.i32"); \
-  extern "C" int __air_atomic_global_##op##_s(device int *, int, int, int, int, bool) __AIR("air.atomic.global." #op ".s.i32"); \
-  __attribute__((always_inline)) inline uint atomic_fetch_##op##_explicit(device atomic_uint *a, uint v, memory_order o) { return __air_atomic_global_##op##_u(&a->__s, v, int(o), 2, 0, false); } \
-  __attribute__((always_inline)) inline int atomic_fetch_##op##_explicit(device atomic_int *a, int v, memory_order o) { return __air_atomic_global_##op##_s(&a->__s, v, int(o), 2, 0, false); }
+  extern "C" uint __msl_atomic_##op##_u_i32(uint *, uint, int); \
+  extern "C" int __msl_atomic_##op##_s_i32(int *, int, int); \
+  __attribute__((always_inline)) inline uint atomic_fetch_##op##_explicit(device atomic_uint *a, uint v, memory_order o) { return __msl_atomic_##op##_u_i32((uint *)&a->__s, v, int(o)); } \
+  __attribute__((always_inline)) inline int atomic_fetch_##op##_explicit(device atomic_int *a, int v, memory_order o) { return __msl_atomic_##op##_s_i32((int *)&a->__s, v, int(o)); }
 __MSL_ATOMIC(add) __MSL_ATOMIC(sub) __MSL_ATOMIC(min) __MSL_ATOMIC(max) __MSL_ATOMIC(and) __MSL_ATOMIC(or) __MSL_ATOMIC(xor)
 
 // ---- math. Observed names; fast_ variants under -ffast-math (rules_apple's default).
@@ -145,11 +167,6 @@ template <class T, int C, int R> __attribute__((always_inline)) inline __vector<
   for (int c = 1; c < C; c++) r += m.columns[c] * v[c];
   return r;
 }
-template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(constant const matrix<T, C, R> &m, __vector<T, C> v) {
-  __vector<T, R> r = m.columns[0] * v[0];
-  for (int c = 1; c < C; c++) r += m.columns[c] * v[c];
-  return r;
-}
 #define __MSL_MAT(T) typedef matrix<T, 2, 2> T##2x2; typedef matrix<T, 2, 3> T##2x3; typedef matrix<T, 2, 4> T##2x4; \
   typedef matrix<T, 3, 2> T##3x2; typedef matrix<T, 3, 3> T##3x3; typedef matrix<T, 3, 4> T##3x4; \
   typedef matrix<T, 4, 2> T##4x2; typedef matrix<T, 4, 3> T##4x3; typedef matrix<T, 4, 4> T##4x4;
@@ -159,22 +176,106 @@ using metal::float2x2; using metal::float3x3; using metal::float4x4; using metal
 using metal::float4x3; using metal::float2x4; using metal::float3x2; using metal::float4x2;
 using metal::half2x2; using metal::half3x3; using metal::half4x4;
 
+// ---- array<T, N> (argument buffers) and packed vectors
+namespace metal {
+template <class T, int N> struct array {
+  T __e[N];
+  __attribute__((always_inline)) T &operator[](int i) { return __e[i]; }
+  __attribute__((always_inline)) const T &operator[](int i) const { return __e[i]; }
+};
+template <class T, int N> struct __packed {
+  T __e[N];
+  __attribute__((always_inline)) T &operator[](int i) { return __e[i]; }
+  __attribute__((always_inline)) T operator[](int i) const { return __e[i]; }
+  __attribute__((always_inline)) operator __vector<T, N>() const { __vector<T, N> v; for (int i = 0; i < N; i++) v[i] = __e[i]; return v; }
+};
+}  // namespace metal
+#define __MSL_PACKED(T) typedef metal::__packed<T, 2> packed_##T##2; typedef metal::__packed<T, 3> packed_##T##3; typedef metal::__packed<T, 4> packed_##T##4;
+__MSL_PACKED(float) __MSL_PACKED(half) __MSL_PACKED(int) __MSL_PACKED(uint) __MSL_PACKED(short) __MSL_PACKED(ushort) __MSL_PACKED(char) __MSL_PACKED(uchar)
+
 // ---- textures and samplers: opaque handles, as in AIR.
-struct _texture_2d_t; struct _sampler_t;
+struct _texture_1d_t; struct _texture_2d_t; struct _texture_2d_array_t; struct _texture_3d_t; struct _texture_cube_t;
+struct _depth_2d_t; struct _texture_buffer_1d_t; struct _sampler_t;
 namespace metal {
 enum class access { sample = 0, read = 1, write = 2, read_write = 3 };
-struct sampler { constant _sampler_t *__s; };
+struct sampler { __MSL_CONSTANT _sampler_t *__s; };
+// AIR returns (value, status) pairs directly; the driver undoes spir64's sret.
 struct __ret_v4f32 { float4 v; char status; };
-extern "C" uint __air_get_width_texture_2d(device _texture_2d_t *, int) __AIR("air.get_width_texture_2d");
-extern "C" uint __air_get_height_texture_2d(device _texture_2d_t *, int) __AIR("air.get_height_texture_2d");
-extern "C" constant _sampler_t *__air_get_read_sampler() __AIR("air.get_read_sampler");
-extern "C" __ret_v4f32 __air_read_texture_2d_v4f32(device _texture_2d_t *, constant _sampler_t *, uint2, uint2, int, int) __AIR("air.read_texture_2d.v4f32");
-extern "C" void __air_write_texture_2d_v4f32(device _texture_2d_t *, uint2, float4, int, int) __AIR("air.write_texture_2d.v4f32");
-template <class T, access A = access::sample> struct texture2d {
-  device _texture_2d_t *__t;
-  __attribute__((always_inline)) uint get_width(uint lod = 0) const { return __air_get_width_texture_2d(__t, lod); }
-  __attribute__((always_inline)) uint get_height(uint lod = 0) const { return __air_get_height_texture_2d(__t, lod); }
-  __attribute__((always_inline)) float4 read(uint2 c, uint lod = 0) const { return __air_read_texture_2d_v4f32(__t, __air_get_read_sampler(), c, uint2{0u, 0u}, lod, int(A)).v; }
-  __attribute__((always_inline)) void write(float4 v, uint2 c, uint lod = 0) const { __air_write_texture_2d_v4f32(__t, c, v, lod, int(A)); }
+struct __ret_v4f16 { half4 v; char status; };
+struct __ret_f32 { float v; char status; };
+template <class T> struct __texel;
+template <> struct __texel<float> { typedef float4 v4; typedef __ret_v4f32 ret; };
+template <> struct __texel<half> { typedef half4 v4; typedef __ret_v4f16 ret; };
+extern "C" __MSL_CONSTANT _sampler_t *__air_get_read_sampler() __AIR("air.get_read_sampler");
+
+// Observed call shapes, one per texture kind (FORMAT.md, "Textures").
+#define __MSL_TEX_QUERY(K) \
+  extern "C" uint __air_get_width_##K(__MSL_DEVICE _##K##_t *, int) __AIR("air.get_width_" #K); \
+  extern "C" uint __air_get_height_##K(__MSL_DEVICE _##K##_t *, int) __AIR("air.get_height_" #K);
+__MSL_TEX_QUERY(texture_2d)
+#define __MSL_TEX_FNS(SFX, T) \
+  extern "C" __ret_##SFX __air_sample_texture_1d_##SFX(__MSL_DEVICE _texture_1d_t *, __MSL_CONSTANT _sampler_t *, float, bool, int, bool, float, float, int) __AIR("air.sample_texture_1d." #SFX); \
+  extern "C" __ret_##SFX __air_sample_texture_2d_##SFX(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, float2, bool, int2, bool, float, float, int) __AIR("air.sample_texture_2d." #SFX); \
+  extern "C" __ret_##SFX __air_sample_texture_2d_array_##SFX(__MSL_DEVICE _texture_2d_array_t *, __MSL_CONSTANT _sampler_t *, float2, uint, bool, int2, bool, float, float, int) __AIR("air.sample_texture_2d_array." #SFX); \
+  extern "C" __ret_##SFX __air_sample_texture_cube_##SFX(__MSL_DEVICE _texture_cube_t *, __MSL_CONSTANT _sampler_t *, float3, bool, float, float, int) __AIR("air.sample_texture_cube." #SFX); \
+  extern "C" __ret_##SFX __air_read_texture_2d_##SFX(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, uint2, uint2, int, int) __AIR("air.read_texture_2d." #SFX); \
+  extern "C" __ret_##SFX __air_read_texture_3d_##SFX(__MSL_DEVICE _texture_3d_t *, __MSL_CONSTANT _sampler_t *, uint3, uint3, int, int) __AIR("air.read_texture_3d." #SFX); \
+  extern "C" void __air_write_texture_2d_##SFX(__MSL_DEVICE _texture_2d_t *, uint2, T##4, int, int) __AIR("air.write_texture_2d." #SFX); \
+  extern "C" void __air_write_texture_buffer_1d_##SFX(__MSL_DEVICE _texture_buffer_1d_t *, uint, T##4, int) __AIR("air.write_texture_buffer_1d." #SFX); \
+  __attribute__((always_inline)) inline __ret_##SFX __sample1d(__MSL_DEVICE _texture_1d_t *t, sampler s, float c, T) { return __air_sample_texture_1d_##SFX(t, s.__s, c, false, 0, false, 0.0f, 0.0f, 0); } \
+  __attribute__((always_inline)) inline __ret_##SFX __sample2d(__MSL_DEVICE _texture_2d_t *t, sampler s, float2 c, T) { return __air_sample_texture_2d_##SFX(t, s.__s, c, true, int2{0, 0}, false, 0.0f, 0.0f, 0); } \
+  __attribute__((always_inline)) inline __ret_##SFX __sample2da(__MSL_DEVICE _texture_2d_array_t *t, sampler s, float2 c, uint a, T) { return __air_sample_texture_2d_array_##SFX(t, s.__s, c, a, true, int2{0, 0}, false, 0.0f, 0.0f, 0); } \
+  __attribute__((always_inline)) inline __ret_##SFX __samplecube(__MSL_DEVICE _texture_cube_t *t, sampler s, float3 c, T) { return __air_sample_texture_cube_##SFX(t, s.__s, c, false, 0.0f, 0.0f, 0); } \
+  __attribute__((always_inline)) inline __ret_##SFX __read2d(__MSL_DEVICE _texture_2d_t *t, uint2 c, uint lod, int a, T) { return __air_read_texture_2d_##SFX(t, __air_get_read_sampler(), c, uint2{0u, 0u}, lod, a); } \
+  __attribute__((always_inline)) inline __ret_##SFX __read3d(__MSL_DEVICE _texture_3d_t *t, uint3 c, uint lod, int a, T) { return __air_read_texture_3d_##SFX(t, __air_get_read_sampler(), c, uint3{0u, 0u, 0u}, lod, a); } \
+  __attribute__((always_inline)) inline void __write2d(__MSL_DEVICE _texture_2d_t *t, T##4 v, uint2 c, uint lod, int a) { __air_write_texture_2d_##SFX(t, c, v, lod, a); } \
+  __attribute__((always_inline)) inline void __writebuf(__MSL_DEVICE _texture_buffer_1d_t *t, T##4 v, uint c, int a) { __air_write_texture_buffer_1d_##SFX(t, c, v, a); }
+__MSL_TEX_FNS(v4f32, float) __MSL_TEX_FNS(v4f16, half)
+extern "C" __ret_f32 __air_sample_depth_2d_f32(__MSL_DEVICE _depth_2d_t *, __MSL_CONSTANT _sampler_t *, int, float2, bool, int2, bool, float, float, int) __AIR("air.sample_depth_2d.f32");
+
+#define __MSL_AI __attribute__((always_inline))
+template <class T, access A = access::sample> struct texture1d {
+  __MSL_DEVICE _texture_1d_t *__t;
+  __MSL_AI typename __texel<T>::v4 sample(sampler s, float c) const { return __sample1d(__t, s, c, T()).v; }
 };
+template <class T, access A = access::sample> struct texture2d {
+  __MSL_DEVICE _texture_2d_t *__t;
+  __MSL_AI uint get_width(uint lod = 0) const { return __air_get_width_texture_2d(__t, lod); }
+  __MSL_AI uint get_height(uint lod = 0) const { return __air_get_height_texture_2d(__t, lod); }
+  __MSL_AI typename __texel<T>::v4 sample(sampler s, float2 c) const { return __sample2d(__t, s, c, T()).v; }
+  __MSL_AI typename __texel<T>::v4 read(uint2 c, uint lod = 0) const { return __read2d(__t, c, lod, int(A), T()).v; }
+  __MSL_AI void write(typename __texel<T>::v4 v, uint2 c, uint lod = 0) const { __write2d(__t, v, c, lod, int(A)); }
+};
+template <class T, access A = access::sample> struct texture2d_array {
+  __MSL_DEVICE _texture_2d_array_t *__t;
+  __MSL_AI typename __texel<T>::v4 sample(sampler s, float2 c, uint a) const { return __sample2da(__t, s, c, a, T()).v; }
+};
+template <class T, access A = access::sample> struct texture3d {
+  __MSL_DEVICE _texture_3d_t *__t;
+  __MSL_AI typename __texel<T>::v4 read(uint3 c, uint lod = 0) const { return __read3d(__t, c, lod, int(A), T()).v; }
+};
+template <class T, access A = access::sample> struct texturecube {
+  __MSL_DEVICE _texture_cube_t *__t;
+  __MSL_AI typename __texel<T>::v4 sample(sampler s, float3 c) const { return __samplecube(__t, s, c, T()).v; }
+};
+template <class T, access A = access::sample> struct depth2d {
+  __MSL_DEVICE _depth_2d_t *__t;
+  __MSL_AI float sample(sampler s, float2 c) const { return __air_sample_depth_2d_f32(__t, s.__s, 1, c, true, int2{0, 0}, false, 0.0f, 0.0f, 0).v; }
+};
+template <class T, access A = access::write> struct texture_buffer {
+  __MSL_DEVICE _texture_buffer_1d_t *__t;
+  __MSL_AI void write(typename __texel<T>::v4 v, uint c) const { __writebuf(__t, v, c, int(A)); }
+};
+// constexpr sampler arguments: the driver computes the state; these only parse.
+enum class coord { normalized, pixel };
+enum class address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class s_address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class t_address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class r_address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class filter { nearest, linear };
+enum class mag_filter { nearest, linear };
+enum class min_filter { nearest, linear };
+enum class mip_filter { none, nearest, linear };
+enum class compare_func { none, less, less_equal, greater, greater_equal, equal, not_equal, always, never };
+enum class border_color { transparent_black, opaque_black, opaque_white };
 }  // namespace metal

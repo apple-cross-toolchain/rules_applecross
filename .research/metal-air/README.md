@@ -51,34 +51,62 @@ The plan, sent to the Manager:
 - **M1, in progress:** `msl2air.py` generates the metadata from the source.
   - **How it works:**
     1. A textual rewrite turns `[[attributes]]` into annotations, and vector
-       constructors and half literals into C++. Our own
-       `include/metal_stdlib` turns stage keywords into macros.
-    2. clang 15's AST dump gives the signatures; `-fdump-record-layouts`
-       gives the struct layouts.
-    3. A generated `extern "C"` entry point gives each function AIR's flat
-       signature: textures and samplers become AIR's opaque pointers.
-    4. Calls to AIR functions that return structs are made direct (spir64
-       uses sret), then `opt -O2` runs.
-    5. The IR pass adds the AIR metadata and the function-constant globals,
-       and `mtlb.py` writes the metallib with its public metadata (CNST).
-  - **Results:** of the probes the stdlib covers so far (buffers,
-    built-ins, threadgroup memory, atomics, math, matrices, read/write
-    textures, function constants, several kernels per file,
-    `max_total_threads_per_threadgroup`):
-    - The AIR metadata matches Xcode's node for node, and the metallib
-      matches in header, function list and public metadata. That's 55 of
-      55 across iOS 12, 16, 18, 27.2 and macOS 11 (`runall.sh`).
-    - On a Mac slot's GPU, every kernel from our Linux-built macOS 27
-      metallibs gives bit-identical output to Xcode's metallib for the
-      same source: 17 of 17 runs, by `run/diffrun.swift` with
-      `run/specs/`.
+       constructors, half literals, function constants and constexpr
+       samplers into C++. Our own `include/metal_stdlib` turns stage
+       keywords into macros.
+    2. **The AST pass** (clang 15, with address spaces as attributes) gives
+       the signatures, struct members and `[[id(n)]]`s;
+       `-fdump-record-layouts` gives the offsets.
+    3. **Codegen compiles flat**, with no address spaces. A generated
+       `extern "C"` entry point gives each function AIR's signature, with
+       its address spaces, and casts the arguments to flat. Textures and
+       samplers become AIR's opaque pointers.
+    4. **IR passes:**
+       - every function is forced inline;
+       - AIR calls that return structs are made direct (spir64 uses sret);
+       - program-scope constants go to address space 2;
+       - atomics resolve to `air.atomic.global/local` by tracing their
+         pointer's address space;
+       - `opt -O2`, LLVM's `infer-address-spaces` (address space 0 as
+         flat), then `-O2` again, put every load and store in its real
+         address space;
+       - function constants get AIR's globals and static init.
+    5. The final pass adds the AIR metadata, and `mtlb.py` writes the
+       metallib with its public metadata (CNST).
+  - **Why flat:** MSL member functions and operators must work on objects
+    in device and constant memory, e.g. `uniforms.mvp[3]` or
+    `args.tex.sample()` in an argument buffer. Plain C++ can't call a
+    method on an object in another address space.
+    - C++ for OpenCL without the generic address space comes closest to
+      MSL's model, but clang declares implicit constructors with a generic
+      `this`, so ordinary structs break.
+    - With the generic space kept, generic pointers would reach the AIR.
+  - **Results (probes the stdlib covers so far):**
+    - **Coverage:**
+      - buffers, built-ins, threadgroup memory, atomics, math and
+        matrices;
+      - textures of each kind (read, write, sample, read_write);
+      - sampler arguments and constexpr samplers;
+      - simdgroup and quadgroup functions, function constants;
+      - argument buffers (textures, arrays of textures, samplers,
+        pointers, references, plain values);
+      - structs with nested structs, arrays, packed vectors and matrices;
+      - several kernels per file, `max_total_threads_per_threadgroup`.
+    - **Metadata:** AIR metadata matches Xcode's node for node, and the
+      metallib's header, function list and public metadata match too. That
+      holds on iOS 12, 16, 18, 27.2 and macOS 11, for 73 probe files plus
+      82 constexpr-sampler files (`runall.sh`).
+    - **Runtime:** on a Mac slot's GPU, every kernel from our Linux-built
+      macOS 27 metallibs gives bit-identical output to Xcode's metallib
+      for the same source: 19 of 19 runs (`run/diffrun.swift` with
+      `run/specs/`).
   - **Still to do:**
-    - simdgroup functions;
-    - sampling and constexpr samplers;
-    - packed types;
-    - argument buffers;
+    - vertex and fragment functions (M3);
     - VATT/VATY;
-    - a Rust port.
+    - a Rust port;
+    - runtime checks for sampling and argument buffers;
+    - unprobed intrinsic variants (int simd, threadgroup atomics, more
+      math).
 - **M2:** a stdlib subset for compute.
 - **M3:** graphics functions.
 - **M4:** replace the relax_metal stub.
