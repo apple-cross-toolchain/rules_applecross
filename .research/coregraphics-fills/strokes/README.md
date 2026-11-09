@@ -129,6 +129,12 @@ Still open:
   T = floor(256·secθ), with bot = floor((A + s·k)/16). For a horizontal
   line bot = floor((y − ½)·256) + 1 (thin15.py). The lower row gets
   ceil(area) and the upper row T minus that.
+- The start offset moves one-for-one with y0 in 1/4096 steps, and with
+  x0 continuously at the exact slope (bottom transitions are 16/m_exact
+  apart), while steps between columns use the quantized slope. Its
+  constant isn't decoded: measured against the column centre it is −17, −7
+  and −1 units for slopes 400, 48 and 160 (×1/4096), not proportional to
+  the slope (thin20–22.py).
 - Not found yet: the start offset A (it is about 9–16 units above the
   exact band bottom and depends on the endpoints in a way I haven't
   matched, thin19.py), columns where the band's edge crosses a row inside
