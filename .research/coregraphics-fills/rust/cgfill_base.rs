@@ -170,12 +170,18 @@ type Fixed = (i64, i64);
 
 /// Values of b at each integer a strictly between the ends, stepping from
 /// (pa, pb) towards qa: (a in pixels, b in units).
-fn stepper(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32) -> Vec<(i64, i64)> {
+fn sdiv(a: i64, b: i64, mode: &str) -> i64 { match mode { "floor" => floor_div(a, b), "ceil" => -floor_div(-a, b), _ => a / b } }
+fn slope_mode(row: bool, side: i32) -> String {
+    let k = match (row, side > 0) { (true, true) => "CG_SLOPE_O", (true, false) => "CG_SLOPE_C", (false, true) => "CG_CSLOPE_O", (false, false) => "CG_CSLOPE_C" };
+    std::env::var(k).unwrap_or_else(|_| "trunc".into())
+}
+fn stepper(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32) -> Vec<(i64, i64)> { stepper2(pa, pb, qa, qb, mode, side, true) }
+fn stepper2(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32, row: bool) -> Vec<(i64, i64)> {
     if pa == qa {
         return Vec::new();
     }
     let up = qa > pa;
-    let m = (qb - pb) * UNIT / (qa - pa).abs();
+    let m = sdiv((qb - pb) * UNIT, (qa - pa).abs(), &slope_mode(row, side));
     let k0 = if up { floor_div(pa, UNIT) + 1 } else { -floor_div(-pa, UNIT) - 1 };
     let frac = (k0 * UNIT - pa).abs();
     let b0 = pb + rdiv(frac * m, UNIT, mode, side);
@@ -192,7 +198,7 @@ fn stepper(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32) -> Vec<(i6
 /// An edge's pieces bottom to top, each with its row: from the lower vertex
 /// through its row crossings, the points at `breaks` (vertex ys, in units)
 /// and its column crossings to where the row stepper ends.
-fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<i64>, end_out: &mut i64, exact_end: bool) -> Vec<(Fixed, Fixed, i64)> {
+fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<i64>, end_out: &mut i64, exact_end: bool, join_x: Option<i64>) -> Vec<(Fixed, Fixed, i64)> {
     let ((vbx, by), (tx, ty)) = (bottom, top);
     let xch = std::env::var("CG_XCHAIN").is_ok() && start_x.is_some();
     let bx = if xch { floor_div(start_x.unwrap(), UNIT) } else { start_x.unwrap_or(vbx) };
@@ -207,8 +213,8 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
         while k * UNIT < ty { v.push((k, floor_div(bnum + (k * UNIT - by) * mr_true, UNIT))); k += 1; }
         v
     } else { stepper(by, bx, ty, tx + (bx - sx), &knob("CG_START"), side) };
-    let cols: std::collections::HashMap<i64, i64> = stepper(bx, by, tx + (bx - sx), ty, &knob("CG_CSTART"), side).into_iter().collect();
-    let mr = if exchain { mr_true } else { (tx - sx) * UNIT / (ty - by) };
+    let cols: std::collections::HashMap<i64, i64> = stepper2(bx, by, tx + (bx - sx), ty, &knob("CG_CSTART"), side, false).into_iter().collect();
+    let mr = if exchain { mr_true } else { sdiv((tx - sx) * UNIT, ty - by, &slope_mode(true, side)) };
     let exact_acc = std::env::var("CG_ACC").is_ok();
     // x at yv stepped from the stepper's exact state (its first step's fraction kept)
     let xat = |yv: i64| -> i64 {
@@ -227,7 +233,7 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
     let mut ends: Vec<Fixed> = Vec::with_capacity(rows.len() + 2);
     let bmode = std::env::var("CG_YS_BOT").unwrap_or_default();
     let by_s = ysnap(by, &bmode);
-    ends.push(if by_s != by { (floor_div(bx * UNIT + (by_s - by) * mr, UNIT), by_s) } else { (bx, by) });
+    ends.push(if let Some(j) = join_x { (j, by) } else if by_s != by { (floor_div(bx * UNIT + (by_s - by) * mr, UNIT), by_s) } else { (bx, by) });
     ends.extend(rows.iter().map(|&(k, x)| (x, k * UNIT)));
     ends.push(end);
     let bandside = std::env::var("CG_BANDSIDE").ok();
@@ -258,7 +264,7 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
                 let (a, b) = (pts[i - 1], pts[i]);
                 if b.1 == a.1 { a.0 } else { a.0 + rdiv((b.0 - a.0) * (yv - a.1), b.1 - a.1, &knob("CG_BAND"), side) }
             } else { stepped };
-            let off: i64 = if side < 0 { std::env::var("CG_BANDOFF").ok().and_then(|v| v.parse().ok()).unwrap_or(0) } else { 0 };
+            let off: i64 = if side < 0 { std::env::var("CG_BANDOFF").ok().and_then(|v| v.parse().ok()).unwrap_or(0) } else { std::env::var("CG_BANDOFF_O").ok().and_then(|v| v.parse().ok()).unwrap_or(0) };
             ends.push((xv + off, yv));
         }
     }
@@ -268,7 +274,9 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
         let (a, b) = (w[0], w[1]);
         let row = floor_div(a.1, UNIT);
         let (lo, hi) = (a.0.min(b.0), a.0.max(b.0));
-        let mut ks: Vec<i64> = ((floor_div(lo, UNIT) + 1)..=(-floor_div(-hi, UNIT) - 1)).filter(|k| cols.contains_key(k)).collect();
+        let mb = breaks.iter().any(|&b| b > row * UNIT && b < (row + 1) * UNIT);
+        let nocol = match std::env::var("CG_NOCOL").as_deref() { Ok("mb") => mb, Ok("all") => true, Ok("mbopen") => mb && side > 0, _ => false };
+        let mut ks: Vec<i64> = if nocol { Vec::new() } else { ((floor_div(lo, UNIT) + 1)..=(-floor_div(-hi, UNIT) - 1)).filter(|k| cols.contains_key(k)).collect() };
         if b.0 < a.0 {
             ks.reverse();
         }
@@ -399,6 +407,7 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
     let mut order: Vec<usize> = (0..specs.len()).collect();
     order.sort_by_key(|&i| specs[i].0 .1);
     let mut ends_at: std::collections::HashMap<Fixed, i64> = std::collections::HashMap::new();
+    let mut prev_end: std::collections::HashMap<Fixed, i64> = std::collections::HashMap::new();
     let mut built: Vec<Option<Edge>> = (0..specs.len()).map(|_| None).collect();
     for &i in &order {
         let (bottom, top, dir, side) = specs[i];
@@ -411,11 +420,16 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
         let ec = std::env::var("CG_ENDCHAIN").ok();
         let exact_end = match ec.as_deref() { Some("open") => side > 0 && chainset.contains(&top), Some("close") => side < 0 && cchainset.contains(&top), Some("all") => (side > 0 && chainset.contains(&top)) || (side < 0 && cchainset.contains(&top)), _ => false };
         let endoff = if side > 0 && chainset.contains(&top) { std::env::var("CG_ENDOFF").ok().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) } else { 0 };
-        let pcs = pieces(bottom, top, &breaks, side, start, &mut endx, exact_end)
+        let jm = std::env::var("CG_JOIN").ok();
+        let joinable = match jm.as_deref() { Some("open") => side > 0 && chainset.contains(&bottom), Some("close") => side < 0 && cchainset.contains(&bottom), Some("all") => (side > 0 && chainset.contains(&bottom)) || (side < 0 && cchainset.contains(&bottom)), _ => false };
+        let join_x = if joinable { prev_end.get(&bottom).copied() } else { None };
+        let pcs = pieces(bottom, top, &breaks, side, start, &mut endx, exact_end, join_x)
             .into_iter()
             .map(|(a, b, r)| { let b = if b.1 == top.1 { (b.0 + endoff, b.1) } else { b }; let a = if a.1 == top.1 { (a.0 + endoff, a.1) } else { a }; ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r) })
             .collect::<Vec<_>>();
         if chained { ends_at.insert(top, endx); }
+        let last_end_x = endx;
+        prev_end.insert(top, last_end_x);
         built[i] = Some(Edge { bottom, top, dir, pieces: pcs });
     }
     edges.extend(built.into_iter().flatten());
@@ -496,6 +510,10 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                             continue;
                         }
                         let Some((a, b)) = clip_y(a, b, lo, hi) else { continue };
+                        let (a, b) = match std::env::var("CG_XQO").ok().and_then(|v| v.parse::<f64>().ok()) {
+                            Some(g) if role > 0.0 && (vb.len() > 2 || std::env::var("CG_XQO_ALL").is_ok()) => { let f = |v: f64| (v * 4096.0 / g).floor() * g / 4096.0; ((f(a.0), a.1), (f(b.0), b.1)) }
+                            _ => (a, b),
+                        };
                         let d = b.1 - a.1;
                         let x0 = (a.0.min(b.0).floor().max(0.0)) as usize;
                         let x1 = (a.0.max(b.0).floor() as i64).min(w as i64 - 1);
@@ -511,8 +529,10 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                                 let part = if role < 0.0 && applies { match std::env::var("CG_PQC").ok() { Some(v) => { let (uu, m) = v.split_once(':').unwrap(); let uu: f64 = uu.parse().unwrap(); match m { "ceil" => (part * uu).ceil() / uu, "floor" => (part * uu).floor() / uu, "round" => (part * uu).round() / uu, _ => part } } None => part } } else { part };
                                 let padd: f64 = if applies && role > 0.0 { std::env::var("CG_PADD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0) / 4096.0 } else { 0.0 };
                                 row[x] += role * (d - part) + padd;
+                                if let Ok(dbg) = std::env::var("CG_DEBUG") { let (dx, dy) = dbg.split_once(',').unwrap(); if dx.parse::<usize>().unwrap() == x && dy.parse::<usize>().unwrap() == y { eprintln!("band [{:.5},{:.5}] edge {} role {} piece ({:.5},{:.5})->({:.5},{:.5}) contrib {:.6}", s0, s1, i, role, a.0, a.1, b.0, b.1, (role * (d - part)) * 256.0); } }
                             }
                         }
+                        if let Ok(dbg) = std::env::var("CG_DEBUG") { let (dx, dy) = dbg.split_once(',').unwrap(); let dx: i64 = dx.parse().unwrap(); if dy.parse::<usize>().unwrap() == y && dx > x1 { eprintln!("band [{:.5},{:.5}] edge {} role {} full piece ({:.5},{:.5})->({:.5},{:.5}) contrib {:.6}", s0, s1, i, role, a.0, a.1, b.0, b.1, role * d * 256.0); } }
                         for v in row.iter_mut().skip((x1 + 1).max(0) as usize) {
                             *v += role * d;
                         }
@@ -535,5 +555,12 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
             }
         }
     }
-    acc.into_iter().map(|r| r.into_iter().map(|v| ((v.clamp(0.0, 1.0) * 256.0 + 1e-9).floor() as i64).min(255) as u8).collect()).collect()
+    let am = std::env::var("CG_ALPHA").ok();
+    acc.into_iter().map(|r| r.into_iter().map(|v| {
+        let c = v.clamp(0.0, 1.0);
+        let a = match am.as_deref() {
+            Some(m) => { let (uu, mode) = m.split_once(':').unwrap(); let uu: f64 = uu.parse().unwrap(); let q = match mode { "round" => (c * uu).round(), "ceil" => (c * uu - 1e-9).ceil(), _ => (c * uu + 1e-9).floor() }; (q * 256.0 / uu + 1e-9).floor() as i64 }
+            None => (c * 256.0 + 1e-9).floor() as i64,
+        };
+        a.min(255) as u8 }).collect()).collect()
 }

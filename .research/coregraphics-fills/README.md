@@ -190,6 +190,19 @@ of a level of the boundary.
   chaining edges through vertices, exactly or floored; exact ends at chain
   vertices; and snapping vertex y.
 
+- **More on the vertex residual (18:15Z).**
+  - Joining an opening edge's first point to the previous edge's stepped
+    end (`CG_JOIN=open`) fixes the one-vertex collinear sweep (8 to 0) and
+    is neutral elsewhere (suite 981).
+  - The rest is on opening edges in rows a vertex splits into bands,
+    including vertices on the other side of the shape (`v2rs.py`). There CG
+    covers about 0.03 of a level more.
+  - No band-point position explains it (`obsweep.py`). Matching offsets
+    range over +1 to −3 units and don't follow the fraction; "floored
+    minus 2" fits 167 of 204 cases.
+  - These also didn't help: side-dependent slope rounding, and coarser x
+    on opening pieces (`CG_XQO`).
+
 ## Remaining before exact fills
 
 - The vertex-row residual above. It matters most for curves.
