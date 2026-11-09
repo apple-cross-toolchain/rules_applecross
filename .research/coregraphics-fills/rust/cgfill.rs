@@ -364,6 +364,7 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 let mut c_rect = vec![0.0f64; w];
                 let mut c_tri = vec![0.0f64; w];
                 let mut c_other = vec![false; w];
+                let mut c_top = vec![false; w];
                 let mut winding = 0;
                 for &(_, i) in &active {
                     let e = &edges[i];
@@ -458,6 +459,15 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                             *v += role * d;
                         }
                     }
+                    if role < 0.0 {
+                        let (mut ty_, mut tx_) = (f64::MIN, 0.0f64);
+                        for &(a, b, r) in &e.pieces { if in_band(a, b, r) { for p in [a, b] { if p.1 > ty_ { ty_ = p.1; tx_ = p.0; } } } }
+                        if ty_ > f64::MIN {
+                            let pt = ((tx_ - 1e-12).floor().max(0.0) as usize).min(w - 1);
+                            let single_c = xmin.floor() == (xmax - 1e-12).floor();
+                            if std::env::var("CG_SPAN_SINGLE").is_err() || single_c { c_top[pt] = true; }
+                        }
+                    }
                     if band_rule && !edge_right.is_empty() {
                         let h = top_pt.1 - bot_y;
                         let pt = (top_pt.0 - 1e-12).floor().max(0.0) as usize;
@@ -474,7 +484,8 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 for x in 0..w {
                     if piece_part[x] != 0.0 || piece_exact[x] != 0.0 {
                         let span = std::env::var("CG_PIECE_SPAN").unwrap_or_else(|_| "exact".to_string());
-                        row[x] += if close_part[x] != 0.0 {
+                        let shared = if std::env::var("CG_NOSPAN_TOP").is_err() { close_part[x] != 0.0 && c_top[x] } else { close_part[x] != 0.0 };
+                        row[x] += if shared {
                             match span.as_str() {
                                 "diff" if !c_other[x] => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; c(o_rect[x] - c_rect[x]) + o_tri[x] - c_tri[x] + c_rect[x] + c_tri[x] }
                                 "diffr" if !c_other[x] => { let r = |v: f64| (v * 4096.0).round() / 4096.0; r(o_rect[x] - c_rect[x]) + o_tri[x] - c_tri[x] + c_rect[x] + c_tri[x] }

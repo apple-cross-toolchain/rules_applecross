@@ -285,10 +285,11 @@ of a level of the boundary.
   - Found with start pieces that cross a column (`crossfit.py`: 40 of 40).
     The lower pixel is exact; the upper one rounds the whole band's
     rectangle.
-  - Closing edges are exact, and a pixel shared with a closing piece in the
-    same band is exact.
+  - Closing edges are exact. A pixel is exact only where a closing edge's
+    band top also falls in it; that refinement took the suite from 97 to 75
+    (triangles 22, two subpaths 42, wedges 1 / 0 / 0).
 
-  Results:
+  Results before that refinement:
 
   | Case | Wrong |
   | --- | --- |
