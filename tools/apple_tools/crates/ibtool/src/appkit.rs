@@ -150,9 +150,10 @@ fn autoresizing_mask(n: Node) -> Result<i64, String> {
 /// A view and its subviews: an `NSView`, or for a top-level custom view an
 /// `NSClassSwapper` for its class.
 fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str, next_responder: Option<&str>) -> Result<Value, String> {
-    // A custom view is an NSClassSwapper for its class, at any depth; a
-    // plain view an NSView (constraint probes, templates).
-    let swapped = n.has_tag_name("customView");
+    // A custom view is an NSClassSwapper for its class, at any depth, as is
+    // a plain view of a custom class; a plain view an NSView (constraint
+    // probes, templates).
+    let swapped = n.has_tag_name("customView") || n.attribute("customClass").is_some();
     only_attributes(
         n,
         &[
@@ -165,7 +166,8 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point"])?;
+    canvas_location_only(n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = Vec::new();
@@ -173,8 +175,6 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     if swapped {
         values.push(("NSClassName", nib.string(&class)));
         values.push(("NSOriginalClassName", nib.string("NSView")));
-    } else if class != "NSView" {
-        return fail("a custom class on a plain view is not supported by this ibtool");
     }
     values.extend(view_values(nib, c, n, module, &name, parent, next_responder)?);
     Ok(Value::New(Object::new(if swapped { "NSClassSwapper" } else { "NSView" }, values).named(name)))
@@ -220,15 +220,18 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     if let Some(constraints) = view_constraints(nib, c, n, name)? {
         values.push(("NSViewConstraints", constraints));
     }
-    // Content hugging (250 each but as given) and compression resistance
-    // (750), when either is given, as strings.
-    let pair = |h: &str, v: &str, default: &str| -> Option<String> {
-        (n.attribute(h).is_some() || n.attribute(v).is_some()).then(|| format!("{{{}, {}}}", n.attribute(h).unwrap_or(default), n.attribute(v).unwrap_or(default)))
+    // Content hugging and compression resistance, as strings, when other
+    // than the class's own: hugging 250 each, a text field's vertical 750;
+    // resistance 750 each (two templates' labels, a probe's).
+    let text = n.has_tag_name("textField");
+    let pair = |h: &str, v: &str, (dh, dv): (&str, &str)| -> Option<String> {
+        let (h, v) = (n.attribute(h).unwrap_or(dh), n.attribute(v).unwrap_or(dv));
+        ((h, v) != (dh, dv)).then(|| format!("{{{h}, {v}}}"))
     };
-    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", "250") {
+    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", ("250", if text { "750" } else { "250" })) {
         values.push(("NSHuggingPriority", nib.string(&p)));
     }
-    if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", "750") {
+    if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", ("750", "750")) {
         values.push(("NSAntiCompressionPriority", nib.string(&p)));
     }
     values.push(("IBNSSafeAreaLayoutGuide", Value::Nil));
@@ -294,13 +297,18 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
         } else if k.attribute("secondAttribute").is_some() {
             return fail("a constraint's second attribute without a second item");
         }
-        let constant = number(k.attribute("constant").ok_or("a constraint without a constant is not supported by this ibtool")?)?;
-        values.push(("NSConstantV2", Value::Double(constant)));
+        // Without a constant, neither constant key (a probe).
+        let constant = k.attribute("constant").map(number).transpose()?;
+        if let Some(constant) = constant {
+            values.push(("NSConstantV2", Value::Double(constant)));
+        }
         values.push(("NSShouldBeArchived", Value::Bool(true)));
         if let Some(p) = k.attribute("priority") {
             values.push(("NSPriority", Value::Int(p.parse().map_err(|_| format!("not a priority: {p}"))?)));
         }
-        values.push(("NSConstant", Value::Double(constant)));
+        if let Some(constant) = constant {
+            values.push(("NSConstant", Value::Double(constant)));
+        }
         items.push(Value::New(Object::new("NSLayoutConstraint", values).named(constraint_name)));
     }
     Ok(Some(nib.array("NSArray", items)))
@@ -354,6 +362,8 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("frameAutosaveName", None),
             ("animationBehavior", Some("default")),
             ("visibleAtLaunch", Some("NO")),
+            // Not one-shot changes nothing (a probe).
+            ("oneShot", Some("NO")),
             ("key", Some("window")),
             ("id", None),
             ("customClass", None),
@@ -382,7 +392,9 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let id = attr(n, "id")?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
-    if n.attribute("visibleAtLaunch").is_none() {
+    // A storyboard's windows are its window controllers', which show them,
+    // and are never visible at launch (Xcode's game templates).
+    if n.attribute("visibleAtLaunch").is_none() && !nib.storyboard {
         c.visible.push(name.clone());
     }
     let style = child(n, "windowStyleMask", "styleMask").ok_or("a window without a style mask")?;
@@ -1095,7 +1107,9 @@ fn outlet(name: String, source: &str, destination: &str, label: Value) -> (Strin
 /// that varies from run to run, and gives each controller a new UUID; this
 /// ibtool keeps one order of each.
 fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
-    only_attributes(wc, &[("id", None), ("sceneMemberID", None)])?;
+    only_attributes(wc, &[("id", None), ("sceneMemberID", None), ("showSeguePresentationStyle", Some("single"))])?;
+    // Shown as a single window, presentation style 1 (a corpus storyboard).
+    let presentation = if wc.attribute("showSeguePresentationStyle").is_some() { 1 } else { 0 };
     only_children(wc, &["window", "connections"])?;
     if !others.is_empty() {
         return fail("objects beside a window controller are not supported by this ibtool");
@@ -1136,7 +1150,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
         vec![
             ("IBWindowTemplate", window_value),
             ("IBWindowTemplateContentViewController", vc_value),
-            ("showSeguePresentationStyle", Value::Int(0)),
+            ("showSeguePresentationStyle", Value::Int(presentation)),
             ("uniqueIdentifierForStoryboardCompilation", nib.string(&wc_uuid)),
         ],
     )
@@ -1353,7 +1367,8 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     let has = |a: &str| cell.attribute(a).is_some();
     let mut flags: i64 = 0x0400_0000;
     let mut flags2: i64 = 0;
-    let line_break = cell.attribute("lineBreakMode").unwrap_or("clipping");
+    // Without a line break mode, word wrapping (a probe).
+    let line_break = cell.attribute("lineBreakMode").unwrap_or("wordWrapping");
     // NSLineBreakMode, in flags2's bits 9 to 11 too.
     let control_break = match line_break {
         "wordWrapping" => 0,
