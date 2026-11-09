@@ -78,6 +78,16 @@ polylines with every join and cap (`strokecmp.py SEED N CLOSED JOIN CAP`):
 - Corpus pixels with my own outlines: blocks needing splits 39, 101 and
   158 wrong at 1×, 2× and 3×; all other wide-stroke blocks 2, 1 and 0.
 
+## Rust port
+
+`rust/cgstroke.rs` ports this stroker (the probe's `s W J C` command
+strokes and fills; `S W J C` prints the outline). It matches
+copy(strokingWithWidth:) on 600 of 600 random polylines and on the same
+15 of 22 corpus curves as the Python (rsstroke.py). End to end, stroking
+and filling in Rust against CoreGraphics' own stroke render, the corpus
+wide strokes are wrong in 41, 102 and 158 of 6,529, 15,302 and 23,914
+edge pixels at 1×, 2× and 3× (corprs.py).
+
 ## Thin strokes (w ≤ 1)
 
 - Axis-aligned lines take their own path: coverage per axis in 1/256,

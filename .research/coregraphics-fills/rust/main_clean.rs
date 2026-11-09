@@ -2,6 +2,8 @@
 #[path = "/tmp/cgprobe/cgfill.rs"]
 #[allow(dead_code)]
 mod cgfill;
+#[path = "/tmp/cgprobe/cgstroke.rs"]
+mod cgstroke;
 use cgfill::{coverage, polygons, Element, Point, Rule};
 use std::io::BufRead;
 fn main() {
@@ -32,6 +34,15 @@ fn main() {
             "f" => { rule = Rule::NonZero; fills = std::mem::take(&mut path); }
             "e" => { rule = Rule::EvenOdd; fills = std::mem::take(&mut path); }
             "n" => { dump(&fills, rule, &mut out); fills.clear(); }
+            "s" => { rule = Rule::NonZero; fills = cgstroke::stroke(&path, v[0], v[1] as i32, v[2] as i32); path.clear(); }
+            "S" => {
+                for e in cgstroke::stroke(&path, v[0], v[1] as i32, v[2] as i32) {
+                    let f = |p: Point| format!("{:?} {:?}", p.x, p.y);
+                    out.push_str(&match e { Element::Move(a) => format!("m {}", f(a)), Element::Line(a) => format!("l {}", f(a)), Element::Cubic(a, b, c) => format!("c {} {} {}", f(a), f(b), f(c)), Element::Close => "h".into() });
+                    out.push('\n');
+                }
+                out.push_str("--\n"); path.clear();
+            }
             _ => {}
         }
     }

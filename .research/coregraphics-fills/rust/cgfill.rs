@@ -385,10 +385,11 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 continue;
             }
             let (bottom, top, dir) = if b.1 > a.1 { (a, b, 1) } else { (b, a, -1) };
-            let pieces = pieces(bottom, top, &breaks)
+            let pieces: Vec<((f64, f64), (f64, f64), i64)> = pieces(bottom, top, &breaks)
                 .into_iter()
                 .map(|(a, b, r)| ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r))
                 .collect();
+            if std::env::var("CG_DUMPEDGES").is_ok() { eprintln!("edge dir {} bottom {:?} top {:?} pieces {:?}", dir, bottom, top, pieces.iter().map(|&((ax, ay), (bx, by), _)| ((ax * u) as i64, (ay * u) as i64, (bx * u) as i64, (by * u) as i64)).collect::<Vec<_>>()); }
             edges.push(Edge { bottom, top, dir, pieces });
         }
     }
@@ -607,6 +608,11 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 }
             }
         }
+    }
+    if let Ok(v) = std::env::var("CG_DUMPPX") {
+        let mut it = v.split(',').map(|t| t.parse::<usize>().unwrap());
+        let (x, y) = (it.next().unwrap(), it.next().unwrap());
+        if y < acc.len() && x < acc[y].len() { eprintln!("px {} {} {:.6}", x, y, acc[y][x] * 4096.0); }
     }
     acc.into_iter().map(|r| r.into_iter().map(|v| ((v.clamp(0.0, 1.0) * 256.0 + 1e-9).floor() as i64).min(255) as u8).collect()).collect()
 }
