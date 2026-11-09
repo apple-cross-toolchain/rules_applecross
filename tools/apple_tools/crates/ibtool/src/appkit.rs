@@ -372,6 +372,11 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     values.push(("NSWindowIsRestorable", Value::Bool(true)));
     values.push(("NSMinFullScreenContentSize", nib.string("{0, 0}")));
     values.push(("NSMaxFullScreenContentSize", nib.string("{0, 0}")));
+    // A custom class's reference last (three corpus xibs).
+    if n.attribute("customClass").is_some() {
+        let class = class_values(nib, n, module, None)?.into_iter().find(|v| v.0 == "IBClassReference").map(|v| v.1).ok_or("a custom class's reference")?;
+        values.push(("IBClassReference", class));
+    }
     Ok(Value::New(Object::new("NSWindowTemplate", values).named(name)))
 }
 
