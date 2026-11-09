@@ -206,8 +206,10 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     if n.attribute("simulatedAppContext").is_some() && !layout_relaxed() {
         return fail("a simulated app context is laid out by Xcode with its own metrics, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
     }
-    if container && (custom_class(n, "NSView").is_some() || embed_segue(n)?.is_none()) {
-        return fail("a container view with a class, or without one embed segue, is not supported by this ibtool");
+    // Without an embed segue, a container view is any view, of its class
+    // or a plain one (two probes, a corpus storyboard).
+    if container && custom_class(n, "NSView").is_some() && embed_segue(n)?.is_some() {
+        return fail("a container view with a class and an embed segue is not supported by this ibtool");
     }
     only_attributes(
         n,
@@ -222,6 +224,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
             ("customModule", None),
             ("customModuleProvider", None),
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point", "connections", "accessibility"])?;
@@ -258,9 +261,10 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     }
     let mut values = Vec::new();
     let class = class_name(n, module, "NSView")?;
+    // A container view's original class is Interface Builder's (a probe).
     if swapped {
         values.push(("NSClassName", nib.string(&class)));
-        values.push(("NSOriginalClassName", nib.string("NSView")));
+        values.push(("NSOriginalClassName", nib.string(if container { "IBNSContainerView" } else { "NSView" })));
     }
     values.extend(view_values(nib, c, n, module, &name, parent, next_responder)?);
     Ok(Value::New(Object::new(if swapped { "NSClassSwapper" } else { "NSView" }, values).named(name)))
@@ -344,6 +348,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "wkWebView" => web_view(nib, c, s, module, name)?,
                 "collectionView" => collection_view(nib, c, s, module, name)?,
                 "slider" => slider(nib, c, s, module, name)?,
+                "progressIndicator" => progress_indicator(nib, c, s, module, name)?,
                 "stackView" => stack_view(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
@@ -370,11 +375,20 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     }
     values.push(("NSViewWantsBestResolutionOpenGLSurface", Value::Bool(true)));
     // A view controller's view leaves it out: the controller sizes it (a
-    // probe, a corpus storyboard).
+    // probe, a corpus storyboard); unless it has constraints of its own,
+    // relating no other view, which it gets whatever the document says
+    // (three probes, a corpus storyboard).
     let controller_view = n.attribute("key") == Some("view") && n.parent_element().is_some_and(|p| p.has_tag_name("viewController"));
+    let own_constraints = || {
+        let id = n.attribute("id");
+        children(n, "constraints")
+            .flat_map(|l| children(l, "constraint"))
+            .any(|k| [k.attribute("firstItem"), k.attribute("secondItem")].iter().all(|item| item.is_none() || *item == id))
+    };
     // A stack view's arranged views are constrained by it (a probe).
     let arranged = n.parent_element().and_then(|p| p.parent_element()).is_some_and(|g| g.has_tag_name("stackView"));
-    if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id) || arranged) && !controller_view {
+    let translated_off = n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id) || arranged);
+    if if controller_view { own_constraints() } else { translated_off } {
         values.push(("NSDoNotTranslateAutoresizingMask", Value::Bool(true)));
     }
     // Its constraints follow its subviews' in the objects' list.
@@ -392,7 +406,14 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         let (h, v) = (n.attribute(h).unwrap_or(absent), n.attribute(v).unwrap_or(absent));
         ((h, v) != (dh, dv)).then(|| format!("{{{h}, {v}}}"))
     };
-    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", "250", ("250", if text { "750" } else { "250" })) {
+    // A progress indicator's hugging is always archived (probes of 250,
+    // 251 and 252, 750).
+    let own_hugging = if n.has_tag_name("progressIndicator") {
+        ("", "")
+    } else {
+        ("250", if text { "750" } else { "250" })
+    };
+    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", "250", own_hugging) {
         values.push(("NSHuggingPriority", nib.string(&p)));
     }
     if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", "750", ("750", "750")) {
@@ -1856,8 +1877,6 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, false)?));
                     let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
-                    nib_names.push((identifier.clone(), identifier.clone()));
-                    uuids.push((identifier, uuid(xml, id)));
                 }
                 // The initial view controller: its nib, named for its id, as
                 // an identified one's (Xcode's notification content
@@ -1905,6 +1924,17 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     }
                 }
                 tag => return fail(format!("an AppKit storyboard's <{tag}> scene is not supported by this ibtool")),
+            }
+            // The controllers this scene embeds, in its segues' order: Xcode
+            // names them as it reaches them (a corpus storyboard whose
+            // embedded controllers' scenes come in another order).
+            for segue in scene.descendants().filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed")) {
+                let id = attr(segue, "destination")?;
+                let identifier = format!("NSViewController-{id}");
+                if !nib_names.iter().any(|n| n.0 == identifier) {
+                    nib_names.push((identifier.clone(), identifier.clone()));
+                    uuids.push((identifier, uuid(xml, id)));
+                }
             }
         }
     }
@@ -2418,9 +2448,6 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     // Its embed segues' templates, made as its view loads (four probes).
     let segues = embeds(vc);
     let mut templates = Vec::new();
-    if !segues.is_empty() && (vc.attribute("storyboardIdentifier").is_some() || vc.attribute("title").is_some()) {
-        return fail("an identified or titled view controller's embed segues are not supported by this ibtool");
-    }
     for segue in &segues {
         let template_name = object_name(&format!("{} template", attr(*segue, "id")?));
         let mut t = Vec::new();
@@ -2434,16 +2461,18 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     }
     let template_names: Vec<String> = templates.iter().map(|t| t.0.clone()).collect();
     let template_names_out = template_names.clone();
-    if !templates.is_empty() {
-        let list = templates.into_iter().map(|t| t.1).collect();
-        values.push(("NSStoryboardSegueTemplates", nib.array("NSArray", list)));
-    }
     if let Some(identifier) = vc.attribute("storyboardIdentifier") {
         values.push(("NSStoryboardIdentifier", nib.string(identifier)));
     }
     // Its title after its identifier (a probe).
     if let Some(title) = vc.attribute("title") {
         values.push(("NSTitle", nib.text(attr(vc, "id")?, "title", title)));
+    }
+    // Its templates after its identifier and title (two probes, a corpus
+    // storyboard).
+    if !templates.is_empty() {
+        let list = templates.into_iter().map(|t| t.1).collect();
+        values.push(("NSStoryboardSegueTemplates", nib.array("NSArray", list)));
     }
     // Its view's nib names it as its upstream placeholder when connections
     // need it there (Xcode's SpriteKit template).
@@ -2630,8 +2659,23 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     if n.attribute("colorSpace") == Some("custom") && n.attribute("customColorSpace") == Some("sRGB") {
         return srgb_color(nib, n);
     }
-    // Gamma 2.2 grey and Display P3 also archive `NSLinearExposure`, which
-    // for grey follows no rule found yet (60 probes).
+    // Gamma 2.2 grey archives `NSLinearExposure`, which follows no rule
+    // found yet (60 probes) but for black and white: 1 whatever the alpha
+    // (five probes, a corpus storyboard).
+    if n.attribute("colorSpace") == Some("custom") && n.attribute("customColorSpace") == Some("genericGamma22GrayColorSpace") {
+        only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None)])?;
+        let (white, alpha) = (number(attr(n, "white")?)?, number(attr(n, "alpha")?)?);
+        if white != 0.0 && white != 1.0 {
+            return fail("a Generic Gray Gamma 2.2 colour other than black or white is not supported by this ibtool");
+        }
+        let mut text = general(white, 10);
+        if alpha != 1.0 {
+            text = format!("{text} {}", general(alpha, 10));
+        }
+        let components = format!("{} {}", general(white, 10), general(alpha, 10));
+        let space = color_space(nib, true)?;
+        return Ok(resolved_gray(nib, &text, &components, space));
+    }
     if n.attribute("colorSpace") == Some("custom") {
         return fail(format!(
             "a colour in the {} colour space is not supported by this ibtool",
@@ -2722,6 +2766,27 @@ fn srgb_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     Ok(nib.shared(key, || Object::new("NSColor", values)))
 }
 
+/// A colour in Generic Gray Gamma 2.2: its white (and alpha, when not 1) as
+/// text, its components, and a linear exposure of 1. Colours resolving to
+/// the same one share it (a corpus xib's label and control text colours; a
+/// document's grey and a System colour's, a probe).
+fn resolved_gray(nib: &mut Nib, white: &str, components: &str, space: Value) -> Value {
+    let mut text = white.as_bytes().to_vec();
+    text.push(0);
+    nib.shared(format!("resolved:{white}:{components}"), || {
+        Object::new(
+            "NSColor",
+            vec![
+                ("NSColorSpace", Value::Int(3)),
+                ("NSWhite", Value::Data(text)),
+                ("NSCustomColorSpace", space),
+                ("NSComponents", Value::Data(components.as_bytes().to_vec())),
+                ("NSLinearExposure", Value::Data(b"1".to_vec())),
+            ],
+        )
+    })
+}
+
 /// A System catalog colour by name.
 fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (white, components): (Option<&str>, &str) = match name {
@@ -2737,25 +2802,7 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     }
     let gray = white.is_some();
     let space = color_space(nib, gray)?;
-    let nul = |s: &str| {
-        let mut b = s.as_bytes().to_vec();
-        b.push(0);
-        Value::Data(b)
-    };
-    // Colours resolving to the same one share it (a corpus xib's label and
-    // control text colours).
-    let fallback = nib.shared(format!("resolved:{white:?}:{components}"), || {
-        Object::new(
-            "NSColor",
-            vec![
-                ("NSColorSpace", Value::Int(3)),
-                ("NSWhite", nul(white.unwrap_or_default())),
-                ("NSCustomColorSpace", space),
-                ("NSComponents", Value::Data(components.as_bytes().to_vec())),
-                ("NSLinearExposure", Value::Data(b"1".to_vec())),
-            ],
-        )
-    });
+    let fallback = resolved_gray(nib, white.unwrap_or_default(), components, space);
     let catalog = nib.string("System");
     let color_name = nib.string(name);
     Ok(nib.shared(key, || {
@@ -2837,10 +2884,30 @@ fn font_as(nib: &mut Nib, n: Node, meta: Option<(&str, &str)>) -> Result<Value, 
         _ => return fail("a font with both a metafont and a name, or neither"),
     };
     let size = size.unwrap_or(default);
+    // A metafont at another size than its own, as AppKit's font cache gives
+    // it (about 90 probes). The system font's kinds (system, small, mini,
+    // cell title) are the system font of that size, and the bold ones the
+    // bold system font: shared, the cached one at 9, 11 and 12 points
+    // carrying the flags of the metafont it was made for. A weight keeps its
+    // flags and is shared. The others are made anew for each use, but the
+    // message font at 12 points, the cached one.
+    let (flags, shared) = match metafont {
+        Some(meta) if size != default => match (meta, size) {
+            ("system" | "smallSystem" | "miniSystem" | "cellTitle" | "message", 12.0) => (0x1313, true),
+            ("system" | "smallSystem" | "miniSystem" | "cellTitle", 9.0) => (0xe1e, true),
+            ("system" | "smallSystem" | "miniSystem" | "cellTitle", 11.0) => (0xc1c, true),
+            ("system" | "smallSystem" | "miniSystem" | "cellTitle", _) => (0x414, true),
+            ("systemBold" | "smallSystemBold", 9.0) => (0xf1f, true),
+            ("systemBold" | "smallSystemBold", 11.0) => (0xd1d, true),
+            ("systemBold" | "smallSystemBold", _) => (0x818, true),
+            ("systemUltraLight" | "systemThin" | "systemLight" | "systemMedium" | "systemSemibold" | "systemHeavy" | "systemBlack", _) => (flags, true),
+            _ => (flags, false),
+        },
+        _ => (flags, true),
+    };
     let font_name = nib.string(name);
-    Ok(nib.shared(format!("font:{name}:{size}:{flags}"), || {
-        Object::new("NSFont", vec![("NSName", font_name), ("NSSize", Value::Double(size)), ("NSfFlags", Value::Int(flags))])
-    }))
+    let make = || Object::new("NSFont", vec![("NSName", font_name), ("NSSize", Value::Double(size)), ("NSfFlags", Value::Int(flags))]);
+    Ok(if shared { nib.shared(format!("font:{name}:{size}:{flags}"), make) } else { Value::New(make()) })
 }
 
 /// Refuses a control Auto Layout sizes by its content, when constraints
@@ -4186,6 +4253,79 @@ fn collection_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&st
 /// values, tick marks (below or right 0, above or left 1) and orientation.
 /// A continuous one sends its action on dragging too (mask 70). Its height
 /// is its own, so a constrained one is laid out by Xcode.
+/// A progress indicator (about 20 probes): a view, layer-backed but for a
+/// regular-size indeterminate spinner (the document's `wantsLayer` aside),
+/// then `NSpiFlags` and its values when not 0. The flags: 0x4004, bezeled
+/// 1, indeterminate 2, small 0x100, mini 0x200, large 0x300, spinning
+/// 0x1000, hidden when stopped 0x2000.
+fn progress_indicator(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("wantsLayer", Some("YES")),
+            ("horizontalHuggingPriority", None),
+            ("verticalHuggingPriority", None),
+            ("horizontalCompressionResistancePriority", None),
+            ("verticalCompressionResistancePriority", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+            ("minValue", None),
+            ("maxValue", None),
+            ("doubleValue", None),
+            ("indeterminate", Some("YES")),
+            ("bezeled", Some("NO")),
+            ("displayedWhenStopped", Some("NO")),
+            ("controlSize", None),
+            ("style", None),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "constraints", "accessibility"])?;
+    content_sized(nib, n)?;
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
+    let indeterminate = n.attribute("indeterminate").is_some();
+    let spinning = match n.attribute("style") {
+        None | Some("bar") => false,
+        Some("spinning") => true,
+        Some(other) => return fail(format!("progress indicator style {other} is not supported by this ibtool")),
+    };
+    let size = match n.attribute("controlSize") {
+        None | Some("regular") => 0,
+        Some("small") => 1,
+        Some("mini") => 2,
+        Some("large") => 3,
+        Some(other) => return fail(format!("control size {other} is not supported by this ibtool")),
+    };
+    let layered = n.attribute("wantsLayer").is_some() || !(spinning && indeterminate && size == 0);
+    if layered && !values.iter().any(|v| v.0 == "NSViewIsLayerTreeHost") {
+        let at = values.iter().position(|v| v.0 == "NSViewWantsBestResolutionOpenGLSurface").expect("a view's keys");
+        values.insert(at, ("NSViewIsLayerTreeHost", Value::Bool(true)));
+    }
+    let mut flags = 0x4004 | (size << 8);
+    if n.attribute("bezeled").is_none() {
+        flags |= 1;
+    }
+    if indeterminate {
+        flags |= 2;
+    }
+    if spinning {
+        flags |= 0x1000;
+    }
+    if n.attribute("displayedWhenStopped").is_some() {
+        flags |= 0x2000;
+    }
+    values.push(("NSpiFlags", Value::Int(flags)));
+    for (a, key) in [("minValue", "NSMinValue"), ("maxValue", "NSMaxValue"), ("doubleValue", "NSProgressIndicatorDoubleValue")] {
+        let v = n.attribute(a).map(number).transpose()?.unwrap_or(0.0);
+        if v != 0.0 {
+            values.push((key, Value::Double(v)));
+        }
+    }
+    Ok(Value::New(Object::new("NSProgressIndicator", values).named(name)))
+}
+
 fn slider(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
     only_attributes(
         n,
@@ -4402,11 +4542,10 @@ fn stack_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     ));
     values.push(("NSStackViewVerticalHugging", Value::Float(priority_f("verticalStackHuggingPriority", None)?)));
     values.push(("NSStackViewHorizontalHugging", Value::Float(priority_f("horizontalStackHuggingPriority", None)?)));
-    // Its numbers as floats (a probe).
-    values.push((
-        "NSStackViewSpacing",
-        Value::Float(number(n.attribute("spacing").ok_or("a stack view without spacing is not supported by this ibtool")?)? as f32),
-    ));
+    // Its numbers as floats (a probe); without a spacing, NSStackView's 8
+    // (a corpus storyboard).
+    let spacing = n.attribute("spacing").map(number).transpose()?.unwrap_or(8.0);
+    values.push(("NSStackViewSpacing", Value::Float(spacing as f32)));
     if distribution == 3 {
         values.push(("NSStackViewHasEqualSpacing", Value::Bool(true)));
     }
