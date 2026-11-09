@@ -2952,7 +2952,13 @@ an `SCNView` with SceneKit's keys after the view's (`loops`, `playing`,
 `jitteringEnabled`, `allowsCameraControl`, `ibWantsMultisampling`,
 `ibPreferredRenderingAPI`, `autoenablesDefaultLighting`, `ibSceneName`,
 `backgroundColor`), in the form Xcode's SceneKit game templates give it.
-A text field's `NSPreferredMaxLayoutWidth` follows its control keys. A
+An initial view controller (a storyboard whose entry point isn't a
+window controller) has its own nib, `NSViewController-<id>`, held as an
+identified controller's, and is the Info.plist's entry point (Xcode's
+notification content extension template). A text field cell of a custom
+class is an `NSClassSwapper` for `NSTextFieldCell`. A xib's Application
+placeholder without a class refers to `NSObject`, as one of that class
+does. A text field's `NSPreferredMaxLayoutWidth` follows its control keys. A
 window controller shown as a single window (presentation style 1) adds
 `NSStoryboardSegueDestinationOptions` last, mapping
 `NSSingleInstancePresentationIdentifier` to its UUID string.

@@ -1305,8 +1305,9 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
     assemble(&mut nib, root_object, &owner_name, c, connections)
 }
 
-/// A xib's Application placeholder (`-3`): of class NSObject, it refers to
-/// that class; of NSApplication, it names that alone (a template).
+/// A xib's Application placeholder (`-3`): of class NSObject, or without a
+/// class, it refers to NSObject; of NSApplication, it names that alone
+/// (templates).
 fn application_placeholder(nib: &mut Nib, c: &mut Collected, application: Node, module: Option<&str>, parent: &str) -> Result<(), String> {
     only_attributes(application, &[("id", None), ("userLabel", None), ("customClass", None)])?;
     only_children(application, &[])?;
@@ -1314,6 +1315,12 @@ fn application_placeholder(nib: &mut Nib, c: &mut Collected, application: Node, 
     let values = match application.attribute("customClass") {
         Some("NSObject") => class_values(nib, application, module, Some("NSApplication"))?,
         Some("NSApplication") => vec![("NSClassName", nib.string("NSApplication"))],
+        // Without a class, as NSObject's (Xcode's application UI template).
+        None => {
+            let class = nib.string("NSObject");
+            let reference = Object::new("IBClassReference", vec![("IBClassName", class), ("IBModuleName", Value::Nil), ("IBModuleProvider", Value::Nil)]);
+            vec![("IBClassReference", Value::New(reference)), ("NSClassName", nib.string("NSApplication"))]
+        }
         _ => return fail("an Application placeholder of a class other than NSObject or NSApplication is not supported by this ibtool"),
     };
     c.parents.push((name.clone(), parent.to_string()));
@@ -1417,6 +1424,22 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     nib_names.push((identifier.clone(), identifier.clone()));
                     uuids.push((identifier, uuid(xml, id)));
                 }
+                // The initial view controller: its nib, named for its id, as
+                // an identified one's (Xcode's notification content
+                // extension template).
+                "viewController" if root.attribute("initialViewController") == controller.attribute("id") && controller.attribute("storyboardIdentifier").is_none() => {
+                    let id = attr(*controller, "id")?;
+                    if !others.is_empty() || content_controllers.contains(&id) || embedded.contains(&id) {
+                        return fail("an initial view controller with objects beside it, a window or a container is not supported by this ibtool");
+                    }
+                    let identifier = format!("NSViewController-{id}");
+                    files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, true)?));
+                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push((format!("{name}.nib"), bytes));
+                    nib_names.push((identifier.clone(), identifier.clone()));
+                    uuids.push((identifier.clone(), uuid(xml, id)));
+                    entry = Some(identifier);
+                }
                 // An identified view controller: its nib and its view's.
                 "viewController" if controller.attribute("storyboardIdentifier").is_some() => {
                     if !others.is_empty() {
@@ -1451,7 +1474,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
         }
     }
     if root.attribute("initialViewController").is_some() && entry.is_none() {
-        return fail("an initial controller other than a window controller is not supported by this ibtool");
+        return fail("an initial controller other than a window or view controller is not supported by this ibtool");
     }
     // Its keys in the order CoreFoundation's table gives them inserted so
     // (three probes' and templates' key sets).
@@ -2047,6 +2070,9 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         &[
             ("key", None),
             ("id", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
             ("title", None),
             ("lineBreakMode", None),
             ("alignment", None),
@@ -2128,7 +2154,15 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     };
     // A set top bit is a negative int.
     let signed = |v: i64| v as u32 as i32 as i64;
-    let mut cell_values = vec![("NSCellFlags", Value::Int(signed(flags))), ("NSCellFlags2", Value::Int(signed(flags2)))];
+    // A cell of a custom class is swapped in for NSTextFieldCell (Xcode's
+    // action extension template).
+    let mut cell_values = Vec::new();
+    if cell.attribute("customClass").is_some() {
+        cell_values.push(("NSClassName", nib.string(&runtime_class_name(cell, module, "NSTextFieldCell")?)));
+        cell_values.push(("NSOriginalClassName", nib.string("NSTextFieldCell")));
+    }
+    cell_values.push(("NSCellFlags", Value::Int(signed(flags))));
+    cell_values.push(("NSCellFlags2", Value::Int(signed(flags2))));
     cell_values.push(("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))));
     let font_node = child(cell, "font", "font").ok_or("a text field cell without a font")?;
     cell_values.push(("NSSupport", appearance_font(nib, font_node, None)?));
@@ -2148,7 +2182,8 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         Some("YES") => cell_values.push(("NSCharacterPickerEnabled", Value::Bool(true))),
         Some(other) => return fail(format!("allowsCharacterPickerTouchBarItem=\"{other}\" is not supported by this ibtool")),
     }
-    values.push(("NSCell", Value::New(Object::new("NSTextFieldCell", cell_values).named(cell_name))));
+    let cell_class = if cell.attribute("customClass").is_some() { "NSClassSwapper" } else { "NSTextFieldCell" };
+    values.push(("NSCell", Value::New(Object::new(cell_class, cell_values).named(cell_name))));
     // A localizable document's controls allow a logical (right-to-left)
     // layout direction (the corpus's 358 controls, exactly those in
     // `Base.lproj`).
