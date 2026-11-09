@@ -341,14 +341,17 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     // than the class's own: hugging 250 each, a text field's vertical 750;
     // resistance 750 each (two templates' labels, a probe's).
     let text = n.has_tag_name("textField");
-    let pair = |h: &str, v: &str, (dh, dv): (&str, &str)| -> Option<String> {
-        let (h, v) = (n.attribute(h).unwrap_or(dh), n.attribute(v).unwrap_or(dv));
+    // A priority the document leaves out is Interface Builder's default
+    // (250 hugging, 750 resistance), whatever the class's own (a probe's
+    // text field without them).
+    let pair = |h: &str, v: &str, absent: &str, (dh, dv): (&str, &str)| -> Option<String> {
+        let (h, v) = (n.attribute(h).unwrap_or(absent), n.attribute(v).unwrap_or(absent));
         ((h, v) != (dh, dv)).then(|| format!("{{{h}, {v}}}"))
     };
-    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", ("250", if text { "750" } else { "250" })) {
+    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", "250", ("250", if text { "750" } else { "250" })) {
         values.push(("NSHuggingPriority", nib.string(&p)));
     }
-    if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", ("750", "750")) {
+    if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", "750", ("750", "750")) {
         values.push(("NSAntiCompressionPriority", nib.string(&p)));
     }
     // A storyboard's box content view clips to its bounds (probes).
@@ -380,10 +383,23 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
 /// established.
 fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>, String> {
     let rank = |a: &str| -> Result<usize, String> {
-        ["centerX", "centerY", "right", "left", "trailing", "leading", "width", "bottom", "top", "height"]
-            .iter()
-            .position(|r| *r == a)
-            .ok_or_else(|| format!("the order of a view's constraints on {a} is not established by this ibtool"))
+        [
+            "centerX",
+            "centerY",
+            "right",
+            "left",
+            "trailing",
+            "leading",
+            "width",
+            "bottom",
+            "top",
+            "firstBaseline",
+            "baseline",
+            "height",
+        ]
+        .iter()
+        .position(|r| *r == a)
+        .ok_or_else(|| format!("the order of a view's constraints on {a} is not established by this ibtool"))
     };
     let own = n.attribute("id");
     let subviews: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
@@ -429,14 +445,25 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
         let key = match (first, second) {
             (None, None) => (-1.0, false, first_attribute, 0, 0.0),
             (Some(f), None) if k.attribute("secondItem").is_none() => (subview(f)?, false, first_attribute, 0, 0.0),
+            // A baseline ranks by the subview's baseline, whatever the
+            // view's attribute (five probes).
+            (Some(f), None) if is_baseline(attr(*k, "firstAttribute")?) => (subview(f)?, false, first_attribute, 0, 0.0),
+            (None, Some(s)) if k.attribute("secondAttribute").is_some_and(is_baseline) => (subview(s)?, false, second_attribute()?, 0, 0.0),
             (Some(f), None) => (subview(f)?, false, second_attribute()?, 0, 0.0),
             (None, Some(s)) => (subview(s)?, false, first_attribute, 0, 0.0),
             (Some(f), Some(s)) if f == s => return fail("a view's constraint relating a subview to itself is not supported by this ibtool"),
             (Some(f), Some(s)) => {
                 subview(s)?;
                 let names = (attr(*k, "firstAttribute")?, k.attribute("secondAttribute").unwrap_or_default());
-                let sibling = |a: &str| ["centerX", "trailing", "leading", "centerY", "bottom", "top", "width", "height"].iter().position(|r| *r == a);
+                let sibling = |a: &str| {
+                    ["centerX", "trailing", "leading", "centerY", "bottom", "top", "firstBaseline", "baseline", "width", "height"]
+                        .iter()
+                        .position(|r| *r == a)
+                };
                 let size = |a: &str| matches!(a, "width" | "height" | "centerX" | "centerY");
+                if is_baseline(names.0) != is_baseline(names.1) {
+                    return fail(format!("the order of constraints between subviews on {} and {} is not established by this ibtool", names.0, names.1));
+                }
                 let (Some(first_rank), Some(second_rank)) = (sibling(names.0), sibling(names.1)) else {
                     return fail(format!("the order of constraints between subviews on {} and {} is not established by this ibtool", names.0, names.1));
                 };
@@ -557,6 +584,10 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn is_baseline(a: &str) -> bool {
+    matches!(a, "firstBaseline" | "baseline")
 }
 
 /// The constraints a view holds, as `NSLayoutConstraint`s, in

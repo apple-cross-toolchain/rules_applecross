@@ -2766,7 +2766,9 @@ margins), subviews, `NSFrameSize` at the origin or `NSFrame`, superview, layer
 hosting, best-resolution OpenGL, `NSDoNotTranslateAutoresizingMask` when it
 doesn't translate its mask and constraints refer to it, its constraints,
 content hugging and compression resistance as strings when other than the
-class's own (250 each, a text field's vertical hugging 750; 750 each), and
+class's own (250 each, a text field's vertical hugging 750; 750 each; a
+priority the document leaves out is Interface Builder's default, 250 or
+750, not the class's), and
 the safe-area, margins and clipping keys. A custom view, or a view of a
 custom class, is an `NSClassSwapper` for it.
 
@@ -2782,18 +2784,20 @@ archived as a double. A view's are in an order of their own (about
   when the view is the first), nearest the view's top-left corner first,
   by the distance from it to the top-left corner of the subview's frame;
 - within a subview's: those relating it to the view, and its size, by
-  the view's attribute (the subview's for a size), in the order centerX,
-  centerY, right, left, trailing, leading, width, bottom, top, height;
+  the view's attribute (the subview's for a size or a baseline), in the
+  order centerX, centerY, right, left, trailing, leading, width, bottom,
+  top, firstBaseline, baseline, height;
 - then those relating it to other subviews, by its own attribute
-  (centerX, trailing, leading, centerY, bottom, top, width, height), then
+  (centerX, trailing, leading, centerY, bottom, top, firstBaseline,
+  baseline, width, height; a baseline only to a baseline), then
   the other subview's, then the other subview farthest from it first, by
   the distance between their centres (four ties in two corpus
   storyboards that their corners don't order).
 
 Refused as not established: subviews at the same distance from the
 corner, two different constraints on the same attributes of the same
-views or of subviews as far apart, baselines, and between subviews left and right or a centre or size
-related to another attribute. A view controller's own view never says
+views or of subviews as far apart, and between subviews left and right,
+or a centre or size related to another attribute. A view controller's own view never says
 `NSDoNotTranslateAutoresizingMask`.
 
 **Layout.** Xcode lays constrained views out again with Auto Layout as it
