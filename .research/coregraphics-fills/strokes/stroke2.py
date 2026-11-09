@@ -9,7 +9,11 @@ def seg_dirs(s):
     a=d1(q,0); b=d1(q,1)
     # degenerate handles
     if math.hypot(*a)==0: a=(q[2][0]-q[0][0],q[2][1]-q[0][1])
+    if math.hypot(*a)==0: a=(q[3][0]-q[0][0],q[3][1]-q[0][1])
     if math.hypot(*b)==0: b=(q[3][0]-q[1][0],q[3][1]-q[1][1])
+    if math.hypot(*b)==0: b=(q[3][0]-q[0][0],q[3][1]-q[0][1])
+    if math.hypot(*a)==0: a=(1.0,0.0)
+    if math.hypot(*b)==0: b=a
     return norm(a),norm(b)
 def seg_len(s):
     if s[0]=='l': return math.dist(s[1],s[2])
@@ -19,12 +23,10 @@ def _sub(q,a,b):
     return sub(q,a,b)
 def _accept(q,d):
     from offs import off
+    from bnd2 import nearest
     c=_piece(q,d)
     if c is None: return False
-    from bnd5 import flat_ts
-    ts=flat_ts(q,0.05/0.75) or [0.5]
-    C=[bez(c,k/64) for k in range(65)]
-    return max(min(math.dist(off(q,t,d),p) for p in C) for t in ts)<=0.1
+    return max(nearest(lambda x:bez(c,x),off(q,t,d)) for t in (0.1,0.3,0.5,0.7,0.9))<=0.1
 def _piece(q,d):
     r=seg_off_one(('c',)+tuple(q),d)
     if r is None: return None
@@ -32,22 +34,30 @@ def _piece(q,d):
     p0=(q[0][0]-u0[1]*d,q[0][1]+u0[0]*d)
     return [p0,e[1],e[2],e[3]]
 SPLIT=True
-ACCEPT_ALL=True
+ACCEPT_ALL=False
+def _coord_infl(q):
+    ti=[]
+    for i in (0,1):
+        a=q[0][i]-2*q[1][i]+q[2][i]; b=q[1][i]-2*q[2][i]+q[3][i]
+        if (a>0 and b<0) or (a<0 and b>0): ti.append(a/(a-b))
+    return sorted(set(t for t in ti if 0<t<1))
 def seg_off(s,d):
     if s[0]=='l' or not SPLIT: return seg_off_one(s,d)
-    from offs5 import inflections
     q=list(s[1:])
-    try: ti=[t for t in inflections(q) if 1e-6<t<1-1e-6]
-    except Exception: ti=[]
-    cuts=[0.0]+ti+[1.0]
     out=[]
+    from offs5 import inflections
+    try: has_infl=any(1e-9<t<1-1e-9 for t in inflections(q))
+    except Exception: has_infl=False
+    pre=_coord_infl(q) if has_infl else []
     def rec(a,b,depth=0):
+        if b-a<1e-9: return
         sq=_sub(q,a,b)
-        try: ok=depth>=6 or ACCEPT_ALL or _accept(sq,d)
+        try: ok=depth>=8 or ACCEPT_ALL or _accept(sq,d)
         except Exception: ok=True
-        if ok: out.extend(seg_off_one(('c',)+tuple(sq),d) or [])
-        else: rec(a,(a+b)/2,depth+1); rec((a+b)/2,b,depth+1)
-    for a,b in zip(cuts,cuts[1:]): rec(a,b)
+        if ok: out.extend(seg_off_one(('c',)+tuple(sq),d) or []); return
+        m=(a+b)/2; rec(a,m,depth+1); rec(m,b,depth+1)
+    cuts=[0.0]+pre+[1.0]
+    for x,y in zip(cuts,cuts[1:]): rec(x,y)
     return out
 def seg_off_one(s,d):
     # elements for offset of s on the left side at distance d, excluding the start point

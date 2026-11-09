@@ -43,26 +43,29 @@ polylines with every join and cap (`strokecmp.py SEED N CLOSED JOIN CAP`):
 - With this, my own outlines of the corpus strokes that need no split fill
   to 2, 1 and 0 wrong pixels (of 5,058, 12,435 and 19,428 edge pixels) at
   1×, 2× and 3× (corpstroke2.py).
-## Curve splits: partly known
+## Curve splits: mostly known
 
-- Convex curves (no inflection) are halved at ½, recursively, while a
-  piece fails an acceptance test. The tolerance is about 0.1 px,
-  absolute. At near-zero width the true maximum distance between the
-  refit and the curve at measured boundaries is 0.1001–0.1062, so
-  CoreGraphics' estimate is a little below the true maximum. No sample set
-  or projection I tried gives exactly 0.1 at every boundary (bnd*.py).
-- Curves with a control point on an endpoint split dyadically toward that
-  end (½, ¾, ⅞).
-- Antisymmetric S-curves split at their inflection (½), then dyadically.
-  Asymmetric inflected curves are pre-split at points that are not the
-  inflection, a tangent-parallel point, or an approximate inflection
-  formula. That rule is not found.
-- Tiny, nearly straight halves come out with coincident control points,
-  (P1+P2)/2 offset by d, as straight cubics do.
-
-With splits only at inflections (`stroke2.py`, ACCEPT_ALL), the corpus
-blocks that need splits are: icon-setting exact; bubble tail 16 and 32,
-userAvatar 79 and 185, icon-add 50 and 103 wrong pixels at 1× and 2×.
+- Acceptance is decided per side. A piece is accepted if, for t in
+  {0.1, 0.3, 0.5, 0.7, 0.9}, every point of the true offset at t is
+  within 0.1 px of the piece. This gives exactly 0.100000 at all 20
+  measured boundaries (bnd6.py, bnd7.py); even tenths would exceed it. On
+  3,000 random curves it matches 96.8% of whole-curve decisions; the rest
+  are rejections of small, sharply curved pieces in a band of widths that
+  I haven't explained (accside.py).
+- Rejected pieces are halved at ½.
+- If the cubic has a true inflection in (0, 1), it is first split where
+  x''(t) = 0 and where y''(t) = 0, the inflections of the device-space
+  coordinate functions (t = a/(a − b) with a = P0 − 2P1 + P2 and
+  b = P1 − 2P2 + P3, per axis). The split is width- and scale-independent
+  but depends on rotation. The family (0,0),(3,λ),(7,−1),(10,0) splits at
+  ½ (x'') and (2λ+1)/(3λ+3) (y''), exactly.
+- With these rules, 12 of the 22 corpus curves that split come out with
+  exactly CoreGraphics' split points (splitcmp.py). The misses are tiny
+  curves, curves with a control point on an endpoint, and the acceptance
+  residual.
+- Corpus pixels with my own outlines: blocks needing splits 65, 121 and
+  175 wrong at 1×, 2× and 3× (of 1,471, 2,867 and 4,486 edge pixels);
+  all other wide-stroke blocks 2, 1 and 0.
 
 ## Thin strokes (w ≤ 1)
 
