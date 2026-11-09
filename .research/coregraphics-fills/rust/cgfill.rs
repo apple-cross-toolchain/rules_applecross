@@ -359,6 +359,11 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 let mut close_part = vec![0.0f64; w];
                 let mut piece_part = vec![0.0f64; w];
                 let mut piece_exact = vec![0.0f64; w];
+                let mut o_rect = vec![0.0f64; w];
+                let mut o_tri = vec![0.0f64; w];
+                let mut c_rect = vec![0.0f64; w];
+                let mut c_tri = vec![0.0f64; w];
+                let mut c_other = vec![false; w];
                 let mut winding = 0;
                 for &(_, i) in &active {
                     let e = &edges[i];
@@ -386,6 +391,9 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         }
                     }
                     let one_column = xmin.floor() == (xmax - 1e-12).floor();
+                    let band_rule = role > 0.0 && std::env::var("CG_NOBANDRULE").is_err();
+                    let mut edge_right: Vec<(usize, f64)> = Vec::new();
+                    let (mut top_pt, mut bot_y) = ((0.0f64, f64::MIN), f64::MAX);
                     for &(a, b, r) in &e.pieces {
                         if !in_band(a, b, r) {
                             continue;
@@ -398,7 +406,21 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                             for x in x0..=(x1 as usize) {
                                 let xf = x as f64;
                                 let right = d - (integral(a, b, xf + 1.0) - integral(a, b, xf));
+                                if band_rule {
+                                    edge_right.push((x, right));
+                                    let (lo_p, hi_p) = if a.1 <= b.1 { (a, b) } else { (b, a) };
+                                    if hi_p.1 > top_pt.1 { top_pt = hi_p; }
+                                    if lo_p.1 < bot_y { bot_y = lo_p.1; }
+                                    continue;
+                                }
                                 let mode = std::env::var("CG_PIECE").unwrap_or_else(|_| "rectonly".to_string());
+                                if role < 0.0 && banded {
+                                    if x0 as i64 == x1 {
+                                        let (lo_p, hi_p) = if a.1 <= b.1 { (a, b) } else { (b, a) };
+                                        let h = hi_p.1 - lo_p.1;
+                                        c_rect[x] += h * (xf + 1.0 - hi_p.0); c_tri[x] += 0.5 * h * (hi_p.0 - lo_p.0);
+                                    } else { c_other[x] = true; }
+                                }
                                 let cmode = std::env::var("CG_CPIECE").unwrap_or_default();
                                 if !cmode.is_empty() && role < 0.0 && x0 as i64 == x1 && banded {
                                     let (lo_p, hi_p) = if a.1 <= b.1 { (a, b) } else { (b, a) };
@@ -419,7 +441,8 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                                     let at_vertex = lo_p.1 == e.bottom.1 as f64 / u || hi_p.1 == e.top.1 as f64 / u;
                                     let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0;
                                     let v = if at_vertex && mode != "rectonly" { rect + c(tri) } else if banded || mode == "all" { c(rect) + tri } else { right };
-                                    if close_part.is_empty() || true { piece_part[x] += v; piece_exact[x] += right; }
+                                    piece_part[x] += v; piece_exact[x] += right;
+                                    o_rect[x] += rect; o_tri[x] += tri;
                                     continue;
                                 }
                                 if banded && role > 0.0 && one_column {
@@ -435,11 +458,31 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                             *v += role * d;
                         }
                     }
+                    if band_rule && !edge_right.is_empty() {
+                        let h = top_pt.1 - bot_y;
+                        let pt = (top_pt.0 - 1e-12).floor().max(0.0) as usize;
+                        let wt = (pt + 1) as f64;
+                        let rect = h * (wt - top_pt.0);
+                        let mut per: Vec<(usize, f64)> = Vec::new();
+                        for &(x, r) in &edge_right { if let Some(p) = per.iter_mut().find(|p| p.0 == x) { p.1 += r; } else { per.push((x, r)); } }
+                        for (x, r) in per {
+                            let v = if x == pt && banded { (rect * 4096.0 - 1e-7).ceil() / 4096.0 + (r - rect) } else { r };
+                            piece_part[x] += v; piece_exact[x] += r;
+                        }
+                    }
                 }
                 for x in 0..w {
                     if piece_part[x] != 0.0 || piece_exact[x] != 0.0 {
                         let span = std::env::var("CG_PIECE_SPAN").unwrap_or_else(|_| "exact".to_string());
-                        row[x] += if span == "exact" && close_part[x] != 0.0 { piece_exact[x] } else { piece_part[x] };
+                        row[x] += if close_part[x] != 0.0 {
+                            match span.as_str() {
+                                "diff" if !c_other[x] => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; c(o_rect[x] - c_rect[x]) + o_tri[x] - c_tri[x] + c_rect[x] + c_tri[x] }
+                                "diffr" if !c_other[x] => { let r = |v: f64| (v * 4096.0).round() / 4096.0; r(o_rect[x] - c_rect[x]) + o_tri[x] - c_tri[x] + c_rect[x] + c_tri[x] }
+                                "diffall" if !c_other[x] => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; c(o_rect[x] + o_tri[x] - c_rect[x] - c_tri[x]) + c_rect[x] + c_tri[x] }
+                                "exact" | "diff" | "diffr" | "diffall" => piece_exact[x],
+                                _ => piece_part[x],
+                            }
+                        } else { piece_part[x] };
                     }
                     let (o, c) = (open_part[x], close_part[x]);
                     if o != 0.0 && c == 0.0 {

@@ -277,6 +277,27 @@ of a level of the boundary.
 
   Corpus fills are wrong on 5 of 1625, 13 of 3285 and 11 of 5011 edge
   pixels at 1×, 2× and 3× (99.6–99.8% exact).
+- **The band rule (19:30Z), which generalizes the piece rule.** Per band
+  and per opening edge, let h be the height of the edge's part in the band
+  and x_top its x at the band's top, and let P be the pixel holding
+  x_top. P gets `ceil(h · (W_P − x_top))` plus the rest of its exact area;
+  other pixels are exact.
+  - Found with start pieces that cross a column (`crossfit.py`: 40 of 40).
+    The lower pixel is exact; the upper one rounds the whole band's
+    rectangle.
+  - Closing edges are exact, and a pixel shared with a closing piece in the
+    same band is exact.
+
+  Results:
+
+  | Case | Wrong |
+  | --- | --- |
+  | Suite | 97 |
+  | Triangles | 40 |
+  | Two subpaths | 46 |
+  | Dense polygons | 0, 0, 0 |
+  | Glyphs (Rg&8, Qa@, 11 px, Sg, AXWNZ) | 1, 2, 7, 1, 0 |
+  | Wedges (side, bottom, top) | 1 / 3744, 6 / 2253, 0 / 2640 |
 - **What's left (older notes, before the piece rule):**
   - **Sloped edges at a vertex inside the row.** Axis-aligned L-shapes are
     exact (0 of 93,329 swept pixels, `lshape.py`), and top vertices of
