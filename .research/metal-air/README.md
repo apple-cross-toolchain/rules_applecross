@@ -52,3 +52,20 @@ The plan, sent to the Manager:
 - **M3:** graphics functions.
 - **M4:** replace the relax_metal stub.
 - **M5:** widen.
+
+## Clean-room provenance
+
+- The approach (rewrite MSL into C++, compile with clang 15 for typed
+  pointers, add the AIR metadata) comes from a friend of Logan's who built
+  this for a subset he needs. His code was not shared; he answered
+  questions only.
+- He learned the AIR metadata black-box (probe shaders, `llvm-dis`, `xcrun
+  metal`) and by "observing Apple's libraries", which he says meant mostly
+  the `metal_stdlib` headers.
+- This work does not read or copy those headers. Its stdlib subset is
+  written from observed behaviour (the AIR Xcode emits for our own probe
+  shaders) and Apple's public Metal Shading Language Specification.
+- The metallib format is learned from Xcode's output for our own probe
+  shaders only.
+- Measurement corpus: Logan's projects, plus public, permissively licensed
+  shader projects downloaded to /tmp for measurement and never committed.
