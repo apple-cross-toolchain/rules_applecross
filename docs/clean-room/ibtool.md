@@ -3039,9 +3039,12 @@ white and RGB (4 and 2) archive their components as `%.10g` text (`NSWhite`
 or `NSRGB`, ending in a NUL), alpha only when not 1. Custom colour spaces
 (sRGB, gamma 2.2 grey, Display P3) archive the components converted to
 calibrated ones, the colour space with its profile, the original
-components, and `NSLinearExposure` (`0` or `1`). That last value is fixed
-for each colour, whatever its order in the document, but no rule for it
-has been found (40 probes), so they are refused.
+components (alpha always), and `NSLinearExposure` (`0` or `1`). For sRGB
+(about 60 probes) the conversion is the one `colorsync` models, and the
+exposure is `1` exactly when all four components are multiples of 1/255,
+as Interface Builder's colour picker makes them. For gamma 2.2 grey the
+exposure follows no rule found yet (0.1 and 0.25 give 1, 0.123 gives 0),
+so grey and Display P3 colours are refused.
 
 **Container views** (seven probes). A container view is a plain view.
 Its embed segue makes the parent controller hold an

@@ -2231,9 +2231,11 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
             Object::new("NSColor", vec![("NSColorSpace", Value::Int(space)), (key, Value::Data(bytes))])
         }));
     }
-    // Custom colour spaces (sRGB, gamma 2.2 grey, Display P3) also archive
-    // `NSLinearExposure`, which varies with the colour in a way not
-    // established (40 probes).
+    if n.attribute("colorSpace") == Some("custom") && n.attribute("customColorSpace") == Some("sRGB") {
+        return srgb_color(nib, n);
+    }
+    // Gamma 2.2 grey and Display P3 also archive `NSLinearExposure`, which
+    // for grey follows no rule found yet (60 probes).
     if n.attribute("colorSpace") == Some("custom") {
         return fail(format!(
             "a colour in the {} colour space is not supported by this ibtool",
@@ -2262,6 +2264,62 @@ fn general(x: f64, digits: i32) -> String {
     }
 }
 
+/// Generic Gray Gamma 2.2's or sRGB's colour space, its profile embedded,
+/// one object in a nib.
+fn color_space(nib: &mut Nib, gray: bool) -> Result<Value, String> {
+    if let Some(existing) = nib.shared.get(&format!("colorspace:{gray}")) {
+        return Ok(reference(existing.clone()));
+    }
+    let icc = profile(gray)?;
+    let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(icc))]));
+    let values = if gray {
+        vec![("NSID", Value::Int(9)), ("NSModel", Value::Int(0)), ("NSICC", data)]
+    } else {
+        vec![("NSID", Value::Int(7)), ("NSICC", data)]
+    };
+    Ok(nib.shared(format!("colorspace:{gray}"), || Object::new("NSColorSpace", values)))
+}
+
+/// A custom sRGB colour (about 60 probes): its components converted to
+/// calibrated RGB as `%.10g` text (alpha when not 1), the sRGB colour space,
+/// its own components (alpha always), and `NSLinearExposure`: `1` when all
+/// four components are multiples of 1/255, as Interface Builder's colour
+/// picker makes them, `0` otherwise.
+fn srgb_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("key", None),
+            ("red", None),
+            ("green", None),
+            ("blue", None),
+            ("alpha", None),
+            ("colorSpace", Some("custom")),
+            ("customColorSpace", Some("sRGB")),
+        ],
+    )?;
+    let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?];
+    let rgb = crate::colorsync::srgb_to_generic([c[0], c[1], c[2]])?;
+    let mut text: Vec<String> = rgb.iter().map(|&x| general(x, 10)).collect();
+    if c[3] != 1.0 {
+        text.push(general(c[3], 10));
+    }
+    let mut rgb_bytes = text.join(" ").into_bytes();
+    rgb_bytes.push(0);
+    let components: Vec<String> = c.iter().map(|&x| general(x, 10)).collect();
+    let eight_bit = c.iter().all(|&x| ((x * 255.0).round() / 255.0) as f32 == x as f32);
+    let space = color_space(nib, false)?;
+    let key = format!("color:srgb:{c:?}");
+    let values = vec![
+        ("NSColorSpace", Value::Int(1)),
+        ("NSRGB", Value::Data(rgb_bytes)),
+        ("NSCustomColorSpace", space),
+        ("NSComponents", Value::Data(components.join(" ").into_bytes())),
+        ("NSLinearExposure", Value::Data(if eight_bit { b"1".to_vec() } else { b"0".to_vec() })),
+    ];
+    Ok(nib.shared(key, || Object::new("NSColor", values)))
+}
+
 /// A System catalog colour by name.
 fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (white, components): (Option<&str>, &str) = match name {
@@ -2276,19 +2334,7 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
         return Ok(reference(existing.clone()));
     }
     let gray = white.is_some();
-    let space = match nib.shared.get(&format!("colorspace:{gray}")) {
-        Some(existing) => reference(existing.clone()),
-        None => {
-            let icc = profile(gray)?;
-            let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(icc))]));
-            let values = if gray {
-                vec![("NSID", Value::Int(9)), ("NSModel", Value::Int(0)), ("NSICC", data)]
-            } else {
-                vec![("NSID", Value::Int(7)), ("NSICC", data)]
-            };
-            nib.shared(format!("colorspace:{gray}"), || Object::new("NSColorSpace", values))
-        }
-    };
+    let space = color_space(nib, gray)?;
     let nul = |s: &str| {
         let mut b = s.as_bytes().to_vec();
         b.push(0);
