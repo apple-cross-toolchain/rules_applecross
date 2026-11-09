@@ -945,6 +945,22 @@ fn system_image(nib: &mut Nib, name: &str, size: &str) -> Value {
     })
 }
 
+/// An image from the app's catalogs, named in a control: an
+/// `NSCustomResource` of the size the document's resources give. AppKit's
+/// own images (namespace `system`) aren't established.
+fn catalog_image(nib: &mut Nib, n: Node, image: &str) -> Result<Value, String> {
+    if image.starts_with("NS") {
+        return fail(format!("AppKit's image {image} in a control is not supported by this ibtool"));
+    }
+    let resource = n
+        .document()
+        .descendants()
+        .find(|d| d.has_tag_name("image") && d.parent_element().is_some_and(|p| p.has_tag_name("resources")) && d.attribute("name") == Some(image))
+        .ok_or_else(|| format!("the image {image} without its size in the document's resources"))?;
+    let size = format!("{{{}, {}}}", g(number(attr(resource, "width")?)?), g(number(attr(resource, "height")?)?));
+    Ok(system_image(nib, image, &size))
+}
+
 /// A key equivalent's modifiers, as NSEvent's flags: shift 1 << 17,
 /// control 1 << 18, option 1 << 19, command 1 << 20; without a mask, command
 /// for an item with a key equivalent.
@@ -2187,6 +2203,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("enabled", Some("NO")),
             ("selectedItem", None),
             ("arrowPosition", None),
+            ("image", None),
         ],
     )?;
     if !popup && ["enabled", "selectedItem", "arrowPosition"].iter().any(|a| cell.attribute(*a).is_some()) {
@@ -2243,6 +2260,12 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let (aux, image_source) = match (behaviors.as_slice(), kind) {
         (["lightByBackground", "lightByGray", "pushIn"], _) => (7, None),
         (["lightByBackground", "lightByGray"], "push" | "bevel") if popup => (0, None),
+        // AppKit's button types for other behaviours, whatever the type
+        // (six probes).
+        (["lightByContents"], _) if !popup => (5, None),
+        (["changeBackground", "changeGray", "lightByBackground", "lightByGray"], _) if !popup => (6, None),
+        (["changeBackground", "changeGray", "lightByBackground", "lightByGray", "pushIn"], _) if !popup => (1, None),
+        (["changeContents", "lightByContents"] | ["lightByBackground", "lightByGray"] | ["lightByContents", "pushIn"], kind) if !popup && kind != "check" && kind != "radio" => (0, None),
         (["changeContents", "doesNotDimImage", "lightByContents"], "check") => (3, Some("NSSwitch")),
         (["changeContents", "doesNotDimImage", "lightByContents"], "radio") => (4, Some("NSRadioButton")),
         _ => return fail(format!("a {kind} button behaving as {} is not supported by this ibtool", behaviors.join(" "))),
@@ -2360,6 +2383,13 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         ("NSButtonFlags2", Value::Int(signed(flags_b2))),
         ("NSBezelStyle", Value::Int(bezel)),
     ];
+    // Its image, before its alternate's (three probes).
+    if let Some(image) = cell.attribute("image") {
+        if image_source.is_some() {
+            return fail("a check box's or radio button's image is not supported by this ibtool");
+        }
+        cell_values.push(("NSNormalImage", catalog_image(nib, cell, image)?));
+    }
     if let Some(image) = image_source {
         let image_name = nib.string(image);
         cell_values.push(("NSAlternateImage", Value::New(Object::new("NSButtonImageSource", vec![("NSImageName", image_name)]))));
@@ -2855,16 +2885,7 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     let flags2 = alignment_bits << 26 | if refuses { 0x200_0000 } else { 0 };
     let mut cell_values = vec![("NSCellFlags", Value::Int(0)), ("NSCellFlags2", Value::Int(flags2))];
     if let Some(image) = cell.attribute("image") {
-        if image.starts_with("NS") {
-            return fail(format!("AppKit's image {image} in an image view is not supported by this ibtool"));
-        }
-        let resource = n
-            .document()
-            .descendants()
-            .find(|d| d.has_tag_name("image") && d.parent_element().is_some_and(|p| p.has_tag_name("resources")) && d.attribute("name") == Some(image))
-            .ok_or_else(|| format!("the image {image} without its size in the document's resources"))?;
-        let size = format!("{{{}, {}}}", g(number(attr(resource, "width")?)?), g(number(attr(resource, "height")?)?));
-        cell_values.push(("NSContents", system_image(nib, image, &size)));
+        cell_values.push(("NSContents", catalog_image(nib, n, image)?));
     }
     cell_values.push(("NSControlView", reference(name.clone())));
     let align = match cell.attribute("imageAlignment") {

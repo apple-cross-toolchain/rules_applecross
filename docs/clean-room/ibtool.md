@@ -2853,8 +2853,14 @@ image scaling in bits 6 and 7 and the key equivalent's modifiers from bit
 8; the bezel style; the check box's and radio button's
 `NSButtonImageSource` (`NSSwitch`, `NSRadioButton`); alternate title, key
 equivalent, a periodic delay of 400 and interval of 75; and
-`NSAuxButtonType` (7 for a momentary push button, 3 a check box, 4 a radio
-button). The other button types and the inline bezel are refused.
+`NSAuxButtonType`: AppKit's button type for its behaviour, whatever the
+`type` says (7 pushing in and lighting by background and gray, 5 lighting
+by contents, 6 changing and lighting by background and gray, 1 the same
+pushing in, 0 for changing and lighting by contents, lighting by
+background and gray, or pushing in and lighting by contents; a check box 3
+and a radio button 4). A catalog image is `NSNormalImage`, after the bezel
+style. The other behaviours, AppKit's own images and the inline bezel are
+refused.
 
 **Boxes** (about 30 probes). A separator or a custom box: `NSBox`'s view
 keys, then `NSOffsets` (`{5, 5}` for a separator, `{0, 0}` otherwise),
