@@ -14,7 +14,42 @@ def seg_dirs(s):
 def seg_len(s):
     if s[0]=='l': return math.dist(s[1],s[2])
     q=s[1:]; return sum(math.dist(bez(q,i/16),bez(q,(i+1)/16)) for i in range(16))
+def _sub(q,a,b):
+    from offs6 import sub
+    return sub(q,a,b)
+def _accept(q,d):
+    from offs import off
+    c=_piece(q,d)
+    if c is None: return False
+    from bnd5 import flat_ts
+    ts=flat_ts(q,0.05/0.75) or [0.5]
+    C=[bez(c,k/64) for k in range(65)]
+    return max(min(math.dist(off(q,t,d),p) for p in C) for t in ts)<=0.1
+def _piece(q,d):
+    r=seg_off_one(('c',)+tuple(q),d)
+    if r is None: return None
+    e=r[0]; u0,_=seg_dirs(('c',)+tuple(q))
+    p0=(q[0][0]-u0[1]*d,q[0][1]+u0[0]*d)
+    return [p0,e[1],e[2],e[3]]
+SPLIT=True
+ACCEPT_ALL=True
 def seg_off(s,d):
+    if s[0]=='l' or not SPLIT: return seg_off_one(s,d)
+    from offs5 import inflections
+    q=list(s[1:])
+    try: ti=[t for t in inflections(q) if 1e-6<t<1-1e-6]
+    except Exception: ti=[]
+    cuts=[0.0]+ti+[1.0]
+    out=[]
+    def rec(a,b,depth=0):
+        sq=_sub(q,a,b)
+        try: ok=depth>=6 or ACCEPT_ALL or _accept(sq,d)
+        except Exception: ok=True
+        if ok: out.extend(seg_off_one(('c',)+tuple(sq),d) or [])
+        else: rec(a,(a+b)/2,depth+1); rec((a+b)/2,b,depth+1)
+    for a,b in zip(cuts,cuts[1:]): rec(a,b)
+    return out
+def seg_off_one(s,d):
     # elements for offset of s on the left side at distance d, excluding the start point
     if s[0]=='l':
         u=S1.unit(s[1],s[2]); n=(-u[1]*d,u[0]*d); return [('l',(s[2][0]+n[0],s[2][1]+n[1]))]

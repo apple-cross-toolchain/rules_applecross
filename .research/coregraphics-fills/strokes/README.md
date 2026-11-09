@@ -43,6 +43,36 @@ polylines with every join and cap (`strokecmp.py SEED N CLOSED JOIN CAP`):
 - With this, my own outlines of the corpus strokes that need no split fill
   to 2, 1 and 0 wrong pixels (of 5,058, 12,435 and 19,428 edge pixels) at
   1×, 2× and 3× (corpstroke2.py).
-- CoreGraphics also pre-splits the source curve. The split points are the
-  same on both sides and don't depend on width or scale; the rule is not
-  found yet.
+## Curve splits: partly known
+
+- Convex curves (no inflection) are halved at ½, recursively, while a
+  piece fails an acceptance test. The tolerance is about 0.1 px,
+  absolute. At near-zero width the true maximum distance between the
+  refit and the curve at measured boundaries is 0.1001–0.1062, so
+  CoreGraphics' estimate is a little below the true maximum. No sample set
+  or projection I tried gives exactly 0.1 at every boundary (bnd*.py).
+- Curves with a control point on an endpoint split dyadically toward that
+  end (½, ¾, ⅞).
+- Antisymmetric S-curves split at their inflection (½), then dyadically.
+  Asymmetric inflected curves are pre-split at points that are not the
+  inflection, a tangent-parallel point, or an approximate inflection
+  formula. That rule is not found.
+- Tiny, nearly straight halves come out with coincident control points,
+  (P1+P2)/2 offset by d, as straight cubics do.
+
+With splits only at inflections (`stroke2.py`, ACCEPT_ALL), the corpus
+blocks that need splits are: icon-setting exact; bubble tail 16 and 32,
+userAvatar 79 and 185, icon-add 50 and 103 wrong pixels at 1× and 2×.
+
+## Thin strokes (w ≤ 1)
+
+- Axis-aligned lines take their own path: coverage per axis in 1/256,
+  with the band's low edge floored and its high edge ceiled; alpha =
+  floor(hx·vy/256) − 1 (`thinsweep.py`).
+- Sloped lines narrower than 1 are roughly the width-1 result scaled by
+  floor(256·w)/256 (90% of pixels; the rest are near zero).
+- Sloped width-1 lines: each interior column totals floor(256·secθ)
+  exactly, but the split between rows differs from area by up to ±2, and
+  a 1/256 translation sweep jitters step by step. That looks like
+  fixed-point area arithmetic I haven't identified.
+- The corpus has one thin block (logo-open live, w = 1.0 at 1×).
