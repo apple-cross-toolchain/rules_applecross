@@ -14,6 +14,10 @@ pub enum Value {
     New(Object),
     /// An object encoded earlier, by name.
     Ref(String),
+    /// An object by name, never defined here even if not encoded yet (an
+    /// AppKit nib's conditional references, as a menu item's to its menu):
+    /// resolved once everything is encoded.
+    Conditional(String),
 }
 
 pub struct Object {
@@ -131,6 +135,14 @@ impl Encoder {
                 Value::Data(d) => Stored::Data(d),
                 Value::Nil => Stored::Nil,
                 Value::New(child) => Stored::Object(self.encode(child)),
+                Value::Conditional(name) => match self.names.get(&name) {
+                    Some(&n) => Stored::Object(n),
+                    None => {
+                        let at = self.objects[me as usize].2.len();
+                        self.pending.push((me, at, name));
+                        Stored::Object(u32::MAX)
+                    }
+                },
                 Value::Ref(name) => match self.names.get(&name) {
                     Some(&n) => Stored::Object(n),
                     None if self.defs.contains_key(&name) => {
@@ -163,8 +175,20 @@ fn varint(out: &mut Vec<u8>, mut v: usize) {
 }
 
 /// The nib of `root`; an error if something refers to an object it doesn't
-/// hold (as an outlet to an object the document doesn't have).
-pub fn archive(mut root: Object) -> Result<Vec<u8>, String> {
+/// hold (as an outlet to an object the document doesn't have). A UIKit nib
+/// ends with `LNE\0`.
+pub fn archive(root: Object) -> Result<Vec<u8>, String> {
+    let mut out = archive_tables(root)?;
+    out.extend_from_slice(b"LNE\0");
+    Ok(out)
+}
+
+/// An AppKit nib: the tables alone, without UIKit's trailer.
+pub fn archive_appkit(root: Object) -> Result<Vec<u8>, String> {
+    archive_tables(root)
+}
+
+fn archive_tables(mut root: Object) -> Result<Vec<u8>, String> {
     let mut defs = HashMap::new();
     lift(&mut root.values, &mut defs);
     let mut e = Encoder { objects: Vec::new(), keys: Vec::new(), key_index: HashMap::new(), names: HashMap::new(), pending: Vec::new(), defs };
@@ -294,6 +318,5 @@ pub fn archive(mut root: Object) -> Result<Vec<u8>, String> {
     out.extend(keys);
     out.extend(values);
     out.extend(class_table);
-    out.extend_from_slice(b"LNE\0");
     Ok(out)
 }

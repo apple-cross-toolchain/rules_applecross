@@ -19,19 +19,19 @@ pub struct Compiled {
     pub files: Vec<(String, Vec<u8>)>,
 }
 
-fn fail<T>(msg: impl Into<String>) -> Result<T, String> {
+pub(crate) fn fail<T>(msg: impl Into<String>) -> Result<T, String> {
     Err(msg.into())
 }
 
-fn attr<'a>(n: Node<'a, '_>, name: &str) -> Result<&'a str, String> {
+pub(crate) fn attr<'a>(n: Node<'a, '_>, name: &str) -> Result<&'a str, String> {
     n.attribute(name).ok_or_else(|| format!("<{}> has no {name} attribute", n.tag_name().name()))
 }
 
-fn children<'a, 'i>(n: Node<'a, 'i>, tag: &'a str) -> impl Iterator<Item = Node<'a, 'i>> + 'a {
+pub(crate) fn children<'a, 'i>(n: Node<'a, 'i>, tag: &'a str) -> impl Iterator<Item = Node<'a, 'i>> + 'a {
     n.children().filter(move |c| c.is_element() && c.tag_name().name() == tag)
 }
 
-fn child<'a, 'i>(n: Node<'a, 'i>, tag: &'a str, key: &str) -> Option<Node<'a, 'i>> {
+pub(crate) fn child<'a, 'i>(n: Node<'a, 'i>, tag: &'a str, key: &str) -> Option<Node<'a, 'i>> {
     children(n, tag).find(|c| c.attribute("key") == Some(key))
 }
 
@@ -45,7 +45,7 @@ const EDITOR_ONLY: [&str; 9] = [
     "splitViewMasterSimulatedSizeMetrics",
 ];
 
-fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
+pub(crate) fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
     for c in n.children().filter(|c| c.is_element()) {
         let editor_only = matches!(n.tag_name().name(), "viewController" | "tableViewController" | "collectionViewController" | "navigationController")
             && (EDITOR_ONLY.contains(&c.tag_name().name()) || c.has_tag_name("nil") && c.attribute("key").is_some_and(|k| k.starts_with("simulated")));
@@ -71,7 +71,7 @@ fn only_children(n: Node, allowed: &[&str]) -> Result<(), String> {
 
 /// Refuses attributes other than `allowed`, and values other than those
 /// given (a `None` value accepts any).
-fn only_attributes(n: Node, allowed: &[(&str, Option<&str>)]) -> Result<(), String> {
+pub(crate) fn only_attributes(n: Node, allowed: &[(&str, Option<&str>)]) -> Result<(), String> {
     // An object's name in Interface Builder's outline, and its warnings that
     // a view is misplaced or ambiguous; not compiled.
     // A bar button item's custom view, or a navigation item's title view,
@@ -90,7 +90,7 @@ fn only_attributes(n: Node, allowed: &[(&str, Option<&str>)]) -> Result<(), Stri
     Ok(())
 }
 
-fn number(s: &str) -> Result<f64, String> {
+pub(crate) fn number(s: &str) -> Result<f64, String> {
     s.parse::<f64>().map_err(|_| format!("not a number: {s}"))
 }
 

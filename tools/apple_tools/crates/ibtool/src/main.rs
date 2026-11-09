@@ -1,6 +1,7 @@
 //! Clean-room `ibtool` for Linux: `--compilation-directory`, `--link` and
 //! `--compile`; see docs/clean-room/ibtool.md.
 
+mod appkit;
 mod colorsync;
 mod fonts;
 mod nib;
@@ -102,6 +103,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         let xml = std::fs::read_to_string(input).map_err(|e| format!("{}: {e}", input.display()))?;
         let localizable = input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"));
+        // An AppKit xib.
+        if xml.contains("type=\"com.apple.InterfaceBuilder3.Cocoa.XIB\"") {
+            return match appkit::compile_xib(&xml, module.as_deref(), localizable) {
+                Ok(nib) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
+                Err(e) => skip(format!("{}: {e}", input.display())),
+            };
+        }
         // Deploying before iOS 8: a nib directory for each idiom, beside
         // the nib asked for (`X~iphone.nib/runtime.nib`, ...).
         match xib::compile_idioms(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable, &devices) {
@@ -137,7 +145,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             skip(format!("{}: a tvOS storyboard compiled for devices other than a TV is not compiled by Xcode's ibtool", input.display()))?;
             continue;
         }
-        let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
+        let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB\"") {
+            appkit::compile_storyboard(&xml, module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj")))
+        } else if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml, module.as_deref())
         } else {
             storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files)

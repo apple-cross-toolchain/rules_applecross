@@ -291,6 +291,7 @@ draw the icon from its layers:
 | `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
 | `relax_docc` | `RULES_APPLECROSS_RELAX_DOCC` | DocC archives with swift.org's render template, where the SDK archive lacks Xcode's |
 | `relax_ibtool` | `RULES_APPLECROSS_RELAX_IBTOOL` | Interface Builder files this ibtool can't reproduce, left uncompiled |
+| `relax_ibtool_layout` | `RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT` | AppKit controls Auto Layout sizes by their content, which Xcode lays out again as it compiles, compiled with the document's frames |
 | `relax_momc` | `RULES_APPLECROSS_RELAX_MOMC` | Core Data models with several versions or a derived attribute, whose `VersionInfo.plist` has no entity version hashes or checksums, without the `.omo` Xcode writes beside a versioned model's current version; generated classes whose header doesn't name the user and the date |
 | `relax_pngcrush` | `RULES_APPLECROSS_RELAX_PNGCRUSH` | iOS PNG resources this pngcrush can't make Xcode's iPhone-optimized PNG of (other than 8-bit RGB and RGBA), copied as they are |
 | `relax_metal` | `RULES_APPLECROSS_RELAX_METAL` | Metal shaders, as an empty library (they fail at run time; bundling on a Mac compiles them) |
