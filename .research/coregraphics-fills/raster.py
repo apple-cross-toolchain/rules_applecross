@@ -55,10 +55,20 @@ def edge_pieces(p0,p1,vy=None,start_x=None):
         if rows: ky,kx=rows[-1]; tx_end=kx+q((ty-ky)*mr,ENDQ)
         else: tx_end=bx+q((ty-by)*mr,ENDQ)
     else: tx_end=tx
+    ty_end=ty
+    if END=='RC' or END=='RCf':
+        mr=q((tx-bx)/(ty-by),'trunc')
+        if abs(tx-bx)<=abs(ty-by):
+            if rows: ky,kx=rows[-1]; tx_end=kx+q((ty-ky)*mr,ENDQ)
+            else: tx_end=bx+q((ty-by)*mr,ENDQ)
+        else:
+            mc=q((ty-by)/abs(tx-bx),'trunc'); tx_end=tx
+            if cols: kx,ky=cols[-1]; ty_end=ky+q(abs(tx-kx)*mc,ENDQ)
+            else: ty_end=by+q(abs(tx-bx)*mc,ENDQ)
     global LAST_END
     LAST_END=tx_end
     colmap=dict(cols)
-    ends=[(bx,by)]+[(x,y) for y,x in rows]+[(tx_end,ty)]
+    ends=[(bx,by)]+[(x,y) for y,x in rows]+[(tx_end,ty_end)]
     if BANDS is not None and BREAKS:
         mr=q((tx-bx)/(ty-by),'trunc'); extra=[]
         for yv in BREAKS:

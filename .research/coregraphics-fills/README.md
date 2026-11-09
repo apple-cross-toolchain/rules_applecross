@@ -88,11 +88,31 @@ of a level of the boundary.
   Float and 16-bit contexts, and partial-alpha fills, show only the 8-bit
   coverage (`covf.swift`, `cova.swift`), so the probes see nothing finer.
 
+- **Clipping.** The clip path becomes an 8-bit mask by the same
+  rasterizer. The fill is clipped to the mask's integer bounding box,
+  rasterized, and combined as `(a · b + 127) // 255`: 1 of 451 pixels
+  wrong (`covc.swift`).
+- **Strokes.** A stroke wider than 1 device pixel is exactly the nonzero
+  fill of `CGPath.copy(strokingWithWidth:lineCap:lineJoin:miterLimit:)`:
+  60 of 60 random polylines and curves, every join and cap
+  (`strokeq.swift`). That public call shows the outline element by element
+  (`outline.swift`): exact double offsets, per-segment rectangles stitched
+  with join wedges into one self-overlapping polygon, round joins and caps
+  as cubics, and curves offset as cubics (two per side for a simple curve).
+  A stroke 1 px wide or less, including exactly 1, takes another rasterizer.
+- **Corpus PDFs.** `pdfpaths.swift` walks a page with `CGPDFScanner`,
+  including form XObjects, and prints each fill in device pixels. Over the
+  26 PDFs left in the corpus's working directory at 2×, the model gets
+  1632 of 1687 fill edge pixels right (`pdffills.py`). Every one of those
+  icons also uses strokes and clips.
+
 ## Remaining before exact fills
 
 - The vertex-row residual above. It matters most for curves.
-- Strokes: joins, caps, dashes, curve offsets, and the thin-stroke path.
-- Clipping paths, gradients and images in PDFs, and CoreSVG for SVGs.
+- Stroke outlines: reproduce `copy(strokingWithWidth:)` (curve offsetting,
+  joins, caps, dashes) against the API's own output, and the thin-stroke
+  rasterizer.
+- Gradients and images in PDFs, and CoreSVG for SVGs.
 - A Rust implementation in actool, checked against `cov` and then against
   Xcode on the corpus's 46 PDF-only catalogs.
 
@@ -110,6 +130,9 @@ of a level of the boundary.
 - `glyphs.swift`, `pathcmp.py`: glyph outlines as paths, compared with the
   model. `covs.swift`: strokes. `covf.swift`, `cova.swift`: float, 16-bit and
   partial-alpha probes.
+- `pdfpaths.swift`, `pdffills.py`: corpus PDFs' fills against the model.
+  `covc.swift`: clips. `strokeq.swift`, `outline.swift`: strokes against
+  their outlines, and the outlines themselves.
 - `ell.py`, `curves.py`, `multi.py`, `wedge2.py`, `genshallow.py`,
   `bias.py`, `vprobe.py`, `perturb.py`: probes for ellipses, curves,
   overlapping subpaths, wedges, shallow edges, the vertex-row bias, vertex
