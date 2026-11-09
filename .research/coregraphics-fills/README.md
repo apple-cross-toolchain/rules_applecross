@@ -106,6 +106,21 @@ of a level of the boundary.
   1632 of 1687 fill edge pixels right (`pdffills.py`). Every one of those
   icons also uses strokes and clips.
 
+- **Rust prototype** (`rust/`). `cgfill.rs` is the model in Rust: integer
+  1/4096 steppers, the band sweep, and flattening. It reproduces `raster.py`
+  (triangles 17, Rg&8 54, overlaps 26, n-gons 57 wrong) and runs every
+  suite in about a second (`rsc.py`). `cgfill_base.rs` is the same with
+  environment knobs for the experiments. In it, these all scored no better
+  than the model: outward, inward, ceil or round for the first crossings,
+  ends and band points; band points on the polyline; and flattening by
+  other measures, tolerances, or uniform halving.
+- **Corpus strokes.** CG's outline filled by the model gets 6588 of 6884
+  stroke edge pixels right (`pdfstrokes.py`). Straight strokes are exact;
+  the misses are on curves.
+- **Thin strokes.** A thin axis-aligned stroke follows the rectangle fast
+  path exactly. A thin diagonal one is within ±1 of the 1 px outline's fill
+  along its length, but its ends differ (`thin.swift`).
+
 ## Remaining before exact fills
 
 - The vertex-row residual above. It matters most for curves.
