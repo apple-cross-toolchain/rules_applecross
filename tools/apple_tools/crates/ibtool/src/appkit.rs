@@ -21,6 +21,8 @@ struct Nib {
     localizable: bool,
     /// Whether the document is a storyboard.
     storyboard: bool,
+    /// The views constraints refer to (`constrained`).
+    constrained: std::collections::HashSet<String>,
 }
 
 impl Nib {
@@ -164,8 +166,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask", "subviews", "constraints"])?;
-    let id = attr(n, "id")?;
-    let name = object_name(id);
+    let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = Vec::new();
     let class = runtime_class_name(n, module, "NSView")?;
@@ -175,19 +176,27 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     } else if class != "NSView" {
         return fail("a custom class on a plain view is not supported by this ibtool");
     }
-    values.push(("NSNextResponder", next_responder.map_or(Value::Nil, reference)));
+    values.extend(view_values(nib, c, n, module, &name, parent, next_responder)?);
+    Ok(Value::New(Object::new(if swapped { "NSClassSwapper" } else { "NSView" }, values).named(name)))
+}
+
+/// The keys every view archives, in order, from its next responder to its
+/// clipping; its subviews and constraints join the objects' list.
+fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, name: &str, parent: &str, next_responder: Option<&str>) -> Result<Vec<(&'static str, Value)>, String> {
+    let mut values = Vec::new();
+    values.push(("NSNextResponder", next_responder.map_or(Value::Nil, |r| reference(r.to_string()))));
     values.push(("NSNibTouchBar", Value::Nil));
     values.push(("NSvFlags", Value::Int(256 | autoresizing_mask(n)?)));
-    // Its subviews, then its frame (a template's text field; plain views
-    // alone so far).
+    // Its subviews, then its frame.
     let subviews: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
     if !subviews.is_empty() {
         let mut items = Vec::new();
         for s in subviews {
-            if !matches!(s.tag_name().name(), "view" | "customView") {
-                return fail(format!("a subview <{}> is not supported by this ibtool", s.tag_name().name()));
-            }
-            items.push(view(nib, c, s, module, &name, Some(&name))?);
+            items.push(match s.tag_name().name() {
+                "view" | "customView" => view(nib, c, s, module, name, Some(name))?,
+                "textField" => text_field(nib, c, s, module, name)?,
+                other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
+            });
         }
         values.push(("NSSubviews", nib.array("NSMutableArray", items)));
     }
@@ -204,17 +213,28 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         values.push(("NSViewIsLayerTreeHost", Value::Bool(true)));
     }
     values.push(("NSViewWantsBestResolutionOpenGLSurface", Value::Bool(true)));
-    if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() {
+    if n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id)) {
         values.push(("NSDoNotTranslateAutoresizingMask", Value::Bool(true)));
     }
     // Its constraints follow its subviews' in the objects' list.
-    if let Some(constraints) = view_constraints(nib, c, n, &name)? {
+    if let Some(constraints) = view_constraints(nib, c, n, name)? {
         values.push(("NSViewConstraints", constraints));
+    }
+    // Content hugging (250 each but as given) and compression resistance
+    // (750), when either is given, as strings.
+    let pair = |h: &str, v: &str, default: &str| -> Option<String> {
+        (n.attribute(h).is_some() || n.attribute(v).is_some()).then(|| format!("{{{}, {}}}", n.attribute(h).unwrap_or(default), n.attribute(v).unwrap_or(default)))
+    };
+    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", "250") {
+        values.push(("NSHuggingPriority", nib.string(&p)));
+    }
+    if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", "750") {
+        values.push(("NSAntiCompressionPriority", nib.string(&p)));
     }
     values.push(("IBNSSafeAreaLayoutGuide", Value::Nil));
     values.push(("IBNSLayoutMarginsGuide", Value::Nil));
     values.push(("IBNSClipsToBounds", Value::Int(0)));
-    Ok(Value::New(Object::new(if swapped { "NSClassSwapper" } else { "NSView" }, values).named(name)))
+    Ok(values)
 }
 
 /// The constraints a view holds, in the order CoreFoundation's hash table
@@ -790,8 +810,22 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
     nib::archive_appkit(Object::new("NSObject", vec![("IB.objectdata", Value::New(data)), ("IB.systemFontUpdateVersion", Value::Int(1))]))
 }
 
-fn new_nib(localizable: bool, storyboard: bool) -> Nib {
-    Nib { shared: HashMap::new(), next: 0, localizable, storyboard }
+fn new_nib(doc: &Document, localizable: bool, storyboard: bool) -> Nib {
+    Nib { shared: HashMap::new(), next: 0, localizable, storyboard, constrained: constrained(doc) }
+}
+
+/// The ids of the views constraints position: their items, and the view
+/// holding one without a first item. Only such a view that doesn't
+/// translate its mask says so (`NSDoNotTranslateAutoresizingMask`; a
+/// constrained probe's subview, a text field's template unconstrained).
+fn constrained(doc: &Document) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for k in doc.descendants().filter(|d| d.has_tag_name("constraint")) {
+        let owner = k.parent().and_then(|p| p.parent()).and_then(|v| v.attribute("id"));
+        ids.extend(k.attribute("firstItem").or(owner).map(str::to_string));
+        ids.extend(k.attribute("secondItem").map(str::to_string));
+    }
+    ids
 }
 
 fn new_collected(sources: Vec<String>) -> Collected {
@@ -807,7 +841,7 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
     }
     only_children(root, &["dependencies", "objects", "resources"])?;
     let objects_node = children(root, "objects").next().ok_or("a xib without objects")?;
-    let mut nib = new_nib(localizable, false);
+    let mut nib = new_nib(&doc, localizable, false);
     let mut c = new_collected(vec!["-2".into()]);
     let mut owner = None;
     let mut application = None;
@@ -988,7 +1022,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
 fn main_menu(doc: &Document, application: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
     only_attributes(application, &[("id", None), ("sceneMemberID", None)])?;
     only_children(application, &["menu", "connections"])?;
-    let mut nib = new_nib(localizable, true);
+    let mut nib = new_nib(doc, localizable, true);
     let app_id = attr(application, "id")?;
     let mut c = new_collected(vec![app_id.to_string()]);
     let root_name = object_name("root");
@@ -1066,7 +1100,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     if !others.is_empty() {
         return fail("objects beside a window controller are not supported by this ibtool");
     }
-    let mut nib = new_nib(localizable, true);
+    let mut nib = new_nib(doc, localizable, true);
     let wc_id = attr(wc, "id")?;
     let window_node = children(wc, "window").next().ok_or("a window controller without a window")?;
     let segues: Vec<Node> = children(wc, "connections").flat_map(|l| l.children().filter(|c| c.is_element())).collect();
@@ -1156,7 +1190,7 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
     if children(vc, "connections").next().is_some() {
         return fail("a view controller's connections are not supported by this ibtool");
     }
-    let mut nib = new_nib(localizable, true);
+    let mut nib = new_nib(doc, localizable, true);
     let view_node = children(vc, "view").next().ok_or("a view controller without a view")?;
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
@@ -1173,4 +1207,230 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
     connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
     let name = format!("{}-view-{}", attr(vc, "id")?, attr(view_node, "id")?);
     Ok((name, assemble(&mut nib, root_object, &root_name, c, connections)?))
+}
+
+/// The ICC profile of the Mac's Generic Gray Gamma 2.2 or sRGB colour space,
+/// which AppKit's colours embed: copied into the SDK archive's toolchain
+/// from the Mac that packaged it (tools/package-sdks.sh), as actool reads it.
+fn profile(gray: bool) -> Result<Vec<u8>, String> {
+    let developer = std::env::var("DEVELOPER_DIR").unwrap_or_else(|_| "/Applications/Xcode.app/Contents/Developer".into());
+    let name = if gray { "generic_gray_gamma_2_2.icc" } else { "srgb.icc" };
+    let path = std::path::Path::new(&developer).join("Toolchains/XcodeDefault.xctoolchain/usr/share/colorsync").join(name);
+    std::fs::read(&path).map_err(|e| format!("{}: {e} (an SDK archive packaged before it kept the Mac's colour profiles)", path.display()))
+}
+
+/// A colour. A System catalog colour names itself and carries the colour
+/// it resolves to on the Mac, in Generic Gray Gamma 2.2 or sRGB with the
+/// profile embedded (the corpus's 15 System colours, each always the
+/// same).
+fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    only_attributes(n, &[("key", None), ("name", None), ("catalog", Some("System")), ("colorSpace", Some("catalog"))])?;
+    let name = attr(n, "name")?;
+    let (white, components): (Option<&str>, &str) = match name {
+        "textBackgroundColor" | "headerColor" => (Some("1"), "1 1"),
+        "labelColor" | "controlTextColor" | "headerTextColor" | "selectedTextColor" | "textColor" => (Some("0"), "0 1"),
+        "controlBackgroundColor" | "controlColor" | "selectedTextBackgroundColor" => (Some("0.602715373"), "0.6666666667 1"),
+        "windowBackgroundColor" | "gridColor" => (Some("0.4246723652"), "0.5 1"),
+        _ => return fail(format!("the System colour {name} is not supported by this ibtool")),
+    };
+    let key = format!("color:{name}");
+    if let Some(existing) = nib.shared.get(&key) {
+        return Ok(reference(existing.clone()));
+    }
+    let gray = white.is_some();
+    let space = match nib.shared.get(&format!("colorspace:{gray}")) {
+        Some(existing) => reference(existing.clone()),
+        None => {
+            let icc = profile(gray)?;
+            let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(icc))]));
+            let values = if gray { vec![("NSID", Value::Int(9)), ("NSModel", Value::Int(0)), ("NSICC", data)] } else { vec![("NSID", Value::Int(7)), ("NSICC", data)] };
+            nib.shared(format!("colorspace:{gray}"), || Object::new("NSColorSpace", values))
+        }
+    };
+    let nul = |s: &str| {
+        let mut b = s.as_bytes().to_vec();
+        b.push(0);
+        Value::Data(b)
+    };
+    let fallback = Object::new(
+        "NSColor",
+        vec![
+            ("NSColorSpace", Value::Int(3)),
+            ("NSWhite", nul(white.unwrap_or_default())),
+            ("NSCustomColorSpace", space),
+            ("NSComponents", Value::Data(components.as_bytes().to_vec())),
+            ("NSLinearExposure", Value::Data(b"1".to_vec())),
+        ],
+    );
+    let catalog = nib.string("System");
+    let color_name = nib.string(name);
+    Ok(nib.shared(key, || Object::new("NSColor", vec![("NSColorSpace", Value::Int(6)), ("NSCatalogName", catalog), ("NSColorName", color_name), ("NSColor", Value::New(fallback))])))
+}
+
+/// A font: a system font by its metafont (AppKit's private names, its
+/// default size and `NSfFlags`, 26 probes), or a font by name (flags 16).
+fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    only_attributes(n, &[("key", None), ("metaFont", None), ("size", None), ("name", None), ("family", None)])?;
+    let size = n.attribute("size").map(number).transpose()?;
+    let (name, default, flags): (&str, f64, i64) = match (n.attribute("metaFont"), n.attribute("name")) {
+        (Some(meta), None) => match meta {
+            "system" => (".AppleSystemUIFont", 13.0, 0x414),
+            "systemBold" => (".AppleSystemUIFontBold", 13.0, 0x818),
+            "smallSystem" => (".AppleSystemUIFont", 11.0, 0xc1c),
+            "smallSystemBold" => (".AppleSystemUIFontBold", 11.0, 0xd1d),
+            "miniSystem" => (".AppleSystemUIFont", 9.0, 0xe1e),
+            "label" => (".AppleSystemUIFont", 10.0, 0xb1b),
+            "menu" => (".AppleSystemUIFont", 13.0, 0x515),
+            "message" => (".AppleSystemUIFont", 13.0, 0x616),
+            "palette" => (".AppleSystemUIFont", 11.0, 0x717),
+            "toolTip" => (".AppleSystemUIFont", 11.0, 0x919),
+            "controlContent" => (".AppleSystemUIFont", 12.0, 0xa1a),
+            "menuBar" => (".AppleSystemUIFont", 14.0, 0x1010),
+            "cellTitle" => (".AppleSystemUIFont", 12.0, 0x1313),
+            "systemUltraLight" => (".AppleSystemUIFontUltraLight", 13.0, 0x1414),
+            "systemThin" => (".AppleSystemUIFontThin", 13.0, 0x1514),
+            "systemLight" => (".AppleSystemUIFontLight", 13.0, 0x1614),
+            "systemMedium" => (".AppleSystemUIFontMedium", 13.0, 0x1714),
+            "systemSemibold" => (".AppleSystemUIFontDemi", 13.0, 0x1814),
+            "systemHeavy" => (".AppleSystemUIFontHeavy", 13.0, 0x1918),
+            "systemBlack" => (".AppleSystemUIFontBlack", 13.0, 0x1a18),
+            other => return fail(format!("metaFont {other} is not supported by this ibtool")),
+        },
+        (None, Some(name)) => (name, size.ok_or("a named font without a size")?, 16),
+        _ => return fail("a font with both a metafont and a name, or neither"),
+    };
+    let size = size.unwrap_or(default);
+    let font_name = nib.string(name);
+    Ok(nib.shared(format!("font:{name}:{size}:{flags}"), || Object::new("NSFont", vec![("NSName", font_name), ("NSSize", Value::Double(size)), ("NSfFlags", Value::Int(flags))])))
+}
+
+/// A text field and its cell (28 probes of the cell's attributes): the
+/// cell's flags and the control's alignment, line breaking and size.
+fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("horizontalHuggingPriority", None),
+            ("verticalHuggingPriority", None),
+            ("horizontalCompressionResistancePriority", None),
+            ("verticalCompressionResistancePriority", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints"])?;
+    let id = attr(n, "id")?;
+    let name = object_name(id);
+    c.parents.push((name.clone(), parent.to_string()));
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let cell = child(n, "textFieldCell", "cell").ok_or("a text field without a cell")?;
+    only_attributes(
+        cell,
+        &[
+            ("key", None),
+            ("id", None),
+            ("title", None),
+            ("lineBreakMode", None),
+            ("alignment", None),
+            ("scrollable", Some("YES")),
+            ("sendsActionOnEndEditing", Some("YES")),
+            ("editable", Some("YES")),
+            ("selectable", Some("YES")),
+            ("drawsBackground", Some("YES")),
+            ("borderStyle", Some("bezel")),
+            ("controlSize", None),
+            ("state", Some("on")),
+            ("focusRingType", Some("none")),
+            ("allowsUndo", Some("NO")),
+            ("truncatesLastVisibleLine", Some("YES")),
+            ("usesSingleLineMode", Some("YES")),
+        ],
+    )?;
+    only_children(cell, &["font", "color"])?;
+    let cell_id = attr(cell, "id")?;
+    let cell_name = object_name(cell_id);
+    let has = |a: &str| cell.attribute(a).is_some();
+    let mut flags: i64 = 0x0400_0000;
+    let mut flags2: i64 = 0;
+    let line_break = cell.attribute("lineBreakMode").unwrap_or("clipping");
+    // NSLineBreakMode, in flags2's bits 9 to 11 too.
+    let control_break = match line_break {
+        "wordWrapping" => 0,
+        "charWrapping" => 1,
+        "clipping" => 2,
+        "truncatingHead" => 3,
+        "truncatingTail" => 4,
+        "truncatingMiddle" => 5,
+        other => return fail(format!("line break mode {other} is not supported by this ibtool")),
+    };
+    flags2 |= control_break << 9;
+    if !line_break.ends_with("Wrapping") {
+        flags |= 0x40;
+    }
+    let (control_alignment, alignment_bits) = match cell.attribute("alignment") {
+        None | Some("natural") => (4, 4),
+        Some("left") => (0, 0),
+        Some("center") => (1, 2),
+        Some("right") => (2, 1),
+        Some("justified") => (3, 3),
+        Some(other) => return fail(format!("alignment {other} is not supported by this ibtool")),
+    };
+    flags2 |= alignment_bits << 26;
+    for (a, bit) in [("scrollable", 0x10_0000), ("editable", 0x1020_0001), ("selectable", 0x20_0001), ("borderStyle", 0x40_0000)] {
+        if has(a) {
+            flags |= bit;
+        }
+    }
+    if has("state") {
+        flags |= 0x8000_0000;
+    }
+    for (a, bit) in [("sendsActionOnEndEditing", 0x40_0000), ("focusRingType", 0x8000), ("allowsUndo", 0x1000), ("truncatesLastVisibleLine", 0x100), ("usesSingleLineMode", 0x40)] {
+        if has(a) {
+            flags2 |= bit;
+        }
+    }
+    let control_size = match cell.attribute("controlSize") {
+        None | Some("regular") => 0,
+        Some("small") => {
+            flags2 |= 0x2_0000;
+            1
+        }
+        Some("mini") => {
+            flags2 |= 0x4_0000;
+            2
+        }
+        Some(other) => return fail(format!("control size {other} is not supported by this ibtool")),
+    };
+    // A set top bit is a negative int.
+    let signed = |v: i64| v as u32 as i32 as i64;
+    let mut cell_values = vec![("NSCellFlags", Value::Int(signed(flags))), ("NSCellFlags2", Value::Int(signed(flags2)))];
+    cell_values.push(("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))));
+    let font_node = child(cell, "font", "font").ok_or("a text field cell without a font")?;
+    cell_values.push(("NSSupport", font(nib, font_node)?));
+    cell_values.push(("NSControlView", reference(name.clone())));
+    if has("drawsBackground") {
+        cell_values.push(("NSDrawsBackground", Value::Bool(true)));
+    }
+    let bg = child(cell, "color", "backgroundColor").ok_or("a text field cell without a background colour")?;
+    cell_values.push(("NSBackgroundColor", color(nib, bg)?));
+    let fg = child(cell, "color", "textColor").ok_or("a text field cell without a text colour")?;
+    cell_values.push(("NSTextColor", color(nib, fg)?));
+    c.parents.push((cell_name.clone(), name.clone()));
+    values.push(("NSEnabled", Value::Bool(true)));
+    values.push(("NSCell", Value::New(Object::new("NSTextFieldCell", cell_values).named(cell_name))));
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(false)));
+    values.push(("NSControlSize", Value::Int(control_size)));
+    values.push(("NSControlContinuous", Value::Bool(false)));
+    values.push(("NSControlRefusesFirstResponder", Value::Bool(false)));
+    values.push(("NSControlUsesSingleLineMode", Value::Bool(has("usesSingleLineMode"))));
+    values.push(("NSControlTextAlignment", Value::Int(control_alignment)));
+    values.push(("NSControlLineBreakMode", Value::Int(control_break)));
+    values.push(("NSControlWritingDirection", Value::Int(-1)));
+    values.push(("NSControlSendActionMask", Value::Int(4)));
+    values.push(("NSTextFieldAlignmentRectInsetsVersion", Value::Int(2)));
+    values.push(("NSAllowsWritingTools", Value::Bool(true)));
+    values.push(("NSTextFieldAllowsWritingToolsAffordance", Value::Bool(false)));
+    values.push(("NS.resolvesNaturalAlignmentWithBaseWritingDirection", Value::Bool(false)));
+    Ok(Value::New(Object::new("NSTextField", values).named(name)))
 }
