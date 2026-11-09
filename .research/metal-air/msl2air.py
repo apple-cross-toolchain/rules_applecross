@@ -52,10 +52,12 @@ def parse_target(t):
 
 # ---------------------------------------------------------------- 1. rewrite
 VEC = r'(?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234]'
-def rewrite(src):
+AS1, AS2, AS3 = '__attribute__((address_space(1)))', '__attribute__((address_space(2)))', '__attribute__((address_space(3)))'
+def rewrite(src, ast_mode):
     # [[a, b(c)]] -> __attribute__((annotate("msl:a"), annotate("msl:b(c)")))
     def attr(m):
-        body = m.group(1)
+        body = re.sub(r'__attribute__\(\(address_space\((\d)\)\)\)', lambda a: {'1': 'device', '2': 'constant', '3': 'threadgroup'}[a.group(1)], m.group(1))
+        body = re.sub(r'(?<![\w)])\((\d+)\)', r'threadgroup(\1)', body) if body.strip().startswith('(') else body
         parts, depth, cur = [], 0, ''
         for ch in body:
             if ch == ',' and depth == 0:
@@ -68,18 +70,23 @@ def rewrite(src):
     src = re.sub(r'\[\[\s*((?:[^\[\]]|\[[^\[\]]*\])*?)\s*\]\]', attr, src)
     src = rewrite_function_constants(src)
     src = re.sub(r'\b(' + VEC + r')\s*\(', r'metal::__vec<\1>(', src)
+    src = re.sub(r'(?<![\w:])((?:float|half)[234]x[234])\s*\(', r'metal::__mat<metal::\1>(', src)
+    # the AST pass sees attributes as annotations; codegen doesn't see them
+    src = re.sub(r'__MSL_ATTR\(("(?:[^"\\]|\\.)*")\)', (lambda m: '__attribute__((annotate(%s)))' % m.group(1)) if ast_mode else '', src)
+    # MSL has no double: unsuffixed floating literals are float
+    src = re.sub(r'(?<![\w.])(\d+\.\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)(?![\w.])', r'\1f', src)
     src = re.sub(r'(?<![\w.])(\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?[hH]\b',
                  lambda m: '((half)' + m.group(0)[:-1] + ')', src)
     return src
 
-FC = re.compile(r'\bconstant\s+([\w:<>, ]+?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;')
+FC = re.compile(r'^[ \t]*(?:__attribute__\(\(address_space\(2\)\)\)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;', re.M)
 def rewrite_function_constants(src):
     """constant T x [[function_constant(i)]]; becomes an internal global copied at
     static-init time from an external initializer the IR pass turns into AIR's."""
     idx = {m.group(2): m.group(3) for m in FC.finditer(src)}
     FC_ORDER[:] = list(idx)
-    src = FC.sub(lambda m: 'extern "C" __MSL_CONSTANT %s __msl_fcinit_%s_%s; static __MSL_CONSTANT %s %s = __msl_fcinit_%s_%s;'
-                 % (m.group(1), m.group(3), m.group(2), m.group(1), m.group(2), m.group(3), m.group(2)), src)
+    src = FC.sub(lambda m: 'extern "C" %s %s __msl_fcinit_%s_%s; static %s %s %s = __msl_fcinit_%s_%s;'
+                 % (AS2, m.group(1), m.group(3), m.group(2), AS2, m.group(1), m.group(2), m.group(3), m.group(2)), src)
     FC_CHECKED.update(re.findall(r'\bis_function_constant_defined\s*\(\s*(\w+)\s*\)', src))
     src = re.sub(r'\bis_function_constant_defined\s*\(\s*(\w+)\s*\)',
                  lambda m: 'metal::__air_is_function_constant_defined(&__msl_fcinit_%s_%s)' % (idx[m.group(1)], m.group(1)), src)
@@ -167,7 +174,7 @@ def rewrite_samplers(src, air):
         word = sampler_state(m.group(2))
         SAMPLERS.append(word)
         decls.append('extern "C" __attribute__((address_space(2))) unsigned long __msl_sampler_%d%s;' % (k, '[2]' if air >= (2, 7) else ''))
-        return 'const metal::sampler %s = {(__MSL_CONSTANT _sampler_t *)&__msl_sampler_%d};' % (m.group(1), k)
+        return 'const metal::sampler %s = {(%s _sampler_t *)&__msl_sampler_%d};' % (m.group(1), AS2, k)
     src = re.sub(r'\bconstexpr\s+sampler\s+(\w+)\s*\(((?:[^()]|\([^()]*\))*)\)\s*;', one, src)
     return '\n'.join(decls) + ('\n' if decls else '') + src
 
@@ -210,6 +217,7 @@ def annotations(node):
 
 TYPEDEFS = {}
 RECORDS = {}
+LAST_ANON = [None]
 
 def stage_functions(tree):
     out = []
@@ -224,16 +232,22 @@ def stage_functions(tree):
                     FC_TYPES[re.match(r'__msl_fcinit_\d+_(\w+)', vn).group(1)] = vt
             elif k['kind'] == 'CXXRecordDecl' and ' definition' in k['rest']:
                 rm = re.search(r' (?:struct|class) (\w+) definition', k['rest'])
-                if rm:
+                anon = re.search(r' (?:struct|class) definition', k['rest'])
+                if rm or anon:
                     fields = []
                     for f in k['kids']:
                         if f['kind'] == 'FieldDecl':
                             fn, ft, fd = decl_name_type(f['rest'])
                             fields.append(dict(name=fn, type=ft, desugared=fd, attrs=[a[4:] for a in annotations(f) if a.startswith('msl:')]))
-                    RECORDS[ns + rm.group(1)] = fields
-                    RECORDS.setdefault(rm.group(1), fields)
+                    if rm:
+                        RECORDS[ns + rm.group(1)] = fields
+                        RECORDS.setdefault(rm.group(1), fields)
+                    else:
+                        LAST_ANON[0] = fields
             elif k['kind'] in ('TypedefDecl', 'TypeAliasDecl'):
                 tn, tt, td = decl_name_type(k['rest'])
+                if tn and LAST_ANON[0] is not None and re.match(r'(?:struct|class) (?:%s|\(unnamed)' % re.escape(tn), tt):
+                    RECORDS[ns + tn] = LAST_ANON[0]; RECORDS.setdefault(tn, LAST_ANON[0]); LAST_ANON[0] = None
                 if tn:
                     TYPEDEFS[ns + tn] = td
                     TYPEDEFS.setdefault(tn, td)
@@ -262,7 +276,7 @@ def record_layouts(text):
     out = {}
     for block in text.split('*** Dumping AST Record Layout')[1:]:
         lines = block.strip().splitlines()
-        head = re.match(r'\s*0 \| (?:struct|class|union) (.*)$', lines[0])
+        head = re.match(r'\s*0 \| (?:(?:struct|class|union) )?(.*)$', lines[0])
         if not head:
             continue
         name = head.group(1).strip()
@@ -284,13 +298,21 @@ CANON = {'unsigned int': 'uint', 'unsigned char': 'uchar', 'unsigned short': 'us
          'unsigned long': 'ulong', 'signed char': 'char', '_Float16': 'half', '_Bool': 'bool'}
 
 def strip_qual(t):
-    t = re.sub(r'\b(device|constant|threadgroup|thread|const|volatile|__MSL_DEVICE|__MSL_CONSTANT|__MSL_THREADGROUP)\b', '', t)
+    t = re.sub(r'\b(device|constant|threadgroup|thread|const|volatile)\b', '', t)
     t = re.sub(r'__attribute__\(\(address_space\(\d\)\)\)', '', t)
     t = t.replace('metal::', '')
     return re.sub(r'\s+', ' ', t).strip()
 
 def msl_name(t):
     t = strip_qual(t)
+    m = re.match(r'(\w[\w ]*?) __attribute__\(\(ext_vector_type\((\d)\)\)\)$', t)
+    if m:
+        return '%s%s' % (CANON.get(m.group(1), m.group(1)), m.group(2))
+    bm = re.match(r'(\w+?)([234])(x[234])?$', t)
+    if t in TYPEDEFS and t not in SCALARS and not (bm and bm.group(1) in SCALARS):
+        r = strip_qual(TYPEDEFS[t])
+        if re.search(r'ext_vector_type|^(unsigned |signed )?\w+$', r) and r != t:
+            return msl_name(r)
     m = re.match(r'(?:metal::)?matrix<(\w[\w ]*), (\d), (\d)>$', t)
     if m:
         return '%s%sx%s' % (CANON.get(m.group(1), m.group(1)), m.group(2), m.group(3))
@@ -323,6 +345,9 @@ def type_size(name, layouts):
         return s * int(m.group(2)), a
     if name in layouts:
         return layouts[name]['size'], layouts[name]['align']
+    r = msl_name(resolve(name))
+    if r != name:
+        return type_size(r, layouts)
     raise KeyError(name)
 
 # ---------------------------------------------------------------- metadata
@@ -371,7 +396,7 @@ def arg_descriptor(md, i, p, layouts, air, used):
     sname = argbuf_struct(p)
     if sname:
         slot = int(re.search(r'\((\d+)\)', a0).group(1))
-        aspace = 2 if re.search(r'\bconstant\b', t) else 1
+        aspace = aspace_of(t)
         size, align = layouts[sname]['size'], layouts[sname]['align']
         f = ['i32 %d' % i, s('air.indirect_buffer'), '!"air.buffer_size"', 'i32 %d' % size, '!"air.location_index"', 'i32 %d' % slot, 'i32 1',
              s('air.read' if aspace == 2 else 'air.read_write')]
@@ -382,7 +407,7 @@ def arg_descriptor(md, i, p, layouts, air, used):
     elif kind == 'buffer' or kind == 'threadgroup':
         slot = int(re.search(r'\((\d+)\)', a0).group(1))
         ref = t.rstrip().endswith('&')
-        aspace = 3 if kind == 'threadgroup' else (2 if re.search(r'\bconstant\b', t) else 1)
+        aspace = 3 if kind == 'threadgroup' else aspace_of(t)
         pointee = re.sub(r'\s*[*&]\s*$', '', t)
         readonly = aspace == 2 or re.search(r'\bconst\b', pointee)
         tname = msl_name(pointee)
@@ -483,7 +508,7 @@ def indirect_info(md, sname, layouts, air):
             d = md.add('!{' + ', '.join(['i32 %d' % k] + desc + ['!"air.arg_type_name"', s(tname), '!"air.arg_name"', s(f['name'])]) + '}')
         elif ft.rstrip().endswith(('*', '&')):
             pt = msl_name(pointee(ft))
-            aspace = 2 if re.search(r'\bconstant\b', ft) else 1
+            aspace = aspace_of(ft)
             ps, pa = type_size(pt, layouts)
             desc = ['i32 %d' % k, s('air.buffer')]
             if ft.rstrip().endswith('&') and aspace == 2:
@@ -546,6 +571,8 @@ def output_descriptors(md, f, air):
         t = msl_name(ret_type(f))
         if f['stage'] == 'fragment':
             out.append(md.add('!{!"air.render_target", i32 0, i32 0, !"air.arg_type_name", %s}' % s(t)))
+        elif f['stage'] == 'vertex' and t != 'void':
+            out.append(md.add('!{!"air.position", !"air.arg_type_name", %s}' % s(t)))
         return md.add('!{' + ', '.join(out) + '}')
     for fld in rf:
         t, a = msl_name(fld['type']), fld['attrs']
@@ -589,10 +616,10 @@ def stage_in_descriptor(md, i, fld, stage, used):
     return md.add('!{' + ', '.join(f) + '}')
 
 # ---------------------------------------------------------------- 3. entry points
-HANDLES = {'texture1d': '__MSL_DEVICE _texture_1d_t *', 'texture2d': '__MSL_DEVICE _texture_2d_t *',
-           'texture2d_array': '__MSL_DEVICE _texture_2d_array_t *', 'texture3d': '__MSL_DEVICE _texture_3d_t *',
-           'texturecube': '__MSL_DEVICE _texture_cube_t *', 'depth2d': '__MSL_DEVICE _depth_2d_t *',
-           'texture_buffer': '__MSL_DEVICE _texture_buffer_1d_t *', 'sampler': '__MSL_CONSTANT _sampler_t *'}
+HANDLES = {'texture1d': AS1 + ' _texture_1d_t *', 'texture2d': AS1 + ' _texture_2d_t *',
+           'texture2d_array': AS1 + ' _texture_2d_array_t *', 'texture3d': AS1 + ' _texture_3d_t *',
+           'texturecube': AS1 + ' _texture_cube_t *', 'depth2d': AS1 + ' _depth_2d_t *',
+           'texture_buffer': AS1 + ' _texture_buffer_1d_t *', 'sampler': AS2 + ' _sampler_t *'}
 
 def resolve(t):
     """Expand known typedef names inside a type string (one level at a time)."""
@@ -607,11 +634,19 @@ def handle_kind(p):
     m = re.match(r'(?:metal::)?(\w+)', strip_qual(p['desugared']))
     return m.group(1) if m and m.group(1) in HANDLES else None
 
-AS_WORDS = {'device': '__MSL_DEVICE', 'constant': '__MSL_CONSTANT', 'threadgroup': '__MSL_THREADGROUP'}
+AS_WORDS = {'device': AS1, 'constant': AS2, 'threadgroup': AS3}
 def explicit_as(t):
     return re.sub(r'\b(device|constant|threadgroup)\b', lambda m: AS_WORDS[m.group(1)], t)
 def flat(t):
+    t = re.sub(r'__attribute__\(\(address_space\(\d\)\)\)', '', t)
     return re.sub(r'\s+', ' ', re.sub(r'\b(device|constant|threadgroup|thread)\b', '', t)).strip()
+
+def aspace_of(t):
+    """The address space a pointer/reference type string points into (1 if unspecified)."""
+    m = re.search(r'address_space\((\d)\)', t)
+    if m:
+        return int(m.group(1))
+    return 2 if re.search(r'\bconstant\b', t) else 3 if re.search(r'\bthreadgroup\b', t) else 1
 
 def stage_in_param(f):
     for k, p in enumerate(f['params']):
@@ -782,7 +817,7 @@ def to_air(ir, funcs, layouts, target, src_path, fcs=()):
     return ir.rstrip() + '\n\n' + '\n'.join(named) + '\n\n' + md.text(), air, lang, (os_name, ver, sim)
 
 # AIR functions return small structs directly; spir64 lowers them to sret.
-RETURNS = {'__ret_v4f32': '{ <4 x float>, i8 }', '__ret_v4f16': '{ <4 x half>, i8 }', '__ret_f32': '{ float, i8 }'}
+RETURNS = {'__ret_v4f32': '{ <4 x float>, i8 }', '__ret_v4f16': '{ <4 x half>, i8 }', '__ret_f32': '{ float, i8 }', '__ret_v4u32': '{ <4 x i32>, i8 }'}
 
 def direct_returns(ir):
     n = [0]
@@ -947,13 +982,24 @@ def main(argv):
     with tempfile.TemporaryDirectory() as tmp:
         rew = os.path.join(tmp, os.path.basename(src) + '.cpp')
         os_name, ver, sim = parse_target(target)
-        air_v, _ = air_versions(os_name, ver)
-        code = rewrite_samplers(rewrite(open(src).read()), air_v)
-        open(rew, 'w').write(code)
-        base = [LLVM + '/clang++', '-std=c++17', '-target', 'spir64', '-ffast-math', '-fno-builtin',
-                '-Wno-unknown-attributes', '-nostdinc++', '-I', HERE + '/include', '-I', os.path.dirname(os.path.abspath(src))] + incs
-        ast = subprocess.run(base + ['-D__MSL_AST', '-fsyntax-only', '-Xclang', '-ast-dump', '-fno-color-diagnostics', rew],
+        air_v, lang_v = air_versions(os_name, ver)
+        # Preprocess first, as MSL does: macros may spell types and attributes.
+        pp = [LLVM + '/clang++', '-E', '-x', 'c++', '-std=c++17', '-target', 'spir64', '-ffast-math', '-nostdinc++',
+              '-I', HERE + '/include', '-include', 'metal_stdlib', '-I', os.path.dirname(os.path.abspath(src)),
+              '-D__METAL_VERSION__=%d' % (lang_v[0] * 100 + lang_v[1] * 10)] + incs
+        pp += ['-D__METAL_MACOS__'] if os_name == 'macosx' else ['-D__METAL_IOS__'] if os_name == 'ios' else []
+        def preprocessed(ast_mode):
+            r = subprocess.run(pp + (['-D__MSL_AST'] if ast_mode else []) + [src], capture_output=True, text=True)
+            if r.returncode:
+                sys.stderr.write(r.stderr); raise SystemExit(1)
+            del SAMPLERS[:]; FC_CHECKED.clear()
+            return rewrite_samplers(rewrite(r.stdout, ast_mode), air_v)
+        base = [LLVM + '/clang++', '-x', 'c++', '-std=c++17', '-target', 'spir64', '-ffast-math', '-fno-builtin',
+                '-Wno-unknown-attributes', '-nostdinc++']
+        open(rew, 'w').write(preprocessed(True))
+        ast = subprocess.run(base + ['-fsyntax-only', '-Xclang', '-ast-dump', '-fno-color-diagnostics', rew],
                              capture_output=True, text=True)
+        code = preprocessed(False)
         ast = ast.stdout  # errors here are address-space checks codegen doesn't have
         funcs = stage_functions(ast_tree(ast))
         open(rew, 'w').write(code + '\n' + entry_points(funcs))
@@ -985,7 +1031,8 @@ def main(argv):
         subprocess.run([LLVM + '/llvm-as', '-o', bc, out + '.ll'], check=True)
         module = mtlb.wrap(open(bc, 'rb').read())
         fl = [dict(name=f['name'], type={'vertex': 0, 'fragment': 1, 'kernel': 2}[f['stage']], module=module,
-                   air=air, lang=lang, pub=public_md(air_ll, f['name'], FC_CHECKED, f)) for f in funcs]
+                   air=air, lang=lang, pub=public_md(air_ll, f['name'], FC_CHECKED, f))
+              for f in sorted(funcs, key=lambda f: ('kernel', 'vertex', 'fragment').index(f['stage']))]
         open(out, 'wb').write(mtlb.metallib(fl, header(os_name, ver, sim, air)))
 
 if __name__ == '__main__':

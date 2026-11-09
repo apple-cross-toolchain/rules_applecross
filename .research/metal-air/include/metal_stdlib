@@ -154,24 +154,96 @@ __MSL_MATH1(sin, __MSL_F(sin)) __MSL_MATH1(cos, __MSL_F(cos)) __MSL_MATH1(sqrt, 
 __MSL_MATH1(rsqrt, __MSL_F(rsqrt)) __MSL_MATH1(fabs, __MSL_F(fabs)) __MSL_MATH1(exp, __MSL_F(exp))
 __MSL_MATH1(log, __MSL_F(log))
 __MSL_MATH2(pow, __MSL_F(pow))
+__MSL_MATH2(fmax, __MSL_F(fmax)) __MSL_MATH2(fmin, __MSL_F(fmin))
+__MSL_MATH1(floor, __MSL_F(floor)) __MSL_MATH1(dfdx, "air.dfdx") __MSL_MATH1(dfdy, "air.dfdy") __MSL_MATH1(fwidth, "air.fwidth")
+__MSL_MATH3(fmax3, __MSL_F(fmax3)) __MSL_MATH3(fmin3, __MSL_F(fmin3))
+// max/min on floats are fmax/fmin (observed); on integers, plain comparisons.
+#define __MSL_ALIAS2(n, to) \
+  __attribute__((always_inline)) inline float n(float x, float y) { return to(x, y); } \
+  __attribute__((always_inline)) inline float2 n(float2 x, float2 y) { return to(x, y); } \
+  __attribute__((always_inline)) inline float3 n(float3 x, float3 y) { return to(x, y); } \
+  __attribute__((always_inline)) inline float4 n(float4 x, float4 y) { return to(x, y); } \
+  __attribute__((always_inline)) inline float2 n(float2 x, float y) { return to(x, y); } \
+  __attribute__((always_inline)) inline float3 n(float3 x, float y) { return to(x, y); } \
+  __attribute__((always_inline)) inline float4 n(float4 x, float y) { return to(x, y); }
+__MSL_ALIAS2(max, fmax) __MSL_ALIAS2(min, fmin)
+
+__attribute__((always_inline)) inline float max3(float a, float b, float c) { return fmax3(a, b, c); }
+__attribute__((always_inline)) inline float min3(float a, float b, float c) { return fmin3(a, b, c); }
+#define __MSL_IMINMAX(T) \
+  __attribute__((always_inline)) inline T max(T a, T b) { return a > b ? a : b; } \
+  __attribute__((always_inline)) inline T min(T a, T b) { return a < b ? a : b; } \
+  __attribute__((always_inline)) inline T max3(T a, T b, T c) { return max(max(a, b), c); } \
+  __attribute__((always_inline)) inline T min3(T a, T b, T c) { return min(min(a, b), c); }
+__MSL_IMINMAX(int) __MSL_IMINMAX(uint) __MSL_IMINMAX(short) __MSL_IMINMAX(ushort)
 __MSL_MATH3(clamp, __MSL_F(clamp)) __MSL_MATH3(fma, "air.fma") __MSL_MATH3(mix, "air.mix")
+// smoothstep (MSL specification): edges may be scalars for vector x
+template <class V, class E0, class E1> __attribute__((always_inline)) inline V smoothstep(E0 e0, E1 e1, V x) {
+  typedef typename __elem<V>::type E;
+  V a, b;
+  if constexpr (__elem<E0>::n == 1) a = (E)e0; else a = e0;
+  if constexpr (__elem<E1>::n == 1) b = (E)e1; else b = e1;
+  V t = clamp((x - a) / (b - a), (E)0, (E)1);
+  return t * t * ((E)3 - (E)2 * t);
+}
+// fract: x - floor(x), kept below 1 (MSL specification)
+#define __MSL_FRACT(V) __attribute__((always_inline)) inline V fract(V x) { return fmin(x - floor(x), 0x1.fffffep-1f); }
+__MSL_FRACT(float) __MSL_FRACT(float2) __MSL_FRACT(float3) __MSL_FRACT(float4)
 #define __MSL_DOT(N) extern "C" float __air_dot_v##N##f32(float##N, float##N) __AIR("air.dot.v" #N "f32"); \
   __attribute__((always_inline)) inline float dot(float##N a, float##N b) { return __air_dot_v##N##f32(a, b); } \
   __attribute__((always_inline)) inline float##N normalize(float##N v) { return v * rsqrt(dot(v, v)); } \
   __attribute__((always_inline)) inline float length(float##N v) { return sqrt(dot(v, v)); }
 __MSL_DOT(2) __MSL_DOT(3) __MSL_DOT(4)
 __attribute__((always_inline)) inline float abs(float x) { return fabs(x); }
+__attribute__((always_inline)) inline float2 abs(float2 x) { return fabs(x); }
+__attribute__((always_inline)) inline float3 abs(float3 x) { return fabs(x); }
+__attribute__((always_inline)) inline float4 abs(float4 x) { return fabs(x); }
+__attribute__((always_inline)) inline int abs(int x) { return x < 0 ? -x : x; }
 
 // ---- matrices: column-major, columns[c] is a vector of R elements.
-template <class T, int C, int R> struct matrix {
-  __vector<T, R> columns[C];
-  __attribute__((always_inline)) __vector<T, R> &operator[](int c) { return columns[c]; }
-  __attribute__((always_inline)) const __vector<T, R> &operator[](int c) const { return columns[c]; }
-};
+template <bool B> struct __enable_cols {};
+template <> struct __enable_cols<true> { typedef void type; };
+// One member per column, so { {..}, {..}, {..} } initialises columns as MSL does.
+template <class T, int C, int R> struct matrix;
+#define __MSL_MATRIX_OPS(C) \
+  __attribute__((always_inline)) __vector<T, R> &operator[](int c) { return (&__c0)[c]; } \
+  __attribute__((always_inline)) const __vector<T, R> &operator[](int c) const { return (&__c0)[c]; }
+template <class T, int R> struct matrix<T, 2, R> { __vector<T, R> __c0, __c1; __MSL_MATRIX_OPS(2) };
+template <class T, int R> struct matrix<T, 3, R> { __vector<T, R> __c0, __c1, __c2; __MSL_MATRIX_OPS(3) };
+template <class T, int R> struct matrix<T, 4, R> { __vector<T, R> __c0, __c1, __c2, __c3; __MSL_MATRIX_OPS(4) };
 template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(const matrix<T, C, R> &m, __vector<T, C> v) {
-  __vector<T, R> r = m.columns[0] * v[0];
-  for (int c = 1; c < C; c++) r += m.columns[c] * v[c];
+  __vector<T, R> r = m[0] * v[0];
+  for (int c = 1; c < C; c++) r += m[c] * v[c];
   return r;
+}
+template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) {
+  __vector<T, C> r;
+  for (int c = 0; c < C; c++) { __vector<T, R> p = v * m[c]; T s = p[0]; for (int k = 1; k < R; k++) s += p[k]; r[c] = s; }
+  return r;
+}
+template <class T, int K, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, K, R> &a, const matrix<T, C, K> &b) {
+  matrix<T, C, R> m;
+  for (int c = 0; c < C; c++) m[c] = a * b[c];
+  return m;
+}
+// T CxR(...) constructors, rewritten by the driver to __mat: C columns, one
+// scalar for the diagonal, or C*R scalars in column order.
+template <class X, class... R> __attribute__((always_inline)) inline X __first(X x, R...) { return x; }
+template <class M> struct __mat_traits;
+template <class T, int C, int R> struct __mat_traits<matrix<T, C, R>> { typedef T E; static constexpr int c = C, r = R; };
+template <class M, class... A> __attribute__((always_inline)) inline M __mat(A... a) {
+  typedef __mat_traits<M> tr;
+  M m;
+  if constexpr (sizeof...(A) == tr::c) {
+    int i = 0; ((m[i++] = a), ...);
+  } else if constexpr (sizeof...(A) == 1) {
+    typename tr::E d = (typename tr::E)__first(a...);
+    for (int c = 0; c < tr::c; c++) { m[c] = (typename tr::E)0; if (c < tr::r) m[c][c] = d; }
+  } else {
+    typename tr::E v[] = {(typename tr::E)a...};
+    for (int c = 0; c < tr::c; c++) for (int r = 0; r < tr::r; r++) m[c][r] = v[c * tr::r + r];
+  }
+  return m;
 }
 #define __MSL_MAT(T) typedef matrix<T, 2, 2> T##2x2; typedef matrix<T, 2, 3> T##2x3; typedef matrix<T, 2, 4> T##2x4; \
   typedef matrix<T, 3, 2> T##3x2; typedef matrix<T, 3, 3> T##3x3; typedef matrix<T, 3, 4> T##3x4; \
@@ -209,10 +281,14 @@ struct sampler { __MSL_CONSTANT _sampler_t *__s; };
 struct __ret_v4f32 { float4 v; char status; };
 struct __ret_v4f16 { half4 v; char status; };
 struct __ret_f32 { float v; char status; };
+struct __ret_v4u32 { uint4 v; char status; };
 template <class T> struct __texel;
 template <> struct __texel<float> { typedef float4 v4; typedef __ret_v4f32 ret; };
 template <> struct __texel<half> { typedef half4 v4; typedef __ret_v4f16 ret; };
+template <> struct __texel<uint> { typedef uint4 v4; typedef __ret_v4u32 ret; };
 extern "C" __MSL_CONSTANT _sampler_t *__air_get_read_sampler() __AIR("air.get_read_sampler");
+extern "C" __ret_v4u32 __air_read_texture_2d_u_v4i32(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, uint2, uint2, int, int) __AIR("air.read_texture_2d.u.v4i32");
+__attribute__((always_inline)) inline __ret_v4u32 __read2d(__MSL_DEVICE _texture_2d_t *t, uint2 c, uint lod, int a, uint) { return __air_read_texture_2d_u_v4i32(t, __air_get_read_sampler(), c, uint2{0u, 0u}, lod, a); }
 
 // Observed call shapes, one per texture kind (FORMAT.md, "Textures").
 #define __MSL_TEX_QUERY(K) \
@@ -240,6 +316,8 @@ __MSL_TEX_FNS(v4f32, float) __MSL_TEX_FNS(v4f16, half)
 extern "C" __ret_f32 __air_sample_depth_2d_f32(__MSL_DEVICE _depth_2d_t *, __MSL_CONSTANT _sampler_t *, int, float2, bool, int2, bool, float, float, int) __AIR("air.sample_depth_2d.f32");
 
 #define __MSL_AI __attribute__((always_inline))
+struct gradient2d { float2 dPdx, dPdy; __MSL_AI gradient2d(float2 x, float2 y) : dPdx(x), dPdy(y) {} };
+extern "C" __ret_v4f32 __air_sample_texture_2d_grad_v4f32(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, float2, float2, float2, float, bool, int2, int) __AIR("air.sample_texture_2d_grad.v4f32");
 template <class T, access A = access::sample> struct texture1d {
   __MSL_DEVICE _texture_1d_t *__t;
   __MSL_AI typename __texel<T>::v4 sample(sampler s, float c) const { return __sample1d(__t, s, c, T()).v; }
@@ -249,6 +327,7 @@ template <class T, access A = access::sample> struct texture2d {
   __MSL_AI uint get_width(uint lod = 0) const { return __air_get_width_texture_2d(__t, lod); }
   __MSL_AI uint get_height(uint lod = 0) const { return __air_get_height_texture_2d(__t, lod); }
   __MSL_AI typename __texel<T>::v4 sample(sampler s, float2 c) const { return __sample2d(__t, s, c, T()).v; }
+  __MSL_AI float4 sample(sampler s, float2 c, gradient2d g) const { return __air_sample_texture_2d_grad_v4f32(__t, s.__s, c, g.dPdx, g.dPdy, 0.0f, true, int2{0, 0}, 0).v; }
   __MSL_AI typename __texel<T>::v4 read(uint2 c, uint lod = 0) const { return __read2d(__t, c, lod, int(A), T()).v; }
   __MSL_AI void write(typename __texel<T>::v4 v, uint2 c, uint lod = 0) const { __write2d(__t, v, c, lod, int(A)); }
 };

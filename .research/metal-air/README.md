@@ -119,6 +119,31 @@ The plan, sent to the Manager:
       includes three draws: stage_in attributes through a vertex
       descriptor, sampling with a sampler argument, and a constexpr
       sampler on a half texture.
+  - **Front end, real-world code:**
+    - The driver preprocesses first, as MSL does, with `__METAL_VERSION__`
+      and the platform macro defined. Macros can then spell types and
+      attributes (FFmpeg's `#define T float2` … `T(…)`), and the rewrite
+      runs on the expanded text.
+    - Unsuffixed floating literals become float, since MSL has no double.
+    - MSL's other standard header names and `<simd/simd.h>` (its vector
+      and matrix names) map onto our stdlib.
+  - **Stdlib breadth:**
+    - min/max/min3/max3, floor/fract, derivatives, `smoothstep`, `abs`;
+    - matrix constructors (columns, diagonal, scalars, nested braces) and
+      vector×matrix and matrix×matrix products;
+    - uint texture reads, gradient sampling.
+    - Names come from Xcode's output for the corpus; semantics from the
+      MSL specification.
+  - **Corpus (measurement only, not committed):** the rules_apple samples,
+    Agora's iOS and macOS shaders, SDL's render and blit shaders, FFmpeg's
+    yadif, and a SwiftPM fixture.
+    - All of them now match Xcode at both the metadata and the metallib
+      level, on all five targets.
+    - Together with the probes, that's 143 files at both levels, plus 83
+      at the metadata level.
+    - The metallib orders functions by stage: kernels, then vertex, then
+      fragment.
+    - GPU: still 22 of 22 identical after these changes.
   - **Still to do:**
     - a Rust port;
     - runtime checks for argument buffers, framebuffer fetch and MRT;
