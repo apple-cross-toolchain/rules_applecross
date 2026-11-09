@@ -194,14 +194,25 @@ fn stepper(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32) -> Vec<(i6
 /// and its column crossings to where the row stepper ends.
 fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<i64>, end_out: &mut i64, exact_end: bool) -> Vec<(Fixed, Fixed, i64)> {
     let ((vbx, by), (tx, ty)) = (bottom, top);
-    let bx = start_x.unwrap_or(vbx);
-    let sx = if std::env::var("CG_CHAINSLOPE").is_ok() { vbx } else { bx };
-    let rows = stepper(by, bx, ty, tx + (bx - sx), &knob("CG_START"), side);
+    let xch = std::env::var("CG_XCHAIN").is_ok() && start_x.is_some();
+    let bx = if xch { floor_div(start_x.unwrap(), UNIT) } else { start_x.unwrap_or(vbx) };
+    let sx = if std::env::var("CG_CHAINSLOPE").is_ok() || xch { vbx } else { bx };
+    let exchain = std::env::var("CG_XCHAIN").is_ok() && start_x.is_some();
+    let bnum: i64 = if exchain { start_x.unwrap() } else { 0 };
+    let mr_true = (tx - vbx) * UNIT / (ty - by);
+    let rows = if exchain {
+        let k0 = floor_div(by, UNIT) + 1;
+        let mut v = Vec::new();
+        let mut k = k0;
+        while k * UNIT < ty { v.push((k, floor_div(bnum + (k * UNIT - by) * mr_true, UNIT))); k += 1; }
+        v
+    } else { stepper(by, bx, ty, tx + (bx - sx), &knob("CG_START"), side) };
     let cols: std::collections::HashMap<i64, i64> = stepper(bx, by, tx + (bx - sx), ty, &knob("CG_CSTART"), side).into_iter().collect();
-    let mr = (tx - sx) * UNIT / (ty - by);
+    let mr = if exchain { mr_true } else { (tx - sx) * UNIT / (ty - by) };
     let exact_acc = std::env::var("CG_ACC").is_ok();
     // x at yv stepped from the stepper's exact state (its first step's fraction kept)
     let xat = |yv: i64| -> i64 {
+        if exchain { return floor_div(bnum + (yv - by) * mr, UNIT); }
         match rows.iter().rposition(|&(k, _)| k * UNIT <= yv) {
             Some(i) => { let k = rows[i].0; let frac0 = rows[0].0 * UNIT - by; floor_div(bx * UNIT + frac0 * mr + i as i64 * mr * UNIT + (yv - k * UNIT) * mr, UNIT) }
             None => floor_div(bx * UNIT + (yv - by) * mr, UNIT),
@@ -212,7 +223,7 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
     let tmode = std::env::var("CG_YS_TOP").unwrap_or_default();
     let ty_e = ysnap(ty, &tmode);
     let end = if exact_end { (tx, ty) } else if exact_acc { (xat(ty_e), ty_e) } else { (kx + rdiv((ty - ky) * mr, UNIT, &knob("CG_END"), side), ty) };
-    *end_out = end.0;
+    *end_out = if std::env::var("CG_XCHAIN").is_ok() { if exchain { bnum + (ty - by) * mr } else { bx * UNIT + (ty - by) * mr } } else { end.0 };
     let mut ends: Vec<Fixed> = Vec::with_capacity(rows.len() + 2);
     let bmode = std::env::var("CG_YS_BOT").unwrap_or_default();
     let by_s = ysnap(by, &bmode);
@@ -495,7 +506,7 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                                 if per_edge { if !touched.contains(&x) { touched.push(x); } parts[x] += part; row[x] += role * d; continue; }
                                 let vpiece = a.1 == e.bottom.1 as f64 / u || b.1 == e.top.1 as f64 / u;
                                 let vmode = std::env::var("CG_PQ_V").ok();
-                                let applies = match vmode.as_deref() { Some("bottom") => a.1 == e.bottom.1 as f64 / u, Some("top") => b.1 == e.top.1 as f64 / u, Some("chain") => (a.1 == e.bottom.1 as f64 / u && chainset.contains(&e.bottom)) || (b.1 == e.top.1 as f64 / u && chainset.contains(&e.top)), Some("chainrow") => chainset.iter().any(|v| (v.1 as f64 / u).floor() as i64 == y as i64), Some("multiband") => vb.len() > 2, Some("multiband_or_v") => vb.len() > 2 || vpiece, Some(_) => vpiece, None => true };
+                                let applies = match vmode.as_deref() { Some("bottom") => a.1 == e.bottom.1 as f64 / u, Some("top") => b.1 == e.top.1 as f64 / u, Some("short") => floor_div(e.bottom.1, UNIT) == floor_div(e.top.1 - 1, UNIT), Some("shortchain") => floor_div(e.bottom.1, UNIT) == floor_div(e.top.1 - 1, UNIT) && (chainset.contains(&e.bottom) || chainset.contains(&e.top)), Some("chain") => (a.1 == e.bottom.1 as f64 / u && chainset.contains(&e.bottom)) || (b.1 == e.top.1 as f64 / u && chainset.contains(&e.top)), Some("chainrow") => chainset.iter().any(|v| (v.1 as f64 / u).floor() as i64 == y as i64), Some("multiband") => vb.len() > 2, Some("multiband_or_v") => vb.len() > 2 || vpiece, Some(_) => vpiece, None => true };
                                 let part = match std::env::var("CG_PQ").ok().filter(|_| applies && (role > 0.0 || std::env::var("CG_PQ_BOTH").is_ok())) { Some(v) => { let (u, m) = v.split_once(':').unwrap(); let u: f64 = u.parse().unwrap(); match m { "ceil" => (part * u).ceil() / u, "floor" => (part * u).floor() / u, "round" => (part * u).round() / u, "trunc" => (part * u).trunc() / u, _ => part } } None => part };
                                 let part = if role < 0.0 && applies { match std::env::var("CG_PQC").ok() { Some(v) => { let (uu, m) = v.split_once(':').unwrap(); let uu: f64 = uu.parse().unwrap(); match m { "ceil" => (part * uu).ceil() / uu, "floor" => (part * uu).floor() / uu, "round" => (part * uu).round() / uu, _ => part } } None => part } } else { part };
                                 let padd: f64 = if applies && role > 0.0 { std::env::var("CG_PADD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0) / 4096.0 } else { 0.0 };

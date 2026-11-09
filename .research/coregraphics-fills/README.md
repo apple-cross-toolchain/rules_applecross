@@ -170,6 +170,26 @@ of a level of the boundary.
     opening side. Snapping edge y extents to 1/256 makes things far worse,
     so vertex y stays at 1/4096.
 
+- **Where the residual stands (18:10Z).** With the exact stepper, the
+  remaining misses are the opening side's vertex pixels in rows with
+  vertices: the model is about 0.03 of a level low per vertex. Corrections
+  that score better without being the mechanism (`CG_ACC=1` plus the knob
+  shown; suite total 986 with none):
+
+  | Knob | Suite total | Triangles | Dense | Glyphs Rg&8 / Qa@ / 11 px |
+  | --- | --- | --- | --- | --- |
+  | `CG_PQ=4096:floor CG_PQ_V=chainrow` | 436 | 154 | 41 / 47 / 51 | 11 / 23 / 8 |
+  | `CG_PQ=4096:floor CG_PQ_V=short` | 555 | 118 | 46 / 55 / 65 | 33 / 50 / 72 |
+  | `CG_PADD=0.5 CG_PQ_V=chain` | 527 | 128 | 25 / 37 / 42 | 46 / 53 / 93 |
+
+  - `chainrow`: rows holding an opening-chain vertex.
+  - `short`: edges that cross no row boundary.
+  - `chain`: pieces at an opening-chain vertex.
+
+  Each trades triangles against dense outlines. These made things worse:
+  chaining edges through vertices, exactly or floored; exact ends at chain
+  vertices; and snapping vertex y.
+
 ## Remaining before exact fills
 
 - The vertex-row residual above. It matters most for curves.
