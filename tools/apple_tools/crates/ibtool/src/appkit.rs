@@ -23,6 +23,10 @@ struct Nib {
     storyboard: bool,
     /// The views constraints refer to (`constrained`).
     constrained: std::collections::HashSet<String>,
+    /// Whether the document is a xib without direct instantiation, whose
+    /// custom views are `NSCustomView`s and custom objects
+    /// `NSCustomObject`s (probes).
+    old_custom: bool,
 }
 
 impl Nib {
@@ -185,6 +189,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         &[
             ("key", None),
             ("id", None),
+            ("autoresizesSubviews", Some("NO")),
             ("hidden", Some("YES")),
             ("wantsLayer", Some("YES")),
             ("customClass", None),
@@ -199,6 +204,28 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     c.parents.push((name.clone(), parent.to_string()));
     if children(n, "connections").next().is_some() && !container {
         c.connection_sources.push(attr(n, "id")?.to_string());
+    }
+    // Without direct instantiation, a custom view is an NSCustomView: the
+    // view's keys, then its class (four probes).
+    if nib.old_custom && swapped {
+        if !n.has_tag_name("customView") {
+            return fail("a view of a custom class in a xib without direct instantiation is not supported by this ibtool");
+        }
+        let class = runtime_class_name(n, module, "NSView")?;
+        let mut values = view_values(nib, c, n, module, &name, parent, next_responder)?;
+        // Its subviews in reverse (four probes; a plain view's keep their
+        // order).
+        for v in values.iter_mut().filter(|v| v.0 == "NSSubviews") {
+            if let Value::New(o) = &mut v.1 {
+                let items: Vec<usize> = (0..o.values.len()).filter(|&i| o.values[i].0 == "UINibEncoderEmptyKey").collect();
+                let reversed: Vec<(&'static str, Value)> = items.iter().rev().map(|&i| std::mem::replace(&mut o.values[i], ("UINibEncoderEmptyKey", Value::Nil))).collect();
+                for (slot, item) in items.into_iter().zip(reversed) {
+                    o.values[slot] = item;
+                }
+            }
+        }
+        values.extend(class_values(nib, n, module, Some(&class))?);
+        return Ok(Value::New(Object::new("NSCustomView", values).named(name)));
     }
     let mut values = Vec::new();
     let class = runtime_class_name(n, module, "NSView")?;
@@ -241,7 +268,9 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     values.push(("NSNibTouchBar", Value::Nil));
     // Hidden, the top bit (a probe's button, scrollers).
     let hidden = if n.attribute("hidden") == Some("YES") { 0x8000_0000_u32 as i32 as i64 } else { 0 };
-    values.push(("NSvFlags", Value::Int(hidden | 256 | autoresizing_mask(n)?)));
+    // 256: it resizes its subviews, unless it says not (a probe).
+    let resizes = if n.attribute("autoresizesSubviews") == Some("NO") { 0 } else { 256 };
+    values.push(("NSvFlags", Value::Int(hidden | resizes | autoresizing_mask(n)?)));
     // Its subviews, then its frame.
     let subviews: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
     let content = n.has_tag_name("box").then(|| child(n, "view", "contentView")).flatten();
@@ -259,6 +288,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "box" => box_view(nib, c, s, module, name)?,
                 "imageView" => image_view(nib, c, s, module, name)?,
                 "wkWebView" => web_view(nib, c, s, module, name)?,
+                "collectionView" => collection_view(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -1181,6 +1211,7 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str, popup_c
             ("isSeparatorItem", Some("YES")),
             ("enabled", Some("NO")),
             ("state", Some("on")),
+            ("indentationLevel", None),
             ("id", None),
         ],
     )?;
@@ -1203,6 +1234,10 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str, popup_c
     }
     if separator {
         values.push(("NSIsSeparator", Value::Bool(true)));
+    }
+    // Its indentation, after its disabled flag (three probes).
+    if let Some(level) = n.attribute("indentationLevel") {
+        values.push(("NSIndent", Value::Int(level.parse().map_err(|_| format!("not an indentation level: {level}"))?)));
     }
     values.push(("NSAllowsKeyEquivalentLocalization", Value::Bool(true)));
     values.push(("NSAllowsKeyEquivalentMirroring", Value::Bool(true)));
@@ -1288,16 +1323,17 @@ fn custom_object(nib: &mut Nib, c: &mut Collected, t: Node, module: Option<&str>
     let name = object_name(attr(t, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
     c.connection_sources.push(attr(t, "id")?.to_string());
+    // Without direct instantiation, any custom object is an
+    // NSCustomObject of its class (two probes).
     let appkit = APPKIT_OBJECTS.contains(&class);
-    if !appkit && class.starts_with("NS") {
-        return fail(format!("a custom object of class {class} is not supported by this ibtool"));
-    }
-    if appkit {
+    if appkit || !direct {
         let values = class_values(nib, t, module, None)?;
         return Ok(Value::New(Object::new("NSCustomObject", values).named(name)));
     }
-    if !direct {
-        return fail("a custom object made other than directly is not supported by this ibtool");
+    // Other AppKit classes are made with init as the app's are (a probe of
+    // NSCollectionViewItem); the rest aren't established.
+    if class.starts_with("NS") && class != "NSCollectionViewItem" {
+        return fail(format!("a custom object of class {class} is not supported by this ibtool"));
     }
     let values = vec![
         ("NSClassName", nib.string(&runtime_class_name(t, module, "NSObject")?)),
@@ -1407,6 +1443,7 @@ fn new_nib(doc: &Document, localizable: bool, storyboard: bool) -> Nib {
         localizable,
         storyboard,
         constrained: constrained(doc),
+        old_custom: !storyboard && doc.root_element().attribute("customObjectInstantitationMethod") != Some("direct"),
     }
 }
 
@@ -2328,6 +2365,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("customModule", None),
             ("customModuleProvider", None),
             ("title", None),
+            ("placeholderString", None),
             ("lineBreakMode", None),
             ("alignment", None),
             ("scrollable", Some("YES")),
@@ -2344,7 +2382,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("usesSingleLineMode", Some("YES")),
         ],
     )?;
-    only_children(cell, &["font", "color"])?;
+    only_children(cell, &["font", "color", "string"])?;
     let cell_id = attr(cell, "id")?;
     let cell_name = object_name(cell_id);
     let has = |a: &str| cell.attribute(a).is_some();
@@ -2417,9 +2455,13 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     }
     cell_values.push(("NSCellFlags", Value::Int(signed(flags))));
     cell_values.push(("NSCellFlags2", Value::Int(signed(flags2))));
-    cell_values.push(("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))));
+    cell_values.push(("NSContents", nib.text(cell_id, "title", &title(cell)?)));
     let font_node = child(cell, "font", "font").ok_or("a text field cell without a font")?;
     cell_values.push(("NSSupport", appearance_font(nib, font_node, None)?));
+    // Its placeholder, after its font (a probe).
+    if let Some(p) = cell.attribute("placeholderString") {
+        cell_values.push(("NSPlaceholderString", nib.text(cell_id, "placeholderString", p)));
+    }
     cell_values.push(("NSControlView", reference(name.clone())));
     if has("drawsBackground") {
         cell_values.push(("NSDrawsBackground", Value::Bool(true)));
@@ -2824,7 +2866,10 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     c.parents.push((name.clone(), parent.to_string()));
     let frame_n = frame(n, "frame")?;
     let clip = child(n, "clipView", "contentView").ok_or("a scroll view without a clip view")?;
-    only_attributes(clip, &[("key", None), ("id", None), ("drawsBackground", Some("NO")), ("copiesOnScroll", Some("NO"))])?;
+    only_attributes(
+        clip,
+        &[("key", None), ("id", None), ("drawsBackground", Some("NO")), ("copiesOnScroll", Some("NO")), ("ambiguous", Some("YES"))],
+    )?;
     only_children(clip, &["rect", "autoresizingMask", "subviews"])?;
     let clip_frame = frame(clip, "frame")?;
     if (clip_frame.x, clip_frame.y, clip_frame.w, clip_frame.h) != (0.0, 0.0, frame_n.w, frame_n.h) {
@@ -2834,7 +2879,14 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     let [doc] = docs.as_slice() else {
         return fail("a clip view without one document view is not supported by this ibtool");
     };
-    if !matches!(doc.tag_name().name(), "view" | "customView") {
+    // Laying a constrained scroll view out again, Xcode may turn off a
+    // collection view's horizontal scroller (a corpus xib); one without it
+    // is established (eleven corpus xibs, a probe).
+    let constrained = n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && nib.constrained.contains(attr(n, "id")?);
+    if doc.has_tag_name("collectionView") && constrained && n.attribute("hasHorizontalScroller").is_none() {
+        return fail("a constrained scroll view's collection view with a horizontal scroller is laid out by Xcode, which this ibtool doesn't reproduce");
+    }
+    if !matches!(doc.tag_name().name(), "view" | "customView" | "collectionView") {
         return fail(format!("a scroll view's document <{}> is not supported by this ibtool", doc.tag_name().name()));
     }
     let doc_frame = frame(*doc, "frame")?;
@@ -2932,7 +2984,9 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     // Its line and page scrolls, as big-endian floats: vertical line and
     // page, then horizontal (a probe), when given.
     let amounts = ["verticalLineScroll", "verticalPageScroll", "horizontalLineScroll", "horizontalPageScroll"];
-    if amounts.iter().any(|a| n.attribute(*a).is_some()) {
+    // Left out when all are AppKit's 10 (a probe).
+    let defaults = amounts.iter().all(|a| n.attribute(*a).is_some_and(|v| number(v).is_ok_and(|v| v == 10.0)));
+    if amounts.iter().any(|a| n.attribute(*a).is_some()) && !defaults {
         let mut data = Vec::new();
         for a in amounts {
             let v = n.attribute(a).ok_or_else(|| format!("a scroll view without its {a} is not supported by this ibtool"))?;
@@ -3014,6 +3068,7 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
         n,
         &[
             ("id", None),
+            ("autoresizesSubviews", Some("NO")),
             ("customClass", None),
             ("customModule", None),
             ("customModuleProvider", None),
@@ -3413,6 +3468,69 @@ fn collection_item(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&st
         ("showSeguePresentationStyle", Value::Int(0)),
     ];
     Ok(Value::New(Object::new("NSClassSwapper", values).named(name)))
+}
+
+/// A collection view with a flow layout, as a scroll view's document (about
+/// ten probes): its core holding the layout and its selection, empty grid
+/// sizes, its background colours and selection, and dragging masks. The
+/// layout archives its spacings and item size only when not 10, 10 and 50
+/// by 50.
+fn collection_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(n, &[("id", None), ("ambiguous", Some("YES")), ("selectable", Some("YES")), ("allowsMultipleSelection", Some("YES"))])?;
+    only_children(n, &["rect", "autoresizingMask", "collectionViewFlowLayout", "color"])?;
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    let layout = child(n, "collectionViewFlowLayout", "collectionViewLayout").ok_or("a collection view without a flow layout is not supported by this ibtool")?;
+    only_attributes(layout, &[("key", None), ("id", None), ("minimumInteritemSpacing", None), ("minimumLineSpacing", None)])?;
+    only_children(layout, &["size"])?;
+    let layout_name = object_name(attr(layout, "id")?);
+    c.parents.push((layout_name.clone(), name.clone()));
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let mut layout_values = Vec::new();
+    for (key, archived) in [("minimumInteritemSpacing", "NSInteritemSpacing"), ("minimumLineSpacing", "NSLineSpacing")] {
+        let v = number(layout.attribute(key).unwrap_or("10"))?;
+        if v != 10.0 {
+            // As floats (a probe).
+            layout_values.push((archived, Value::Float(v as f32)));
+        }
+    }
+    if let Some(size) = child(layout, "size", "itemSize") {
+        only_attributes(size, &[("key", None), ("width", None), ("height", None)])?;
+        let (w, h) = (number(attr(size, "width")?)?, number(attr(size, "height")?)?);
+        if (w, h) != (50.0, 50.0) {
+            let text = nib.string(&format!("{{{}, {}}}", g(w), g(h)));
+            layout_values.push(("NSItemSize", Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", text)]))));
+        }
+    }
+    let layout_value = Value::New(Object::new("NSCollectionViewFlowLayout", layout_values).named(layout_name));
+    let selectable = n.attribute("selectable").is_some();
+    let multiple = n.attribute("allowsMultipleSelection").is_some();
+    let mut core = vec![("UICollectionLayout", layout_value)];
+    if !selectable {
+        core.push(("UIAllowsSelection", Value::Bool(false)));
+    }
+    if multiple {
+        core.push(("UIAllowsMultipleSelection", Value::Bool(true)));
+    }
+    values.push(("NSCollectionViewCore", Value::New(Object::new("_NSCollectionViewCore", core))));
+    let zero = nib.string("{0, 0}");
+    values.push(("NSMinGridSize", zero));
+    let zero = nib.string("{0, 0}");
+    values.push(("NSMaxGridSize", zero));
+    values.push(("NSMaxNumberOfGridRows", Value::Int(0)));
+    values.push(("NSMaxNumberOfGridColumns", Value::Int(0)));
+    let background = child(n, "color", "primaryBackgroundColor").ok_or("a collection view without a background colour is not supported by this ibtool")?;
+    let background = color(nib, background)?;
+    values.push(("NSBackgroundColors", nib.array("NSArray", vec![background])));
+    if selectable {
+        values.push(("NSSelectable", Value::Bool(true)));
+    }
+    if multiple {
+        values.push(("NSAllowsMultipleSelection", Value::Bool(true)));
+    }
+    values.push(("NSDraggingSourceMaskForLocal", Value::Int(-1)));
+    values.push(("NSDraggingSourceMaskForNonLocal", Value::Int(0)));
+    Ok(Value::New(Object::new("NSCollectionView", values).named(name)))
 }
 
 /// A SceneKit view as Xcode's game templates make it: a view, not looping,
