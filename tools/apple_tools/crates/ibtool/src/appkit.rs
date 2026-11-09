@@ -1856,8 +1856,6 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, false)?));
                     let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
-                    nib_names.push((identifier.clone(), identifier.clone()));
-                    uuids.push((identifier, uuid(xml, id)));
                 }
                 // The initial view controller: its nib, named for its id, as
                 // an identified one's (Xcode's notification content
@@ -1905,6 +1903,17 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     }
                 }
                 tag => return fail(format!("an AppKit storyboard's <{tag}> scene is not supported by this ibtool")),
+            }
+            // The controllers this scene embeds, in its segues' order: Xcode
+            // names them as it reaches them (a corpus storyboard whose
+            // embedded controllers' scenes come in another order).
+            for segue in scene.descendants().filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed")) {
+                let id = attr(segue, "destination")?;
+                let identifier = format!("NSViewController-{id}");
+                if !nib_names.iter().any(|n| n.0 == identifier) {
+                    nib_names.push((identifier.clone(), identifier.clone()));
+                    uuids.push((identifier, uuid(xml, id)));
+                }
             }
         }
     }
@@ -2418,9 +2427,6 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     // Its embed segues' templates, made as its view loads (four probes).
     let segues = embeds(vc);
     let mut templates = Vec::new();
-    if !segues.is_empty() && (vc.attribute("storyboardIdentifier").is_some() || vc.attribute("title").is_some()) {
-        return fail("an identified or titled view controller's embed segues are not supported by this ibtool");
-    }
     for segue in &segues {
         let template_name = object_name(&format!("{} template", attr(*segue, "id")?));
         let mut t = Vec::new();
@@ -2434,16 +2440,18 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     }
     let template_names: Vec<String> = templates.iter().map(|t| t.0.clone()).collect();
     let template_names_out = template_names.clone();
-    if !templates.is_empty() {
-        let list = templates.into_iter().map(|t| t.1).collect();
-        values.push(("NSStoryboardSegueTemplates", nib.array("NSArray", list)));
-    }
     if let Some(identifier) = vc.attribute("storyboardIdentifier") {
         values.push(("NSStoryboardIdentifier", nib.string(identifier)));
     }
     // Its title after its identifier (a probe).
     if let Some(title) = vc.attribute("title") {
         values.push(("NSTitle", nib.text(attr(vc, "id")?, "title", title)));
+    }
+    // Its templates after its identifier and title (two probes, a corpus
+    // storyboard).
+    if !templates.is_empty() {
+        let list = templates.into_iter().map(|t| t.1).collect();
+        values.push(("NSStoryboardSegueTemplates", nib.array("NSArray", list)));
     }
     // Its view's nib names it as its upstream placeholder when connections
     // need it there (Xcode's SpriteKit template).
@@ -4402,11 +4410,10 @@ fn stack_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     ));
     values.push(("NSStackViewVerticalHugging", Value::Float(priority_f("verticalStackHuggingPriority", None)?)));
     values.push(("NSStackViewHorizontalHugging", Value::Float(priority_f("horizontalStackHuggingPriority", None)?)));
-    // Its numbers as floats (a probe).
-    values.push((
-        "NSStackViewSpacing",
-        Value::Float(number(n.attribute("spacing").ok_or("a stack view without spacing is not supported by this ibtool")?)? as f32),
-    ));
+    // Its numbers as floats (a probe); without a spacing, NSStackView's 8
+    // (a corpus storyboard).
+    let spacing = n.attribute("spacing").map(number).transpose()?.unwrap_or(8.0);
+    values.push(("NSStackViewSpacing", Value::Float(spacing as f32)));
     if distribution == 3 {
         values.push(("NSStackViewHasEqualSpacing", Value::Bool(true)));
     }

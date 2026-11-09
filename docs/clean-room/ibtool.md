@@ -2951,7 +2951,8 @@ are the arranged views (which, constrained by the stack, all say
 secondary and primary alignments (horizontal: top 1 and 3, centerY 3 and
 10, bottom 4 and 4, firstBaseline 2 and 12; vertical: leading 1 and 5,
 centerX 3 and 9, trailing 4 and 6), clipping resistance and hugging,
-spacing (with `NSStackViewHasEqualSpacing` for equal spacing), the
+spacing (8 when the document gives none; with
+`NSStackViewHasEqualSpacing` for equal spacing), the
 distribution (fill 0, fill equally 1, fill proportionally 2, equal spacing
 3, equal centering 4) and edge insets, all numbers as floats; an
 `NSStackViewContainer` (outside the objects list) holding the arranged
@@ -3167,7 +3168,8 @@ Its embed segue makes the parent controller hold an
 `NSStoryboardSegueTemplates` array, after its nib name, of
 `NSStoryboardEmbedSegueTemplate`s (the segue's identifier if any, the
 trigger `IBSegueTriggerViewDidLoad`, the destination
-`NSViewController-<id>`, and a nil container view). The templates are in
+`NSViewController-<id>`, and a nil container view); with a storyboard
+identifier or title, the array follows them. The templates are in
 document order in the array, but listed in reverse after the controller
 in the objects list, each with outlets to the controller (`controller`)
 and to its storyboard placeholder (`storyboard`). The controller's
@@ -3176,7 +3178,10 @@ needs one) and then to each template. Its view's nib has a placeholder of
 each, with a template's `containerView` outlet to its container view. The
 embedded controller has its own nib, `NSViewController-<id>`, in the
 Info.plist's nib names and UUIDs, holding it as a window's content
-controller is held (a plain `NSViewController` without a class). Xcode's
+controller is held (a plain `NSViewController` without a class). The
+Info.plist names embedded controllers as Xcode reaches them: after the
+scene holding their segues, in the segues' document order, whatever order
+their own scenes come in (a corpus storyboard). Xcode's
 UUIDs change from run to run, so these are checked by probes, not by
 `tests/ibtool_xib`. A view
 controller with a storyboard identifier has its own nib of that name,
