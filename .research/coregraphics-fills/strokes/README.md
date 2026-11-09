@@ -113,12 +113,17 @@ within a band of widths for reasons I haven't found.
   exactly, but the split between rows differs from area by up to ±2, and
   a 1/256 translation sweep jitters step by step. That looks like
   fixed-point area arithmetic I haven't identified.
-- In shallow width-1 lines each column is a band [bot, bot + T] in
-  integer 1/256 units with T = floor(256·secθ). The bottoms step like a
-  DDA, but their average slope isn't the line's: a rise of 4/256 over 24
-  px rises 4 units over the 22 interior columns, and −12 gives −10. It
-  looks like interpolation between rounded values at the end columns; I
-  haven't found the exact rounding (thin11.py, thin12.py).
+- Sloped width-1 lines (x-major) run on a fixed-point DDA in 1/4096 px.
+  The slope is trunc((dy·4096 + dx/2)/dx) with C integer division: half-up
+  for rising lines, and descending lines lose up to 1.5 units (thin14.py,
+  exact on 60 slopes). Each column is a band [bot, bot + T] in 1/256 units,
+  T = floor(256·secθ), with bot = floor((A + s·k)/16). For a horizontal
+  line bot = floor((y − ½)·256) + 1 (thin15.py). The lower row gets
+  ceil(area) and the upper row T minus that.
+- Not found yet: the start offset A (it is about 9–16 units above the
+  exact band bottom and depends on the endpoints in a way I haven't
+  matched, thin19.py), columns where the band's edge crosses a row inside
+  the column, three-row columns of steeper lines, the ends, and curves.
 - The corpus has one thin block (logo-open live, w = 1.0 at 1×). It is
   now the largest remaining corpus gap: filling CoreGraphics' own width-1
   outline gets 770 of its 1,259 edge pixels wrong, mostly by ±1 to 3.
