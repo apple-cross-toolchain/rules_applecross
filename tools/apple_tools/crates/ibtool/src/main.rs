@@ -76,12 +76,17 @@ fn run(args: Vec<String>) -> Result<(), String> {
     }
     if let Some(dir) = link_dir {
         for input in &inputs {
-            // A WatchKit interface links to the plist alone.
+            // A WatchKit interface links to its plists alone, its
+            // notifications' beside it (rules_apple's Buttons example).
             let interface = input.join("Interface.plist");
-            if interface.is_file() && std::fs::read_dir(input).map_err(|e| e.to_string())?.count() == 1 {
-                let compiled = std::fs::read(&interface).map_err(|e| format!("{}: {e}", interface.display()))?;
-                let linked = watch::link(&compiled).map_err(|e| format!("{}: {e}", interface.display()))?;
-                std::fs::write(dir.join("Interface.plist"), linked).map_err(|e| e.to_string())?;
+            let names: Vec<std::ffi::OsString> = std::fs::read_dir(input).map_err(|e| e.to_string())?.map(|e| e.map(|e| e.file_name())).collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+            if interface.is_file() && names.iter().all(|n| n == "Interface.plist" || n == "Interface-notification.plist") {
+                for name in &names {
+                    let path = input.join(name);
+                    let compiled = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                    let linked = watch::link(&compiled).map_err(|e| format!("{}: {e}", path.display()))?;
+                    std::fs::write(dir.join(name), linked).map_err(|e| e.to_string())?;
+                }
                 continue;
             }
             let name = input.file_name().ok_or("bad input path")?;
@@ -148,7 +153,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB\"") {
             appkit::compile_storyboard(&xml, module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj")))
         } else if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
-            watch::compile(&xml, module.as_deref())
+            watch::compile(&xml, module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj")))
         } else {
             storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files)
         };
