@@ -712,6 +712,8 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("oneShot", Some("NO")),
             ("showsToolbarButton", Some("NO")),
             ("restorable", Some("NO")),
+            ("titlebarAppearsTransparent", Some("YES")),
+            ("titleVisibility", Some("hidden")),
             ("key", Some("window")),
             ("id", None),
             ("customClass", None),
@@ -891,6 +893,14 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     if !nib.storyboard {
         values.push(("NSMinFullScreenContentSize", nib.string("{0, 0}")));
         values.push(("NSMaxFullScreenContentSize", nib.string("{0, 0}")));
+    }
+    // A hidden title and a transparent title bar, after the full-screen
+    // sizes (two probes).
+    if n.attribute("titleVisibility").is_some() {
+        values.push(("NSWindowTitleVisibility", Value::Int(1)));
+    }
+    if n.attribute("titlebarAppearsTransparent").is_some() {
+        values.push(("NSTitlebarAppearsTransparent", Value::Bool(true)));
     }
     // A custom class's reference last (three corpus xibs).
     if n.attribute("customClass").is_some() {
@@ -1589,7 +1599,11 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
 /// (templates).
 fn application_placeholder(nib: &mut Nib, c: &mut Collected, application: Node, module: Option<&str>, parent: &str) -> Result<(), String> {
     only_attributes(application, &[("id", None), ("userLabel", None), ("customClass", None)])?;
-    only_children(application, &[])?;
+    // Its outlets, as an older main menu's delegate (a corpus xib).
+    only_children(application, &["connections"])?;
+    if children(application, "connections").next().is_some() {
+        c.connection_sources.push(attr(application, "id")?.to_string());
+    }
     let name = object_name(attr(application, "id")?);
     let values = match application.attribute("customClass") {
         Some("NSObject") => class_values(nib, application, module, Some("NSApplication"))?,
@@ -1868,7 +1882,15 @@ fn outlet(name: String, source: &str, destination: &str, label: Value) -> (Strin
 fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
     only_attributes(
         wc,
-        &[("id", None), ("sceneMemberID", None), ("showSeguePresentationStyle", Some("single")), ("storyboardIdentifier", None)],
+        &[
+            ("id", None),
+            ("sceneMemberID", None),
+            ("showSeguePresentationStyle", Some("single")),
+            ("storyboardIdentifier", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
+        ],
     )?;
     // Shown as a single window, presentation style 1 (a corpus storyboard).
     let presentation = if wc.attribute("showSeguePresentationStyle").is_some() { 1 } else { 0 };
@@ -1930,8 +1952,10 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
             )),
         ));
     }
-    let wc_object = Object::new("NSWindowController", wc_values).named(wc_name.clone());
-    c.definitions.insert(wc_name.clone(), Value::New(wc_object));
+    // Of a custom class, swapped in for NSWindowController (a corpus
+    // storyboard).
+    let wc_object = swapped(&mut nib, wc, module, "NSWindowController", wc_values, wc_name.clone())?;
+    c.definitions.insert(wc_name.clone(), wc_object);
 
     // The scene controller first, then the window's own connections, the
     // storyboard outlets, the window outlet and the content controller.
