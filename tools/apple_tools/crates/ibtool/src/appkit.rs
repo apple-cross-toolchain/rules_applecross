@@ -202,7 +202,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     if let Some(content) = content {
         let content = view(nib, c, content, module, name, Some(name))?;
         values.push(("NSSubviews", nib.array("NSMutableArray", vec![content])));
-    } else if !subviews.is_empty() || n.has_tag_name("button") || n.has_tag_name("box") {
+    } else if !subviews.is_empty() || n.has_tag_name("button") || n.has_tag_name("box") || n.has_tag_name("imageView") {
         let mut items = Vec::new();
         for s in subviews {
             items.push(match s.tag_name().name() {
@@ -211,6 +211,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "button" => button(nib, c, s, module, name)?,
                 "scrollView" => scroll_view(nib, c, s, module, name)?,
                 "box" => box_view(nib, c, s, module, name)?,
+                "imageView" => image_view(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -2501,6 +2502,133 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
         values.push(("IBNSBoxIsUsingDocumentContentView", Value::Bool(true)));
     }
     Ok(Value::New(Object::new("NSBox", values).named(name)))
+}
+
+/// An image view and its cell (about 15 probes): an editable control
+/// accepting eight drag types, its cell's flags as a text field's, the
+/// image's alignment, scaling and frame style by AppKit's enums, and a named
+/// image from the app's catalogs as an `NSCustomResource` of its document
+/// size. AppKit's own images (namespace `system`) aren't established.
+fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("hidden", Some("YES")),
+            ("horizontalHuggingPriority", None),
+            ("verticalHuggingPriority", None),
+            ("horizontalCompressionResistancePriority", None),
+            ("verticalCompressionResistancePriority", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+            ("userLabel", None),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints"])?;
+    // Its image sizes it.
+    content_sized(nib, n)?;
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    let cell = child(n, "imageCell", "cell").ok_or("an image view without a cell")?;
+    only_attributes(
+        cell,
+        &[
+            ("key", None),
+            ("id", None),
+            ("refusesFirstResponder", Some("YES")),
+            ("alignment", None),
+            ("imageScaling", None),
+            ("imageAlignment", None),
+            ("imageFrameStyle", None),
+            ("image", None),
+        ],
+    )?;
+    only_children(cell, &[])?;
+    let cell_name = object_name(attr(cell, "id")?);
+    // Its cell comes before its own constraints in the objects' list.
+    c.parents.push((cell_name.clone(), name.clone()));
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let types = [
+        "Apple PDF pasteboard type",
+        "Apple PICT pasteboard type",
+        "Apple PNG pasteboard type",
+        "NSFilenamesPboardType",
+        "NeXT TIFF v4.0 pasteboard type",
+        "com.apple.NSFilePromiseItemMetaData",
+        "com.apple.pasteboard.promised-file-content-type",
+        "dyn.ah62d4rv4gu8yc6durvwwa3xmrvw1gkdusm1044pxqyuha2pxsvw0e55bsmwca7d3sbwu",
+    ];
+    let types: Vec<Value> = types.iter().map(|t| nib.string(t)).collect();
+    let at = values.iter().position(|v| v.0 == "NSFrame" || v.0 == "NSFrameSize").expect("its frame");
+    values.insert(at, ("NSDragTypes", nib.array("NSMutableSet", types)));
+    let refuses = cell.attribute("refusesFirstResponder").is_some();
+    let (control_alignment, alignment_bits) = match cell.attribute("alignment") {
+        None | Some("natural") => (4, 4),
+        Some("left") => (0, 0),
+        Some("center") => (1, 2),
+        Some("right") => (2, 1),
+        Some("justified") => (3, 3),
+        Some(other) => return fail(format!("alignment {other} is not supported by this ibtool")),
+    };
+    let flags2 = alignment_bits << 26 | if refuses { 0x200_0000 } else { 0 };
+    let mut cell_values = vec![("NSCellFlags", Value::Int(0)), ("NSCellFlags2", Value::Int(flags2))];
+    if let Some(image) = cell.attribute("image") {
+        if image.starts_with("NS") {
+            return fail(format!("AppKit's image {image} in an image view is not supported by this ibtool"));
+        }
+        let resource = n
+            .document()
+            .descendants()
+            .find(|d| d.has_tag_name("image") && d.parent_element().is_some_and(|p| p.has_tag_name("resources")) && d.attribute("name") == Some(image))
+            .ok_or_else(|| format!("the image {image} without its size in the document's resources"))?;
+        let size = format!("{{{}, {}}}", g(number(attr(resource, "width")?)?), g(number(attr(resource, "height")?)?));
+        cell_values.push(("NSContents", system_image(nib, image, &size)));
+    }
+    cell_values.push(("NSControlView", reference(name.clone())));
+    let align = match cell.attribute("imageAlignment") {
+        None | Some("center") => 0,
+        Some("top") => 1,
+        Some("topLeft") => 2,
+        Some("topRight") => 3,
+        Some("left") => 4,
+        Some("bottom") => 5,
+        Some("bottomLeft") => 6,
+        Some("bottomRight") => 7,
+        Some("right") => 8,
+        Some(other) => return fail(format!("image alignment {other} is not supported by this ibtool")),
+    };
+    let scale = match cell.attribute("imageScaling") {
+        None | Some("proportionallyDown") => 0,
+        Some("axesIndependently") => 1,
+        Some("none") => 2,
+        Some("proportionallyUpOrDown") => 3,
+        Some(other) => return fail(format!("image scaling {other} is not supported by this ibtool")),
+    };
+    let style = match cell.attribute("imageFrameStyle") {
+        None => 0,
+        Some("grayBezel") => 2,
+        Some(other) => return fail(format!("image frame style {other} is not supported by this ibtool")),
+    };
+    cell_values.push(("NSAlign", Value::Int(align)));
+    cell_values.push(("NSScale", Value::Int(scale)));
+    cell_values.push(("NSStyle", Value::Int(style)));
+    cell_values.push(("NSAnimates", Value::Bool(false)));
+    cell_values.push(("NSImageAnimation", Value::Int(-1)));
+    values.push(("NSEnabled", Value::Bool(true)));
+    values.push(("NSCell", Value::New(Object::new("NSImageCell", cell_values).named(cell_name))));
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
+    values.push(("NSControlSize", Value::Int(0)));
+    values.push(("NSControlContinuous", Value::Bool(false)));
+    values.push(("NSControlRefusesFirstResponder", Value::Bool(refuses)));
+    values.push(("NSControlUsesSingleLineMode", Value::Bool(false)));
+    values.push(("NSControlTextAlignment", Value::Int(control_alignment)));
+    values.push(("NSControlLineBreakMode", Value::Int(0)));
+    values.push(("NSControlWritingDirection", Value::Int(-1)));
+    values.push(("NSControlSendActionMask", Value::Int(4)));
+    values.push(("NSEditable", Value::Bool(true)));
+    values.push(("NSImageViewPlaceholderPrecedence", Value::Int(0)));
+    values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
+    Ok(Value::New(Object::new("NSImageView", values).named(name)))
 }
 
 /// Whether a view controller's view nib needs it as an upstream placeholder:

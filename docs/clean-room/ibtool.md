@@ -2864,6 +2864,22 @@ whatever its frame says; in a storyboard it clips to its bounds. A primary
 or secondary box puts its content below its title, measured with the
 Mac's fonts, and is refused.
 
+**Image views** (about 15 probes). An `NSImageView`'s view keys, with
+`NSDragTypes` before its frame: a set of eight pasteboard types (PDF,
+PICT, PNG, file names, TIFF, file promises, and a dynamic type), always
+the same. Then `NSEnabled`, the cell, and the control keys, refusing
+first responder as the cell says, editable, and
+`NSImageViewPlaceholderPrecedence` 0. Its `NSImageCell`: the text field
+cell's flags (refusing first responder 0x2000000 in `NSCellFlags2`), a
+named image as an `NSCustomResource` of the size the document's resources
+give, the image alignment (center 0, top 1, top left 2, top right 3, left
+4, bottom 5, bottom left 6, bottom right 7, right 8), scaling
+(proportionally down 0, axes independently 1, none 2, proportionally up or
+down 3), frame style (none 0, gray bezel 2), and no animation. An image
+sizes its view, so a constrained image view is laid out by Xcode, as a
+content-sized control is. AppKit's own images (`NSAddTemplate`), which
+Xcode names in the `system` namespace, are refused.
+
 **Scroll views**, as Xcode archives those it doesn't lay out again: no
 border, hidden scrollers that hide themselves, no content insets, and a
 document view (a plain or custom view) no larger than the clip view. With
@@ -2900,6 +2916,6 @@ controller with a storyboard identifier has its own nib of that name,
 holding it and a storyboard placeholder, and requiring its class swapper
 for connections whether or not it has a class.
 
-Refused: other elements and attributes (primary boxes, image views, collection
+Refused: other elements and attributes (primary boxes, collection
 views and other controls, scroll views Xcode tiles, bindings, other segues
 and controllers, other colours).
