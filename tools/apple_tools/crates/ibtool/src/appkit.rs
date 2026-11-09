@@ -1375,7 +1375,16 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
             match controller.tag_name().name() {
                 "windowController" => {
                     let id = attr(*controller, "id")?;
-                    let identifier = format!("NSWindowController-{id}");
+                    // Named by its identifier when it has one, which its
+                    // nib name's and UUID's keys share (Xcode's document app
+                    // template).
+                    let identifier = match controller.attribute("storyboardIdentifier") {
+                        Some(i) => {
+                            identified.push(i.to_string());
+                            i.to_string()
+                        }
+                        None => format!("NSWindowController-{id}"),
+                    };
                     let (bytes, uuid) = window_controller_nib(&doc, xml, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{identifier}.nib"), bytes));
                     nib_names.push((identifier.clone(), identifier.clone()));
@@ -1554,7 +1563,10 @@ fn outlet(name: String, source: &str, destination: &str, label: Value) -> (Strin
 /// that varies from run to run, and gives each controller a new UUID; this
 /// ibtool keeps one order of each.
 fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
-    only_attributes(wc, &[("id", None), ("sceneMemberID", None), ("showSeguePresentationStyle", Some("single"))])?;
+    only_attributes(
+        wc,
+        &[("id", None), ("sceneMemberID", None), ("showSeguePresentationStyle", Some("single")), ("storyboardIdentifier", None)],
+    )?;
     // Shown as a single window, presentation style 1 (a corpus storyboard).
     let presentation = if wc.attribute("showSeguePresentationStyle").is_some() { 1 } else { 0 };
     only_children(wc, &["window", "connections"])?;
@@ -1595,16 +1607,14 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
 
     let (vc_value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, false)?;
     let wc_uuid = uuid(xml, wc_id);
-    let wc_object = Object::new(
-        "NSWindowController",
-        vec![
-            ("IBWindowTemplate", window_value),
-            ("IBWindowTemplateContentViewController", vc_value),
-            ("showSeguePresentationStyle", Value::Int(presentation)),
-            ("uniqueIdentifierForStoryboardCompilation", nib.string(&wc_uuid)),
-        ],
-    )
-    .named(wc_name.clone());
+    let mut wc_values = vec![("IBWindowTemplate", window_value), ("IBWindowTemplateContentViewController", vc_value)];
+    // Its identifier, when it has one (Xcode's document app template).
+    if let Some(identifier) = wc.attribute("storyboardIdentifier") {
+        wc_values.push(("explicitStoryboardIdentifier", nib.string(identifier)));
+    }
+    wc_values.push(("showSeguePresentationStyle", Value::Int(presentation)));
+    wc_values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&wc_uuid)));
+    let wc_object = Object::new("NSWindowController", wc_values).named(wc_name.clone());
     c.definitions.insert(wc_name.clone(), Value::New(wc_object));
 
     // The scene controller first, then the window's own connections, the
@@ -1659,7 +1669,7 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
             ("title", None),
         ],
     )?;
-    let view = children(vc, "view").next().ok_or("a view controller without a view")?;
+    let view = controller_view(vc).ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
     // A window's content controller without a class is a plain
     // NSViewController (rules_apple's example, two probes).
@@ -1766,7 +1776,7 @@ fn controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, loc
 /// A view controller's view nib: an NSObject root (the controller) whose
 /// `view` outlet is the view.
 fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(String, Vec<u8>), String> {
-    only_children(vc, &["view", "connections"])?;
+    only_children(vc, &["view", "sceneView", "connections"])?;
     // The controller's own connections, and those to it, go through an
     // upstream placeholder standing for it (Xcode's SpriteKit template).
     let upstream = uses_upstream(vc);
@@ -1774,12 +1784,16 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
         return fail("a view controller's connections other than outlets are not supported by this ibtool");
     }
     let mut nib = new_nib(doc, localizable, true);
-    let view_node = children(vc, "view").next().ok_or("a view controller without a view")?;
+    let view_node = controller_view(vc).ok_or("a view controller without a view")?;
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(vec![attr(vc, "id")?.to_string()]);
     let view_name = object_name(attr(view_node, "id")?);
-    let value = view(&mut nib, &mut c, view_node, module, &root_name, None)?;
+    let value = if view_node.has_tag_name("sceneView") {
+        scene_view(&mut nib, &mut c, view_node, module, &root_name)?
+    } else {
+        view(&mut nib, &mut c, view_node, module, &root_name, None)?
+    };
     c.definitions.insert(view_name.clone(), value);
     let placeholder = object_name("application placeholder");
     c.parents.push((placeholder.clone(), root_name.clone()));
@@ -2001,6 +2015,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
             ("fixedFrame", Some("YES")),
             ("allowsCharacterPickerTouchBarItem", None),
+            ("preferredMaxLayoutWidth", None),
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints"])?;
@@ -2132,6 +2147,11 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     values.push(("NSControlLineBreakMode", Value::Int(control_break)));
     values.push(("NSControlWritingDirection", Value::Int(-1)));
     values.push(("NSControlSendActionMask", Value::Int(4)));
+    // Its preferred width for wrapping, when given (Xcode's document app
+    // template).
+    if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
+        values.push(("NSPreferredMaxLayoutWidth", Value::Double(number(w)?)));
+    }
     values.push(("NSTextFieldAlignmentRectInsetsVersion", Value::Int(2)));
     values.push(("NSAllowsWritingTools", Value::Bool(true)));
     values.push(("NSTextFieldAllowsWritingToolsAffordance", Value::Bool(false)));
@@ -2934,6 +2954,39 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     Ok(Value::New(Object::new("NSImageView", values).named(name)))
 }
 
+/// A view controller's view: a view, or a SceneKit view (Xcode's SceneKit
+/// game templates).
+fn controller_view<'a, 'i>(vc: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    vc.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("sceneView")) && c.attribute("key") == Some("view"))
+}
+
+/// A SceneKit view as Xcode's game templates make it: a view, not looping,
+/// with the default rendering API, then SCNView's keys (two templates).
+fn scene_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(n, &[("key", None), ("id", None), ("loops", Some("NO")), ("preferredRenderingAPI", Some("-1"))])?;
+    only_children(n, &["rect", "autoresizingMask", "connections"])?;
+    if n.attribute("loops").is_none() || n.attribute("preferredRenderingAPI").is_none() {
+        return fail("a SceneKit view other than Xcode's templates' is not supported by this ibtool");
+    }
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    // Its outlet to its controller (Xcode's multi-platform template).
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(attr(n, "id")?.to_string());
+    }
+    let mut values = view_values(nib, c, n, module, &name, parent, None)?;
+    values.push(("loops", Value::Bool(false)));
+    values.push(("playing", Value::Bool(false)));
+    values.push(("jitteringEnabled", Value::Bool(false)));
+    values.push(("allowsCameraControl", Value::Bool(false)));
+    values.push(("ibWantsMultisampling", Value::Bool(true)));
+    values.push(("ibPreferredRenderingAPI", Value::Int(-1)));
+    values.push(("autoenablesDefaultLighting", Value::Bool(false)));
+    values.push(("ibSceneName", Value::Nil));
+    values.push(("backgroundColor", Value::Nil));
+    Ok(Value::New(Object::new("SCNView", values).named(name)))
+}
+
 /// A container view's embed segue: its only connection.
 fn embed_segue<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> {
     let all: Vec<Node> = children(n, "connections").flat_map(|l| l.children().filter(|c| c.is_element())).collect();
@@ -2949,7 +3002,8 @@ fn embed_segue<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> 
 
 /// The embed segues of a view controller's view, in document order.
 fn embeds<'a, 'i>(vc: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
-    children(vc, "view")
+    controller_view(vc)
+        .into_iter()
         .flat_map(|v| v.descendants())
         .filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed"))
         .collect()
@@ -2960,7 +3014,8 @@ fn embeds<'a, 'i>(vc: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
 fn uses_upstream(vc: Node) -> bool {
     let id = vc.attribute("id");
     children(vc, "connections").next().is_some()
-        || children(vc, "view")
+        || controller_view(vc)
+            .into_iter()
             .flat_map(|v| v.descendants())
             .any(|d| (d.has_tag_name("outlet") && d.attribute("destination") == id) || (d.has_tag_name("action") && d.attribute("target") == id))
 }

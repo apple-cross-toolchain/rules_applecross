@@ -2944,6 +2944,16 @@ dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
 derives a UUID from the document and the controller's id.
 
+A window controller with a storyboard identifier is named by it: its nib,
+and its Info.plist keys sharing one string, with
+`explicitStoryboardIdentifier` after its content controller (Xcode's
+document app template). A view controller's view may be a SceneKit view,
+an `SCNView` with SceneKit's keys after the view's (`loops`, `playing`,
+`jitteringEnabled`, `allowsCameraControl`, `ibWantsMultisampling`,
+`ibPreferredRenderingAPI`, `autoenablesDefaultLighting`, `ibSceneName`,
+`backgroundColor`), in the form Xcode's SceneKit game templates give it.
+A text field's `NSPreferredMaxLayoutWidth` follows its control keys.
+
 **Container views** (seven probes). A container view is a plain view.
 Its embed segue makes the parent controller hold an
 `NSStoryboardSegueTemplates` array, after its nib name, of
