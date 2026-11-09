@@ -377,6 +377,80 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
     Ok(order)
 }
 
+/// Whether `relax_ibtool_layout` compiles constrained views with their
+/// documents' frames.
+fn layout_relaxed() -> bool {
+    std::env::var("RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT").is_ok_and(|v| v == "1") || std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").is_ok_and(|v| v == "relaxed")
+}
+
+/// Refuses a view's constraints that its subviews' frames in the document
+/// don't satisfy: Xcode lays such views out again as it compiles (probes
+/// whose frames disagreed moved), while this ibtool keeps the document's
+/// frames. Attributes are measured as Auto Layout does, left to right and
+/// down from the view's top (a probe whose frames agree, kept): leading and
+/// left the frame's left edge, trailing and right its right, top and bottom
+/// from the view's top edge.
+fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
+    let own = n.attribute("id");
+    let bounds = match own.and_then(|id| c.laid_out.get(id)) {
+        Some(f) => *f,
+        None => frame(n, "frame")?,
+    };
+    let height = bounds.h;
+    let rect = |id: Option<&str>| -> Result<Frame, String> {
+        match id.filter(|i| Some(*i) != own) {
+            None => Ok(Frame {
+                x: 0.0,
+                y: 0.0,
+                w: bounds.w,
+                h: bounds.h,
+            }),
+            Some(id) => {
+                let s = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).find(|s| s.attribute("id") == Some(id));
+                frame(s.ok_or("a constraint on a view other than its view or a subview is not supported by this ibtool")?, "frame")
+            }
+        }
+    };
+    let value = |f: &Frame, a: &str| -> Result<f64, String> {
+        Ok(match a {
+            "leading" | "left" => f.x,
+            "trailing" | "right" => f.x + f.w,
+            "centerX" => f.x + f.w / 2.0,
+            "width" => f.w,
+            "top" => height - (f.y + f.h),
+            "bottom" => height - f.y,
+            "centerY" => height - (f.y + f.h / 2.0),
+            "height" => f.h,
+            other => return fail(format!("a constraint on {other} is not supported by this ibtool")),
+        })
+    };
+    for k in list {
+        let first = value(&rect(k.attribute("firstItem"))?, attr(*k, "firstAttribute")?)?;
+        let second = match k.attribute("secondItem") {
+            Some(s) => value(&rect(Some(s))?, k.attribute("secondAttribute").ok_or("a constraint with a second item and no attribute")?)?,
+            // A size alone, or a second attribute of the view's own.
+            None => match k.attribute("secondAttribute") {
+                Some(a) => value(&rect(None)?, a)?,
+                None => 0.0,
+            },
+        };
+        let wanted = second + k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+        let agrees = match k.attribute("relation") {
+            None => (first - wanted).abs() < 0.001,
+            Some("greaterThanOrEqual") => first > wanted - 0.001,
+            Some("lessThanOrEqual") => first < wanted + 0.001,
+            Some(other) => return fail(format!("constraint relation {other} is not supported by this ibtool")),
+        };
+        if !agrees {
+            return fail(format!(
+                "a constraint ({}) that its views' frames in the document don't satisfy, so Xcode lays them out again as it compiles, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles them with the document's frames",
+                attr(*k, "id")?
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The constraints a view holds, as `NSLayoutConstraint`s, in
 /// [`constraint_order`]: a missing first item is the view; attributes by
 /// NSLayoutAttribute, relations by NSLayoutRelation (-1, 0, 1); the
@@ -388,6 +462,9 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
     }
     let ids: Vec<&str> = list.iter().map(|k| attr(*k, "id")).collect::<Result<_, _>>()?;
     let order = constraint_order(c, n, &list)?;
+    if !layout_relaxed() {
+        frames_agree(c, n, &list)?;
+    }
     let mut items = Vec::new();
     for i in order {
         let k = list[i];
@@ -1626,7 +1703,7 @@ fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
 /// which only the first layout at run time uses.
 fn content_sized(nib: &Nib, n: Node) -> Result<(), String> {
     let constrained = n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id));
-    let relaxed = std::env::var("RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT").is_ok_and(|v| v == "1") || std::env::var("RULES_APPLECROSS_RESOURCE_OUTPUT_MODE").is_ok_and(|v| v == "relaxed");
+    let relaxed = layout_relaxed();
     if constrained && !relaxed {
         return fail(format!(
             "a constrained <{}> is laid out again by Xcode's Auto Layout as it compiles, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frame",

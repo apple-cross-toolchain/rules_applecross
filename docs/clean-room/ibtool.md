@@ -2789,7 +2789,10 @@ related to another attribute. A view controller's own view never says
 **Layout.** Xcode lays constrained views out again with Auto Layout as it
 compiles, with the Mac's control metrics and text measurement: 133 of the
 corpus's 227 text field and button frames differ from their documents'.
-Strict, this ibtool refuses constrained controls sized by their content;
+Strict, this ibtool refuses constrained controls sized by their content,
+and constraints that the document's frames don't satisfy (a view
+Interface Builder shows misplaced, which probes show Xcode moving; Auto
+Layout measures left to right and down from the view's top);
 `--config=relax_ibtool_layout` compiles them with the document's frames,
 which only their first layout at run time uses.
 
