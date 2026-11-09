@@ -2772,6 +2772,15 @@ priority the document leaves out is Interface Builder's default, 250 or
 the safe-area, margins and clipping keys. A custom view, or a view of a
 custom class, is an `NSClassSwapper` for it.
 
+**Own classes.** A custom class naming the element's own AppKit class is
+no custom class, with or without a module: Xcode compiles the document as
+though the class weren't there. This holds for a view's or custom view's
+`NSView` in both kinds of xib, a button's `NSButton`, a window's
+`NSWindow`, a text field cell's `NSTextFieldCell` and a content
+controller's `NSViewController` (about a dozen probes). A plain view naming
+`NSView` is an `NSView`, not a class swapper; a custom view is swapped (or
+an `NSCustomView`) all the same, with no class reference.
+
 **Constraints** (`NSLayoutConstraint`): items, attributes twice
 (NSLayoutAttribute), the relation, the constant twice when given (a
 symbolic one, the standard space, as `NSSymbolicConstant` `NSSpace` in their

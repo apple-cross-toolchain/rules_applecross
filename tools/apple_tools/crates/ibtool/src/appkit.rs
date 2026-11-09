@@ -197,7 +197,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     // A custom view is an NSClassSwapper for its class, at any depth, as is
     // a plain view of a custom class; a plain view an NSView (constraint
     // probes, templates).
-    let swapped = n.has_tag_name("customView") || n.attribute("customClass").is_some();
+    let swapped = n.has_tag_name("customView") || custom_class(n, "NSView").is_some();
     // A container view is a plain view; its embed segue's template finds it
     // through its controller (four probes).
     let container = n.has_tag_name("containerView");
@@ -206,7 +206,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     if n.attribute("simulatedAppContext").is_some() && !layout_relaxed() {
         return fail("a simulated app context is laid out by Xcode with its own metrics, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
     }
-    if container && (n.attribute("customClass").is_some() || embed_segue(n)?.is_none()) {
+    if container && (custom_class(n, "NSView").is_some() || embed_segue(n)?.is_none()) {
         return fail("a container view with a class, or without one embed segue, is not supported by this ibtool");
     }
     only_attributes(
@@ -237,7 +237,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         if !n.has_tag_name("customView") {
             return fail("a view of a custom class in a xib without direct instantiation is not supported by this ibtool");
         }
-        let class = runtime_class_name(n, module, "NSView")?;
+        let class = class_name(n, module, "NSView")?;
         let mut values = view_values(nib, c, n, module, &name, parent, next_responder)?;
         // Its subviews in reverse (four probes; a plain view's keep their
         // order).
@@ -250,11 +250,14 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
                 }
             }
         }
-        values.extend(class_values(nib, n, module, Some(&class))?);
+        match custom_class(n, "NSView") {
+            Some(_) => values.extend(class_values(nib, n, module, Some(&class))?),
+            None => values.push(("NSClassName", nib.string(&class))),
+        }
         return Ok(Value::New(Object::new("NSCustomView", values).named(name)));
     }
     let mut values = Vec::new();
-    let class = runtime_class_name(n, module, "NSView")?;
+    let class = class_name(n, module, "NSView")?;
     if swapped {
         values.push(("NSClassName", nib.string(&class)));
         values.push(("NSOriginalClassName", nib.string("NSView")));
@@ -263,12 +266,29 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     Ok(Value::New(Object::new(if swapped { "NSClassSwapper" } else { "NSView" }, values).named(name)))
 }
 
+/// An element's custom class: none when it names the element's own AppKit
+/// class, with or without a module (probes: a view's and a custom view's
+/// NSView in both kinds of xib, a button's NSButton, a window's NSWindow, a
+/// text field cell's NSTextFieldCell, a content controller's
+/// NSViewController).
+fn custom_class<'a>(n: Node<'a, '_>, own: &str) -> Option<&'a str> {
+    n.attribute("customClass").filter(|c| *c != own)
+}
+
+/// The class an element is at run time: its custom class, or its own.
+fn class_name(n: Node, module: Option<&str>, own: &str) -> Result<String, String> {
+    match custom_class(n, own) {
+        Some(_) => runtime_class_name(n, module, own),
+        None => Ok(own.to_string()),
+    }
+}
+
 /// A control as its class: of another class than its AppKit one, an
 /// `NSClassSwapper` naming both before its keys; of its own, itself (corpus
 /// xibs' box and button).
 fn swapped(nib: &mut Nib, n: Node, module: Option<&str>, class: &'static str, mut values: Vec<(&'static str, Value)>, name: String) -> Result<Value, String> {
-    match n.attribute("customClass") {
-        Some(c) if c != class => {
+    match custom_class(n, class) {
+        Some(_) => {
             let mut v = vec![("NSClassName", nib.string(&runtime_class_name(n, module, class)?)), ("NSOriginalClassName", nib.string(class))];
             v.append(&mut values);
             Ok(Value::New(Object::new("NSClassSwapper", v).named(name)))
@@ -882,7 +902,7 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         ("NSWTFlags", Value::Int(flags)),
         ("NSWindowTitle", nib.text(id, "title", n.attribute("title").unwrap_or(""))),
         ("NSWindowSubtitle", nib.string("")),
-        ("NSWindowClass", nib.string(&runtime_class_name(n, module, "NSWindow")?)),
+        ("NSWindowClass", nib.string(&class_name(n, module, "NSWindow")?)),
         ("NSViewClass", Value::Nil),
         ("NSUserInterfaceItemIdentifier", Value::Nil),
     ];
@@ -968,7 +988,7 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         values.push(("NSTitlebarAppearsTransparent", Value::Bool(true)));
     }
     // A custom class's reference last (three corpus xibs).
-    if n.attribute("customClass").is_some() {
+    if custom_class(n, "NSWindow").is_some() {
         let class = class_values(nib, n, module, None)?
             .into_iter()
             .find(|v| v.0 == "IBClassReference")
@@ -2117,10 +2137,10 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
     // A window's content controller without a class is a plain
     // NSViewController (rules_apple's example, two probes).
-    let swapped = own_nib || vc.attribute("customClass").is_some();
+    let swapped = own_nib || custom_class(vc, "NSViewController").is_some();
     let mut values = Vec::new();
     if swapped {
-        values.push(("NSClassName", nib.string(&runtime_class_name(vc, module, "NSViewController")?)));
+        values.push(("NSClassName", nib.string(&class_name(vc, module, "NSViewController")?)));
         values.push(("NSOriginalClassName", nib.string("NSViewController")));
     }
     values.push(("NSNibName", nib.string(&nib_name)));
@@ -2682,7 +2702,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     // A cell of a custom class is swapped in for NSTextFieldCell (Xcode's
     // action extension template).
     let mut cell_values = Vec::new();
-    if cell.attribute("customClass").is_some() {
+    if custom_class(cell, "NSTextFieldCell").is_some() {
         cell_values.push(("NSClassName", nib.string(&runtime_class_name(cell, module, "NSTextFieldCell")?)));
         cell_values.push(("NSOriginalClassName", nib.string("NSTextFieldCell")));
     }
@@ -2711,7 +2731,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         Some("YES") => cell_values.push(("NSCharacterPickerEnabled", Value::Bool(true))),
         Some(other) => return fail(format!("allowsCharacterPickerTouchBarItem=\"{other}\" is not supported by this ibtool")),
     }
-    let cell_class = if cell.attribute("customClass").is_some() { "NSClassSwapper" } else { "NSTextFieldCell" };
+    let cell_class = if custom_class(cell, "NSTextFieldCell").is_some() { "NSClassSwapper" } else { "NSTextFieldCell" };
     values.push(("NSCell", Value::New(Object::new(cell_class, cell_values).named(cell_name))));
     // A localizable document's controls allow a logical (right-to-left)
     // layout direction (the corpus's 358 controls, exactly those in
