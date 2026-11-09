@@ -280,6 +280,39 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
         .map(|p| p.iter().map(|q| (fixed(q.x), fixed(q.y))).collect())
         .collect();
     let mut breaks: Vec<i64> = polys.iter().flatten().map(|p| p.1).collect();
+    let icut_mode = std::env::var("CG_ICUT").unwrap_or_else(|_| "stceil".to_string());
+    if !icut_mode.is_empty() {
+        let mut es: Vec<(Fixed, Fixed)> = Vec::new();
+        for p in &polys { for i in 0..p.len() { let (a, b) = (p[i], p[(i + 1) % p.len()]); if a.1 != b.1 { es.push((a, b)); } } }
+        for i in 0..es.len() { for j in i + 1..es.len() {
+            let ((a0, a1), (b0, b1)) = es[i]; let ((c0, c1), (d0, d1)) = es[j];
+            let shares = es[i].0 == es[j].0 || es[i].0 == es[j].1 || es[i].1 == es[j].0 || es[i].1 == es[j].1;
+            if shares && std::env::var("CG_ICUT_ADJ").is_err() { continue; }
+            if icut_mode.starts_with("st") {
+                // lines through each edge's lower vertex at its truncated slope (x per unit y = m/UNIT)
+                let lo = |p: Fixed, q: Fixed| if p.1 < q.1 { (p, q) } else { (q, p) };
+                let ((p0, p1), (q0, q1)) = (lo((a0, a1), (b0, b1)), lo((c0, c1), (d0, d1)));
+                let m1 = (p1.0 - p0.0) * UNIT / (p1.1 - p0.1); let m2 = (q1.0 - q0.0) * UNIT / (q1.1 - q0.1);
+                if m1 == m2 { continue; }
+                // x1(y) = p0.x + (y - p0.y) m1/U ; x2(y) = q0.x + (y - q0.y) m2/U
+                let yy = ((q0.0 - p0.0) as f64 * UNIT as f64 + p0.1 as f64 * m1 as f64 - q0.1 as f64 * m2 as f64) / (m1 - m2) as f64;
+                let ylo = p0.1.max(q0.1) as f64; let yhi = p1.1.min(q1.1) as f64;
+                if yy > ylo && yy < yhi {
+                    breaks.push(match icut_mode.as_str() { "stfloor" => yy.floor() as i64, "stceil" => yy.ceil() as i64, _ => yy.round() as i64 });
+                }
+                continue;
+            }
+            let (a, b, c, d) = ((a0 as f64, a1 as f64), (b0 as f64, b1 as f64), (c0 as f64, c1 as f64), (d0 as f64, d1 as f64));
+            let den = (b.0 - a.0) * (d.1 - c.1) - (b.1 - a.1) * (d.0 - c.0);
+            if den == 0.0 { continue; }
+            let t = ((c.0 - a.0) * (d.1 - c.1) - (c.1 - a.1) * (d.0 - c.0)) / den;
+            let s2 = ((c.0 - a.0) * (b.1 - a.1) - (c.1 - a.1) * (b.0 - a.0)) / den;
+            if 1e-12 < t && t < 1.0 - 1e-12 && 1e-12 < s2 && s2 < 1.0 - 1e-12 {
+                let yy = a.1 + t * (b.1 - a.1);
+                breaks.push(match icut_mode.as_str() { "floor" => yy.floor() as i64, "ceil" => yy.ceil() as i64, _ => yy.round() as i64 });
+            }
+        } }
+    }
     breaks.sort_unstable();
     breaks.dedup();
     // Edges bottom to top, each with its direction in the path.
@@ -317,7 +350,7 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
             }
             let t = ((c.0 - a.0) * (d.1 - c.1) - (c.1 - a.1) * (d.0 - c.0)) / den;
             let s = ((c.0 - a.0) * (b.1 - a.1) - (c.1 - a.1) * (b.0 - a.0)) / den;
-            if 1e-12 < t && t < 1.0 - 1e-12 && 1e-12 < s && s < 1.0 - 1e-12 {
+            if 1e-12 < t && t < 1.0 - 1e-12 && 1e-12 < s && s < 1.0 - 1e-12 && icut_mode.is_empty() {
                 cuts.push(a.1 + t * (b.1 - a.1));
             }
         }
@@ -365,6 +398,7 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 let mut c_tri = vec![0.0f64; w];
                 let mut c_other = vec![false; w];
                 let mut c_top = vec![false; w];
+                let mut c_rectb = vec![0.0f64; w];
                 let mut winding = 0;
                 for &(_, i) in &active {
                     let e = &edges[i];
@@ -466,6 +500,9 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                             let pt = ((tx_ - 1e-12).floor().max(0.0) as usize).min(w - 1);
                             let single_c = xmin.floor() == (xmax - 1e-12).floor();
                             if std::env::var("CG_SPAN_SINGLE").is_err() || single_c { c_top[pt] = true; }
+                            // closing band rectangle (height of the edge's part in the band, right of its top)
+                            let mut by_ = f64::MAX; for &(a, b, r) in &e.pieces { if in_band(a, b, r) { by_ = by_.min(a.1.min(b.1)); } }
+                            c_rectb[pt] += (ty_ - by_) * ((pt + 1) as f64 - tx_);
                         }
                     }
                     if band_rule && !edge_right.is_empty() {
@@ -486,12 +523,17 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         let span = std::env::var("CG_PIECE_SPAN").unwrap_or_else(|_| "exact".to_string());
                         let shared = if std::env::var("CG_NOSPAN_TOP").is_err() { close_part[x] != 0.0 && c_top[x] } else { close_part[x] != 0.0 };
                         row[x] += if shared {
-                            match span.as_str() {
+                            match (std::env::var("CG_SHARED").unwrap_or_default().as_str(), span.as_str()) {
+                                ("both", _) => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; piece_part[x] - (c(c_rectb[x]) - c_rectb[x]) }
+                                ("bothf", _) => { let f = |v: f64| (v * 4096.0 + 1e-7).floor() / 4096.0; piece_part[x] - (f(c_rectb[x]) - c_rectb[x]) }
+                                ("netceil", _) => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; piece_exact[x] + (c(c_rectb[x]) - c_rectb[x]) * 0.0 + { let o = piece_part[x] - piece_exact[x]; o } * 0.0 + c(piece_exact[x] + close_part[x]) - (piece_exact[x] + close_part[x]) }
+                                (_, sp) => match sp {
                                 "diff" if !c_other[x] => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; c(o_rect[x] - c_rect[x]) + o_tri[x] - c_tri[x] + c_rect[x] + c_tri[x] }
                                 "diffr" if !c_other[x] => { let r = |v: f64| (v * 4096.0).round() / 4096.0; r(o_rect[x] - c_rect[x]) + o_tri[x] - c_tri[x] + c_rect[x] + c_tri[x] }
                                 "diffall" if !c_other[x] => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; c(o_rect[x] + o_tri[x] - c_rect[x] - c_tri[x]) + c_rect[x] + c_tri[x] }
                                 "exact" | "diff" | "diffr" | "diffall" => piece_exact[x],
                                 _ => piece_part[x],
+                            },
                             }
                         } else { piece_part[x] };
                     }

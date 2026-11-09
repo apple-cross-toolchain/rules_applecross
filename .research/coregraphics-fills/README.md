@@ -289,7 +289,12 @@ of a level of the boundary.
     band top also falls in it; that refinement took the suite from 97 to 75
     (triangles 22, two subpaths 42, wedges 1 / 0 / 0).
 
-  Results before that refinement:
+  Band cuts at edge crossings are computed from the stepped lines (each
+  through its lower vertex at its truncated slope), rounded up to 1/4096,
+  and treated like vertex heights. Edges that share an endpoint are
+  skipped. That took two subpaths from 42 to 19 and the suite to 52.
+
+  Results before these refinements:
 
   | Case | Wrong |
   | --- | --- |
