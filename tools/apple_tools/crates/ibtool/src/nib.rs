@@ -163,8 +163,20 @@ fn varint(out: &mut Vec<u8>, mut v: usize) {
 }
 
 /// The nib of `root`; an error if something refers to an object it doesn't
-/// hold (as an outlet to an object the document doesn't have).
-pub fn archive(mut root: Object) -> Result<Vec<u8>, String> {
+/// hold (as an outlet to an object the document doesn't have). A UIKit nib
+/// ends with `LNE\0`.
+pub fn archive(root: Object) -> Result<Vec<u8>, String> {
+    let mut out = archive_tables(root)?;
+    out.extend_from_slice(b"LNE\0");
+    Ok(out)
+}
+
+/// An AppKit nib: the tables alone, without UIKit's trailer.
+pub fn archive_appkit(root: Object) -> Result<Vec<u8>, String> {
+    archive_tables(root)
+}
+
+fn archive_tables(mut root: Object) -> Result<Vec<u8>, String> {
     let mut defs = HashMap::new();
     lift(&mut root.values, &mut defs);
     let mut e = Encoder { objects: Vec::new(), keys: Vec::new(), key_index: HashMap::new(), names: HashMap::new(), pending: Vec::new(), defs };
@@ -294,6 +306,5 @@ pub fn archive(mut root: Object) -> Result<Vec<u8>, String> {
     out.extend(keys);
     out.extend(values);
     out.extend(class_table);
-    out.extend_from_slice(b"LNE\0");
     Ok(out)
 }
