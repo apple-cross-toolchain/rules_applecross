@@ -2853,8 +2853,14 @@ image scaling in bits 6 and 7 and the key equivalent's modifiers from bit
 8; the bezel style; the check box's and radio button's
 `NSButtonImageSource` (`NSSwitch`, `NSRadioButton`); alternate title, key
 equivalent, a periodic delay of 400 and interval of 75; and
-`NSAuxButtonType` (7 for a momentary push button, 3 a check box, 4 a radio
-button). The other button types and the inline bezel are refused.
+`NSAuxButtonType`: AppKit's button type for its behaviour, whatever the
+`type` says (7 pushing in and lighting by background and gray, 5 lighting
+by contents, 6 changing and lighting by background and gray, 1 the same
+pushing in, 0 for changing and lighting by contents, lighting by
+background and gray, or pushing in and lighting by contents; a check box 3
+and a radio button 4). A catalog image is `NSNormalImage`, after the bezel
+style. The other behaviours, AppKit's own images and the inline bezel are
+refused.
 
 **Boxes** (about 30 probes). A separator or a custom box: `NSBox`'s view
 keys, then `NSOffsets` (`{5, 5}` for a separator, `{0, 0}` otherwise),
@@ -2937,6 +2943,37 @@ Application placeholder, and the controller's
 dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
 derives a UUID from the document and the controller's id.
+
+A window controller with a storyboard identifier is named by it: its nib,
+and its Info.plist keys sharing one string, with
+`explicitStoryboardIdentifier` after its content controller (Xcode's
+document app template). A view controller's view may be a SceneKit view,
+an `SCNView` with SceneKit's keys after the view's (`loops`, `playing`,
+`jitteringEnabled`, `allowsCameraControl`, `ibWantsMultisampling`,
+`ibPreferredRenderingAPI`, `autoenablesDefaultLighting`, `ibSceneName`,
+`backgroundColor`), in the form Xcode's SceneKit game templates give it.
+An initial view controller (a storyboard whose entry point isn't a
+window controller) has its own nib, `NSViewController-<id>`, held as an
+identified controller's, and is the Info.plist's entry point (Xcode's
+notification content extension template). A text field cell of a custom
+class is an `NSClassSwapper` for `NSTextFieldCell`. A xib's Application
+placeholder without a class refers to `NSObject`, as one of that class
+does. A text field's `NSPreferredMaxLayoutWidth` follows its control keys. A
+window controller shown as a single window (presentation style 1) adds
+`NSStoryboardSegueDestinationOptions` last, mapping
+`NSSingleInstancePresentationIdentifier` to its UUID string.
+
+**Web views.** Xcode archives a live `WKWebView`, so its keys are WebKit's
+on the Mac running Xcode (macOS 27 for these notes). In the form Xcode's
+Safari extension templates give it (a layer-backed view with the default
+configuration), its keys are:
+- a view's keys, with 17 drag types before its frame;
+- subviews outside the objects list: a `WKFlippedView` of its size,
+  clipping to its bounds, and two hidden `WKColorExtensionView`s;
+- a `WKWebViewConfiguration` holding a process pool, preferences, a user
+  content controller, the default data store and WebKit's defaults;
+- back and forward gestures off, an empty user agent, link previews on,
+  magnification off at 1.
 
 **Container views** (seven probes). A container view is a plain view.
 Its embed segue makes the parent controller hold an

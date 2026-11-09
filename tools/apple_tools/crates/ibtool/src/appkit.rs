@@ -235,6 +235,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "scrollView" => scroll_view(nib, c, s, module, name)?,
                 "box" => box_view(nib, c, s, module, name)?,
                 "imageView" => image_view(nib, c, s, module, name)?,
+                "wkWebView" => web_view(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -945,6 +946,22 @@ fn system_image(nib: &mut Nib, name: &str, size: &str) -> Value {
     })
 }
 
+/// An image from the app's catalogs, named in a control: an
+/// `NSCustomResource` of the size the document's resources give. AppKit's
+/// own images (namespace `system`) aren't established.
+fn catalog_image(nib: &mut Nib, n: Node, image: &str) -> Result<Value, String> {
+    if image.starts_with("NS") {
+        return fail(format!("AppKit's image {image} in a control is not supported by this ibtool"));
+    }
+    let resource = n
+        .document()
+        .descendants()
+        .find(|d| d.has_tag_name("image") && d.parent_element().is_some_and(|p| p.has_tag_name("resources")) && d.attribute("name") == Some(image))
+        .ok_or_else(|| format!("the image {image} without its size in the document's resources"))?;
+    let size = format!("{{{}, {}}}", g(number(attr(resource, "width")?)?), g(number(attr(resource, "height")?)?));
+    Ok(system_image(nib, image, &size))
+}
+
 /// A key equivalent's modifiers, as NSEvent's flags: shift 1 << 17,
 /// control 1 << 18, option 1 << 19, command 1 << 20; without a mask, command
 /// for an item with a key equivalent.
@@ -1288,8 +1305,9 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
     assemble(&mut nib, root_object, &owner_name, c, connections)
 }
 
-/// A xib's Application placeholder (`-3`): of class NSObject, it refers to
-/// that class; of NSApplication, it names that alone (a template).
+/// A xib's Application placeholder (`-3`): of class NSObject, or without a
+/// class, it refers to NSObject; of NSApplication, it names that alone
+/// (templates).
 fn application_placeholder(nib: &mut Nib, c: &mut Collected, application: Node, module: Option<&str>, parent: &str) -> Result<(), String> {
     only_attributes(application, &[("id", None), ("userLabel", None), ("customClass", None)])?;
     only_children(application, &[])?;
@@ -1297,6 +1315,12 @@ fn application_placeholder(nib: &mut Nib, c: &mut Collected, application: Node, 
     let values = match application.attribute("customClass") {
         Some("NSObject") => class_values(nib, application, module, Some("NSApplication"))?,
         Some("NSApplication") => vec![("NSClassName", nib.string("NSApplication"))],
+        // Without a class, as NSObject's (Xcode's application UI template).
+        None => {
+            let class = nib.string("NSObject");
+            let reference = Object::new("IBClassReference", vec![("IBClassName", class), ("IBModuleName", Value::Nil), ("IBModuleProvider", Value::Nil)]);
+            vec![("IBClassReference", Value::New(reference)), ("NSClassName", nib.string("NSApplication"))]
+        }
         _ => return fail("an Application placeholder of a class other than NSObject or NSApplication is not supported by this ibtool"),
     };
     c.parents.push((name.clone(), parent.to_string()));
@@ -1359,7 +1383,16 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
             match controller.tag_name().name() {
                 "windowController" => {
                     let id = attr(*controller, "id")?;
-                    let identifier = format!("NSWindowController-{id}");
+                    // Named by its identifier when it has one, which its
+                    // nib name's and UUID's keys share (Xcode's document app
+                    // template).
+                    let identifier = match controller.attribute("storyboardIdentifier") {
+                        Some(i) => {
+                            identified.push(i.to_string());
+                            i.to_string()
+                        }
+                        None => format!("NSWindowController-{id}"),
+                    };
                     let (bytes, uuid) = window_controller_nib(&doc, xml, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{identifier}.nib"), bytes));
                     nib_names.push((identifier.clone(), identifier.clone()));
@@ -1390,6 +1423,22 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     files.push((format!("{name}.nib"), bytes));
                     nib_names.push((identifier.clone(), identifier.clone()));
                     uuids.push((identifier, uuid(xml, id)));
+                }
+                // The initial view controller: its nib, named for its id, as
+                // an identified one's (Xcode's notification content
+                // extension template).
+                "viewController" if root.attribute("initialViewController") == controller.attribute("id") && controller.attribute("storyboardIdentifier").is_none() => {
+                    let id = attr(*controller, "id")?;
+                    if !others.is_empty() || content_controllers.contains(&id) || embedded.contains(&id) {
+                        return fail("an initial view controller with objects beside it, a window or a container is not supported by this ibtool");
+                    }
+                    let identifier = format!("NSViewController-{id}");
+                    files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, true)?));
+                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push((format!("{name}.nib"), bytes));
+                    nib_names.push((identifier.clone(), identifier.clone()));
+                    uuids.push((identifier.clone(), uuid(xml, id)));
+                    entry = Some(identifier);
                 }
                 // An identified view controller: its nib and its view's.
                 "viewController" if controller.attribute("storyboardIdentifier").is_some() => {
@@ -1425,7 +1474,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
         }
     }
     if root.attribute("initialViewController").is_some() && entry.is_none() {
-        return fail("an initial controller other than a window controller is not supported by this ibtool");
+        return fail("an initial controller other than a window or view controller is not supported by this ibtool");
     }
     // Its keys in the order CoreFoundation's table gives them inserted so
     // (three probes' and templates' key sets).
@@ -1538,7 +1587,10 @@ fn outlet(name: String, source: &str, destination: &str, label: Value) -> (Strin
 /// that varies from run to run, and gives each controller a new UUID; this
 /// ibtool keeps one order of each.
 fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
-    only_attributes(wc, &[("id", None), ("sceneMemberID", None), ("showSeguePresentationStyle", Some("single"))])?;
+    only_attributes(
+        wc,
+        &[("id", None), ("sceneMemberID", None), ("showSeguePresentationStyle", Some("single")), ("storyboardIdentifier", None)],
+    )?;
     // Shown as a single window, presentation style 1 (a corpus storyboard).
     let presentation = if wc.attribute("showSeguePresentationStyle").is_some() { 1 } else { 0 };
     only_children(wc, &["window", "connections"])?;
@@ -1579,16 +1631,27 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
 
     let (vc_value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, false)?;
     let wc_uuid = uuid(xml, wc_id);
-    let wc_object = Object::new(
-        "NSWindowController",
-        vec![
-            ("IBWindowTemplate", window_value),
-            ("IBWindowTemplateContentViewController", vc_value),
-            ("showSeguePresentationStyle", Value::Int(presentation)),
-            ("uniqueIdentifierForStoryboardCompilation", nib.string(&wc_uuid)),
-        ],
-    )
-    .named(wc_name.clone());
+    let mut wc_values = vec![("IBWindowTemplate", window_value), ("IBWindowTemplateContentViewController", vc_value)];
+    // Its identifier, when it has one (Xcode's document app template).
+    if let Some(identifier) = wc.attribute("storyboardIdentifier") {
+        wc_values.push(("explicitStoryboardIdentifier", nib.string(identifier)));
+    }
+    wc_values.push(("showSeguePresentationStyle", Value::Int(presentation)));
+    wc_values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&wc_uuid)));
+    // Shown as a single window: its UUID names the single instance (Xcode's
+    // Safari extension templates).
+    if presentation == 1 {
+        let key = nib.string("NSSingleInstancePresentationIdentifier");
+        let id = nib.string(&wc_uuid);
+        wc_values.push((
+            "NSStoryboardSegueDestinationOptions",
+            Value::New(Object::new(
+                "NSDictionary",
+                vec![("NSInlinedValue", Value::Bool(true)), ("UINibEncoderEmptyKey", key), ("UINibEncoderEmptyKey", id)],
+            )),
+        ));
+    }
+    let wc_object = Object::new("NSWindowController", wc_values).named(wc_name.clone());
     c.definitions.insert(wc_name.clone(), Value::New(wc_object));
 
     // The scene controller first, then the window's own connections, the
@@ -1643,7 +1706,7 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
             ("title", None),
         ],
     )?;
-    let view = children(vc, "view").next().ok_or("a view controller without a view")?;
+    let view = controller_view(vc).ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
     // A window's content controller without a class is a plain
     // NSViewController (rules_apple's example, two probes).
@@ -1750,7 +1813,7 @@ fn controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, loc
 /// A view controller's view nib: an NSObject root (the controller) whose
 /// `view` outlet is the view.
 fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(String, Vec<u8>), String> {
-    only_children(vc, &["view", "connections"])?;
+    only_children(vc, &["view", "sceneView", "connections"])?;
     // The controller's own connections, and those to it, go through an
     // upstream placeholder standing for it (Xcode's SpriteKit template).
     let upstream = uses_upstream(vc);
@@ -1758,12 +1821,16 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
         return fail("a view controller's connections other than outlets are not supported by this ibtool");
     }
     let mut nib = new_nib(doc, localizable, true);
-    let view_node = children(vc, "view").next().ok_or("a view controller without a view")?;
+    let view_node = controller_view(vc).ok_or("a view controller without a view")?;
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(vec![attr(vc, "id")?.to_string()]);
     let view_name = object_name(attr(view_node, "id")?);
-    let value = view(&mut nib, &mut c, view_node, module, &root_name, None)?;
+    let value = if view_node.has_tag_name("sceneView") {
+        scene_view(&mut nib, &mut c, view_node, module, &root_name)?
+    } else {
+        view(&mut nib, &mut c, view_node, module, &root_name, None)?
+    };
     c.definitions.insert(view_name.clone(), value);
     let placeholder = object_name("application placeholder");
     c.parents.push((placeholder.clone(), root_name.clone()));
@@ -1985,6 +2052,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
             ("fixedFrame", Some("YES")),
             ("allowsCharacterPickerTouchBarItem", None),
+            ("preferredMaxLayoutWidth", None),
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints"])?;
@@ -2002,6 +2070,9 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         &[
             ("key", None),
             ("id", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
             ("title", None),
             ("lineBreakMode", None),
             ("alignment", None),
@@ -2083,7 +2154,15 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     };
     // A set top bit is a negative int.
     let signed = |v: i64| v as u32 as i32 as i64;
-    let mut cell_values = vec![("NSCellFlags", Value::Int(signed(flags))), ("NSCellFlags2", Value::Int(signed(flags2)))];
+    // A cell of a custom class is swapped in for NSTextFieldCell (Xcode's
+    // action extension template).
+    let mut cell_values = Vec::new();
+    if cell.attribute("customClass").is_some() {
+        cell_values.push(("NSClassName", nib.string(&runtime_class_name(cell, module, "NSTextFieldCell")?)));
+        cell_values.push(("NSOriginalClassName", nib.string("NSTextFieldCell")));
+    }
+    cell_values.push(("NSCellFlags", Value::Int(signed(flags))));
+    cell_values.push(("NSCellFlags2", Value::Int(signed(flags2))));
     cell_values.push(("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))));
     let font_node = child(cell, "font", "font").ok_or("a text field cell without a font")?;
     cell_values.push(("NSSupport", appearance_font(nib, font_node, None)?));
@@ -2103,7 +2182,8 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
         Some("YES") => cell_values.push(("NSCharacterPickerEnabled", Value::Bool(true))),
         Some(other) => return fail(format!("allowsCharacterPickerTouchBarItem=\"{other}\" is not supported by this ibtool")),
     }
-    values.push(("NSCell", Value::New(Object::new("NSTextFieldCell", cell_values).named(cell_name))));
+    let cell_class = if cell.attribute("customClass").is_some() { "NSClassSwapper" } else { "NSTextFieldCell" };
+    values.push(("NSCell", Value::New(Object::new(cell_class, cell_values).named(cell_name))));
     // A localizable document's controls allow a logical (right-to-left)
     // layout direction (the corpus's 358 controls, exactly those in
     // `Base.lproj`).
@@ -2116,6 +2196,11 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     values.push(("NSControlLineBreakMode", Value::Int(control_break)));
     values.push(("NSControlWritingDirection", Value::Int(-1)));
     values.push(("NSControlSendActionMask", Value::Int(4)));
+    // Its preferred width for wrapping, when given (Xcode's document app
+    // template).
+    if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
+        values.push(("NSPreferredMaxLayoutWidth", Value::Double(number(w)?)));
+    }
     values.push(("NSTextFieldAlignmentRectInsetsVersion", Value::Int(2)));
     values.push(("NSAllowsWritingTools", Value::Bool(true)));
     values.push(("NSTextFieldAllowsWritingToolsAffordance", Value::Bool(false)));
@@ -2187,6 +2272,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("enabled", Some("NO")),
             ("selectedItem", None),
             ("arrowPosition", None),
+            ("image", None),
         ],
     )?;
     if !popup && ["enabled", "selectedItem", "arrowPosition"].iter().any(|a| cell.attribute(*a).is_some()) {
@@ -2243,6 +2329,12 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let (aux, image_source) = match (behaviors.as_slice(), kind) {
         (["lightByBackground", "lightByGray", "pushIn"], _) => (7, None),
         (["lightByBackground", "lightByGray"], "push" | "bevel") if popup => (0, None),
+        // AppKit's button types for other behaviours, whatever the type
+        // (six probes).
+        (["lightByContents"], _) if !popup => (5, None),
+        (["changeBackground", "changeGray", "lightByBackground", "lightByGray"], _) if !popup => (6, None),
+        (["changeBackground", "changeGray", "lightByBackground", "lightByGray", "pushIn"], _) if !popup => (1, None),
+        (["changeContents", "lightByContents"] | ["lightByBackground", "lightByGray"] | ["lightByContents", "pushIn"], kind) if !popup && kind != "check" && kind != "radio" => (0, None),
         (["changeContents", "doesNotDimImage", "lightByContents"], "check") => (3, Some("NSSwitch")),
         (["changeContents", "doesNotDimImage", "lightByContents"], "radio") => (4, Some("NSRadioButton")),
         _ => return fail(format!("a {kind} button behaving as {} is not supported by this ibtool", behaviors.join(" "))),
@@ -2360,6 +2452,13 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         ("NSButtonFlags2", Value::Int(signed(flags_b2))),
         ("NSBezelStyle", Value::Int(bezel)),
     ];
+    // Its image, before its alternate's (three probes).
+    if let Some(image) = cell.attribute("image") {
+        if image_source.is_some() {
+            return fail("a check box's or radio button's image is not supported by this ibtool");
+        }
+        cell_values.push(("NSNormalImage", catalog_image(nib, cell, image)?));
+    }
     if let Some(image) = image_source {
         let image_name = nib.string(image);
         cell_values.push(("NSAlternateImage", Value::New(Object::new("NSButtonImageSource", vec![("NSImageName", image_name)]))));
@@ -2855,16 +2954,7 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     let flags2 = alignment_bits << 26 | if refuses { 0x200_0000 } else { 0 };
     let mut cell_values = vec![("NSCellFlags", Value::Int(0)), ("NSCellFlags2", Value::Int(flags2))];
     if let Some(image) = cell.attribute("image") {
-        if image.starts_with("NS") {
-            return fail(format!("AppKit's image {image} in an image view is not supported by this ibtool"));
-        }
-        let resource = n
-            .document()
-            .descendants()
-            .find(|d| d.has_tag_name("image") && d.parent_element().is_some_and(|p| p.has_tag_name("resources")) && d.attribute("name") == Some(image))
-            .ok_or_else(|| format!("the image {image} without its size in the document's resources"))?;
-        let size = format!("{{{}, {}}}", g(number(attr(resource, "width")?)?), g(number(attr(resource, "height")?)?));
-        cell_values.push(("NSContents", system_image(nib, image, &size)));
+        cell_values.push(("NSContents", catalog_image(nib, n, image)?));
     }
     cell_values.push(("NSControlView", reference(name.clone())));
     let align = match cell.attribute("imageAlignment") {
@@ -2913,6 +3003,157 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     Ok(Value::New(Object::new("NSImageView", values).named(name)))
 }
 
+/// A view controller's view: a view, or a SceneKit view (Xcode's SceneKit
+/// game templates).
+fn controller_view<'a, 'i>(vc: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    vc.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("sceneView")) && c.attribute("key") == Some("view"))
+}
+
+/// A web view as Xcode's Safari extension templates make it. Xcode
+/// archives a live WKWebView, so its keys are WebKit's on the Mac that ran
+/// it (macOS 27): 17 drag types, its own flipped view and two
+/// hidden colour extension views as subviews outside the objects' list, and
+/// a default configuration (two templates).
+fn web_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("wantsLayer", Some("YES")),
+            ("fixedFrame", Some("YES")),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "wkWebViewConfiguration"])?;
+    let config = child(n, "wkWebViewConfiguration", "configuration").ok_or("a web view without a configuration")?;
+    only_attributes(config, &[("key", None)])?;
+    only_children(config, &["audiovisualMediaTypes", "wkPreferences"])?;
+    let media = child(config, "audiovisualMediaTypes", "mediaTypesRequiringUserActionForPlayback").ok_or("a web view's configuration other than Xcode's templates'")?;
+    only_attributes(media, &[("key", None), ("none", Some("YES"))])?;
+    let preferences = child(config, "wkPreferences", "preferences").ok_or("a web view's configuration other than Xcode's templates'")?;
+    only_attributes(preferences, &[("key", None)])?;
+    only_children(preferences, &[])?;
+    if n.attribute("wantsLayer").is_none() || media.attribute("none").is_none() {
+        return fail("a web view other than Xcode's templates' is not supported by this ibtool");
+    }
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let f = frame(n, "frame")?;
+    let size = nib.string(&format!("{{{}, {}}}", g(f.w), g(f.h)));
+    let internal = |nib: &mut Nib, class: &'static str, hidden: bool, size: Value| {
+        let mut v = vec![
+            ("NSNextResponder", reference(name.clone())),
+            ("NSNibTouchBar", Value::Nil),
+            ("NSvFlags", Value::Int(if hidden { 0x8000_0000_u32 as i32 as i64 | 256 } else { 274 })),
+            ("NSFrameSize", size),
+            ("NSSuperview", reference(name.clone())),
+            ("NSViewIsLayerTreeHost", Value::Bool(true)),
+            ("NSViewWantsBestResolutionOpenGLSurface", Value::Bool(true)),
+        ];
+        if !hidden {
+            v.push(("NSViewClipsToBoundsKeyName", Value::Bool(true)));
+        }
+        v.push(("IBNSSafeAreaLayoutGuide", Value::Nil));
+        v.push(("IBNSLayoutMarginsGuide", Value::Nil));
+        v.push(("IBNSClipsToBounds", Value::Int(0)));
+        let _ = nib;
+        Value::New(Object::new(class, v))
+    };
+    let flipped = internal(nib, "WKFlippedView", false, size);
+    let zero = nib.string("{0, 0}");
+    let first = internal(nib, "WKColorExtensionView", true, zero);
+    let zero = nib.string("{0, 0}");
+    let second = internal(nib, "WKColorExtensionView", true, zero);
+    let at = values.iter().position(|v| v.0 == "NSFrame" || v.0 == "NSFrameSize").expect("its frame");
+    values.insert(at, ("NSSubviews", nib.array("NSMutableArray", vec![flipped, first, second])));
+    let types = [
+        "Apple HTML pasteboard type",
+        "Apple PDF pasteboard type",
+        "Apple URL pasteboard type",
+        "Apple Web Archive pasteboard type",
+        "Apple WebKit dummy pasteboard type",
+        "Apple files promise pasteboard type",
+        "NSColor pasteboard type",
+        "NSFilenamesPboardType",
+        "NSStringPboardType",
+        "NeXT RTFD pasteboard type",
+        "NeXT Rich Text Format v1.0 pasteboard type",
+        "NeXT TIFF v4.0 pasteboard type",
+        "WebURLsWithTitlesPboardType",
+        "com.apple.webarchive",
+        "public.png",
+        "public.url",
+        "public.url-name",
+    ];
+    let types: Vec<Value> = types.iter().map(|t| nib.string(t)).collect();
+    let at = values.iter().position(|v| v.0 == "NSFrame" || v.0 == "NSFrameSize").expect("its frame");
+    values.insert(at, ("NSDragTypes", nib.array("NSMutableSet", types)));
+    let preferences = Object::new(
+        "WKPreferences",
+        vec![
+            ("minimumFontSize", Value::Double(0.0)),
+            ("javaScriptCanOpenWindowsAutomatically", Value::Bool(true)),
+            ("javaScriptEnabled", Value::Bool(true)),
+            ("shouldPrintBackgrounds", Value::Bool(false)),
+            ("tabFocusesLinks", Value::Bool(false)),
+            ("textInteractionEnabled", Value::Bool(true)),
+        ],
+    );
+    let empty = nib.string("");
+    let configuration = Object::new(
+        "WKWebViewConfiguration",
+        vec![
+            ("processPool", Value::New(Object::new("WKProcessPool", vec![]))),
+            ("preferences", Value::New(preferences)),
+            ("userContentController", Value::New(Object::new("WKUserContentController", vec![]))),
+            ("websiteDataStore", Value::New(Object::new("WKWebsiteDataStore", vec![("isDefaultDataStore", Value::Bool(true))]))),
+            ("suppressesIncrementalRendering", Value::Bool(false)),
+            ("applicationNameForUserAgent", empty),
+            ("allowsAirPlayForMediaPlayback", Value::Bool(true)),
+            ("drawsBackground", Value::Bool(true)),
+            ("userInterfaceDirectionPolicy", Value::Int(0)),
+            ("scrollToTextFragmentIndicatorEnabled", Value::Bool(true)),
+            ("scrollToTextFragmentMarkingEnabled", Value::Bool(true)),
+            ("multiRepresentationHEICInsertionEnabled", Value::Bool(false)),
+        ],
+    );
+    values.push(("configuration", Value::New(configuration)));
+    values.push(("allowsBackForwardNavigationGestures", Value::Bool(false)));
+    values.push(("customUserAgent", nib.string("")));
+    values.push(("allowsLinkPreview", Value::Bool(true)));
+    values.push(("allowsMagnification", Value::Bool(false)));
+    values.push(("magnification", Value::Double(1.0)));
+    Ok(Value::New(Object::new("WKWebView", values).named(name)))
+}
+
+/// A SceneKit view as Xcode's game templates make it: a view, not looping,
+/// with the default rendering API, then SCNView's keys (two templates).
+fn scene_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(n, &[("key", None), ("id", None), ("loops", Some("NO")), ("preferredRenderingAPI", Some("-1"))])?;
+    only_children(n, &["rect", "autoresizingMask", "connections"])?;
+    if n.attribute("loops").is_none() || n.attribute("preferredRenderingAPI").is_none() {
+        return fail("a SceneKit view other than Xcode's templates' is not supported by this ibtool");
+    }
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    // Its outlet to its controller (Xcode's multi-platform template).
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(attr(n, "id")?.to_string());
+    }
+    let mut values = view_values(nib, c, n, module, &name, parent, None)?;
+    values.push(("loops", Value::Bool(false)));
+    values.push(("playing", Value::Bool(false)));
+    values.push(("jitteringEnabled", Value::Bool(false)));
+    values.push(("allowsCameraControl", Value::Bool(false)));
+    values.push(("ibWantsMultisampling", Value::Bool(true)));
+    values.push(("ibPreferredRenderingAPI", Value::Int(-1)));
+    values.push(("autoenablesDefaultLighting", Value::Bool(false)));
+    values.push(("ibSceneName", Value::Nil));
+    values.push(("backgroundColor", Value::Nil));
+    Ok(Value::New(Object::new("SCNView", values).named(name)))
+}
+
 /// A container view's embed segue: its only connection.
 fn embed_segue<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> {
     let all: Vec<Node> = children(n, "connections").flat_map(|l| l.children().filter(|c| c.is_element())).collect();
@@ -2928,7 +3169,8 @@ fn embed_segue<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> 
 
 /// The embed segues of a view controller's view, in document order.
 fn embeds<'a, 'i>(vc: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
-    children(vc, "view")
+    controller_view(vc)
+        .into_iter()
         .flat_map(|v| v.descendants())
         .filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed"))
         .collect()
@@ -2939,7 +3181,8 @@ fn embeds<'a, 'i>(vc: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
 fn uses_upstream(vc: Node) -> bool {
     let id = vc.attribute("id");
     children(vc, "connections").next().is_some()
-        || children(vc, "view")
+        || controller_view(vc)
+            .into_iter()
             .flat_map(|v| v.descendants())
             .any(|d| (d.has_tag_name("outlet") && d.attribute("destination") == id) || (d.has_tag_name("action") && d.attribute("target") == id))
 }
