@@ -2767,8 +2767,24 @@ custom class, is an `NSClassSwapper` for it.
 
 **Constraints** (`NSLayoutConstraint`): items, attributes twice
 (NSLayoutAttribute), the relation, the constant twice when given, the
-priority when not required. A view's are ordered by their first item's
-place in the document, the view itself first (three probes).
+priority when not required. A view's are in an order of their own (about
+60 probes and a corpus storyboard, none from the document's order):
+- first the view's own, relating none of its subviews;
+- then each subview's (those whose first item it is, or whose second
+  when the view is the first), nearest the view's top-left corner first,
+  by the distance from it to the top-left corner of the subview's frame;
+- within a subview's: those relating it to the view, and its size, by
+  the view's attribute (the subview's for a size), in the order centerX,
+  centerY, right, left, trailing, leading, width, bottom, top, height;
+- then those relating it to other subviews, by its own attribute
+  (centerX, trailing, leading, centerY, bottom, top, width, height), then
+  the other subview's, then the other subview farthest from it first.
+
+Refused as not established: subviews at the same distance from the
+corner, two different constraints on the same attributes of the same
+views, baselines, and between subviews left and right or a centre or size
+related to another attribute. A view controller's own view never says
+`NSDoNotTranslateAutoresizingMask`.
 
 **Layout.** Xcode lays constrained views out again with Auto Layout as it
 compiles, with the Mac's control metrics and text measurement: 133 of the
@@ -2800,10 +2816,11 @@ colour it resolves to, in Generic Gray Gamma 2.2 or sRGB with the profile
 embedded: the Mac's own profiles, which the SDK archive carries
 (`tools/package-sdks.sh`) rather than this repository.
 
-**Buttons** (around 100 probes). An `NSButton`'s view keys, with a bordered
-non-square button's content hugging always archived, then `NSEnabled`, the
-cell, and the control keys (`NSControlTextAlignment` as `NSTextAlignment`:
-left 0, centre 1, right 2). Its `NSButtonCell`: the cell flags as a text
+**Buttons** (around 100 probes). An `NSButton`'s view keys, then
+`NSEnabled`, the cell, and the control keys (`NSControlTextAlignment` as
+`NSTextAlignment`: left 0, centre 1, right 2). A bordered button of a
+rounded kind has its own content hugging, 250 and 750, and archives any
+other, even 250 each. Its `NSButtonCell`: the cell flags as a text
 field's, the state the top bit; title and font; `NSButtonFlags`, its behaviour (push in
 0x80000000, change contents 0x40000000, background 0x20000000, gray
 0x10000000, light by contents 0x8000000, background 0x4000000, gray
@@ -2818,6 +2835,23 @@ equivalent, a periodic delay of 400 and interval of 75; and
 `NSAuxButtonType` (7 for a momentary push button, 3 a check box, 4 a radio
 button). The other button types and the inline bezel are refused.
 
+**Boxes** (about 30 probes). A separator or a custom box: `NSBox`'s view
+keys, then `NSOffsets` (`{5, 5}` for a separator, `{0, 0}` otherwise),
+the title's `NSTextFieldCell` (the small system font, text background and
+label colours; a plain `Title` without a title; a storyboard's leaves out
+`NSControlView`), the content view, the border type (none 0, line 1,
+bezel 2, groove 3, the default), the box type (separator 2, custom 4), the
+title position (no title 0 to below bottom 6, at top 2 the default),
+`NSTransparent` false and `NSFullyTransparent` when transparent, the
+border width as an `NSNumber` (numbers are shared by value: an object id
+of the same integer is the same object), the corner radius, border and
+fill colours, and `IBNSBoxIsUsingDocumentContentView` with a content view.
+Xcode lays a custom box's content view out again, inset from the box's
+bounds by its border width (1 unless given, none without a border),
+whatever its frame says; in a storyboard it clips to its bounds. A primary
+or secondary box puts its content below its title, measured with the
+Mac's fonts, and is refused.
+
 **Scroll views**, as Xcode archives those it doesn't lay out again: no
 border, hidden scrollers that hide themselves, no content insets, and a
 document view (a plain or custom view) no larger than the clip view. With
@@ -2830,7 +2864,9 @@ amounts as big-endian floats (vertical, then horizontal); magnification
 0.25 to 4. The clip view holds the document view at its origin and the
 control background colour, drawing it (4) and copying on scroll (2). The
 scrollers are layer-backed and target the scroll view with
-`_doScroller:`.
+`_doScroller:`. In a storyboard whose document view is off its clip view's
+origin, the vertical scroller comes before the horizontal one among the
+scroll view's subviews (not in the objects' list).
 
 **Storyboards.** `Info.plist`: the main menu's nib name `MainMenu` (whether
 or not there is one), the controllers' nib names, the entry point, the
@@ -2849,8 +2885,9 @@ dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
 derives a UUID from the document and the controller's id. A view
 controller with a storyboard identifier has its own nib of that name,
-holding it and a storyboard placeholder.
+holding it and a storyboard placeholder, and requiring its class swapper
+for connections whether or not it has a class.
 
-Refused: other elements and attributes (boxes, image views, collection
+Refused: other elements and attributes (primary boxes, image views, collection
 views and other controls, scroll views Xcode tiles, bindings, other segues
 and controllers, other colours).
