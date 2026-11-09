@@ -174,11 +174,18 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     // a plain view of a custom class; a plain view an NSView (constraint
     // probes, templates).
     let swapped = n.has_tag_name("customView") || n.attribute("customClass").is_some();
+    // A container view is a plain view; its embed segue's template finds it
+    // through its controller (four probes).
+    let container = n.has_tag_name("containerView");
+    if container && (n.attribute("customClass").is_some() || embed_segue(n)?.is_none()) {
+        return fail("a container view with a class, or without one embed segue, is not supported by this ibtool");
+    }
     only_attributes(
         n,
         &[
             ("key", None),
             ("id", None),
+            ("hidden", Some("YES")),
             ("wantsLayer", Some("YES")),
             ("customClass", None),
             ("customModule", None),
@@ -190,7 +197,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     canvas_location_only(n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
-    if children(n, "connections").next().is_some() {
+    if children(n, "connections").next().is_some() && !container {
         c.connection_sources.push(attr(n, "id")?.to_string());
     }
     let mut values = Vec::new();
@@ -222,7 +229,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         let mut items = Vec::new();
         for s in subviews {
             items.push(match s.tag_name().name() {
-                "view" | "customView" => view(nib, c, s, module, name, Some(name))?,
+                "view" | "customView" | "containerView" => view(nib, c, s, module, name, Some(name))?,
                 "textField" => text_field(nib, c, s, module, name)?,
                 "button" | "popUpButton" => button(nib, c, s, module, name)?,
                 "scrollView" => scroll_view(nib, c, s, module, name)?,
@@ -1321,9 +1328,17 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
         .filter(|d| d.has_tag_name("segue") && d.attribute("relationship") == Some("window.shadowedContentViewController"))
         .filter_map(|d| d.attribute("destination"))
         .collect();
+    // The controllers embed segues lead to.
+    let embedded: Vec<&str> = doc
+        .descendants()
+        .filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed"))
+        .filter_map(|d| d.attribute("destination"))
+        .collect();
     for s in doc.descendants().filter(|d| d.has_tag_name("segue")) {
-        if s.attribute("relationship") != Some("window.shadowedContentViewController") || s.attribute("kind") != Some("relationship") {
-            return fail("segues other than a window's content relationship are not supported by this ibtool");
+        let content = s.attribute("relationship") == Some("window.shadowedContentViewController") && s.attribute("kind") == Some("relationship");
+        let embed = s.attribute("kind") == Some("embed") && s.parent().and_then(|l| l.parent()).is_some_and(|v| v.has_tag_name("containerView"));
+        if !content && !embed {
+            return fail("segues other than a window's content relationship or a container view's embedding are not supported by this ibtool");
         }
     }
     for scenes in children(root, "scenes") {
@@ -1362,13 +1377,27 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                 }
+                // An embedded view controller: its nib, named for its id, and
+                // its view's (four probes).
+                "viewController" if embedded.contains(&attr(*controller, "id")?) => {
+                    let id = attr(*controller, "id")?;
+                    if !others.is_empty() || controller.attribute("storyboardIdentifier").is_some() || content_controllers.contains(&id) {
+                        return fail("an embedded view controller with an identifier, objects beside it or a window is not supported by this ibtool");
+                    }
+                    let identifier = format!("NSViewController-{id}");
+                    files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, false)?));
+                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push((format!("{name}.nib"), bytes));
+                    nib_names.push((identifier.clone(), identifier.clone()));
+                    uuids.push((identifier, uuid(xml, id)));
+                }
                 // An identified view controller: its nib and its view's.
                 "viewController" if controller.attribute("storyboardIdentifier").is_some() => {
                     if !others.is_empty() {
                         return fail("objects beside a view controller are not supported by this ibtool");
                     }
                     let identifier = attr(*controller, "storyboardIdentifier")?;
-                    files.push((format!("{identifier}.nib"), identified_controller_nib(&doc, xml, *controller, module, localizable)?));
+                    files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, true)?));
                     let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                     nib_names.push((identifier.to_string(), identifier.to_string()));
@@ -1548,7 +1577,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     c.definitions.insert(placeholder, value);
     storyboard_placeholder(&mut nib, &mut c, &wc_placeholder, &root_name);
 
-    let (vc_value, _) = content_controller(&mut nib, xml, vc, module, &vc_name, false)?;
+    let (vc_value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, false)?;
     let wc_uuid = uuid(xml, wc_id);
     let wc_object = Object::new(
         "NSWindowController",
@@ -1576,6 +1605,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
         let label = nib.string("delegate");
         connections.push(outlet(format!("{window_name} delegate outlet"), &window_name, &wc_name, label));
     }
+    add_templates(&mut nib, &mut c, &mut connections, &templates, &vc_name, &vc_placeholder);
     let label = nib.string("storyboard");
     connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &vc_placeholder, label));
     let label = nib.string("storyboard");
@@ -1600,7 +1630,7 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
 /// identifier. In its own nib it is always swapped, requiring the swapper
 /// for connections; as a window's content without a class, it is a plain
 /// NSViewController (eight probes, a template, rules_apple's example).
-fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str, own_nib: bool) -> Result<(Value, String), String> {
+fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str, own_nib: bool) -> Result<(Value, Vec<String>), String> {
     only_attributes(
         vc,
         &[
@@ -1624,6 +1654,29 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
         values.push(("NSOriginalClassName", nib.string("NSViewController")));
     }
     values.push(("NSNibName", nib.string(&nib_name)));
+    // Its embed segues' templates, made as its view loads (four probes).
+    let segues = embeds(vc);
+    let mut templates = Vec::new();
+    if !segues.is_empty() && (vc.attribute("storyboardIdentifier").is_some() || vc.attribute("title").is_some()) {
+        return fail("an identified or titled view controller's embed segues are not supported by this ibtool");
+    }
+    for segue in &segues {
+        let template_name = object_name(&format!("{} template", attr(*segue, "id")?));
+        let mut t = Vec::new();
+        if let Some(identifier) = segue.attribute("identifier") {
+            t.push(("NSIdentifier", nib.string(identifier)));
+        }
+        t.push(("NSTrigger", nib.string("IBSegueTriggerViewDidLoad")));
+        t.push(("NSDestinationControllerIdentifier", nib.string(&format!("NSViewController-{}", attr(*segue, "destination")?))));
+        t.push(("NSContainerView", Value::Nil));
+        templates.push((template_name.clone(), Value::New(Object::new("NSStoryboardEmbedSegueTemplate", t).named(template_name))));
+    }
+    let template_names: Vec<String> = templates.iter().map(|t| t.0.clone()).collect();
+    let template_names_out = template_names.clone();
+    if !templates.is_empty() {
+        let list = templates.into_iter().map(|t| t.1).collect();
+        values.push(("NSStoryboardSegueTemplates", nib.array("NSArray", list)));
+    }
     if let Some(identifier) = vc.attribute("storyboardIdentifier") {
         values.push(("NSStoryboardIdentifier", nib.string(identifier)));
     }
@@ -1634,9 +1687,14 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     // Its view's nib names it as its upstream placeholder when connections
     // need it there (Xcode's SpriteKit template).
     let mut table = vec![("NSInlinedValue", Value::Bool(true))];
+    let mut upstream: Vec<String> = Vec::new();
     if uses_upstream(vc) {
-        table.push(("UINibEncoderEmptyKey", nib.string("UpstreamPlaceholder-1")));
-        table.push(("UINibEncoderEmptyKey", reference(name.to_string())));
+        upstream.push(name.to_string());
+    }
+    upstream.extend(template_names);
+    for (i, target) in upstream.into_iter().enumerate() {
+        table.push(("UINibEncoderEmptyKey", nib.string(&format!("UpstreamPlaceholder-{}", i + 1))));
+        table.push(("UINibEncoderEmptyKey", reference(target)));
     }
     values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", table))));
     values.push(("showSeguePresentationStyle", Value::Int(0)));
@@ -1645,20 +1703,35 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
         values.push(("connectionsRequireClassSwapperForStoryboardCompilation", Value::Bool(true)));
     }
     let class = if swapped { "NSClassSwapper" } else { "NSViewController" };
-    Ok((Value::New(Object::new(class, values).named(name.to_string())), nib_name))
+    Ok((Value::New(Object::new(class, values).named(name.to_string())), template_names_out))
 }
 
-/// A view controller with a storyboard identifier: its own nib, named by
-/// it, holding the controller (its scene controller) and a storyboard
-/// placeholder (a probe).
-fn identified_controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+/// A controller's embed segue templates in its nib: listed after it, in
+/// reverse order (three probes), each with outlets to the controller and to
+/// its storyboard placeholder.
+fn add_templates(nib: &mut Nib, c: &mut Collected, connections: &mut Vec<(String, Value)>, templates: &[String], vc_name: &str, storyboard: &str) {
+    let at = c.parents.iter().position(|p| p.0 == vc_name).map_or(c.parents.len(), |i| i + 1);
+    for t in templates {
+        c.parents.insert(at, (t.clone(), vc_name.to_string()));
+        let label = nib.string("controller");
+        connections.push(outlet(format!("{t} controller outlet"), t, vc_name, label));
+        let label = nib.string("storyboard");
+        connections.push(outlet(format!("{t} storyboard outlet"), t, storyboard, label));
+    }
+}
+
+/// A view controller's own nib: one with a storyboard identifier, named by
+/// it, or one a container view embeds, named `NSViewController-<id>`
+/// (`identified` false), holding the controller (its scene controller) and
+/// a storyboard placeholder (probes).
+fn controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, localizable: bool, identified: bool) -> Result<Vec<u8>, String> {
     let mut nib = new_nib(doc, localizable, true);
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(Vec::new());
     let vc_name = object_name(attr(vc, "id")?);
     c.parents.push((vc_name.clone(), root_name.clone()));
-    let (value, _) = content_controller(&mut nib, xml, vc, module, &vc_name, true)?;
+    let (value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, identified)?;
     c.definitions.insert(vc_name.clone(), value);
     let placeholder = object_name("application placeholder");
     c.parents.push((placeholder.clone(), root_name.clone()));
@@ -1668,6 +1741,7 @@ fn identified_controller_nib(doc: &Document, xml: &str, vc: Node, module: Option
     storyboard_placeholder(&mut nib, &mut c, &storyboard, &root_name);
     let label = nib.string("sceneController");
     let mut connections = vec![outlet(format!("{vc_name} scene controller"), &root_name, &vc_name, label)];
+    add_templates(&mut nib, &mut c, &mut connections, &templates, &vc_name, &storyboard);
     let label = nib.string("storyboard");
     connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &storyboard, label));
     assemble(&mut nib, root_object, &root_name, c, connections)
@@ -1695,17 +1769,33 @@ fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str
     c.parents.push((placeholder.clone(), root_name.clone()));
     let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
     c.definitions.insert(placeholder, value);
+    // Upstream placeholders: the controller's, then each embed segue's
+    // template, numbered from 1, after the Application placeholder; each
+    // template's container view is its outlet (four probes).
+    let mut placeholders = Vec::new();
     if upstream {
-        let name = object_name(attr(vc, "id")?);
+        placeholders.push((object_name(attr(vc, "id")?), None));
+    }
+    for segue in embeds(vc) {
+        let container = segue.parent().and_then(|l| l.parent()).ok_or("an embed segue outside a container view")?;
+        placeholders.push((object_name(&format!("{} template", attr(segue, "id")?)), Some(object_name(attr(container, "id")?))));
+    }
+    let mut embed_outlets = Vec::new();
+    for (i, (name, container)) in placeholders.into_iter().enumerate() {
         c.parents.push((name.clone(), root_name.clone()));
-        let identifier = nib.string("UpstreamPlaceholder-1");
+        let identifier = nib.string(&format!("UpstreamPlaceholder-{}", i + 1));
         c.definitions.insert(
             name.clone(),
-            Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name)),
+            Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name.clone())),
         );
+        if let Some(container) = container {
+            let label = nib.string("containerView");
+            embed_outlets.push(outlet(format!("{name} container outlet"), &name, &container, label));
+        }
     }
     let label = nib.string("view");
     let mut connections = vec![outlet(format!("{view_name} view outlet"), &root_name, &view_name, label)];
+    connections.extend(embed_outlets);
     connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
     let name = format!("{}-view-{}", attr(vc, "id")?, attr(view_node, "id")?);
     Ok((name, assemble(&mut nib, root_object, &root_name, c, connections)?))
@@ -2821,6 +2911,27 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     values.push(("NSImageViewPlaceholderPrecedence", Value::Int(0)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
     Ok(Value::New(Object::new("NSImageView", values).named(name)))
+}
+
+/// A container view's embed segue: its only connection.
+fn embed_segue<'a, 'i>(n: Node<'a, 'i>) -> Result<Option<Node<'a, 'i>>, String> {
+    let all: Vec<Node> = children(n, "connections").flat_map(|l| l.children().filter(|c| c.is_element())).collect();
+    match all.as_slice() {
+        [] => Ok(None),
+        [s] if s.has_tag_name("segue") && s.attribute("kind") == Some("embed") => {
+            only_attributes(*s, &[("destination", None), ("kind", None), ("identifier", None), ("id", None)])?;
+            Ok(Some(*s))
+        }
+        _ => fail("a container view's connections other than one embed segue are not supported by this ibtool"),
+    }
+}
+
+/// The embed segues of a view controller's view, in document order.
+fn embeds<'a, 'i>(vc: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
+    children(vc, "view")
+        .flat_map(|v| v.descendants())
+        .filter(|d| d.has_tag_name("segue") && d.attribute("kind") == Some("embed"))
+        .collect()
 }
 
 /// Whether a view controller's view nib needs it as an upstream placeholder:

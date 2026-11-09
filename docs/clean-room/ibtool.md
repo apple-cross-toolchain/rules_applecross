@@ -2936,7 +2936,25 @@ Application placeholder, and the controller's
 `NSExternalObjectsTableForViewLoading` maps that name to it (an empty
 dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
-derives a UUID from the document and the controller's id. A view
+derives a UUID from the document and the controller's id.
+
+**Container views** (seven probes). A container view is a plain view.
+Its embed segue makes the parent controller hold an
+`NSStoryboardSegueTemplates` array, after its nib name, of
+`NSStoryboardEmbedSegueTemplate`s (the segue's identifier if any, the
+trigger `IBSegueTriggerViewDidLoad`, the destination
+`NSViewController-<id>`, and a nil container view). The templates are in
+document order in the array, but listed in reverse after the controller
+in the objects list, each with outlets to the controller (`controller`)
+and to its storyboard placeholder (`storyboard`). The controller's
+external objects table maps `UpstreamPlaceholder-<n>` to itself (when it
+needs one) and then to each template. Its view's nib has a placeholder of
+each, with a template's `containerView` outlet to its container view. The
+embedded controller has its own nib, `NSViewController-<id>`, in the
+Info.plist's nib names and UUIDs, holding it as a window's content
+controller is held (a plain `NSViewController` without a class). Xcode's
+UUIDs change from run to run, so these are checked by probes, not by
+`tests/ibtool_xib`. A view
 controller with a storyboard identifier has its own nib of that name,
 holding it and a storyboard placeholder, and requiring its class swapper
 for connections whether or not it has a class.
