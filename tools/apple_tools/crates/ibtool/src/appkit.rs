@@ -235,6 +235,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "scrollView" => scroll_view(nib, c, s, module, name)?,
                 "box" => box_view(nib, c, s, module, name)?,
                 "imageView" => image_view(nib, c, s, module, name)?,
+                "wkWebView" => web_view(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -1614,6 +1615,19 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     }
     wc_values.push(("showSeguePresentationStyle", Value::Int(presentation)));
     wc_values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&wc_uuid)));
+    // Shown as a single window: its UUID names the single instance (Xcode's
+    // Safari extension templates).
+    if presentation == 1 {
+        let key = nib.string("NSSingleInstancePresentationIdentifier");
+        let id = nib.string(&wc_uuid);
+        wc_values.push((
+            "NSStoryboardSegueDestinationOptions",
+            Value::New(Object::new(
+                "NSDictionary",
+                vec![("NSInlinedValue", Value::Bool(true)), ("UINibEncoderEmptyKey", key), ("UINibEncoderEmptyKey", id)],
+            )),
+        ));
+    }
     let wc_object = Object::new("NSWindowController", wc_values).named(wc_name.clone());
     c.definitions.insert(wc_name.clone(), Value::New(wc_object));
 
@@ -2958,6 +2972,124 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
 /// game templates).
 fn controller_view<'a, 'i>(vc: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
     vc.children().find(|c| (c.has_tag_name("view") || c.has_tag_name("sceneView")) && c.attribute("key") == Some("view"))
+}
+
+/// A web view as Xcode's Safari extension templates make it. Xcode
+/// archives a live WKWebView, so its keys are WebKit's on the Mac that ran
+/// it (macOS 27): 17 drag types, its own flipped view and two
+/// hidden colour extension views as subviews outside the objects' list, and
+/// a default configuration (two templates).
+fn web_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("wantsLayer", Some("YES")),
+            ("fixedFrame", Some("YES")),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "wkWebViewConfiguration"])?;
+    let config = child(n, "wkWebViewConfiguration", "configuration").ok_or("a web view without a configuration")?;
+    only_attributes(config, &[("key", None)])?;
+    only_children(config, &["audiovisualMediaTypes", "wkPreferences"])?;
+    let media = child(config, "audiovisualMediaTypes", "mediaTypesRequiringUserActionForPlayback").ok_or("a web view's configuration other than Xcode's templates'")?;
+    only_attributes(media, &[("key", None), ("none", Some("YES"))])?;
+    let preferences = child(config, "wkPreferences", "preferences").ok_or("a web view's configuration other than Xcode's templates'")?;
+    only_attributes(preferences, &[("key", None)])?;
+    only_children(preferences, &[])?;
+    if n.attribute("wantsLayer").is_none() || media.attribute("none").is_none() {
+        return fail("a web view other than Xcode's templates' is not supported by this ibtool");
+    }
+    let name = object_name(attr(n, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let f = frame(n, "frame")?;
+    let size = nib.string(&format!("{{{}, {}}}", g(f.w), g(f.h)));
+    let internal = |nib: &mut Nib, class: &'static str, hidden: bool, size: Value| {
+        let mut v = vec![
+            ("NSNextResponder", reference(name.clone())),
+            ("NSNibTouchBar", Value::Nil),
+            ("NSvFlags", Value::Int(if hidden { 0x8000_0000_u32 as i32 as i64 | 256 } else { 274 })),
+            ("NSFrameSize", size),
+            ("NSSuperview", reference(name.clone())),
+            ("NSViewIsLayerTreeHost", Value::Bool(true)),
+            ("NSViewWantsBestResolutionOpenGLSurface", Value::Bool(true)),
+        ];
+        if !hidden {
+            v.push(("NSViewClipsToBoundsKeyName", Value::Bool(true)));
+        }
+        v.push(("IBNSSafeAreaLayoutGuide", Value::Nil));
+        v.push(("IBNSLayoutMarginsGuide", Value::Nil));
+        v.push(("IBNSClipsToBounds", Value::Int(0)));
+        let _ = nib;
+        Value::New(Object::new(class, v))
+    };
+    let flipped = internal(nib, "WKFlippedView", false, size);
+    let zero = nib.string("{0, 0}");
+    let first = internal(nib, "WKColorExtensionView", true, zero);
+    let zero = nib.string("{0, 0}");
+    let second = internal(nib, "WKColorExtensionView", true, zero);
+    let at = values.iter().position(|v| v.0 == "NSFrame" || v.0 == "NSFrameSize").expect("its frame");
+    values.insert(at, ("NSSubviews", nib.array("NSMutableArray", vec![flipped, first, second])));
+    let types = [
+        "Apple HTML pasteboard type",
+        "Apple PDF pasteboard type",
+        "Apple URL pasteboard type",
+        "Apple Web Archive pasteboard type",
+        "Apple WebKit dummy pasteboard type",
+        "Apple files promise pasteboard type",
+        "NSColor pasteboard type",
+        "NSFilenamesPboardType",
+        "NSStringPboardType",
+        "NeXT RTFD pasteboard type",
+        "NeXT Rich Text Format v1.0 pasteboard type",
+        "NeXT TIFF v4.0 pasteboard type",
+        "WebURLsWithTitlesPboardType",
+        "com.apple.webarchive",
+        "public.png",
+        "public.url",
+        "public.url-name",
+    ];
+    let types: Vec<Value> = types.iter().map(|t| nib.string(t)).collect();
+    let at = values.iter().position(|v| v.0 == "NSFrame" || v.0 == "NSFrameSize").expect("its frame");
+    values.insert(at, ("NSDragTypes", nib.array("NSMutableSet", types)));
+    let preferences = Object::new(
+        "WKPreferences",
+        vec![
+            ("minimumFontSize", Value::Double(0.0)),
+            ("javaScriptCanOpenWindowsAutomatically", Value::Bool(true)),
+            ("javaScriptEnabled", Value::Bool(true)),
+            ("shouldPrintBackgrounds", Value::Bool(false)),
+            ("tabFocusesLinks", Value::Bool(false)),
+            ("textInteractionEnabled", Value::Bool(true)),
+        ],
+    );
+    let empty = nib.string("");
+    let configuration = Object::new(
+        "WKWebViewConfiguration",
+        vec![
+            ("processPool", Value::New(Object::new("WKProcessPool", vec![]))),
+            ("preferences", Value::New(preferences)),
+            ("userContentController", Value::New(Object::new("WKUserContentController", vec![]))),
+            ("websiteDataStore", Value::New(Object::new("WKWebsiteDataStore", vec![("isDefaultDataStore", Value::Bool(true))]))),
+            ("suppressesIncrementalRendering", Value::Bool(false)),
+            ("applicationNameForUserAgent", empty),
+            ("allowsAirPlayForMediaPlayback", Value::Bool(true)),
+            ("drawsBackground", Value::Bool(true)),
+            ("userInterfaceDirectionPolicy", Value::Int(0)),
+            ("scrollToTextFragmentIndicatorEnabled", Value::Bool(true)),
+            ("scrollToTextFragmentMarkingEnabled", Value::Bool(true)),
+            ("multiRepresentationHEICInsertionEnabled", Value::Bool(false)),
+        ],
+    );
+    values.push(("configuration", Value::New(configuration)));
+    values.push(("allowsBackForwardNavigationGestures", Value::Bool(false)));
+    values.push(("customUserAgent", nib.string("")));
+    values.push(("allowsLinkPreview", Value::Bool(true)));
+    values.push(("allowsMagnification", Value::Bool(false)));
+    values.push(("magnification", Value::Double(1.0)));
+    Ok(Value::New(Object::new("WKWebView", values).named(name)))
 }
 
 /// A SceneKit view as Xcode's game templates make it: a view, not looping,

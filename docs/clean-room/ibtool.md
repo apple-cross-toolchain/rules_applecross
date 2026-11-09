@@ -2952,7 +2952,22 @@ an `SCNView` with SceneKit's keys after the view's (`loops`, `playing`,
 `jitteringEnabled`, `allowsCameraControl`, `ibWantsMultisampling`,
 `ibPreferredRenderingAPI`, `autoenablesDefaultLighting`, `ibSceneName`,
 `backgroundColor`), in the form Xcode's SceneKit game templates give it.
-A text field's `NSPreferredMaxLayoutWidth` follows its control keys.
+A text field's `NSPreferredMaxLayoutWidth` follows its control keys. A
+window controller shown as a single window (presentation style 1) adds
+`NSStoryboardSegueDestinationOptions` last, mapping
+`NSSingleInstancePresentationIdentifier` to its UUID string.
+
+**Web views.** Xcode archives a live `WKWebView`, so its keys are WebKit's
+on the Mac running Xcode (macOS 27 for these notes). In the form Xcode's
+Safari extension templates give it (a layer-backed view with the default
+configuration), its keys are:
+- a view's keys, with 17 drag types before its frame;
+- subviews outside the objects list: a `WKFlippedView` of its size,
+  clipping to its bounds, and two hidden `WKColorExtensionView`s;
+- a `WKWebViewConfiguration` holding a process pool, preferences, a user
+  content controller, the default data store and WebKit's defaults;
+- back and forward gestures off, an empty user agent, link previews on,
+  magnification off at 1.
 
 **Container views** (seven probes). A container view is a plain view.
 Its embed segue makes the parent controller hold an
