@@ -137,6 +137,9 @@ struct Collected {
     accessibility: Vec<(String, String)>,
     /// Stack views, whose early decoding connectors lead the connections.
     stacks: Vec<String>,
+    /// Boxes whose subviews don't autoresize, which a runtime attribute
+    /// says again.
+    runtime: Vec<String>,
 }
 
 /// An autoresizing mask's bits, as NSView's: flexible left margin 1, width
@@ -175,6 +178,19 @@ fn autoresizing_mask(n: Node) -> Result<i64, String> {
     Ok(mask)
 }
 
+/// A view's identity: its id, or for a box's content view, which old
+/// documents write without one (a corpus xib), its box's id with a NUL no
+/// document's id can hold. Nothing can refer to such a view.
+fn view_id(n: Node) -> Result<String, String> {
+    if let Some(id) = n.attribute("id") {
+        return Ok(id.to_string());
+    }
+    match n.parent_element() {
+        Some(b) if b.has_tag_name("box") && n.attribute("key") == Some("contentView") => Ok(format!("{}\0contentView", attr(b, "id")?)),
+        _ => attr(n, "id").map(str::to_string),
+    }
+}
+
 /// A view and its subviews: an `NSView`, or for a top-level custom view an
 /// `NSClassSwapper` for its class.
 fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str, next_responder: Option<&str>) -> Result<Value, String> {
@@ -210,7 +226,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     )?;
     only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point", "connections", "accessibility"])?;
     canvas_location_only(n)?;
-    let name = object_name(attr(n, "id")?);
+    let name = object_name(&view_id(n)?);
     c.parents.push((name.clone(), parent.to_string()));
     if children(n, "connections").next().is_some() && !container {
         c.connection_sources.push(attr(n, "id")?.to_string());
@@ -315,7 +331,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         values.push(("NSSubviews", nib.array("NSMutableArray", items)));
     }
     let mut f = frame(n, "frame")?;
-    if let Some(laid_out) = n.attribute("id").and_then(|id| c.laid_out.get(id)) {
+    if let Some(laid_out) = view_id(n).ok().and_then(|id| c.laid_out.get(&id)) {
         f = Frame { ..*laid_out };
     }
     if n.attribute("id").is_some_and(|id| c.at_origin.iter().any(|o| o == id)) {
@@ -1500,6 +1516,23 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
         let label = nib.string("Encoding NSStackView requires being decoded before other connections with an early decoding order priority of 999990.");
         connection_values.push(Value::New(Object::new("NSNibConnector", vec![("NSSource", reference(object_name(id))), ("NSLabel", label)])));
     }
+    // A box whose subviews don't autoresize sets that again as a runtime
+    // attribute, after the stacks' connectors and by the box's id (four
+    // probes, a corpus xib); a plain view doesn't (a probe).
+    c.runtime.sort();
+    for id in &c.runtime {
+        let no = nib.shared("n:NO".into(), || Object::new("NSNumber", vec![("NS.boolval", Value::Bool(false))]));
+        let values = nib.array("NSArray", vec![no]);
+        let key_path = nib.string("autoresizesSubviews");
+        let key_paths = nib.array("NSArray", vec![key_path]);
+        let name = format!("{} autoresizesSubviews", object_name(id));
+        oids.push(reference(name.clone()));
+        let connector = Object::new(
+            "NSIBUserDefinedRuntimeAttributesConnector",
+            vec![("NSObject", reference(object_name(id))), ("NSValues", values), ("NSKeyPaths", key_paths)],
+        );
+        connection_values.push(Value::New(connector.named(name)));
+    }
     for (name, value) in connections {
         oids.push(reference(name));
         connection_values.push(value);
@@ -1589,6 +1622,7 @@ fn new_collected(sources: Vec<String>) -> Collected {
         laid_out: HashMap::new(),
         accessibility: Vec::new(),
         stacks: Vec::new(),
+        runtime: Vec::new(),
     }
 }
 
@@ -3336,12 +3370,15 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
         (_, content) => content,
     };
     c.parents.push((name.clone(), parent.to_string()));
+    if n.attribute("autoresizesSubviews").is_some() {
+        c.runtime.push(id.to_string());
+    }
     if let Some(content) = content {
         let f = frame(n, "frame")?;
         let border = n.attribute("borderWidth").map(number).transpose()?.unwrap_or(1.0);
         let inset = if border_type == 0 { 0.0 } else { border };
         c.laid_out.insert(
-            attr(content, "id")?.to_string(),
+            view_id(content)?,
             Frame {
                 x: inset,
                 y: inset,
@@ -3381,7 +3418,7 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     cell.push(("NSTextColor", text));
     values.push(("NSTitleCell", Value::New(Object::new("NSTextFieldCell", cell))));
     if let Some(content) = content {
-        values.push(("NSContentView", reference(object_name(attr(content, "id")?))));
+        values.push(("NSContentView", reference(object_name(&view_id(content)?))));
     }
     values.push(("NSBorderType", Value::Int(border_type)));
     values.push(("NSBoxType", Value::Int(if separator { 2 } else { 4 })));

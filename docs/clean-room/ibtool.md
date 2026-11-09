@@ -2879,9 +2879,17 @@ of the same integer is the same object), the corner radius, border and
 fill colours, and `IBNSBoxIsUsingDocumentContentView` with a content view.
 Xcode lays a custom box's content view out again, inset from the box's
 bounds by its border width (1 unless given, none without a border),
-whatever its frame says; in a storyboard it clips to its bounds. A primary
-or secondary box puts its content below its title, measured with the
-Mac's fonts, and is refused.
+whatever its frame says; in a storyboard it clips to its bounds. Old
+documents write the content view without an id; nothing can refer to it.
+A box whose subviews don't autoresize clears the view flag and says so
+again through an `NSIBUserDefinedRuntimeAttributesConnector` (the box,
+`NSValues` holding a shared `NSNumber` false, `NSKeyPaths` holding
+`autoresizesSubviews`). These connectors follow the stack views'
+connectors and come before every other connection. They are ordered by
+the box's id as bytes and numbered with the connections (four probes, a
+corpus xib). A plain view with the same attribute gets no connector. A
+primary or secondary box puts its content below its title, measured with
+the Mac's fonts, and is refused.
 
 **Pop-up buttons** (about 15 probes) are buttons whose
 `NSPopUpButtonCell` holds a menu. The cell's flags add border and bezel
