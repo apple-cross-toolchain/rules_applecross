@@ -136,8 +136,11 @@ of a level of the boundary.
   stroke edge pixels right (`pdfstrokes.py`). Straight strokes are exact;
   the misses are on curves.
 - **Thin strokes.** A thin axis-aligned stroke follows the rectangle fast
-  path exactly. A thin diagonal one is within ±1 of the 1 px outline's fill
-  along its length, but its ends differ (`thin.swift`).
+  path exactly. A diagonal stroke 1 px wide matches no fill of its outline
+  (butt, round or square caps, widths 1 to 1 + 1/64; at best 563 of 886
+  edge pixels differ, `thin2.swift`). Nor does it match the exact strip
+  area with floor or rounding at 255 or 256. It's a separate rasterizer,
+  not yet found.
 
 - **The residual, narrowed** (`dense.py`, `suite.py`, and the knobs in
   `rust/cgfill_base.rs`):
