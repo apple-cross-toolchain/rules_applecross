@@ -453,6 +453,10 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 let mut c_tri = vec![0.0f64; w];
                 let mut c_other = vec![false; w];
                 let mut c_top = vec![false; w];
+                let mut c_lean = vec![0i32; w];
+                let mut o_lean = vec![0i32; w];
+                let mut c_topx = vec![f64::NAN; w];
+                let mut o_topx = vec![f64::NAN; w];
                 let mut c_rectb = vec![0.0f64; w];
                 let mut winding = 0;
                 for &(_, i) in &active {
@@ -556,6 +560,12 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                             let pt = ((tx_ - 1e-12).floor().max(0.0) as usize).min(w - 1);
                             let single_c = xmin.floor() == (xmax - 1e-12).floor();
                             if std::env::var("CG_SPAN_SINGLE").is_err() || single_c { c_top[pt] = true; }
+                            {
+                                let (mut by2, mut bx2) = (f64::MAX, 0.0f64);
+                                for &(a, b, r) in &e.pieces { if in_band(a, b, r) { for p in [a, b] { if p.1 < by2 { by2 = p.1; bx2 = p.0; } } } }
+                                c_lean[pt] = if tx_ > bx2 { 1 } else if tx_ < bx2 { -1 } else { 0 };
+                                c_topx[pt] = tx_;
+                            }
                             // closing band rectangle (height of the edge's part in the band, right of its top)
                             let mut by_ = f64::MAX; for &(a, b, r) in &e.pieces { if in_band(a, b, r) { by_ = by_.min(a.1.min(b.1)); } }
                             c_rectb[pt] += (ty_ - by_) * ((pt + 1) as f64 - tx_);
@@ -564,6 +574,11 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     if band_rule && !edge_right.is_empty() {
                         let h = top_pt.1 - bot_y;
                         let pt = (top_pt.0 - 1e-12).floor().max(0.0) as usize;
+                        if role > 0.0 {
+                            let mut bx3 = top_pt.0; let mut by3 = f64::MAX;
+                            for &(a, b, r) in &e.pieces { if in_band(a, b, r) { for p in [a, b] { if p.1 < by3 { by3 = p.1; bx3 = p.0; } } } }
+                            if pt < w { o_lean[pt] = if top_pt.0 > bx3 { 1 } else if top_pt.0 < bx3 { -1 } else { 0 }; o_topx[pt] = top_pt.0; }
+                        }
                         let wt = (pt + 1) as f64;
                         let rect = h * (wt - top_pt.0);
                         let mut per: Vec<(usize, f64)> = Vec::new();
@@ -583,7 +598,9 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 for x in 0..w {
                     if piece_part[x] != 0.0 || piece_exact[x] != 0.0 {
                         let span = std::env::var("CG_PIECE_SPAN").unwrap_or_else(|_| "exact".to_string());
-                        let shared = if std::env::var("CG_NOSPAN_TOP").is_err() { close_part[x] != 0.0 && c_top[x] } else { close_part[x] != 0.0 };
+                        let mut shared = if std::env::var("CG_NOSPAN_TOP").is_err() { close_part[x] != 0.0 && c_top[x] } else { close_part[x] != 0.0 };
+                        if shared && std::env::var("CG_LEAN").is_ok() && o_lean[x] != 0 && o_lean[x] == c_lean[x] { shared = false; }
+                        if shared && std::env::var("CG_TOPORDER").is_ok() && c_topx[x] < o_topx[x] { shared = false; }
                         row[x] += if shared {
                             match (std::env::var("CG_SHARED").unwrap_or_default().as_str(), span.as_str()) {
                                 ("both", _) => { let c = |v: f64| (v * 4096.0 - 1e-7).ceil() / 4096.0; piece_part[x] - (c(c_rectb[x]) - c_rectb[x]) }

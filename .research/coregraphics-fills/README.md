@@ -373,3 +373,18 @@ of a level of the boundary.
   `cov` built there from `cov.swift`.
 - `model.py`, `scan.py`, `area2.py`, `gray.py`, `tri.py`: earlier coverage
   models, superseded by `raster.py`.
+
+## Vertex residual (open)
+
+The remaining fill misses are single pixels at a triangle's apex where both
+edges lean the same way and their stepped tops are reversed by one unit
+(the edges cross just below the apex). Sweeping such a triangle up in
+1/4096 steps shows CoreGraphics' alpha changing exactly one step before
+the model's at every transition: about 0.6–1.2/4096 px² more area,
+consistently (apexsweep.py). Dropping the shared-pixel exemption when the
+closing edge's top lies left of the opening edge's (`CG_TOPORDER`) takes
+the random suite from 51 to 35 wrong pixels and every glyph test to 0, but
+the apex family from 6 to 26 (apex13.py: only the reversed-top group
+changes). So CoreGraphics adds area in some reversed cases and not
+others; the rule isn't found, and the knob stays off.
+
