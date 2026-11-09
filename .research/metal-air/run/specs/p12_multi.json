@@ -1,0 +1,1 @@
+[{"function": "first", "grid": [64, 1, 1], "group": [16, 1, 1], "buffers": [{"index": 0, "bytes": 256, "fill": "float"}]}, {"function": "second", "grid": [64, 1, 1], "group": [16, 1, 1], "buffers": [{"index": 0, "bytes": 256, "fill": "float"}]}, {"function": "third", "grid": [64, 1, 1], "group": [16, 1, 1], "buffers": [{"index": 0, "bytes": 256, "fill": "float"}]}]

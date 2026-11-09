@@ -48,8 +48,37 @@ The plan, sent to the Manager:
   - function constants;
   - the constexpr-sampler encoding;
   - what changes with the deployment target.
-- **M1, next:** generate the metadata from the source instead of
-  hard-coding it, plus a Rust writer.
+- **M1, in progress:** `msl2air.py` generates the metadata from the source.
+  - **How it works:**
+    1. A textual rewrite turns `[[attributes]]` into annotations, and vector
+       constructors and half literals into C++. Our own
+       `include/metal_stdlib` turns stage keywords into macros.
+    2. clang 15's AST dump gives the signatures; `-fdump-record-layouts`
+       gives the struct layouts.
+    3. A generated `extern "C"` entry point gives each function AIR's flat
+       signature: textures and samplers become AIR's opaque pointers.
+    4. Calls to AIR functions that return structs are made direct (spir64
+       uses sret), then `opt -O2` runs.
+    5. The IR pass adds the AIR metadata and the function-constant globals,
+       and `mtlb.py` writes the metallib with its public metadata (CNST).
+  - **Results:** of the probes the stdlib covers so far (buffers,
+    built-ins, threadgroup memory, atomics, math, matrices, read/write
+    textures, function constants, several kernels per file,
+    `max_total_threads_per_threadgroup`):
+    - The AIR metadata matches Xcode's node for node, and the metallib
+      matches in header, function list and public metadata. That's 55 of
+      55 across iOS 12, 16, 18, 27.2 and macOS 11 (`runall.sh`).
+    - On a Mac slot's GPU, every kernel from our Linux-built macOS 27
+      metallibs gives bit-identical output to Xcode's metallib for the
+      same source: 17 of 17 runs, by `run/diffrun.swift` with
+      `run/specs/`.
+  - **Still to do:**
+    - simdgroup functions;
+    - sampling and constexpr samplers;
+    - packed types;
+    - argument buffers;
+    - VATT/VATY;
+    - a Rust port.
 - **M2:** a stdlib subset for compute.
 - **M3:** graphics functions.
 - **M4:** replace the relax_metal stub.

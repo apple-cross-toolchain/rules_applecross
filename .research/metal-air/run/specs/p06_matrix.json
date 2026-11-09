@@ -1,0 +1,1 @@
+[{"function": "matmul", "grid": [64, 1, 1], "group": [16, 1, 1], "buffers": [{"index": 0, "bytes": 1024, "fill": "zero"}, {"index": 1, "bytes": 64, "fill": "float"}, {"index": 2, "bytes": 1024, "fill": "float"}]}]

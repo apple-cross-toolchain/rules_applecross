@@ -1,0 +1,1 @@
+[{"function": "tgsum", "grid": [256, 1, 1], "group": [64, 1, 1], "buffers": [{"index": 0, "bytes": 16, "fill": "zero"}, {"index": 1, "bytes": 1024, "fill": "float"}], "threadgroup": [[0, 256]]}]

@@ -1,0 +1,1 @@
+[{"function": "ka", "grid": [256, 1, 1], "group": [64, 1, 1], "buffers": [{"index": 0, "bytes": 4, "fill": "zero"}, {"index": 1, "bytes": 1024, "fill": "bytes"}]}, {"function": "kb", "grid": [8, 8, 1], "group": [8, 8, 1], "buffers": [{"index": 0, "bytes": 256, "fill": "zero"}, {"index": 1, "bytes": 256, "fill": "float"}, {"index": 2, "bytes": 128, "fill": "bytes"}]}]
