@@ -18,7 +18,7 @@
                     <rect key="frame" x="140" y="192" width="100" height="60"/>
                 </customView>
                 <customView translatesAutoresizingMaskIntoConstraints="NO" id="vCx-aa-bbb">
-                    <rect key="frame" x="20" y="100" width="220" height="60"/>
+                    <rect key="frame" x="20" y="100" width="210" height="60"/>
                 </customView>
             </subviews>
             <constraints>
@@ -32,7 +32,7 @@
                 <constraint firstItem="vBx-aa-bbb" firstAttribute="height" secondItem="vAx-aa-bbb" secondAttribute="height" id="k08-aa-bbb"/>
                 <constraint firstItem="vCx-aa-bbb" firstAttribute="leading" secondItem="vAx-aa-bbb" secondAttribute="leading" id="k09-aa-bbb"/>
                 <constraint firstItem="vCx-aa-bbb" firstAttribute="top" secondItem="vAx-aa-bbb" secondAttribute="bottom" constant="32" id="k10-aa-bbb"/>
-                <constraint firstItem="vCx-aa-bbb" firstAttribute="trailing" secondItem="vBx-aa-bbb" secondAttribute="trailing" id="k11-aa-bbb"/>
+                <constraint firstItem="vCx-aa-bbb" firstAttribute="trailing" secondItem="vBx-aa-bbb" secondAttribute="trailing" constant="-10" id="k11-aa-bbb"/>
                 <constraint firstItem="vCx-aa-bbb" firstAttribute="height" constant="60" id="k12-aa-bbb"/>
                 <constraint firstAttribute="trailing" secondItem="vBx-aa-bbb" secondAttribute="trailing" constant="240" id="k13-aa-bbb"/>
                 <constraint firstItem="vCx-aa-bbb" firstAttribute="top" secondItem="vBx-aa-bbb" secondAttribute="bottom" constant="32" id="k14-aa-bbb"/>

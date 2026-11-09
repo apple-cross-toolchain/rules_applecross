@@ -2735,7 +2735,8 @@ the app's own classes is an `NSClassSwapper` for `NSObject`, made with
 `init` (`NSInitializeWithInit`) when the document says
 `customObjectInstantitationMethod="direct"`.
 
-**Connections**, in a xib: outlets, then actions, each by their source's
+**Connections**, from any object including views, in a xib: outlets, then
+actions, each by their source's
 id as bytes, in document order for one source (Xcode's main menu
 template's 87). A storyboard's nibs list them in an order that varies from
 run to run; this ibtool keeps the xib's. `toggleSourceList:` is archived
@@ -2770,8 +2771,9 @@ the safe-area, margins and clipping keys. A custom view, or a view of a
 custom class, is an `NSClassSwapper` for it.
 
 **Constraints** (`NSLayoutConstraint`): items, attributes twice
-(NSLayoutAttribute), the relation, the constant twice when given, the
-priority when not required. A view's are in an order of their own (about
+(NSLayoutAttribute), the relation, the constant twice when given (a
+symbolic one, the standard space, as `NSSymbolicConstant` `NSSpace` in their
+place), the priority when not required. A view's are in an order of their own (about
 60 probes and a corpus storyboard, none from the document's order):
 - first the view's own, relating none of its subviews;
 - then each subview's (those whose first item it is, or whose second
@@ -2782,11 +2784,13 @@ priority when not required. A view's are in an order of their own (about
   centerY, right, left, trailing, leading, width, bottom, top, height;
 - then those relating it to other subviews, by its own attribute
   (centerX, trailing, leading, centerY, bottom, top, width, height), then
-  the other subview's, then the other subview farthest from it first.
+  the other subview's, then the other subview farthest from it first, by
+  the distance between their centres (four ties in two corpus
+  storyboards that their corners don't order).
 
 Refused as not established: subviews at the same distance from the
 corner, two different constraints on the same attributes of the same
-views, baselines, and between subviews left and right or a centre or size
+views or of subviews as far apart, baselines, and between subviews left and right or a centre or size
 related to another attribute. A view controller's own view never says
 `NSDoNotTranslateAutoresizingMask`.
 
@@ -2823,7 +2827,10 @@ is a text field's system font at 13 points with
 `NSFontUsesAppearanceFontSize`, whatever its control size, and a button's
 plain system font of its control size (13, 11, 9). A control's cell comes
 before the control's own constraints in the objects' list. System colours
-that resolve to the same colour share it. A System catalog colour carries the
+that resolve to the same colour share it. A text field allowing the Touch
+Bar's character picker adds `NSCharacterPickerEnabled` last in its cell;
+not allowing it changes nothing. A key equivalent Interface Builder writes
+in base64 (`base64-UTF8`, without padding: the escape key) is decoded. A System catalog colour carries the
 colour it resolves to, in Generic Gray Gamma 2.2 or sRGB with the profile
 embedded: the Mac's own profiles, which the SDK archive carries
 (`tools/package-sdks.sh`) rather than this repository.
@@ -2887,7 +2894,9 @@ a border, a scroller showing, or a larger document, Xcode tiles it with
 AppKit's scroller metrics, and this ibtool refuses it. The scroll view's
 subviews are its clip view and two scrollers; `NSsFlags` 0x20a00, with the
 horizontal and vertical scrollers 0x20 and 0x10, predominant-axis
-scrolling 0x10000 and content insets 0x100000; the line and page scroll
+scrolling 0x10000, content insets 0x100000, and the scroll elasticity,
+vertical in bits 12 and 13 and horizontal in 14 and 15 (automatic 0, none
+1, allowed 2); the line and page scroll
 amounts as big-endian floats (vertical, then horizontal); magnification
 0.25 to 4. The clip view holds the document view at its origin and the
 control background colour, drawing it (4) and copying on scroll (2). The
@@ -2901,8 +2910,9 @@ or not there is one), the controllers' nib names, the entry point, the
 window controllers' UUIDs and the version, inserted in that order. The
 application scene is `MainMenu.nib`; a window controller
 `NSWindowController-<id>.nib`, holding its window, its content view
-controller (an `NSClassSwapper` naming its view's nib) and storyboard
-placeholders, with the window's delegate its controller whether the
+controller (an `NSClassSwapper` naming its view's nib, or without a class a
+plain `NSViewController`; each with its own `storyboard` outlet) and
+storyboard placeholders, with the window's delegate its controller whether the
 document connects it or not; the content controller's view
 `<controller>-view-<view>.nib`. When the controller has outlets, or its
 view's objects connect to it, the view's nib stands it in with an

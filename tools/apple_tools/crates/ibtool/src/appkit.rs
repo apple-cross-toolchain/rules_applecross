@@ -173,10 +173,13 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point"])?;
+    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point", "connections"])?;
     canvas_location_only(n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(attr(n, "id")?.to_string());
+    }
     let mut values = Vec::new();
     let class = runtime_class_name(n, module, "NSView")?;
     if swapped {
@@ -280,9 +283,9 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
 /// leading, width, bottom, top, height); then those relating it to other
 /// subviews, by its own attribute (centerX, trailing, leading, centerY,
 /// bottom, top, width, height; a centre or size to the other's same), then
-/// the other subview's
-/// attribute, then the other subview farthest from it first (by the
-/// distance between their top-left corners). Subviews at the same
+/// the other subview's attribute, then the other subview farthest from it
+/// first (by the distance between their centres: four ties in two corpus
+/// storyboards, which their corners don't order). Subviews at the same
 /// distance, two different constraints on the same attributes of the same
 /// views, other attributes (between subviews: left and right, a centre or
 /// size to another attribute) and constraints on other views aren't
@@ -300,17 +303,17 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
         Some(f) => f.h,
         None => frame(n, "frame")?.h,
     };
-    // Each subview's top-left corner, and its squared distance from the
-    // view's.
+    // Each subview's squared distance from the view's top-left corner to
+    // its own, and its centre.
     let mut distances = Vec::new();
     for s in &subviews {
         let f = frame(*s, "frame")?;
         let (dx, dy) = (f.x, height - (f.y + f.h));
-        distances.push((attr(*s, "id")?, dx * dx + dy * dy, (f.x, f.y + f.h)));
+        distances.push((attr(*s, "id")?, dx * dx + dy * dy, (f.x + f.w / 2.0, f.y + f.h / 2.0)));
     }
     let apart = |a: &str, b: &str| -> f64 {
-        let corner = |id: &str| distances.iter().find(|d| d.0 == id).map_or((0.0, 0.0), |d| d.2);
-        let ((ax, ay), (bx, by)) = (corner(a), corner(b));
+        let centre = |id: &str| distances.iter().find(|d| d.0 == id).map_or((0.0, 0.0), |d| d.2);
+        let ((ax, ay), (bx, by)) = (centre(a), centre(b));
         (ax - bx) * (ax - bx) + (ay - by) * (ay - by)
     };
     // Each constraint's (group distance, sibling relation, attribute rank,
@@ -481,6 +484,7 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
                 ("secondItem", None),
                 ("secondAttribute", None),
                 ("constant", None),
+                ("symbolic", Some("YES")),
                 ("priority", None),
                 ("id", None),
             ],
@@ -525,10 +529,14 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
         } else if k.attribute("secondAttribute").is_some() {
             return fail("a constraint's second attribute without a second item");
         }
-        // Without a constant, neither constant key (a probe).
-        let constant = k.attribute("constant").map(number).transpose()?;
+        // Without a constant, neither constant key (a probe); a symbolic
+        // one, the standard space, in their place (a probe).
+        let constant = k.attribute("constant").map(number).transpose()?.filter(|_| k.attribute("symbolic").is_none());
         if let Some(constant) = constant {
             values.push(("NSConstantV2", Value::Double(constant)));
+        }
+        if k.attribute("symbolic").is_some() {
+            values.push(("NSSymbolicConstant", nib.string("NSSpace")));
         }
         values.push(("NSShouldBeArchived", Value::Bool(true)));
         if let Some(p) = k.attribute("priority") {
@@ -1010,6 +1018,8 @@ fn connections(nib: &mut Nib, doc: &Document, sources: &[String], first_responde
     let by_id: HashMap<&str, Node> = doc.descendants().filter(|d| d.is_element()).filter_map(|d| d.attribute("id").map(|id| (id, d))).collect();
     let mut sorted: Vec<&str> = sources.iter().map(String::as_str).collect();
     sorted.sort();
+    // A view at the top level is collected as one twice.
+    sorted.dedup();
     let mut out = Vec::new();
     for kind in ["outlet", "action"] {
         for id in &sorted {
@@ -1500,10 +1510,10 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
 }
 
 /// A view controller as a window controller's or its own nib holds it:
-/// its class swapped in for NSViewController (without one, NSViewController
-/// itself, which connections then require; in its own nib, whatever its
-/// class), naming its view's nib and its identifier (five probes, a
-/// template).
+/// its class swapped in for NSViewController, naming its view's nib and its
+/// identifier. In its own nib it is always swapped, requiring the swapper
+/// for connections; as a window's content without a class, it is a plain
+/// NSViewController (eight probes, a template, rules_apple's example).
 fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str, own_nib: bool) -> Result<(Value, String), String> {
     only_attributes(
         vc,
@@ -1519,11 +1529,15 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     )?;
     let view = children(vc, "view").next().ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
-    let mut values = vec![
-        ("NSClassName", nib.string(&runtime_class_name(vc, module, "NSViewController")?)),
-        ("NSOriginalClassName", nib.string("NSViewController")),
-        ("NSNibName", nib.string(&nib_name)),
-    ];
+    // A window's content controller without a class is a plain
+    // NSViewController (rules_apple's example, two probes).
+    let swapped = own_nib || vc.attribute("customClass").is_some();
+    let mut values = Vec::new();
+    if swapped {
+        values.push(("NSClassName", nib.string(&runtime_class_name(vc, module, "NSViewController")?)));
+        values.push(("NSOriginalClassName", nib.string("NSViewController")));
+    }
+    values.push(("NSNibName", nib.string(&nib_name)));
     if let Some(identifier) = vc.attribute("storyboardIdentifier") {
         values.push(("NSStoryboardIdentifier", nib.string(identifier)));
     }
@@ -1541,10 +1555,11 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
     values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", table))));
     values.push(("showSeguePresentationStyle", Value::Int(0)));
     values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, attr(vc, "id")?))));
-    if own_nib || vc.attribute("customClass").is_none() {
+    if own_nib {
         values.push(("connectionsRequireClassSwapperForStoryboardCompilation", Value::Bool(true)));
     }
-    Ok((Value::New(Object::new("NSClassSwapper", values).named(name.to_string())), nib_name))
+    let class = if swapped { "NSClassSwapper" } else { "NSViewController" };
+    Ok((Value::New(Object::new(class, values).named(name.to_string())), nib_name))
 }
 
 /// A view controller with a storyboard identifier: its own nib, named by
@@ -1783,6 +1798,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("verticalCompressionResistancePriority", None),
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
             ("fixedFrame", Some("YES")),
+            ("allowsCharacterPickerTouchBarItem", None),
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints"])?;
@@ -1894,6 +1910,13 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     let fg = child(cell, "color", "textColor").ok_or("a text field cell without a text colour")?;
     cell_values.push(("NSTextColor", color(nib, fg)?));
     values.push(("NSEnabled", Value::Bool(true)));
+    // The Touch Bar's character picker when allowed, last; not allowing it
+    // changes nothing (two probes).
+    match n.attribute("allowsCharacterPickerTouchBarItem") {
+        None | Some("NO") => {}
+        Some("YES") => cell_values.push(("NSCharacterPickerEnabled", Value::Bool(true))),
+        Some(other) => return fail(format!("allowsCharacterPickerTouchBarItem=\"{other}\" is not supported by this ibtool")),
+    }
     values.push(("NSCell", Value::New(Object::new("NSTextFieldCell", cell_values).named(cell_name))));
     // A localizable document's controls allow a logical (right-to-left)
     // layout direction (the corpus's 358 controls, exactly those in
@@ -2051,7 +2074,14 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     };
     let key_equivalent = match (cell.attribute("keyEquivalent"), children(cell, "string").find(|s| s.attribute("key") == Some("keyEquivalent"))) {
         (Some(k), None) => k.to_string(),
-        (None, Some(e)) => e.text().unwrap_or("").to_string(),
+        (None, Some(e)) => match e.attribute("base64-UTF8") {
+            None => e.text().unwrap_or("").to_string(),
+            // Characters XML can't hold (escape, a corpus xib's Cancel).
+            Some("YES") => cf::xml::decode_base64(e.text().unwrap_or(""))
+                .and_then(|b| String::from_utf8(b).ok())
+                .ok_or("a key equivalent that isn't base64 of UTF-8")?,
+            Some(other) => return fail(format!("base64-UTF8=\"{other}\" is not supported by this ibtool")),
+        },
         (None, None) => String::new(),
         _ => return fail("a key equivalent both as an attribute and an element"),
     };
@@ -2181,6 +2211,8 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
             ("usesPredominantAxisScrolling", Some("NO")),
             ("hasHorizontalScroller", Some("NO")),
             ("hasVerticalScroller", Some("NO")),
+            ("verticalScrollElasticity", None),
+            ("horizontalScrollElasticity", None),
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
             ("fixedFrame", Some("YES")),
         ],
@@ -2284,6 +2316,16 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     }
     if child(n, "edgeInsets", "contentInsets").is_some() {
         flags |= 0x10_0000;
+    }
+    // Scroll elasticity, vertical in bits 12 and 13, horizontal in 14 and
+    // 15: automatic 0, none 1, allowed 2 (five probes).
+    for (key, shift) in [("verticalScrollElasticity", 12), ("horizontalScrollElasticity", 14)] {
+        flags |= match n.attribute(key) {
+            None | Some("automatic") => 0,
+            Some("none") => 1,
+            Some("allowed") => 2,
+            Some(other) => return fail(format!("{key}=\"{other}\" is not supported by this ibtool")),
+        } << shift;
     }
     values.push(("NSsFlags", Value::Int(flags)));
     values.push(("NSVScroller", reference(object_name(attr(v, "id")?))));
