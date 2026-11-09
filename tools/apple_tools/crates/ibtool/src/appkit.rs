@@ -252,6 +252,7 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("frameAutosaveName", None),
             ("animationBehavior", Some("default")),
             ("visibleAtLaunch", Some("NO")),
+            ("key", Some("window")),
             ("id", None),
             ("customClass", None),
             ("customModule", None),
@@ -333,12 +334,13 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         screen.y + (screen.h - content.h) / 2.0
     };
     let contents = children(n, "view").collect::<Vec<_>>();
-    let [content_view] = contents.as_slice() else {
-        return fail("a window without one content view is not supported by this ibtool");
+    let content_view = match contents.as_slice() {
+        [v] if v.attribute("key") == Some("contentView") => Some(*v),
+        // A storyboard's window without one has a plain view of its
+        // content's size (Xcode's app template).
+        [] if nib.storyboard => None,
+        _ => return fail("a window's views other than one content view are not supported by this ibtool"),
     };
-    if content_view.attribute("key") != Some("contentView") {
-        return fail("a window's view other than its content view is not supported by this ibtool");
-    }
     let titlebar = if mask & 1 != 0 { 32.0 } else { 0.0 };
     let size = |nib: &mut Nib, (w, h): (f64, f64), extra: f64| nib.string(&format!("{{{}, {}}}", g(w), g(h + extra)));
     let mut values = vec![
@@ -358,7 +360,25 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     if let Some(min) = sizes[0] {
         values.push(("NSWindowContentMinSize", size(nib, min, 0.0)));
     }
-    values.push(("NSWindowView", view(nib, c, *content_view, module, &name, None, false)?));
+    let content = match content_view {
+        Some(v) => view(nib, c, v, module, &name, None, false)?,
+        None => {
+            let view_name = format!("{name} content view");
+            c.parents.push((view_name.clone(), name.clone()));
+            let values = vec![
+                ("NSNextResponder", Value::Nil),
+                ("NSNibTouchBar", Value::Nil),
+                ("NSvFlags", Value::Int(256)),
+                ("NSFrameSize", size(nib, (content.w, content.h), 0.0)),
+                ("NSViewWantsBestResolutionOpenGLSurface", Value::Bool(true)),
+                ("IBNSSafeAreaLayoutGuide", Value::Nil),
+                ("IBNSLayoutMarginsGuide", Value::Nil),
+                ("IBNSClipsToBounds", Value::Int(0)),
+            ];
+            Value::New(Object::new("NSView", values).named(view_name))
+        }
+    };
+    values.push(("NSWindowView", content));
     values.push(("NSScreenRect", nib.string(&format!("{{{{{}, {}}}, {{{}, {}}}}}", g(screen.x), g(screen.y), g(screen.w), g(screen.h)))));
     if let Some(min) = sizes[0] {
         values.push(("NSMinSize", size(nib, min, titlebar)));
@@ -374,8 +394,12 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         values.push(("NSFrameAutosaveName", nib.string(name)));
     }
     values.push(("NSWindowIsRestorable", Value::Bool(true)));
-    values.push(("NSMinFullScreenContentSize", nib.string("{0, 0}")));
-    values.push(("NSMaxFullScreenContentSize", nib.string("{0, 0}")));
+    // A xib's window has full-screen content sizes; a storyboard's doesn't
+    // (Xcode's app template).
+    if !nib.storyboard {
+        values.push(("NSMinFullScreenContentSize", nib.string("{0, 0}")));
+        values.push(("NSMaxFullScreenContentSize", nib.string("{0, 0}")));
+    }
     // A custom class's reference last (three corpus xibs).
     if n.attribute("customClass").is_some() {
         let class = class_values(nib, n, module, None)?.into_iter().find(|v| v.0 == "IBClassReference").map(|v| v.1).ok_or("a custom class's reference")?;
@@ -774,11 +798,21 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
         return fail("an AppKit storyboard for another runtime than MacOSX.Cocoa is not supported by this ibtool");
     }
     only_children(root, &["dependencies", "scenes", "resources"])?;
-    if root.attribute("initialViewController").is_some() {
-        return fail("an AppKit storyboard's initial controller is not supported by this ibtool");
-    }
     let mut files = Vec::new();
     let mut nib_names: Vec<(String, String)> = Vec::new();
+    let mut uuids: Vec<(String, String)> = Vec::new();
+    let mut entry = None;
+    // The controllers windows' content segues lead to.
+    let content_controllers: Vec<&str> = doc
+        .descendants()
+        .filter(|d| d.has_tag_name("segue") && d.attribute("relationship") == Some("window.shadowedContentViewController"))
+        .filter_map(|d| d.attribute("destination"))
+        .collect();
+    for s in doc.descendants().filter(|d| d.has_tag_name("segue")) {
+        if s.attribute("relationship") != Some("window.shadowedContentViewController") || s.attribute("kind") != Some("relationship") {
+            return fail("segues other than a window's content relationship are not supported by this ibtool");
+        }
+    }
     for scenes in children(root, "scenes") {
         for scene in children(scenes, "scene") {
             only_attributes(scene, &[("sceneID", None)])?;
@@ -795,6 +829,26 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
             let controller = members.iter().find(|m| m.attribute("sceneMemberID") == Some("viewController")).ok_or("a scene without a controller")?;
             let others: Vec<Node> = members.iter().copied().filter(|m| m != first_responder && m != controller).collect();
             match controller.tag_name().name() {
+                "windowController" => {
+                    let id = attr(*controller, "id")?;
+                    let identifier = format!("NSWindowController-{id}");
+                    let (bytes, uuid) = window_controller_nib(&doc, xml, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push((format!("{identifier}.nib"), bytes));
+                    nib_names.push((identifier.clone(), identifier.clone()));
+                    uuids.push((identifier.clone(), uuid));
+                    if root.attribute("initialViewController") == Some(id) {
+                        entry = Some(identifier);
+                    }
+                }
+                // A window's content controller: its view's nib (the window
+                // controller's holds the controller).
+                "viewController" if content_controllers.contains(&attr(*controller, "id")?) => {
+                    if !others.is_empty() || controller.attribute("storyboardIdentifier").is_some() {
+                        return fail("a content controller with an identifier or objects beside it is not supported by this ibtool");
+                    }
+                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push((format!("{name}.nib"), bytes));
+                }
                 "application" => {
                     let nib = main_menu(&doc, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
                     files.push(("MainMenu.nib".to_string(), nib));
@@ -804,6 +858,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                 // no segue to it) compiles to nothing (Xcode's storyboard
                 // template).
                 _ if controller.attribute("storyboardIdentifier").is_none()
+                    && root.attribute("initialViewController") != controller.attribute("id")
                     && !doc.descendants().any(|d| d.has_tag_name("segue") && d.attribute("destination") == controller.attribute("id")) =>
                 {
                     if !others.is_empty() {
@@ -814,11 +869,23 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
             }
         }
     }
-    let info = cf::Value::dict([
+    if root.attribute("initialViewController").is_some() && entry.is_none() {
+        return fail("an initial controller other than a window controller is not supported by this ibtool");
+    }
+    // Its keys in the order CoreFoundation's table gives them inserted so
+    // (two templates' Info.plists, with and without an entry point).
+    let mut info = vec![
         ("NSStoryboardMainMenu", cf::Value::string("MainMenu")),
-        ("NSStoryboardVersion", cf::Value::Integer(1)),
         ("NSViewControllerIdentifiersToNibNames", cf::Value::dict(nib_names.into_iter().map(|(k, v)| (k, cf::Value::string(v))))),
-    ]);
+    ];
+    if let Some(e) = &entry {
+        info.push(("NSStoryboardDesignatedEntryPointIdentifier", cf::Value::string(e.clone())));
+    }
+    if !uuids.is_empty() {
+        info.push(("NSViewControllerIdentifiersToUUIDs", cf::Value::dict(uuids.into_iter().map(|(k, v)| (k, cf::Value::string(v))))));
+    }
+    info.push(("NSStoryboardVersion", cf::Value::Integer(1)));
+    let info = cf::Value::dict(info);
     // The main menu's nib name is the string naming the main menu (a
     // template).
     let share = |_: &cf::Value, at: &cf::binary::Position| {
@@ -870,4 +937,158 @@ fn main_menu(doc: &Document, application: Node, others: &[Node], first_responder
     c.definitions.insert(app_name, Value::New(app));
     let connections = connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?;
     assemble(&mut nib, root_object, &root_name, c, connections)
+}
+
+/// A UUID for a controller's `uniqueIdentifierForStoryboardCompilation`,
+/// which Xcode makes anew on every run: this ibtool derives one from the
+/// document and the controller's id, so that its output is reproducible.
+fn uuid(xml: &str, id: &str) -> String {
+    let mut h: u128 = 0x6c62272e07bb014262b821756295c58d;
+    for b in xml.bytes().chain([0]).chain(id.bytes()) {
+        h ^= b as u128;
+        h = h.wrapping_mul(0x0000000001000000000000000000013b);
+    }
+    let hex = format!("{h:032X}");
+    format!("{}-{}-4{}-8{}-{}", &hex[0..8], &hex[8..12], &hex[13..16], &hex[17..20], &hex[20..32])
+}
+
+/// A storyboard placeholder, as a controller's `storyboard` outlet names it.
+fn storyboard_placeholder(nib: &mut Nib, c: &mut Collected, name: &str, parent: &str) {
+    c.parents.push((name.to_string(), parent.to_string()));
+    let identifier = nib.string("NSStoryboardPlaceholder");
+    c.definitions.insert(name.to_string(), Value::New(Object::new("NSNibExternalObjectPlaceholder", vec![("NSExternalObjectPlaceholderIdentifier", identifier)]).named(name.to_string())));
+}
+
+fn outlet(name: String, source: &str, destination: &str, label: Value) -> (String, Value) {
+    let connector = Object::new(
+        "NSNibOutletConnector",
+        vec![
+            ("NSSource", reference(source.to_string())),
+            ("NSDestination", reference(destination.to_string())),
+            ("NSLabel", label),
+            ("NSChildControllerCreationSelectorName", Value::Nil),
+        ],
+    );
+    (name.clone(), Value::New(connector.named(name)))
+}
+
+/// A window controller's nib: an NSObject root (its scene controller), the
+/// controller holding its window and the window's content controller, each
+/// with a storyboard placeholder, and the content controller set on the
+/// window as a runtime attribute. Xcode lists the connections in an order
+/// that varies from run to run, and gives each controller a new UUID; this
+/// ibtool keeps one order of each.
+fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
+    only_attributes(wc, &[("id", None), ("sceneMemberID", None)])?;
+    only_children(wc, &["window", "connections"])?;
+    if !others.is_empty() {
+        return fail("objects beside a window controller are not supported by this ibtool");
+    }
+    let mut nib = new_nib(localizable, true);
+    let wc_id = attr(wc, "id")?;
+    let window_node = children(wc, "window").next().ok_or("a window controller without a window")?;
+    let segues: Vec<Node> = children(wc, "connections").flat_map(|l| l.children().filter(|c| c.is_element())).collect();
+    let [segue] = segues.as_slice() else {
+        return fail("a window controller without one content segue is not supported by this ibtool");
+    };
+    let vc = doc.descendants().find(|d| d.attribute("id") == segue.attribute("destination") && d.attribute("sceneMemberID") == Some("viewController")).ok_or("a content segue's destination")?;
+    if !vc.has_tag_name("viewController") {
+        return fail("a window's content controller other than a view controller is not supported by this ibtool");
+    }
+    let root_name = object_name("root");
+    let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
+    let mut c = new_collected(vec![attr(window_node, "id")?.to_string()]);
+    let wc_name = object_name(wc_id);
+    let vc_name = object_name(attr(vc, "id")?);
+    let vc_placeholder = format!("{vc_name} storyboard");
+    let wc_placeholder = format!("{wc_name} storyboard");
+    storyboard_placeholder(&mut nib, &mut c, &vc_placeholder, &root_name);
+    c.parents.push((wc_name.clone(), root_name.clone()));
+    let window_value = window(&mut nib, &mut c, window_node, module, &wc_name)?;
+    let window_name = object_name(attr(window_node, "id")?);
+    c.parents.push((vc_name.clone(), window_name.clone()));
+    let placeholder = object_name("application placeholder");
+    c.parents.push((placeholder.clone(), root_name.clone()));
+    let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
+    c.definitions.insert(placeholder, value);
+    storyboard_placeholder(&mut nib, &mut c, &wc_placeholder, &root_name);
+
+    let (vc_value, _) = content_controller(&mut nib, xml, vc, module, &vc_name)?;
+    let wc_uuid = uuid(xml, wc_id);
+    let wc_object = Object::new(
+        "NSWindowController",
+        vec![
+            ("IBWindowTemplate", window_value),
+            ("IBWindowTemplateContentViewController", vc_value),
+            ("showSeguePresentationStyle", Value::Int(0)),
+            ("uniqueIdentifierForStoryboardCompilation", nib.string(&wc_uuid)),
+        ],
+    )
+    .named(wc_name.clone());
+    c.definitions.insert(wc_name.clone(), Value::New(wc_object));
+
+    // The scene controller first, then the window's own connections, the
+    // storyboard outlets, the window outlet and the content controller.
+    let label = nib.string("sceneController");
+    let mut connections = vec![outlet(format!("{wc_name} scene controller"), &root_name, &wc_name, label)];
+    connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
+    let label = nib.string("storyboard");
+    connections.push(outlet(format!("{vc_name} storyboard outlet"), &vc_name, &vc_placeholder, label));
+    let label = nib.string("storyboard");
+    connections.push(outlet(format!("{wc_name} storyboard outlet"), &wc_name, &wc_placeholder, label));
+    let label = nib.string("window");
+    connections.push(outlet(format!("{wc_name} window outlet"), &wc_name, &window_name, label));
+    let values = nib.array("NSArray", vec![reference(vc_name.clone())]);
+    let key_path = nib.string("contentViewController");
+    let key_paths = nib.array("NSArray", vec![key_path]);
+    let runtime = format!("{wc_name} content controller");
+    let connector = Object::new("NSIBUserDefinedRuntimeAttributesConnector", vec![("NSObject", reference(window_name)), ("NSValues", values), ("NSKeyPaths", key_paths)]).named(runtime.clone());
+    connections.push((runtime, Value::New(connector)));
+    Ok((assemble(&mut nib, root_object, &root_name, c, connections)?, wc_uuid))
+}
+
+/// A content view controller as its window controller's nib holds it: its
+/// class swapped in for NSViewController, naming its view's nib.
+fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, name: &str) -> Result<(Value, String), String> {
+    only_attributes(vc, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("sceneMemberID", None)])?;
+    if vc.attribute("customClass").is_none() {
+        return fail("a content controller without a custom class is not supported by this ibtool");
+    }
+    let view = children(vc, "view").next().ok_or("a view controller without a view")?;
+    let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
+    let values = vec![
+        ("NSClassName", nib.string(&runtime_class_name(vc, module, "NSViewController")?)),
+        ("NSOriginalClassName", nib.string("NSViewController")),
+        ("NSNibName", nib.string(&nib_name)),
+        ("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", vec![("NSInlinedValue", Value::Bool(true))]))),
+        ("showSeguePresentationStyle", Value::Int(0)),
+        ("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, attr(vc, "id")?))),
+    ];
+    Ok((Value::New(Object::new("NSClassSwapper", values).named(name.to_string())), nib_name))
+}
+
+/// A view controller's view nib: an NSObject root (the controller) whose
+/// `view` outlet is the view.
+fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(String, Vec<u8>), String> {
+    only_children(vc, &["view", "connections"])?;
+    if children(vc, "connections").next().is_some() {
+        return fail("a view controller's connections are not supported by this ibtool");
+    }
+    let mut nib = new_nib(localizable, true);
+    let view_node = children(vc, "view").next().ok_or("a view controller without a view")?;
+    let root_name = object_name("root");
+    let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
+    let mut c = new_collected(Vec::new());
+    let view_name = object_name(attr(view_node, "id")?);
+    let value = view(&mut nib, &mut c, view_node, module, &root_name, None, false)?;
+    c.definitions.insert(view_name.clone(), value);
+    let placeholder = object_name("application placeholder");
+    c.parents.push((placeholder.clone(), root_name.clone()));
+    let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
+    c.definitions.insert(placeholder, value);
+    let label = nib.string("view");
+    let mut connections = vec![outlet(format!("{view_name} view outlet"), &root_name, &view_name, label)];
+    connections.extend(self::connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?);
+    let name = format!("{}-view-{}", attr(vc, "id")?, attr(view_node, "id")?);
+    Ok((name, assemble(&mut nib, root_object, &root_name, c, connections)?))
 }
