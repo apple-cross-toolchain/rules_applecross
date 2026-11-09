@@ -2659,8 +2659,23 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     if n.attribute("colorSpace") == Some("custom") && n.attribute("customColorSpace") == Some("sRGB") {
         return srgb_color(nib, n);
     }
-    // Gamma 2.2 grey and Display P3 also archive `NSLinearExposure`, which
-    // for grey follows no rule found yet (60 probes).
+    // Gamma 2.2 grey archives `NSLinearExposure`, which follows no rule
+    // found yet (60 probes) but for black and white: 1 whatever the alpha
+    // (five probes, a corpus storyboard).
+    if n.attribute("colorSpace") == Some("custom") && n.attribute("customColorSpace") == Some("genericGamma22GrayColorSpace") {
+        only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None)])?;
+        let (white, alpha) = (number(attr(n, "white")?)?, number(attr(n, "alpha")?)?);
+        if white != 0.0 && white != 1.0 {
+            return fail("a Generic Gray Gamma 2.2 colour other than black or white is not supported by this ibtool");
+        }
+        let mut text = general(white, 10);
+        if alpha != 1.0 {
+            text = format!("{text} {}", general(alpha, 10));
+        }
+        let components = format!("{} {}", general(white, 10), general(alpha, 10));
+        let space = color_space(nib, true)?;
+        return Ok(resolved_gray(nib, &text, &components, space));
+    }
     if n.attribute("colorSpace") == Some("custom") {
         return fail(format!(
             "a colour in the {} colour space is not supported by this ibtool",
@@ -2751,6 +2766,27 @@ fn srgb_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     Ok(nib.shared(key, || Object::new("NSColor", values)))
 }
 
+/// A colour in Generic Gray Gamma 2.2: its white (and alpha, when not 1) as
+/// text, its components, and a linear exposure of 1. Colours resolving to
+/// the same one share it (a corpus xib's label and control text colours; a
+/// document's grey and a System colour's, a probe).
+fn resolved_gray(nib: &mut Nib, white: &str, components: &str, space: Value) -> Value {
+    let mut text = white.as_bytes().to_vec();
+    text.push(0);
+    nib.shared(format!("resolved:{white}:{components}"), || {
+        Object::new(
+            "NSColor",
+            vec![
+                ("NSColorSpace", Value::Int(3)),
+                ("NSWhite", Value::Data(text)),
+                ("NSCustomColorSpace", space),
+                ("NSComponents", Value::Data(components.as_bytes().to_vec())),
+                ("NSLinearExposure", Value::Data(b"1".to_vec())),
+            ],
+        )
+    })
+}
+
 /// A System catalog colour by name.
 fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (white, components): (Option<&str>, &str) = match name {
@@ -2766,25 +2802,7 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     }
     let gray = white.is_some();
     let space = color_space(nib, gray)?;
-    let nul = |s: &str| {
-        let mut b = s.as_bytes().to_vec();
-        b.push(0);
-        Value::Data(b)
-    };
-    // Colours resolving to the same one share it (a corpus xib's label and
-    // control text colours).
-    let fallback = nib.shared(format!("resolved:{white:?}:{components}"), || {
-        Object::new(
-            "NSColor",
-            vec![
-                ("NSColorSpace", Value::Int(3)),
-                ("NSWhite", nul(white.unwrap_or_default())),
-                ("NSCustomColorSpace", space),
-                ("NSComponents", Value::Data(components.as_bytes().to_vec())),
-                ("NSLinearExposure", Value::Data(b"1".to_vec())),
-            ],
-        )
-    });
+    let fallback = resolved_gray(nib, white.unwrap_or_default(), components, space);
     let catalog = nib.string("System");
     let color_name = nib.string(name);
     Ok(nib.shared(key, || {

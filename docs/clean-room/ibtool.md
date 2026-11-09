@@ -3182,7 +3182,9 @@ components (alpha always), and `NSLinearExposure` (`0` or `1`). For sRGB
 exposure is `1` exactly when all four components are multiples of 1/255,
 as Interface Builder's colour picker makes them. For gamma 2.2 grey the
 exposure follows no rule found yet (0.1 and 0.25 give 1, 0.123 gives 0),
-so grey and Display P3 colours are refused.
+except for black and white: `1` whatever the alpha (five probes). Those are
+compiled, sharing the System colours' grey fallback of the same value; other
+greys and Display P3 colours are refused.
 
 **Container views** (nine probes). A container view is a plain view.
 Without an embed segue it is any view: of a custom class, a class swapper
