@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="23504" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" customObjectInstantitationMethod="direct">
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="23504"/>
+    </dependencies>
+    <objects>
+        <customObject id="-2" userLabel="File's Owner"/>
+        <customObject id="-1" userLabel="First Responder" customClass="FirstResponder"/>
+        <customObject id="-3" userLabel="Application" customClass="NSObject"/>
+        <customView id="c22-O7-iKe">
+            <rect key="frame" x="0.0" y="0.0" width="480" height="272"/>
+            <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+            <subviews>
+                <slider verticalHuggingPriority="750" id="s0d-aa-bbb">
+                    <rect key="frame" x="20" y="20" width="200" height="28"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <sliderCell key="cell" state="on" alignment="left" maxValue="100" doubleValue="50" tickMarkPosition="above" sliderType="linear" id="c0l-aa-bbb"/>
+                </slider>
+                <slider verticalHuggingPriority="750" id="s1d-aa-bbb">
+                    <rect key="frame" x="50" y="25" width="200" height="28"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <sliderCell key="cell" continuous="YES" state="on" alignment="left" maxValue="100" doubleValue="50" tickMarkPosition="above" sliderType="linear" id="c1l-aa-bbb"/>
+                </slider>
+                <slider verticalHuggingPriority="750" id="s2d-aa-bbb">
+                    <rect key="frame" x="80" y="30" width="200" height="28"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <sliderCell key="cell" enabled="NO" state="on" alignment="left" minValue="1" maxValue="10" tickMarkPosition="above" sliderType="linear" id="c2l-aa-bbb"/>
+                </slider>
+                <slider horizontalHuggingPriority="750" id="s3d-aa-bbb">
+                    <rect key="frame" x="110" y="35" width="200" height="28"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <sliderCell key="cell" controlSize="mini" enabled="NO" alignment="left" minValue="1" maxValue="5" tickMarkPosition="right" sliderType="linear" id="c3l-aa-bbb"/>
+                </slider>
+                <slider horizontalHuggingPriority="750" id="s4d-aa-bbb">
+                    <rect key="frame" x="140" y="40" width="24" height="150"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <sliderCell key="cell" controlSize="mini" enabled="NO" alignment="left" minValue="1" maxValue="5" tickMarkPosition="right" sliderType="linear" id="c4l-aa-bbb"/>
+                </slider>
+                <slider horizontalHuggingPriority="750" id="s5d-aa-bbb">
+                    <rect key="frame" x="170" y="45" width="24" height="150"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <sliderCell key="cell" controlSize="mini" enabled="NO" alignment="left" minValue="1" maxValue="5" tickMarkPosition="left" sliderType="linear" id="c5l-aa-bbb"/>
+                </slider>
+                <slider verticalHuggingPriority="750" id="s6d-aa-bbb">
+                    <rect key="frame" x="200" y="50" width="200" height="28"/>
+                    <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
+                    <sliderCell key="cell" state="on" alignment="left" maxValue="100" doubleValue="50" numberOfTickMarks="5" allowsTickMarkValuesOnly="YES" tickMarkPosition="above" sliderType="linear" id="c6l-aa-bbb"/>
+                </slider>
+            </subviews>
+        </customView>
+    </objects>
+</document>

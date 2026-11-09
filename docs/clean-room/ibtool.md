@@ -2892,6 +2892,17 @@ selected item's state on, and `_popUpItemAction:` targeting the cell. A
 pop-up cell's menu font is the message font. A cell's connections come
 from the cell.
 
+**Sliders** (about ten probes), linear: vertical when the frame is taller
+than wide; their own content hugging is 250 and 750 (750 and 250
+vertical), left out; no subviews array. The `NSSliderCell`: state 0x80000000,
+continuous 0x40100 and disabled 0x20000000 in `NSCellFlags`, the control
+size in `NSCellFlags2`; maximum, minimum and value (the minimum without
+one), an alternate increment of 0, the tick marks' count and position
+(below or right 0, above or left 1), whether only their values are
+allowed, and the orientation. A continuous slider sends its action on
+dragging too (`NSControlSendActionMask` 70). A slider's height is its own,
+so a constrained one is laid out by Xcode, as a content-sized control is.
+
 **Image views** (about 15 probes). An `NSImageView`'s view keys, with
 `NSDragTypes` before its frame: a set of eight pasteboard types (PDF,
 PICT, PNG, file names, TIFF, file promises, and a dynamic type), always

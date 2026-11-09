@@ -302,6 +302,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "imageView" => image_view(nib, c, s, module, name)?,
                 "wkWebView" => web_view(nib, c, s, module, name)?,
                 "collectionView" => collection_view(nib, c, s, module, name)?,
+                "slider" => slider(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -3668,6 +3669,135 @@ fn collection_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&st
     values.push(("NSDraggingSourceMaskForLocal", Value::Int(-1)));
     values.push(("NSDraggingSourceMaskForNonLocal", Value::Int(0)));
     Ok(Value::New(Object::new("NSCollectionView", values).named(name)))
+}
+
+/// A linear slider (about ten probes): vertical when its frame is taller
+/// than wide, its own content hugging 250 and 750 (750 and 250 vertical),
+/// its cell's state, continuity and enabling as a text field cell's, its
+/// values, tick marks (below or right 0, above or left 1) and orientation.
+/// A continuous one sends its action on dragging too (mask 70). Its height
+/// is its own, so a constrained one is laid out by Xcode.
+fn slider(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("horizontalHuggingPriority", None),
+            ("verticalHuggingPriority", None),
+            ("horizontalCompressionResistancePriority", None),
+            ("verticalCompressionResistancePriority", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "sliderCell", "constraints", "connections", "accessibility"])?;
+    content_sized(nib, n)?;
+    let id = attr(n, "id")?;
+    let name = object_name(id);
+    c.parents.push((name.clone(), parent.to_string()));
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(id.to_string());
+    }
+    let cell = child(n, "sliderCell", "cell").ok_or("a slider without a cell")?;
+    only_attributes(
+        cell,
+        &[
+            ("key", None),
+            ("id", None),
+            ("continuous", Some("YES")),
+            ("state", Some("on")),
+            ("enabled", Some("NO")),
+            ("alignment", Some("left")),
+            ("controlSize", None),
+            ("minValue", None),
+            ("maxValue", None),
+            ("doubleValue", None),
+            ("tickMarkPosition", None),
+            ("sliderType", Some("linear")),
+            ("numberOfTickMarks", None),
+            ("allowsTickMarkValuesOnly", Some("YES")),
+        ],
+    )?;
+    only_children(cell, &[])?;
+    let cell_name = object_name(attr(cell, "id")?);
+    c.parents.push((cell_name.clone(), name.clone()));
+    let f = frame(n, "frame")?;
+    let vertical = f.h > f.w;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
+    // Its own hugging is left out (four probes).
+    let own = if vertical { ("750", "250") } else { ("250", "750") };
+    let hugging = (n.attribute("horizontalHuggingPriority").unwrap_or("250"), n.attribute("verticalHuggingPriority").unwrap_or("250"));
+    let at = values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key");
+    nib.remove(&mut values, "NSHuggingPriority");
+    let at = at.min(values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key"));
+    let at = if values.iter().any(|v| v.0 == "NSAntiCompressionPriority") { at - 1 } else { at };
+    if hugging != own {
+        values.insert(at, ("NSHuggingPriority", nib.string(&format!("{{{}, {}}}", hugging.0, hugging.1))));
+    }
+    let has = |a: &str| cell.attribute(a).is_some();
+    let mut flags: i64 = 0;
+    if has("state") {
+        flags |= 0x8000_0000;
+    }
+    if has("continuous") {
+        flags |= 0x4_0100;
+    }
+    if has("enabled") {
+        flags |= 0x2000_0000;
+    }
+    let (control_size, size_bits) = match cell.attribute("controlSize") {
+        None | Some("regular") => (0, 0),
+        Some("small") => (1, 0x2_0000),
+        Some("mini") => (2, 0x4_0000),
+        Some(other) => return fail(format!("control size {other} is not supported by this ibtool")),
+    };
+    let min = number(cell.attribute("minValue").unwrap_or("0"))?;
+    let max = number(cell.attribute("maxValue").ok_or("a slider without a maximum is not supported by this ibtool")?)?;
+    let value = match cell.attribute("doubleValue") {
+        Some(v) => number(v)?,
+        None => min,
+    };
+    // Below or right 0, above or left 1, whatever its orientation (five
+    // probes).
+    let ticks = match cell.attribute("tickMarkPosition") {
+        Some("below" | "right") => 0,
+        Some("above" | "left") => 1,
+        other => return fail(format!("a slider's tick mark position {} is not supported by this ibtool", other.unwrap_or("default"))),
+    };
+    let signed = |v: i64| v as u32 as i32 as i64;
+    let cell_values = vec![
+        ("NSCellFlags", Value::Int(signed(flags))),
+        ("NSCellFlags2", Value::Int(size_bits)),
+        ("NSControlView", reference(name.clone())),
+        ("NSMaxValue", Value::Double(max)),
+        ("NSMinValue", Value::Double(min)),
+        ("NSValue", Value::Double(value)),
+        ("NSAltIncValue", Value::Double(0.0)),
+        (
+            "NSNumberOfTickMarks",
+            Value::Int(
+                cell.attribute("numberOfTickMarks")
+                    .map(|t| t.parse().map_err(|_| format!("not a count: {t}")))
+                    .transpose()?
+                    .unwrap_or(0),
+            ),
+        ),
+        ("NSTickMarkPosition", Value::Int(ticks)),
+        ("NSAllowsTickMarkValuesOnly", Value::Bool(has("allowsTickMarkValuesOnly"))),
+        ("NSVertical", Value::Bool(vertical)),
+    ];
+    values.push(("NSEnabled", Value::Bool(true)));
+    values.push(("NSCell", Value::New(Object::new("NSSliderCell", cell_values).named(cell_name))));
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
+    values.push(("NSControlSize", Value::Int(control_size)));
+    values.push(("NSControlContinuous", Value::Bool(has("continuous"))));
+    values.push(("NSControlRefusesFirstResponder", Value::Bool(false)));
+    values.push(("NSControlUsesSingleLineMode", Value::Bool(false)));
+    values.push(("NSControlTextAlignment", Value::Int(0)));
+    values.push(("NSControlLineBreakMode", Value::Int(0)));
+    values.push(("NSControlWritingDirection", Value::Int(-1)));
+    values.push(("NSControlSendActionMask", Value::Int(if has("continuous") { 70 } else { 4 })));
+    Ok(Value::New(Object::new("NSSlider", values).named(name)))
 }
 
 /// A SceneKit view as Xcode's game templates make it: a view, not looping,
