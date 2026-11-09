@@ -7,6 +7,14 @@ const HEADER: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
 <plist version=\"1.0\">\n";
 
+/// Decodes base64 text as Interface Builder writes it (`base64-UTF8`),
+/// without padding (a corpus xib's `Gw`, the escape key), ignoring
+/// whitespace and any padding.
+pub fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let compact: String = text.chars().filter(|c| !c.is_whitespace() && *c != '=').collect();
+    base64::engine::general_purpose::STANDARD_NO_PAD.decode(compact).ok()
+}
+
 pub fn to_string(value: &Value) -> String {
     let mut out = String::from(HEADER);
     write_value(&mut out, value, 0);
