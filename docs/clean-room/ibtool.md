@@ -2766,7 +2766,9 @@ margins), subviews, `NSFrameSize` at the origin or `NSFrame`, superview, layer
 hosting, best-resolution OpenGL, `NSDoNotTranslateAutoresizingMask` when it
 doesn't translate its mask and constraints refer to it, its constraints,
 content hugging and compression resistance as strings when other than the
-class's own (250 each, a text field's vertical hugging 750; 750 each), and
+class's own (250 each, a text field's vertical hugging 750; 750 each; a
+priority the document leaves out is Interface Builder's default, 250 or
+750, not the class's), and
 the safe-area, margins and clipping keys. A custom view, or a view of a
 custom class, is an `NSClassSwapper` for it.
 
@@ -2782,18 +2784,20 @@ archived as a double. A view's are in an order of their own (about
   when the view is the first), nearest the view's top-left corner first,
   by the distance from it to the top-left corner of the subview's frame;
 - within a subview's: those relating it to the view, and its size, by
-  the view's attribute (the subview's for a size), in the order centerX,
-  centerY, right, left, trailing, leading, width, bottom, top, height;
+  the view's attribute (the subview's for a size or a baseline), in the
+  order centerX, centerY, right, left, trailing, leading, width, bottom,
+  top, firstBaseline, baseline, height;
 - then those relating it to other subviews, by its own attribute
-  (centerX, trailing, leading, centerY, bottom, top, width, height), then
+  (centerX, trailing, leading, centerY, bottom, top, firstBaseline,
+  baseline, width, height; a baseline only to a baseline), then
   the other subview's, then the other subview farthest from it first, by
   the distance between their centres (four ties in two corpus
   storyboards that their corners don't order).
 
-Refused as not established: subviews at the same distance from the
-corner, two different constraints on the same attributes of the same
-views or of subviews as far apart, baselines, and between subviews left and right or a centre or size
-related to another attribute. A view controller's own view never says
+Subviews as far from the corner go leftmost first, and at the same corner
+by their ids as bytes. Refused as not established: two different constraints on the same attributes of the same
+views or of subviews as far apart, and between subviews left and right,
+or a centre or size related to another attribute. A view controller's own view never says
 `NSDoNotTranslateAutoresizingMask`.
 
 **Layout.** Xcode lays constrained views out again with Auto Layout as it
@@ -2889,8 +2893,20 @@ selected index unless 0 (-1 with none), the preferred edge 1, using the
 item from the menu, altering state, and the arrow position (bottom 2,
 centre 1). Its items are menu items with command as their modifiers, the
 selected item's state on, and `_popUpItemAction:` targeting the cell. A
-pop-up cell's menu font is the message font. A cell's connections come
+pop-up cell's menu font is the message font, and its title is a plain
+string even where its items' titles are localizable (Base.lproj). A cell's connections come
 from the cell.
+
+**Sliders** (about ten probes), linear: vertical when the frame is taller
+than wide; their own content hugging is 250 and 750 (750 and 250
+vertical), left out; no subviews array. The `NSSliderCell`: state 0x80000000,
+continuous 0x40100 and disabled 0x20000000 in `NSCellFlags`, the control
+size in `NSCellFlags2`; maximum, minimum and value (the minimum without
+one), an alternate increment of 0, the tick marks' count and position
+(below or right 0, above or left 1), whether only their values are
+allowed, and the orientation. A continuous slider sends its action on
+dragging too (`NSControlSendActionMask` 70). A slider's height is its own,
+so a constrained one is laid out by Xcode, as a content-sized control is.
 
 **Image views** (about 15 probes). An `NSImageView`'s view keys, with
 `NSDragTypes` before its frame: a set of eight pasteboard types (PDF,
@@ -2903,7 +2919,8 @@ named image as an `NSCustomResource` of the size the document's resources
 give, the image alignment (center 0, top 1, top left 2, top right 3, left
 4, bottom 5, bottom left 6, bottom right 7, right 8), scaling
 (proportionally down 0, axes independently 1, none 2, proportionally up or
-down 3), frame style (none 0, gray bezel 2), and no animation. An image
+down 3), frame style (none 0, gray bezel 2), and animation in a storyboard
+only. An image
 sizes its view, so a constrained image view is laid out by Xcode, as a
 content-sized control is. AppKit's own images (`NSAddTemplate`), which
 Xcode names in the `system` namespace, are refused.
@@ -2991,6 +3008,22 @@ app class's is.
 - A text field cell's placeholder (`NSPlaceholderString`) follows its font,
   and its title may be a `<string key="title">` element.
 - A menu item's `NSIndent` follows its disabled flag.
+- A view's accessibility identifier is an `NSNibAXAttributeConnector` (the
+  view, a new `NSMutableString` `AXIdentifier`, the identifier) in
+  `NSAccessibilityConnectors`, by the view's id as bytes, listed again in
+  `NSAccessibilityOidsKeys` with ids numbered after the other objects'.
+- Subview groups as far from the corner go leftmost first, and at the
+  same corner by their ids as bytes (nine probes).
+- A view controller shown as a single window has presentation style 1 and
+  `NSStoryboardSegueDestinationOptions`, as a window controller does.
+- `simulatedAppContext` changes Xcode's layout of the text in it, so only
+  `relax_ibtool_layout` compiles it.
+- A window with a hidden title has `NSWindowTitleVisibility` 1, and with a
+  transparent title bar `NSTitlebarAppearsTransparent`, after its
+  full-screen sizes.
+- A window controller of a custom class is an `NSClassSwapper` for
+  `NSWindowController`.
+- An older xib's Application placeholder may have outlets (its delegate).
 
 **Collection views** (about ten probes), as a scroll view's document:
 an `NSCollectionView`'s view keys, then its `_NSCollectionViewCore` (the
@@ -3025,9 +3058,12 @@ white and RGB (4 and 2) archive their components as `%.10g` text (`NSWhite`
 or `NSRGB`, ending in a NUL), alpha only when not 1. Custom colour spaces
 (sRGB, gamma 2.2 grey, Display P3) archive the components converted to
 calibrated ones, the colour space with its profile, the original
-components, and `NSLinearExposure` (`0` or `1`). That last value is fixed
-for each colour, whatever its order in the document, but no rule for it
-has been found (40 probes), so they are refused.
+components (alpha always), and `NSLinearExposure` (`0` or `1`). For sRGB
+(about 60 probes) the conversion is the one `colorsync` models, and the
+exposure is `1` exactly when all four components are multiples of 1/255,
+as Interface Builder's colour picker makes them. For gamma 2.2 grey the
+exposure follows no rule found yet (0.1 and 0.25 give 1, 0.123 gives 0),
+so grey and Display P3 colours are refused.
 
 **Container views** (seven probes). A container view is a plain view.
 Its embed segue makes the parent controller hold an

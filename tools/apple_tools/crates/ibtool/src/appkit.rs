@@ -133,6 +133,8 @@ struct Collected {
     /// Views Xcode lays out whatever their frames say (a box's content
     /// view).
     laid_out: HashMap<String, Frame>,
+    /// Views' accessibility identifiers: (view id, identifier).
+    accessibility: Vec<(String, String)>,
 }
 
 /// An autoresizing mask's bits, as NSView's: flexible left margin 1, width
@@ -181,6 +183,11 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     // A container view is a plain view; its embed segue's template finds it
     // through its controller (four probes).
     let container = n.has_tag_name("containerView");
+    // The context Interface Builder simulates changes Xcode's layout of the
+    // text in it (rules_apple's HelloToday example, a probe).
+    if n.attribute("simulatedAppContext").is_some() && !layout_relaxed() {
+        return fail("a simulated app context is laid out by Xcode with its own metrics, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
+    }
     if container && (n.attribute("customClass").is_some() || embed_segue(n)?.is_none()) {
         return fail("a container view with a class, or without one embed segue, is not supported by this ibtool");
     }
@@ -189,6 +196,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
         &[
             ("key", None),
             ("id", None),
+            ("simulatedAppContext", None),
             ("autoresizesSubviews", Some("NO")),
             ("hidden", Some("YES")),
             ("wantsLayer", Some("YES")),
@@ -198,7 +206,7 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
             ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point", "connections"])?;
+    only_children(n, &["rect", "autoresizingMask", "subviews", "constraints", "point", "connections", "accessibility"])?;
     canvas_location_only(n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
@@ -263,6 +271,11 @@ fn superview<'p>(n: Node, parent: &'p str) -> Option<&'p str> {
 /// The keys every view archives, in order, from its next responder to its
 /// clipping; its subviews and constraints join the objects' list.
 fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, name: &str, parent: &str, next_responder: Option<&str>) -> Result<Vec<(&'static str, Value)>, String> {
+    if let Some(a) = children(n, "accessibility").next() {
+        only_attributes(a, &[("identifier", None)])?;
+        only_children(a, &[])?;
+        c.accessibility.push((attr(n, "id")?.to_string(), attr(a, "identifier")?.to_string()));
+    }
     let mut values = Vec::new();
     values.push(("NSNextResponder", next_responder.map_or(Value::Nil, |r| reference(r.to_string()))));
     values.push(("NSNibTouchBar", Value::Nil));
@@ -289,6 +302,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "imageView" => image_view(nib, c, s, module, name)?,
                 "wkWebView" => web_view(nib, c, s, module, name)?,
                 "collectionView" => collection_view(nib, c, s, module, name)?,
+                "slider" => slider(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -327,14 +341,17 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     // than the class's own: hugging 250 each, a text field's vertical 750;
     // resistance 750 each (two templates' labels, a probe's).
     let text = n.has_tag_name("textField");
-    let pair = |h: &str, v: &str, (dh, dv): (&str, &str)| -> Option<String> {
-        let (h, v) = (n.attribute(h).unwrap_or(dh), n.attribute(v).unwrap_or(dv));
+    // A priority the document leaves out is Interface Builder's default
+    // (250 hugging, 750 resistance), whatever the class's own (a probe's
+    // text field without them).
+    let pair = |h: &str, v: &str, absent: &str, (dh, dv): (&str, &str)| -> Option<String> {
+        let (h, v) = (n.attribute(h).unwrap_or(absent), n.attribute(v).unwrap_or(absent));
         ((h, v) != (dh, dv)).then(|| format!("{{{h}, {v}}}"))
     };
-    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", ("250", if text { "750" } else { "250" })) {
+    if let Some(p) = pair("horizontalHuggingPriority", "verticalHuggingPriority", "250", ("250", if text { "750" } else { "250" })) {
         values.push(("NSHuggingPriority", nib.string(&p)));
     }
-    if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", ("750", "750")) {
+    if let Some(p) = pair("horizontalCompressionResistancePriority", "verticalCompressionResistancePriority", "750", ("750", "750")) {
         values.push(("NSAntiCompressionPriority", nib.string(&p)));
     }
     // A storyboard's box content view clips to its bounds (probes).
@@ -366,10 +383,23 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
 /// established.
 fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>, String> {
     let rank = |a: &str| -> Result<usize, String> {
-        ["centerX", "centerY", "right", "left", "trailing", "leading", "width", "bottom", "top", "height"]
-            .iter()
-            .position(|r| *r == a)
-            .ok_or_else(|| format!("the order of a view's constraints on {a} is not established by this ibtool"))
+        [
+            "centerX",
+            "centerY",
+            "right",
+            "left",
+            "trailing",
+            "leading",
+            "width",
+            "bottom",
+            "top",
+            "firstBaseline",
+            "baseline",
+            "height",
+        ]
+        .iter()
+        .position(|r| *r == a)
+        .ok_or_else(|| format!("the order of a view's constraints on {a} is not established by this ibtool"))
     };
     let own = n.attribute("id");
     let subviews: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
@@ -383,7 +413,7 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
     for s in &subviews {
         let f = frame(*s, "frame")?;
         let (dx, dy) = (f.x, height - (f.y + f.h));
-        distances.push((attr(*s, "id")?, dx * dx + dy * dy, (f.x + f.w / 2.0, f.y + f.h / 2.0)));
+        distances.push((attr(*s, "id")?, dx * dx + dy * dy, (f.x + f.w / 2.0, f.y + f.h / 2.0), f.x));
     }
     let apart = |a: &str, b: &str| -> f64 {
         let centre = |id: &str| distances.iter().find(|d| d.0 == id).map_or((0.0, 0.0), |d| d.2);
@@ -395,6 +425,8 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
     // own at -1.
     let mut keys: Vec<(f64, bool, usize, usize, f64)> = Vec::new();
     let mut groups: Vec<&str> = Vec::new();
+    let mut group_xs: Vec<f64> = Vec::new();
+    let mut group_ids: Vec<&str> = Vec::new();
     for k in list {
         let first = k.attribute("firstItem").filter(|f| Some(*f) != own);
         let second = k.attribute("secondItem").filter(|s| Some(*s) != own);
@@ -412,17 +444,30 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
                 groups.push(g);
             }
         }
+        group_xs.push(first.or(second).and_then(|g| distances.iter().find(|d| d.0 == g)).map_or(f64::NEG_INFINITY, |d| d.3));
+        group_ids.push(first.or(second).unwrap_or(""));
         let key = match (first, second) {
             (None, None) => (-1.0, false, first_attribute, 0, 0.0),
             (Some(f), None) if k.attribute("secondItem").is_none() => (subview(f)?, false, first_attribute, 0, 0.0),
+            // A baseline ranks by the subview's baseline, whatever the
+            // view's attribute (five probes).
+            (Some(f), None) if is_baseline(attr(*k, "firstAttribute")?) => (subview(f)?, false, first_attribute, 0, 0.0),
+            (None, Some(s)) if k.attribute("secondAttribute").is_some_and(is_baseline) => (subview(s)?, false, second_attribute()?, 0, 0.0),
             (Some(f), None) => (subview(f)?, false, second_attribute()?, 0, 0.0),
             (None, Some(s)) => (subview(s)?, false, first_attribute, 0, 0.0),
             (Some(f), Some(s)) if f == s => return fail("a view's constraint relating a subview to itself is not supported by this ibtool"),
             (Some(f), Some(s)) => {
                 subview(s)?;
                 let names = (attr(*k, "firstAttribute")?, k.attribute("secondAttribute").unwrap_or_default());
-                let sibling = |a: &str| ["centerX", "trailing", "leading", "centerY", "bottom", "top", "width", "height"].iter().position(|r| *r == a);
+                let sibling = |a: &str| {
+                    ["centerX", "trailing", "leading", "centerY", "bottom", "top", "firstBaseline", "baseline", "width", "height"]
+                        .iter()
+                        .position(|r| *r == a)
+                };
                 let size = |a: &str| matches!(a, "width" | "height" | "centerX" | "centerY");
+                if is_baseline(names.0) != is_baseline(names.1) {
+                    return fail(format!("the order of constraints between subviews on {} and {} is not established by this ibtool", names.0, names.1));
+                }
                 let (Some(first_rank), Some(second_rank)) = (sibling(names.0), sibling(names.1)) else {
                     return fail(format!("the order of constraints between subviews on {} and {} is not established by this ibtool", names.0, names.1));
                 };
@@ -439,19 +484,24 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
                 .map(|a| (a.name(), a.value()))
                 .eq(k.attributes().filter(|a| a.name() != "id").map(|a| (a.name(), a.value())))
         };
-        if keys.iter().zip(list).any(|(other, o)| *other == key && !same(o)) {
+        let gid = *group_ids.last().expect("pushed");
+        if keys.iter().zip(list).zip(&group_ids).any(|((other, o), oid)| *other == key && *oid == gid && !same(o)) {
             return fail("a view's constraints whose order isn't established (on the same attributes of the same views, or of subviews as far apart) are not supported by this ibtool");
         }
         keys.push(key);
     }
-    let at: Vec<f64> = distances.iter().filter(|d| groups.contains(&d.0)).map(|d| d.1).collect();
-    if at.iter().enumerate().any(|(i, a)| at[i + 1..].contains(a)) {
-        return fail("a view's constraints on subviews at the same distance from its top-left corner are not supported by this ibtool");
-    }
+    // Subviews as far from the corner go leftmost first (four probes), and
+    // at the same corner by their ids as bytes (four probes).
     let mut order: Vec<usize> = (0..list.len()).collect();
     order.sort_by(|&a, &b| {
         let (ka, kb) = (keys[a], keys[b]);
-        ka.0.total_cmp(&kb.0).then(ka.1.cmp(&kb.1)).then(ka.2.cmp(&kb.2)).then(ka.3.cmp(&kb.3)).then(ka.4.total_cmp(&kb.4))
+        ka.0.total_cmp(&kb.0)
+            .then(group_xs[a].total_cmp(&group_xs[b]))
+            .then(group_ids[a].cmp(group_ids[b]))
+            .then(ka.1.cmp(&kb.1))
+            .then(ka.2.cmp(&kb.2))
+            .then(ka.3.cmp(&kb.3))
+            .then(ka.4.total_cmp(&kb.4))
     });
     Ok(order)
 }
@@ -543,6 +593,10 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn is_baseline(a: &str) -> bool {
+    matches!(a, "firstBaseline" | "baseline")
 }
 
 /// The constraints a view holds, as `NSLayoutConstraint`s, in
@@ -699,6 +753,8 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("oneShot", Some("NO")),
             ("showsToolbarButton", Some("NO")),
             ("restorable", Some("NO")),
+            ("titlebarAppearsTransparent", Some("YES")),
+            ("titleVisibility", Some("hidden")),
             ("key", Some("window")),
             ("id", None),
             ("customClass", None),
@@ -878,6 +934,14 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     if !nib.storyboard {
         values.push(("NSMinFullScreenContentSize", nib.string("{0, 0}")));
         values.push(("NSMaxFullScreenContentSize", nib.string("{0, 0}")));
+    }
+    // A hidden title and a transparent title bar, after the full-screen
+    // sizes (two probes).
+    if n.attribute("titleVisibility").is_some() {
+        values.push(("NSWindowTitleVisibility", Value::Int(1)));
+    }
+    if n.attribute("titlebarAppearsTransparent").is_some() {
+        values.push(("NSTitlebarAppearsTransparent", Value::Bool(true)));
     }
     // A custom class's reference last (three corpus xibs).
     if n.attribute("customClass").is_some() {
@@ -1418,6 +1482,37 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
         connection_values.push(value);
     }
     let numbers: Vec<Value> = (1..=oids.len() as i64).map(|i| nib.int_number(i)).collect();
+    // Accessibility identifiers: a connector each, by the view's id as
+    // bytes, numbered after the other objects (a rules_apple example, three
+    // probes).
+    c.accessibility.sort();
+    let mut ax_connectors = Vec::new();
+    let mut ax_keys = Vec::new();
+    let mut ax_numbers = Vec::new();
+    for (i, (id, identifier)) in c.accessibility.iter().enumerate() {
+        let name = format!("{} accessibility", object_name(id));
+        let kind = Value::New(Object::new("NSMutableString", vec![("NS.bytes", Value::Data(b"AXIdentifier".to_vec()))]));
+        let value = nib.string(identifier);
+        ax_connectors.push(Value::New(
+            Object::new(
+                "NSNibAXAttributeConnector",
+                vec![
+                    ("AXDestinationArchiveKey", reference(object_name(id))),
+                    ("AXAttributeTypeArchiveKey", kind),
+                    ("AXAttributeValueArchiveKey", value),
+                ],
+            )
+            .named(name.clone()),
+        ));
+        ax_keys.push(reference(name));
+        ax_numbers.push(nib.int_number(numbers.len() as i64 + 1 + i as i64));
+    }
+    let (ax_keys, ax_values) = if ax_keys.is_empty() {
+        let empty = nib.empty_array();
+        (empty, nib.empty_array())
+    } else {
+        (nib.array("NSArray", ax_keys), nib.array("NSArray", ax_numbers))
+    };
     let data = Object::new(
         "NSIBObjectData",
         vec![
@@ -1428,9 +1523,9 @@ fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collecte
             ("NSObjectsValues", nib.array("NSArray", parents)),
             ("NSOidsKeys", nib.array("NSArray", oids)),
             ("NSOidsValues", nib.array("NSArray", numbers)),
-            ("NSAccessibilityConnectors", nib.array("NSMutableArray", Vec::new())),
-            ("NSAccessibilityOidsKeys", nib.empty_array()),
-            ("NSAccessibilityOidsValues", nib.empty_array()),
+            ("NSAccessibilityConnectors", nib.array("NSMutableArray", ax_connectors)),
+            ("NSAccessibilityOidsKeys", ax_keys),
+            ("NSAccessibilityOidsValues", ax_values),
         ],
     );
     nib::archive_appkit(Object::new("NSObject", vec![("IB.objectdata", Value::New(data)), ("IB.systemFontUpdateVersion", Value::Int(1))]))
@@ -1469,6 +1564,7 @@ fn new_collected(sources: Vec<String>) -> Collected {
         definitions: HashMap::new(),
         at_origin: Vec::new(),
         laid_out: HashMap::new(),
+        accessibility: Vec::new(),
     }
 }
 
@@ -1544,7 +1640,11 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
 /// (templates).
 fn application_placeholder(nib: &mut Nib, c: &mut Collected, application: Node, module: Option<&str>, parent: &str) -> Result<(), String> {
     only_attributes(application, &[("id", None), ("userLabel", None), ("customClass", None)])?;
-    only_children(application, &[])?;
+    // Its outlets, as an older main menu's delegate (a corpus xib).
+    only_children(application, &["connections"])?;
+    if children(application, "connections").next().is_some() {
+        c.connection_sources.push(attr(application, "id")?.to_string());
+    }
     let name = object_name(attr(application, "id")?);
     let values = match application.attribute("customClass") {
         Some("NSObject") => class_values(nib, application, module, Some("NSApplication"))?,
@@ -1823,7 +1923,15 @@ fn outlet(name: String, source: &str, destination: &str, label: Value) -> (Strin
 fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
     only_attributes(
         wc,
-        &[("id", None), ("sceneMemberID", None), ("showSeguePresentationStyle", Some("single")), ("storyboardIdentifier", None)],
+        &[
+            ("id", None),
+            ("sceneMemberID", None),
+            ("showSeguePresentationStyle", Some("single")),
+            ("storyboardIdentifier", None),
+            ("customClass", None),
+            ("customModule", None),
+            ("customModuleProvider", None),
+        ],
     )?;
     // Shown as a single window, presentation style 1 (a corpus storyboard).
     let presentation = if wc.attribute("showSeguePresentationStyle").is_some() { 1 } else { 0 };
@@ -1885,8 +1993,10 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
             )),
         ));
     }
-    let wc_object = Object::new("NSWindowController", wc_values).named(wc_name.clone());
-    c.definitions.insert(wc_name.clone(), Value::New(wc_object));
+    // Of a custom class, swapped in for NSWindowController (a corpus
+    // storyboard).
+    let wc_object = swapped(&mut nib, wc, module, "NSWindowController", wc_values, wc_name.clone())?;
+    c.definitions.insert(wc_name.clone(), wc_object);
 
     // The scene controller first, then the window's own connections, the
     // storyboard outlets, the window outlet and the content controller.
@@ -1938,8 +2048,13 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
             ("sceneMemberID", None),
             ("storyboardIdentifier", None),
             ("title", None),
+            ("showSeguePresentationStyle", Some("single")),
         ],
     )?;
+    let single = vc.attribute("showSeguePresentationStyle").is_some();
+    if single && own_nib {
+        return fail("an identified view controller shown as a single window is not supported by this ibtool");
+    }
     let view = controller_view(vc).ok_or("a view controller without a view")?;
     let nib_name = format!("{}-view-{}", attr(vc, "id")?, attr(view, "id")?);
     // A window's content controller without a class is a plain
@@ -1994,8 +2109,22 @@ fn content_controller(nib: &mut Nib, xml: &str, vc: Node, module: Option<&str>, 
         table.push(("UINibEncoderEmptyKey", reference(target)));
     }
     values.push(("NSExternalObjectsTableForViewLoading", Value::New(Object::new("NSDictionary", table))));
-    values.push(("showSeguePresentationStyle", Value::Int(0)));
-    values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&uuid(xml, attr(vc, "id")?))));
+    // Shown as a single window: style 1, its UUID naming the single
+    // instance, as a window controller's (rules_apple's Buttons example).
+    values.push(("showSeguePresentationStyle", Value::Int(if single { 1 } else { 0 })));
+    let vc_uuid = uuid(xml, attr(vc, "id")?);
+    values.push(("uniqueIdentifierForStoryboardCompilation", nib.string(&vc_uuid)));
+    if single {
+        let key = nib.string("NSSingleInstancePresentationIdentifier");
+        let id = nib.string(&vc_uuid);
+        values.push((
+            "NSStoryboardSegueDestinationOptions",
+            Value::New(Object::new(
+                "NSDictionary",
+                vec![("NSInlinedValue", Value::Bool(true)), ("UINibEncoderEmptyKey", key), ("UINibEncoderEmptyKey", id)],
+            )),
+        ));
+    }
     if own_nib {
         values.push(("connectionsRequireClassSwapperForStoryboardCompilation", Value::Bool(true)));
     }
@@ -2143,9 +2272,11 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
             Object::new("NSColor", vec![("NSColorSpace", Value::Int(space)), (key, Value::Data(bytes))])
         }));
     }
-    // Custom colour spaces (sRGB, gamma 2.2 grey, Display P3) also archive
-    // `NSLinearExposure`, which varies with the colour in a way not
-    // established (40 probes).
+    if n.attribute("colorSpace") == Some("custom") && n.attribute("customColorSpace") == Some("sRGB") {
+        return srgb_color(nib, n);
+    }
+    // Gamma 2.2 grey and Display P3 also archive `NSLinearExposure`, which
+    // for grey follows no rule found yet (60 probes).
     if n.attribute("colorSpace") == Some("custom") {
         return fail(format!(
             "a colour in the {} colour space is not supported by this ibtool",
@@ -2174,6 +2305,62 @@ fn general(x: f64, digits: i32) -> String {
     }
 }
 
+/// Generic Gray Gamma 2.2's or sRGB's colour space, its profile embedded,
+/// one object in a nib.
+fn color_space(nib: &mut Nib, gray: bool) -> Result<Value, String> {
+    if let Some(existing) = nib.shared.get(&format!("colorspace:{gray}")) {
+        return Ok(reference(existing.clone()));
+    }
+    let icc = profile(gray)?;
+    let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(icc))]));
+    let values = if gray {
+        vec![("NSID", Value::Int(9)), ("NSModel", Value::Int(0)), ("NSICC", data)]
+    } else {
+        vec![("NSID", Value::Int(7)), ("NSICC", data)]
+    };
+    Ok(nib.shared(format!("colorspace:{gray}"), || Object::new("NSColorSpace", values)))
+}
+
+/// A custom sRGB colour (about 60 probes): its components converted to
+/// calibrated RGB as `%.10g` text (alpha when not 1), the sRGB colour space,
+/// its own components (alpha always), and `NSLinearExposure`: `1` when all
+/// four components are multiples of 1/255, as Interface Builder's colour
+/// picker makes them, `0` otherwise.
+fn srgb_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("key", None),
+            ("red", None),
+            ("green", None),
+            ("blue", None),
+            ("alpha", None),
+            ("colorSpace", Some("custom")),
+            ("customColorSpace", Some("sRGB")),
+        ],
+    )?;
+    let c = [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?];
+    let rgb = crate::colorsync::srgb_to_generic([c[0], c[1], c[2]])?;
+    let mut text: Vec<String> = rgb.iter().map(|&x| general(x, 10)).collect();
+    if c[3] != 1.0 {
+        text.push(general(c[3], 10));
+    }
+    let mut rgb_bytes = text.join(" ").into_bytes();
+    rgb_bytes.push(0);
+    let components: Vec<String> = c.iter().map(|&x| general(x, 10)).collect();
+    let eight_bit = c.iter().all(|&x| ((x * 255.0).round() / 255.0) as f32 == x as f32);
+    let space = color_space(nib, false)?;
+    let key = format!("color:srgb:{c:?}");
+    let values = vec![
+        ("NSColorSpace", Value::Int(1)),
+        ("NSRGB", Value::Data(rgb_bytes)),
+        ("NSCustomColorSpace", space),
+        ("NSComponents", Value::Data(components.join(" ").into_bytes())),
+        ("NSLinearExposure", Value::Data(if eight_bit { b"1".to_vec() } else { b"0".to_vec() })),
+    ];
+    Ok(nib.shared(key, || Object::new("NSColor", values)))
+}
+
 /// A System catalog colour by name.
 fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (white, components): (Option<&str>, &str) = match name {
@@ -2188,19 +2375,7 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
         return Ok(reference(existing.clone()));
     }
     let gray = white.is_some();
-    let space = match nib.shared.get(&format!("colorspace:{gray}")) {
-        Some(existing) => reference(existing.clone()),
-        None => {
-            let icc = profile(gray)?;
-            let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(icc))]));
-            let values = if gray {
-                vec![("NSID", Value::Int(9)), ("NSModel", Value::Int(0)), ("NSICC", data)]
-            } else {
-                vec![("NSID", Value::Int(7)), ("NSICC", data)]
-            };
-            nib.shared(format!("colorspace:{gray}"), || Object::new("NSColorSpace", values))
-        }
-    };
+    let space = color_space(nib, gray)?;
     let nul = |s: &str| {
         let mut b = s.as_bytes().to_vec();
         b.push(0);
@@ -2345,7 +2520,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("preferredMaxLayoutWidth", None),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints", "point"])?;
+    only_children(n, &["rect", "autoresizingMask", "textFieldCell", "constraints", "point", "accessibility"])?;
     canvas_location_only(n)?;
     let id = attr(n, "id")?;
     content_sized(nib, n)?;
@@ -2536,7 +2711,10 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point"])?;
+    only_children(
+        n,
+        &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point", "accessibility"],
+    )?;
     canvas_location_only(n)?;
     content_sized(nib, n)?;
     // A pop-up button is a button whose cell holds a menu (about 10
@@ -2739,7 +2917,16 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let mut cell_values = vec![
         ("NSCellFlags", Value::Int(signed(flags))),
         ("NSCellFlags2", Value::Int(signed(flags2))),
-        ("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))),
+        // A pop-up button's title is its selected item's, not localized
+        // itself (a xib and a storyboard in Base.lproj).
+        (
+            "NSContents",
+            if popup {
+                nib.string(cell.attribute("title").unwrap_or(""))
+            } else {
+                nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))
+            },
+        ),
         (
             "NSSupport",
             if popup && font_node.attribute("usesAppearanceFont").is_none() {
@@ -2857,7 +3044,7 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "clipView", "edgeInsets", "scroller", "constraints"])?;
+    only_children(n, &["rect", "autoresizingMask", "clipView", "edgeInsets", "scroller", "constraints", "accessibility"])?;
     if n.attribute("borderType").is_none() || n.attribute("autohidesScrollers").is_none() {
         return fail("a scroll view with a border or scrollers that don't hide themselves is laid out by Xcode, which this ibtool doesn't reproduce");
     }
@@ -3087,7 +3274,7 @@ fn box_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
             ("fixedFrame", Some("YES")),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "view", "color", "constraints", "point"])?;
+    only_children(n, &["rect", "autoresizingMask", "view", "color", "constraints", "point", "accessibility"])?;
     canvas_location_only(n)?;
     let id = attr(n, "id")?;
     let name = object_name(id);
@@ -3226,7 +3413,7 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             ("userLabel", None),
         ],
     )?;
-    only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints", "point"])?;
+    only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints", "point", "accessibility"])?;
     canvas_location_only(n)?;
     // Its image sizes it.
     content_sized(nib, n)?;
@@ -3306,7 +3493,8 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     cell_values.push(("NSAlign", Value::Int(align)));
     cell_values.push(("NSScale", Value::Int(scale)));
     cell_values.push(("NSStyle", Value::Int(style)));
-    cell_values.push(("NSAnimates", Value::Bool(false)));
+    // A storyboard's animates its images, a xib's doesn't (probes).
+    cell_values.push(("NSAnimates", Value::Bool(nib.storyboard)));
     cell_values.push(("NSImageAnimation", Value::Int(-1)));
     values.push(("NSEnabled", Value::Bool(true)));
     values.push(("NSCell", Value::New(Object::new("NSImageCell", cell_values).named(cell_name))));
@@ -3531,6 +3719,135 @@ fn collection_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&st
     values.push(("NSDraggingSourceMaskForLocal", Value::Int(-1)));
     values.push(("NSDraggingSourceMaskForNonLocal", Value::Int(0)));
     Ok(Value::New(Object::new("NSCollectionView", values).named(name)))
+}
+
+/// A linear slider (about ten probes): vertical when its frame is taller
+/// than wide, its own content hugging 250 and 750 (750 and 250 vertical),
+/// its cell's state, continuity and enabling as a text field cell's, its
+/// values, tick marks (below or right 0, above or left 1) and orientation.
+/// A continuous one sends its action on dragging too (mask 70). Its height
+/// is its own, so a constrained one is laid out by Xcode.
+fn slider(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("horizontalHuggingPriority", None),
+            ("verticalHuggingPriority", None),
+            ("horizontalCompressionResistancePriority", None),
+            ("verticalCompressionResistancePriority", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "sliderCell", "constraints", "connections", "accessibility"])?;
+    content_sized(nib, n)?;
+    let id = attr(n, "id")?;
+    let name = object_name(id);
+    c.parents.push((name.clone(), parent.to_string()));
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(id.to_string());
+    }
+    let cell = child(n, "sliderCell", "cell").ok_or("a slider without a cell")?;
+    only_attributes(
+        cell,
+        &[
+            ("key", None),
+            ("id", None),
+            ("continuous", Some("YES")),
+            ("state", Some("on")),
+            ("enabled", Some("NO")),
+            ("alignment", Some("left")),
+            ("controlSize", None),
+            ("minValue", None),
+            ("maxValue", None),
+            ("doubleValue", None),
+            ("tickMarkPosition", None),
+            ("sliderType", Some("linear")),
+            ("numberOfTickMarks", None),
+            ("allowsTickMarkValuesOnly", Some("YES")),
+        ],
+    )?;
+    only_children(cell, &[])?;
+    let cell_name = object_name(attr(cell, "id")?);
+    c.parents.push((cell_name.clone(), name.clone()));
+    let f = frame(n, "frame")?;
+    let vertical = f.h > f.w;
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
+    // Its own hugging is left out (four probes).
+    let own = if vertical { ("750", "250") } else { ("250", "750") };
+    let hugging = (n.attribute("horizontalHuggingPriority").unwrap_or("250"), n.attribute("verticalHuggingPriority").unwrap_or("250"));
+    let at = values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key");
+    nib.remove(&mut values, "NSHuggingPriority");
+    let at = at.min(values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key"));
+    let at = if values.iter().any(|v| v.0 == "NSAntiCompressionPriority") { at - 1 } else { at };
+    if hugging != own {
+        values.insert(at, ("NSHuggingPriority", nib.string(&format!("{{{}, {}}}", hugging.0, hugging.1))));
+    }
+    let has = |a: &str| cell.attribute(a).is_some();
+    let mut flags: i64 = 0;
+    if has("state") {
+        flags |= 0x8000_0000;
+    }
+    if has("continuous") {
+        flags |= 0x4_0100;
+    }
+    if has("enabled") {
+        flags |= 0x2000_0000;
+    }
+    let (control_size, size_bits) = match cell.attribute("controlSize") {
+        None | Some("regular") => (0, 0),
+        Some("small") => (1, 0x2_0000),
+        Some("mini") => (2, 0x4_0000),
+        Some(other) => return fail(format!("control size {other} is not supported by this ibtool")),
+    };
+    let min = number(cell.attribute("minValue").unwrap_or("0"))?;
+    let max = number(cell.attribute("maxValue").ok_or("a slider without a maximum is not supported by this ibtool")?)?;
+    let value = match cell.attribute("doubleValue") {
+        Some(v) => number(v)?,
+        None => min,
+    };
+    // Below or right 0, above or left 1, whatever its orientation (five
+    // probes).
+    let ticks = match cell.attribute("tickMarkPosition") {
+        Some("below" | "right") => 0,
+        Some("above" | "left") => 1,
+        other => return fail(format!("a slider's tick mark position {} is not supported by this ibtool", other.unwrap_or("default"))),
+    };
+    let signed = |v: i64| v as u32 as i32 as i64;
+    let cell_values = vec![
+        ("NSCellFlags", Value::Int(signed(flags))),
+        ("NSCellFlags2", Value::Int(size_bits)),
+        ("NSControlView", reference(name.clone())),
+        ("NSMaxValue", Value::Double(max)),
+        ("NSMinValue", Value::Double(min)),
+        ("NSValue", Value::Double(value)),
+        ("NSAltIncValue", Value::Double(0.0)),
+        (
+            "NSNumberOfTickMarks",
+            Value::Int(
+                cell.attribute("numberOfTickMarks")
+                    .map(|t| t.parse().map_err(|_| format!("not a count: {t}")))
+                    .transpose()?
+                    .unwrap_or(0),
+            ),
+        ),
+        ("NSTickMarkPosition", Value::Int(ticks)),
+        ("NSAllowsTickMarkValuesOnly", Value::Bool(has("allowsTickMarkValuesOnly"))),
+        ("NSVertical", Value::Bool(vertical)),
+    ];
+    values.push(("NSEnabled", Value::Bool(true)));
+    values.push(("NSCell", Value::New(Object::new("NSSliderCell", cell_values).named(cell_name))));
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
+    values.push(("NSControlSize", Value::Int(control_size)));
+    values.push(("NSControlContinuous", Value::Bool(has("continuous"))));
+    values.push(("NSControlRefusesFirstResponder", Value::Bool(false)));
+    values.push(("NSControlUsesSingleLineMode", Value::Bool(false)));
+    values.push(("NSControlTextAlignment", Value::Int(0)));
+    values.push(("NSControlLineBreakMode", Value::Int(0)));
+    values.push(("NSControlWritingDirection", Value::Int(-1)));
+    values.push(("NSControlSendActionMask", Value::Int(if has("continuous") { 70 } else { 4 })));
+    Ok(Value::New(Object::new("NSSlider", values).named(name)))
 }
 
 /// A SceneKit view as Xcode's game templates make it: a view, not looping,
