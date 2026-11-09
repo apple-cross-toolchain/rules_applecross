@@ -145,7 +145,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             skip(format!("{}: a tvOS storyboard compiled for devices other than a TV is not compiled by Xcode's ibtool", input.display()))?;
             continue;
         }
-        let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
+        let compiled = if xml.contains("type=\"com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB\"") {
+            appkit::compile_storyboard(&xml, module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj")))
+        } else if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml, module.as_deref())
         } else {
             storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files)

@@ -19,6 +19,8 @@ struct Nib {
     /// Whether the document is in `Base.lproj`, where its titles are
     /// localizable.
     localizable: bool,
+    /// Whether the document is a storyboard.
+    storyboard: bool,
 }
 
 impl Nib {
@@ -103,6 +105,8 @@ struct Collected {
     visible: Vec<String>,
     /// The ids of the objects whose connections the nib holds.
     connection_sources: Vec<String>,
+    /// The definitions of objects that the objects' list defines.
+    definitions: HashMap<String, Value>,
 }
 
 /// An autoresizing mask's bits, as NSView's: flexible left margin 1, width
@@ -383,7 +387,7 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
 /// A menu: its title, items and, for a system menu, the name AppKit finds
 /// it by. Its items, and their submenus, follow it in the objects' list.
 fn menu(nib: &mut Nib, c: &mut Collected, n: Node, parent: &str) -> Result<Value, String> {
-    only_attributes(n, &[("key", Some("submenu")), ("title", None), ("systemMenu", None), ("id", None)])?;
+    only_attributes(n, &[("key", None), ("title", None), ("systemMenu", None), ("id", None)])?;
     only_children(n, &["items", "point"])?;
     canvas_location_only(n)?;
     let name = object_name(attr(n, "id")?);
@@ -497,6 +501,11 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str) -> Resu
     c.connection_sources.push(n.attribute("id").unwrap_or_default().to_string());
     let separator = n.attribute("isSeparatorItem").is_some();
     let mut values = vec![("NSMenu", Value::Conditional(menu_name.to_string()))];
+    // In a storyboard, an item opening a submenu is allowed in limited app
+    // mode (Xcode's main menu templates' 20 such items; a xib's aren't).
+    if nib.storyboard && children(n, "menu").next().is_some() {
+        values.push(("NSAllowedForLimitedAppMode", Value::Bool(true)));
+    }
     if separator || n.attribute("enabled").is_some() {
         values.push(("NSIsDisabled", Value::Bool(true)));
     }
@@ -560,122 +569,47 @@ fn class_values(nib: &mut Nib, n: Node, module: Option<&str>, runtime: Option<&s
 /// AppKit classes whose custom objects are `NSCustomObject`s.
 const APPKIT_OBJECTS: [&str; 1] = ["NSFontManager"];
 
-/// Compiles an AppKit xib to its nib.
-pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
-    let doc = Document::parse(xml).map_err(|e| e.to_string())?;
-    let root = doc.root_element();
-    if root.attribute("targetRuntime") != Some("MacOSX.Cocoa") {
-        return fail("an AppKit xib for another runtime than MacOSX.Cocoa is not supported by this ibtool");
+/// A custom object. An AppKit class's is an NSCustomObject of its class, as
+/// a placeholder's (Xcode's main menu templates' font manager); the app's
+/// own classes are swapped in for NSObject, made with init when the
+/// document says so (its app delegate; an installer pane template).
+fn custom_object(nib: &mut Nib, c: &mut Collected, t: Node, module: Option<&str>, parent: &str, direct: bool) -> Result<Value, String> {
+    only_attributes(t, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("userLabel", None)])?;
+    only_children(t, &["connections"])?;
+    let class = t.attribute("customClass").ok_or("a custom object without a class is not supported by this ibtool")?;
+    let name = object_name(attr(t, "id")?);
+    c.parents.push((name.clone(), parent.to_string()));
+    c.connection_sources.push(attr(t, "id")?.to_string());
+    let appkit = APPKIT_OBJECTS.contains(&class);
+    if !appkit && class.starts_with("NS") {
+        return fail(format!("a custom object of class {class} is not supported by this ibtool"));
     }
-    only_children(root, &["dependencies", "objects", "resources"])?;
-    let objects_node = children(root, "objects").next().ok_or("a xib without objects")?;
-    let mut nib = Nib {
-        shared: HashMap::new(),
-        next: 0,
-        localizable,
-    };
-    let mut c = Collected {
-        parents: Vec::new(),
-        visible: Vec::new(),
-        connection_sources: vec!["-2".into()],
-    };
-    let mut owner = None;
-    let mut application = None;
-    let mut tops = Vec::new();
-    let mut connections: Vec<(String, Value)> = Vec::new();
-    for o in objects_node.children().filter(|c| c.is_element()) {
-        match (o.tag_name().name(), o.attribute("id")) {
-            ("customObject", Some("-2")) => owner = Some(o),
-            ("customObject", Some("-1")) => {
-                only_attributes(o, &[("id", None), ("userLabel", None), ("customClass", Some("FirstResponder"))])?;
-                only_children(o, &[])?;
-            }
-            ("customObject", Some("-3")) => application = Some(o),
-            ("customView" | "window" | "customObject" | "menu", _) => tops.push(o),
-            (tag, _) => return fail(format!("a xib's top-level <{tag}> is not supported by this ibtool")),
-        }
+    if appkit {
+        let values = class_values(nib, t, module, None)?;
+        return Ok(Value::New(Object::new("NSCustomObject", values).named(name)));
     }
-    let owner = owner.ok_or("a xib without a File's Owner")?;
-    only_attributes(
-        owner,
-        &[("id", None), ("userLabel", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)],
-    )?;
-    only_children(owner, &["connections"])?;
-    let owner_name = object_name("-2");
-    let root_object = Object::new("NSCustomObject", class_values(&mut nib, owner, module, None)?).named(owner_name.clone());
-
-    // The application placeholder: its class, NSApplication at run time.
-    let application = application.ok_or("a xib without an Application placeholder")?;
-    only_attributes(application, &[("id", None), ("userLabel", None), ("customClass", None)])?;
-    only_children(application, &[])?;
-    let application_name = object_name("-3");
-    // Of class NSObject, it refers to that class; of NSApplication, it
-    // names that alone (a template).
-    let values = match application.attribute("customClass") {
-        Some("NSObject") => class_values(&mut nib, application, module, Some("NSApplication"))?,
-        Some("NSApplication") => vec![("NSClassName", nib.string("NSApplication"))],
-        _ => return fail("an Application placeholder of a class other than NSObject or NSApplication is not supported by this ibtool"),
-    };
-    let application_object = Object::new("NSCustomObject", values).named(application_name.clone());
-    c.parents.push((application_name.clone(), owner_name.clone()));
-
-    let mut definitions = Vec::new();
-    for t in &tops {
-        if !t.has_tag_name("customObject") && !t.has_tag_name("menu") {
-            c.connection_sources.push(attr(*t, "id")?.to_string());
-        }
-        let value = match t.tag_name().name() {
-            "window" => window(&mut nib, &mut c, *t, module, &owner_name)?,
-            "menu" => menu(&mut nib, &mut c, *t, &owner_name)?,
-            // A custom object: its class swapped in for NSObject, made with
-            // init as the document says (an installer pane template).
-            "customObject" => {
-                only_attributes(*t, &[("id", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("userLabel", None)])?;
-                only_children(*t, &["connections"])?;
-                if t.attribute("customClass").is_none() {
-                    return fail("a custom object without a class is not supported by this ibtool");
-                }
-                let name = object_name(attr(*t, "id")?);
-                c.parents.push((name.clone(), owner_name.clone()));
-                c.connection_sources.push(attr(*t, "id")?.to_string());
-                // An AppKit class's is an NSCustomObject of its class, as a
-                // placeholder's (Xcode's main menu templates' font manager);
-                // the app's own classes are swapped in for NSObject, made
-                // with init when the document says so (its app delegate).
-                let class = attr(*t, "customClass")?;
-                let appkit = APPKIT_OBJECTS.contains(&class);
-                if !appkit && class.starts_with("NS") {
-                    return fail(format!("a custom object of class {class} is not supported by this ibtool"));
-                }
-                if !appkit && root.attribute("customObjectInstantitationMethod") != Some("direct") {
-                    return fail("a custom object made other than directly is not supported by this ibtool");
-                }
-                if appkit {
-                    let values = class_values(&mut nib, *t, module, None)?;
-                    definitions.push(Value::New(Object::new("NSCustomObject", values).named(name)));
-                    continue;
-                }
-                let values = vec![
-                    ("NSClassName", nib.string(&runtime_class_name(*t, module, "NSObject")?)),
-                    ("NSOriginalClassName", nib.string("NSObject")),
-                    ("NSInitializeWithInit", Value::Bool(true)),
-                ];
-                Value::New(Object::new("NSClassSwapper", values).named(name))
-            }
-            _ => view(&mut nib, &mut c, *t, module, &owner_name, None, true)?,
-        };
-        definitions.push(value);
+    if !direct {
+        return fail("a custom object made other than directly is not supported by this ibtool");
     }
+    let values = vec![
+        ("NSClassName", nib.string(&runtime_class_name(t, module, "NSObject")?)),
+        ("NSOriginalClassName", nib.string("NSObject")),
+        ("NSInitializeWithInit", Value::Bool(true)),
+    ];
+    Ok(Value::New(Object::new("NSClassSwapper", values).named(name)))
+}
 
-    // Connections: outlets, then actions (whose target is left out when it
-    // is the first responder), each by their source's id (as bytes; Xcode's
-    // main menu template's 87, and two corpus xibs), in document order for
-    // one source.
+/// Connections: outlets, then actions (whose target is left out when it is
+/// the first responder), each by their source's id (as bytes; Xcode's main
+/// menu template's 87, and two corpus xibs), in document order for one
+/// source.
+fn connections(nib: &mut Nib, doc: &Document, sources: &[String], first_responder: &str) -> Result<Vec<(String, Value)>, String> {
     let by_id: HashMap<&str, Node> = doc.descendants().filter(|d| d.is_element()).filter_map(|d| d.attribute("id").map(|id| (id, d))).collect();
-    let mut sources: Vec<&str> = c.connection_sources.iter().map(String::as_str).collect();
-    sources.sort();
+    let mut sorted: Vec<&str> = sources.iter().map(String::as_str).collect();
+    sorted.sort();
+    let mut out = Vec::new();
     for kind in ["outlet", "action"] {
-        for id in &sources {
+        for id in &sorted {
             let id = *id;
             let source = by_id.get(id).ok_or("a connection's source")?;
             for list in children(*source, "connections") {
@@ -695,40 +629,36 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
                     } else {
                         only_attributes(o, &[("selector", None), ("target", None), ("id", None)])?;
                         let mut values = vec![("NSSource", reference(object_name(id)))];
-                        match attr(o, "target")? {
-                            "-1" => {}
-                            target => values.push(("NSDestination", reference(object_name(target)))),
+                        let target = attr(o, "target")?;
+                        if target != first_responder {
+                            values.push(("NSDestination", reference(object_name(target))));
                         }
                         values.push(("NSLabel", nib.string(attr(o, "selector")?)));
                         Object::new("NSNibControlConnector", values)
                     };
                     let name = object_name(attr(o, "id")?);
-                    connections.push((name.clone(), Value::New(connector.named(name))));
+                    out.push((name.clone(), Value::New(connector.named(name))));
                 }
             }
         }
     }
+    Ok(out)
+}
 
-    // Every object is defined where the encoder first meets it (all are
-    // shared): the definitions stand in the objects' list.
+/// The nib of a root object (the File's Owner, or a storyboard nib's
+/// NSObject), its objects with their parents (each defined where the
+/// encoder first meets it: those `c.definitions` holds stand in the
+/// objects' list) and connections.
+fn assemble(nib: &mut Nib, root_object: Object, root_name: &str, mut c: Collected, connections: Vec<(String, Value)>) -> Result<Vec<u8>, String> {
     let visible: Vec<Value> = c.visible.iter().map(|v| reference(v.clone())).collect();
     let visible = nib.array("NSMutableSet", visible);
-    let mut oids = vec![reference(owner_name.clone())];
+    let mut oids = vec![reference(root_name.to_string())];
     let mut keys = Vec::new();
     let mut parents = Vec::new();
-    let mut definitions = definitions.into_iter();
-    let mut application_object = Some(application_object);
     for (object, parent) in &c.parents {
         oids.push(reference(object.clone()));
         parents.push(reference(parent.clone()));
-        let definition = if *object == application_name {
-            application_object.take().map(Value::New)
-        } else if tops.iter().any(|t| t.attribute("id").map(object_name).as_ref() == Some(object)) {
-            definitions.next()
-        } else {
-            None
-        };
-        keys.push(definition.unwrap_or_else(|| reference(object.clone())));
+        keys.push(c.definitions.remove(object).unwrap_or_else(|| reference(object.clone())));
     }
     let mut connection_values = Vec::new();
     for (name, value) in connections {
@@ -752,4 +682,192 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
         ],
     );
     nib::archive_appkit(Object::new("NSObject", vec![("IB.objectdata", Value::New(data)), ("IB.systemFontUpdateVersion", Value::Int(1))]))
+}
+
+fn new_nib(localizable: bool, storyboard: bool) -> Nib {
+    Nib { shared: HashMap::new(), next: 0, localizable, storyboard }
+}
+
+fn new_collected(sources: Vec<String>) -> Collected {
+    Collected { parents: Vec::new(), visible: Vec::new(), connection_sources: sources, definitions: HashMap::new() }
+}
+
+/// Compiles an AppKit xib to its nib.
+pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+    let doc = Document::parse(xml).map_err(|e| e.to_string())?;
+    let root = doc.root_element();
+    if root.attribute("targetRuntime") != Some("MacOSX.Cocoa") {
+        return fail("an AppKit xib for another runtime than MacOSX.Cocoa is not supported by this ibtool");
+    }
+    only_children(root, &["dependencies", "objects", "resources"])?;
+    let objects_node = children(root, "objects").next().ok_or("a xib without objects")?;
+    let mut nib = new_nib(localizable, false);
+    let mut c = new_collected(vec!["-2".into()]);
+    let mut owner = None;
+    let mut application = None;
+    let mut tops = Vec::new();
+    for o in objects_node.children().filter(|c| c.is_element()) {
+        match (o.tag_name().name(), o.attribute("id")) {
+            ("customObject", Some("-2")) => owner = Some(o),
+            ("customObject", Some("-1")) => {
+                only_attributes(o, &[("id", None), ("userLabel", None), ("customClass", Some("FirstResponder"))])?;
+                only_children(o, &[])?;
+            }
+            ("customObject", Some("-3")) => application = Some(o),
+            ("customView" | "window" | "customObject" | "menu", _) => tops.push(o),
+            (tag, _) => return fail(format!("a xib's top-level <{tag}> is not supported by this ibtool")),
+        }
+    }
+    let owner = owner.ok_or("a xib without a File's Owner")?;
+    only_attributes(owner, &[("id", None), ("userLabel", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None)])?;
+    only_children(owner, &["connections"])?;
+    let owner_name = object_name("-2");
+    let root_object = Object::new("NSCustomObject", class_values(&mut nib, owner, module, None)?).named(owner_name.clone());
+
+    // The application placeholder: its class, NSApplication at run time.
+    let application = application.ok_or("a xib without an Application placeholder")?;
+    application_placeholder(&mut nib, &mut c, application, module, &owner_name)?;
+
+    let direct = root.attribute("customObjectInstantitationMethod") == Some("direct");
+    for t in &tops {
+        let value = match t.tag_name().name() {
+            "window" => {
+                c.connection_sources.push(attr(*t, "id")?.to_string());
+                window(&mut nib, &mut c, *t, module, &owner_name)?
+            }
+            "menu" => menu(&mut nib, &mut c, *t, &owner_name)?,
+            "customObject" => custom_object(&mut nib, &mut c, *t, module, &owner_name, direct)?,
+            _ => {
+                c.connection_sources.push(attr(*t, "id")?.to_string());
+                view(&mut nib, &mut c, *t, module, &owner_name, None, true)?
+            }
+        };
+        c.definitions.insert(object_name(attr(*t, "id")?), value);
+    }
+    let connections = connections(&mut nib, &doc, &c.connection_sources.clone(), "-1")?;
+    assemble(&mut nib, root_object, &owner_name, c, connections)
+}
+
+/// A xib's Application placeholder (`-3`): of class NSObject, it refers to
+/// that class; of NSApplication, it names that alone (a template).
+fn application_placeholder(nib: &mut Nib, c: &mut Collected, application: Node, module: Option<&str>, parent: &str) -> Result<(), String> {
+    only_attributes(application, &[("id", None), ("userLabel", None), ("customClass", None)])?;
+    only_children(application, &[])?;
+    let name = object_name(attr(application, "id")?);
+    let values = match application.attribute("customClass") {
+        Some("NSObject") => class_values(nib, application, module, Some("NSApplication"))?,
+        Some("NSApplication") => vec![("NSClassName", nib.string("NSApplication"))],
+        _ => return fail("an Application placeholder of a class other than NSObject or NSApplication is not supported by this ibtool"),
+    };
+    c.parents.push((name.clone(), parent.to_string()));
+    c.definitions.insert(name.clone(), Value::New(Object::new("NSCustomObject", values).named(name)));
+    Ok(())
+}
+
+/// Compiles an AppKit storyboard: its files in the `.storyboardc`. The
+/// application scene's main menu is `MainMenu.nib`; the Info.plist names it
+/// whether or not there is one (Xcode's storyboard template).
+pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let doc = Document::parse(xml).map_err(|e| e.to_string())?;
+    let root = doc.root_element();
+    if root.attribute("targetRuntime") != Some("MacOSX.Cocoa") {
+        return fail("an AppKit storyboard for another runtime than MacOSX.Cocoa is not supported by this ibtool");
+    }
+    only_children(root, &["dependencies", "scenes", "resources"])?;
+    if root.attribute("initialViewController").is_some() {
+        return fail("an AppKit storyboard's initial controller is not supported by this ibtool");
+    }
+    let mut files = Vec::new();
+    let mut nib_names: Vec<(String, String)> = Vec::new();
+    for scenes in children(root, "scenes") {
+        for scene in children(scenes, "scene") {
+            only_attributes(scene, &[("sceneID", None)])?;
+            only_children(scene, &["objects", "point"])?;
+            canvas_location_only(scene)?;
+            let objects = children(scene, "objects").next().ok_or("a scene without objects")?;
+            let members: Vec<Node> = objects.children().filter(|c| c.is_element()).collect();
+            let first_responder = members
+                .iter()
+                .find(|m| m.attribute("sceneMemberID") == Some("firstResponder"))
+                .ok_or("a scene without a first responder")?;
+            only_attributes(*first_responder, &[("id", None), ("userLabel", None), ("customClass", Some("NSResponder")), ("sceneMemberID", None)])?;
+            only_children(*first_responder, &[])?;
+            let controller = members.iter().find(|m| m.attribute("sceneMemberID") == Some("viewController")).ok_or("a scene without a controller")?;
+            let others: Vec<Node> = members.iter().copied().filter(|m| m != first_responder && m != controller).collect();
+            match controller.tag_name().name() {
+                "application" => {
+                    let nib = main_menu(&doc, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
+                    files.push(("MainMenu.nib".to_string(), nib));
+                    nib_names.push(("MainMenu".into(), "MainMenu".into()));
+                }
+                // A controller nothing loads (no identifier, not initial,
+                // no segue to it) compiles to nothing (Xcode's storyboard
+                // template).
+                _ if controller.attribute("storyboardIdentifier").is_none()
+                    && !doc.descendants().any(|d| d.has_tag_name("segue") && d.attribute("destination") == controller.attribute("id")) =>
+                {
+                    if !others.is_empty() {
+                        return fail("objects beside a controller nothing loads are not supported by this ibtool");
+                    }
+                }
+                tag => return fail(format!("an AppKit storyboard's <{tag}> scene is not supported by this ibtool")),
+            }
+        }
+    }
+    let info = cf::Value::dict([
+        ("NSStoryboardMainMenu", cf::Value::string("MainMenu")),
+        ("NSStoryboardVersion", cf::Value::Integer(1)),
+        ("NSViewControllerIdentifiersToNibNames", cf::Value::dict(nib_names.into_iter().map(|(k, v)| (k, cf::Value::string(v))))),
+    ]);
+    // The main menu's nib name is the string naming the main menu (a
+    // template).
+    let share = |_: &cf::Value, at: &cf::binary::Position| {
+        use cf::binary::Step;
+        match at {
+            [Step::Value(k)] => k == "NSStoryboardMainMenu",
+            [Step::Value(k), Step::Key(id)] => k == "NSViewControllerIdentifiersToNibNames" && id == "MainMenu",
+            _ => false,
+        }
+    };
+    files.push(("Info.plist".to_string(), cf::binary::to_bytes_with(&info, &share, cf::binary::Dictionaries::Grown)));
+    Ok(files)
+}
+
+/// The application scene's nib: an NSObject root, the application (its
+/// main menu, NSApplication at run time), the scene's objects, an
+/// Application placeholder, then the menu.
+fn main_menu(doc: &Document, application: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+    only_attributes(application, &[("id", None), ("sceneMemberID", None)])?;
+    only_children(application, &["menu", "connections"])?;
+    let mut nib = new_nib(localizable, true);
+    let app_id = attr(application, "id")?;
+    let mut c = new_collected(vec![app_id.to_string()]);
+    let root_name = object_name("root");
+    let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
+    let app_name = object_name(app_id);
+    c.parents.push((app_name.clone(), root_name.clone()));
+    let direct = true;
+    for o in others {
+        if !o.has_tag_name("customObject") {
+            return fail(format!("an application scene's <{}> is not supported by this ibtool", o.tag_name().name()));
+        }
+        let value = custom_object(&mut nib, &mut c, *o, module, &root_name, direct)?;
+        c.definitions.insert(object_name(attr(*o, "id")?), value);
+    }
+    let placeholder = object_name("application placeholder");
+    c.parents.push((placeholder.clone(), root_name.clone()));
+    let value = Value::New(Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSApplication"))]).named(placeholder.clone()));
+    c.definitions.insert(placeholder, value);
+    let menus: Vec<Node> = children(application, "menu").collect();
+    let [main] = menus.as_slice() else {
+        return fail("an application without one main menu is not supported by this ibtool");
+    };
+    if main.attribute("key") != Some("mainMenu") {
+        return fail("an application's menu other than its main menu is not supported by this ibtool");
+    }
+    let menu_value = menu(&mut nib, &mut c, *main, &root_name)?;
+    let app = Object::new("NSCustomObject", vec![("IBMainMenu", menu_value), ("NSClassName", nib.string("NSApplication"))]).named(app_name.clone());
+    c.definitions.insert(app_name, Value::New(app));
+    let connections = connections(&mut nib, doc, &c.connection_sources.clone(), first_responder)?;
+    assemble(&mut nib, root_object, &root_name, c, connections)
 }
