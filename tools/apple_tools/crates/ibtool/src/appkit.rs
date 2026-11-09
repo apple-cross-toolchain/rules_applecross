@@ -189,12 +189,13 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     values.push(("NSvFlags", Value::Int(256 | autoresizing_mask(n)?)));
     // Its subviews, then its frame.
     let subviews: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
-    if !subviews.is_empty() {
+    if !subviews.is_empty() || n.has_tag_name("button") {
         let mut items = Vec::new();
         for s in subviews {
             items.push(match s.tag_name().name() {
                 "view" | "customView" => view(nib, c, s, module, name, Some(name))?,
                 "textField" => text_field(nib, c, s, module, name)?,
+                "button" => button(nib, c, s, module, name)?,
                 other => return fail(format!("a subview <{other}> is not supported by this ibtool")),
             });
         }
@@ -241,8 +242,9 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
 }
 
 /// The constraints a view holds, by their first item's place in the
-/// document (the view itself first), in document order for one item (three
-/// probes of two to four), as `NSLayoutConstraint`s:
+/// document (the view itself first), then horizontal before vertical, in
+/// document order otherwise (three probes of two to four, a template), as
+/// `NSLayoutConstraint`s:
 /// a missing first item is the view; attributes by NSLayoutAttribute,
 /// relations by NSLayoutRelation (-1, 0, 1); the constant twice; the
 /// priority when not required.
@@ -254,7 +256,10 @@ fn view_constraints(nib: &mut Nib, c: &mut Collected, n: Node, name: &str) -> Re
     let ids: Vec<&str> = list.iter().map(|k| attr(*k, "id")).collect::<Result<_, _>>()?;
     let place = |id: &str| n.document().descendants().position(|d| d.attribute("id") == Some(id)).unwrap_or(usize::MAX);
     let mut order: Vec<usize> = (0..list.len()).collect();
-    order.sort_by_key(|&i| list[i].attribute("firstItem").map_or_else(|| place(n.attribute("id").unwrap_or_default()), place));
+    // Then horizontal attributes before vertical ones (a template's centre
+    // before its top; probes' leading before top, width before height).
+    let vertical = |k: Node| matches!(k.attribute("firstAttribute"), Some("top" | "bottom" | "height" | "centerY" | "baseline" | "lastBaseline" | "firstBaseline"));
+    order.sort_by_key(|&i| (list[i].attribute("firstItem").map_or_else(|| place(n.attribute("id").unwrap_or_default()), place), vertical(list[i])));
     let mut items = Vec::new();
     for i in order {
         let k = list[i];
@@ -1475,7 +1480,10 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     c.parents.push((cell_name.clone(), name.clone()));
     values.push(("NSEnabled", Value::Bool(true)));
     values.push(("NSCell", Value::New(Object::new("NSTextFieldCell", cell_values).named(cell_name))));
-    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(false)));
+    // A localizable document's controls allow a logical (right-to-left)
+    // layout direction (the corpus's 358 controls, exactly those in
+    // `Base.lproj`).
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
     values.push(("NSControlSize", Value::Int(control_size)));
     values.push(("NSControlContinuous", Value::Bool(false)));
     values.push(("NSControlRefusesFirstResponder", Value::Bool(false)));
@@ -1489,4 +1497,235 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     values.push(("NSTextFieldAllowsWritingToolsAffordance", Value::Bool(false)));
     values.push(("NS.resolvesNaturalAlignmentWithBaseWritingDirection", Value::Bool(false)));
     Ok(Value::New(Object::new("NSTextField", values).named(name)))
+}
+
+/// A button and its cell (85 probes): the cell's flags as a text field's,
+/// `NSButtonFlags` (its behaviour, image position in bits 19 to 22,
+/// border 0x800000, inset from bit 13, transparency 0x8000, 0x100 for a
+/// check box's or radio button's image), `NSButtonFlags2` (the bezel style,
+/// image scaling in bits 6 and 7, the key equivalent's modifiers from bit
+/// 8), and the button type its behaviour makes. A button's `type` itself
+/// changes nothing.
+fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    only_attributes(
+        n,
+        &[
+            ("id", None),
+            ("horizontalHuggingPriority", None),
+            ("verticalHuggingPriority", None),
+            ("horizontalCompressionResistancePriority", None),
+            ("verticalCompressionResistancePriority", None),
+            ("translatesAutoresizingMaskIntoConstraints", Some("NO")),
+            ("fixedFrame", Some("YES")),
+        ],
+    )?;
+    only_children(n, &["rect", "autoresizingMask", "buttonCell", "constraints", "connections"])?;
+    content_sized(nib, n)?;
+    let id = attr(n, "id")?;
+    let name = object_name(id);
+    c.parents.push((name.clone(), parent.to_string()));
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(id.to_string());
+    }
+    let cell = child(n, "buttonCell", "cell").ok_or("a button without a cell")?;
+    only_attributes(
+        cell,
+        &[
+            ("key", None),
+            ("id", None),
+            ("type", None),
+            ("bezelStyle", None),
+            ("title", None),
+            ("alternateTitle", None),
+            ("alignment", None),
+            ("borderStyle", Some("border")),
+            ("imagePosition", None),
+            ("imageScaling", None),
+            ("inset", None),
+            ("state", Some("on")),
+            ("controlSize", None),
+            ("keyEquivalent", None),
+            ("lineBreakMode", None),
+        ],
+    )?;
+    only_children(cell, &["behavior", "font", "modifierMask", "string"])?;
+    let cell_id = attr(cell, "id")?;
+    let cell_name = object_name(cell_id);
+    let has = |a: &str| cell.attribute(a).is_some();
+    let bezel_name = cell.attribute("bezelStyle").ok_or("a button without a bezel style")?;
+    let (bezel, bezel_bits) = match bezel_name {
+        "rounded" => (1, 1),
+        "regularSquare" => (2, 2),
+        "disclosure" => (5, 5),
+        "shadowlessSquare" => (6, 6),
+        "circular" => (7, 7),
+        "texturedSquare" => (8, 0x20),
+        "helpButton" => (9, 0x21),
+        "smallSquare" => (10, 0x22),
+        "texturedRounded" => (11, 0x23),
+        "recessed" => (13, 0x2d),
+        "roundedDisclosure" => (14, 0x26),
+        // An inline button's font is its own (a probe), not established.
+        other => return fail(format!("bezel style {other} is not supported by this ibtool")),
+    };
+    // Its behaviour's bits, and the button type it makes.
+    let behavior = child(cell, "behavior", "behavior").ok_or("a button without a behaviour")?;
+    let mut behaviors: Vec<&str> = behavior.attributes().filter(|a| a.name() != "key").map(|a| a.name()).collect();
+    behaviors.sort();
+    if behavior.attributes().any(|a| a.name() != "key" && a.value() != "YES") {
+        return fail("a button behaviour other than YES is not supported by this ibtool");
+    }
+    let mut flags_b: i64 = 0;
+    for b in &behaviors {
+        flags_b |= match *b {
+            "pushIn" => 0x8000_0000,
+            "changeContents" => 0x4000_0000,
+            "changeBackground" => 0x2000_0000,
+            "changeGray" => 0x1000_0000,
+            "lightByContents" => 0x0800_0000,
+            "lightByBackground" => 0x0400_0000,
+            "lightByGray" => 0x0200_0000,
+            "doesNotDimImage" => 0x1000,
+            other => return fail(format!("button behaviour {other} is not supported by this ibtool")),
+        };
+    }
+    let kind = cell.attribute("type").unwrap_or("push");
+    let (aux, image_source) = match (behaviors.as_slice(), kind) {
+        (["lightByBackground", "lightByGray", "pushIn"], _) => (7, None),
+        (["changeContents", "doesNotDimImage", "lightByContents"], "check") => (3, Some("NSSwitch")),
+        (["changeContents", "doesNotDimImage", "lightByContents"], "radio") => (4, Some("NSRadioButton")),
+        _ => return fail(format!("a {kind} button behaving as {} is not supported by this ibtool", behaviors.join(" "))),
+    };
+    let position = match cell.attribute("imagePosition") {
+        None => 0,
+        Some("above") => 1,
+        Some("below") => 3,
+        Some("right" | "trailing") => 5,
+        Some("left" | "leading") => 7,
+        Some("only") => 8,
+        Some("overlaps") => 9,
+        Some(other) => return fail(format!("image position {other} is not supported by this ibtool")),
+    };
+    flags_b |= position << 19;
+    if has("borderStyle") {
+        flags_b |= 0x80_0000;
+    }
+    if let Some(inset) = cell.attribute("inset") {
+        flags_b |= inset.parse::<i64>().map_err(|_| format!("not an inset: {inset}"))? << 13;
+    }
+    if image_source.is_some() {
+        flags_b |= 0x100;
+    }
+    let scaling = match cell.attribute("imageScaling") {
+        None | Some("none") => 0,
+        Some("proportionallyUpOrDown") => 1,
+        Some("proportionallyDown") => 2,
+        Some("axesIndependently") => 3,
+        Some(other) => return fail(format!("image scaling {other} is not supported by this ibtool")),
+    };
+    let key_equivalent = match (cell.attribute("keyEquivalent"), children(cell, "string").find(|s| s.attribute("key") == Some("keyEquivalent"))) {
+        (Some(k), None) => k.to_string(),
+        (None, Some(e)) => e.text().unwrap_or("").to_string(),
+        (None, None) => String::new(),
+        _ => return fail("a key equivalent both as an attribute and an element"),
+    };
+    // A button's key equivalent has no modifiers without a mask.
+    let modifiers = match child(cell, "modifierMask", "keyEquivalentModifierMask") {
+        Some(_) => modifier_mask(cell)?,
+        None => 0,
+    };
+    let flags_b2 = bezel_bits | scaling << 6 | modifiers << 8;
+
+    // The cell's flags, as a text field's.
+    let mut flags: i64 = 0x0400_0000;
+    let mut flags2: i64 = 0;
+    let line_break = match cell.attribute("lineBreakMode") {
+        None | Some("wordWrapping") => 0,
+        Some("charWrapping") => 1,
+        Some("clipping") => 2,
+        Some("truncatingHead") => 3,
+        Some("truncatingTail") => 4,
+        Some("truncatingMiddle") => 5,
+        Some(other) => return fail(format!("line break mode {other} is not supported by this ibtool")),
+    };
+    if line_break >= 2 {
+        flags |= 0x40;
+    }
+    flags2 |= line_break << 9;
+    let (control_alignment, alignment_bits) = match cell.attribute("alignment") {
+        None | Some("natural") => (4, 4),
+        Some("left") => (0, 0),
+        Some("center") => (1, 2),
+        Some("right") => (2, 1),
+        Some("justified") => (3, 3),
+        Some(other) => return fail(format!("alignment {other} is not supported by this ibtool")),
+    };
+    flags2 |= alignment_bits << 26;
+    if has("state") {
+        flags |= 0x8000_0000;
+    }
+    let control_size = match cell.attribute("controlSize") {
+        None | Some("regular") => 0,
+        Some("small") => {
+            flags2 |= 0x2_0000;
+            1
+        }
+        Some("mini") => {
+            flags2 |= 0x4_0000;
+            2
+        }
+        Some(other) => return fail(format!("control size {other} is not supported by this ibtool")),
+    };
+    let signed = |v: i64| v as u32 as i32 as i64;
+    let font_node = child(cell, "font", "font").ok_or("a button cell without a font")?;
+    let mut cell_values = vec![
+        ("NSCellFlags", Value::Int(signed(flags))),
+        ("NSCellFlags2", Value::Int(signed(flags2))),
+        ("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))),
+        ("NSSupport", font(nib, font_node)?),
+        ("NSControlView", reference(name.clone())),
+        ("NSButtonFlags", Value::Int(signed(flags_b))),
+        ("NSButtonFlags2", Value::Int(signed(flags_b2))),
+        ("NSBezelStyle", Value::Int(bezel)),
+    ];
+    if let Some(image) = image_source {
+        let image_name = nib.string(image);
+        cell_values.push(("NSAlternateImage", Value::New(Object::new("NSButtonImageSource", vec![("NSImageName", image_name)]))));
+    }
+    cell_values.push(("NSAlternateContents", nib.text(cell_id, "alternateTitle", cell.attribute("alternateTitle").unwrap_or(""))));
+    cell_values.push(("NSKeyEquivalent", nib.string(&key_equivalent)));
+    cell_values.push(("NSPeriodicDelay", Value::Int(400)));
+    cell_values.push(("NSPeriodicInterval", Value::Int(75)));
+    cell_values.push(("NSAuxButtonType", Value::Int(aux)));
+
+    // Content hugging: a bordered button of a rounded kind archives it as
+    // given, even at 250 each (a probe); square and borderless kinds as a
+    // view does.
+    let square = matches!(bezel_name, "regularSquare" | "shadowlessSquare" | "smallSquare" | "texturedSquare");
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    if has("borderStyle") && !square {
+        let hugging = format!("{{{}, {}}}", n.attribute("horizontalHuggingPriority").unwrap_or("250"), n.attribute("verticalHuggingPriority").unwrap_or("250"));
+        if hugging == "{250, 750}" {
+            return fail("a rounded button's hugging of 250 and 750 is not supported by this ibtool");
+        }
+        let at = values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key");
+        values.retain(|v| v.0 != "NSHuggingPriority");
+        let at = at.min(values.iter().position(|v| v.0 == "IBNSSafeAreaLayoutGuide").expect("the safe-area key"));
+        let at = if values.iter().any(|v| v.0 == "NSAntiCompressionPriority") { at - 1 } else { at };
+        values.insert(at, ("NSHuggingPriority", nib.string(&hugging)));
+    }
+    c.parents.push((cell_name.clone(), name.clone()));
+    values.push(("NSEnabled", Value::Bool(true)));
+    values.push(("NSCell", Value::New(Object::new("NSButtonCell", cell_values).named(cell_name))));
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
+    values.push(("NSControlSize", Value::Int(control_size)));
+    values.push(("NSControlContinuous", Value::Bool(false)));
+    values.push(("NSControlRefusesFirstResponder", Value::Bool(false)));
+    values.push(("NSControlUsesSingleLineMode", Value::Bool(false)));
+    values.push(("NSControlTextAlignment", Value::Int(control_alignment)));
+    values.push(("NSControlLineBreakMode", Value::Int(line_break)));
+    values.push(("NSControlWritingDirection", Value::Int(-1)));
+    values.push(("NSControlSendActionMask", Value::Int(4)));
+    values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
+    Ok(Value::New(Object::new("NSButton", values).named(name)))
 }
