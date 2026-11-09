@@ -413,7 +413,7 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
     for s in &subviews {
         let f = frame(*s, "frame")?;
         let (dx, dy) = (f.x, height - (f.y + f.h));
-        distances.push((attr(*s, "id")?, dx * dx + dy * dy, (f.x + f.w / 2.0, f.y + f.h / 2.0)));
+        distances.push((attr(*s, "id")?, dx * dx + dy * dy, (f.x + f.w / 2.0, f.y + f.h / 2.0), f.x));
     }
     let apart = |a: &str, b: &str| -> f64 {
         let centre = |id: &str| distances.iter().find(|d| d.0 == id).map_or((0.0, 0.0), |d| d.2);
@@ -425,6 +425,8 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
     // own at -1.
     let mut keys: Vec<(f64, bool, usize, usize, f64)> = Vec::new();
     let mut groups: Vec<&str> = Vec::new();
+    let mut group_xs: Vec<f64> = Vec::new();
+    let mut group_ids: Vec<&str> = Vec::new();
     for k in list {
         let first = k.attribute("firstItem").filter(|f| Some(*f) != own);
         let second = k.attribute("secondItem").filter(|s| Some(*s) != own);
@@ -442,6 +444,8 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
                 groups.push(g);
             }
         }
+        group_xs.push(first.or(second).and_then(|g| distances.iter().find(|d| d.0 == g)).map_or(f64::NEG_INFINITY, |d| d.3));
+        group_ids.push(first.or(second).unwrap_or(""));
         let key = match (first, second) {
             (None, None) => (-1.0, false, first_attribute, 0, 0.0),
             (Some(f), None) if k.attribute("secondItem").is_none() => (subview(f)?, false, first_attribute, 0, 0.0),
@@ -480,19 +484,24 @@ fn constraint_order(c: &Collected, n: Node, list: &[Node]) -> Result<Vec<usize>,
                 .map(|a| (a.name(), a.value()))
                 .eq(k.attributes().filter(|a| a.name() != "id").map(|a| (a.name(), a.value())))
         };
-        if keys.iter().zip(list).any(|(other, o)| *other == key && !same(o)) {
+        let gid = *group_ids.last().expect("pushed");
+        if keys.iter().zip(list).zip(&group_ids).any(|((other, o), oid)| *other == key && *oid == gid && !same(o)) {
             return fail("a view's constraints whose order isn't established (on the same attributes of the same views, or of subviews as far apart) are not supported by this ibtool");
         }
         keys.push(key);
     }
-    let at: Vec<f64> = distances.iter().filter(|d| groups.contains(&d.0)).map(|d| d.1).collect();
-    if at.iter().enumerate().any(|(i, a)| at[i + 1..].contains(a)) {
-        return fail("a view's constraints on subviews at the same distance from its top-left corner are not supported by this ibtool");
-    }
+    // Subviews as far from the corner go leftmost first (four probes), and
+    // at the same corner by their ids as bytes (four probes).
     let mut order: Vec<usize> = (0..list.len()).collect();
     order.sort_by(|&a, &b| {
         let (ka, kb) = (keys[a], keys[b]);
-        ka.0.total_cmp(&kb.0).then(ka.1.cmp(&kb.1)).then(ka.2.cmp(&kb.2)).then(ka.3.cmp(&kb.3)).then(ka.4.total_cmp(&kb.4))
+        ka.0.total_cmp(&kb.0)
+            .then(group_xs[a].total_cmp(&group_xs[b]))
+            .then(group_ids[a].cmp(group_ids[b]))
+            .then(ka.1.cmp(&kb.1))
+            .then(ka.2.cmp(&kb.2))
+            .then(ka.3.cmp(&kb.3))
+            .then(ka.4.total_cmp(&kb.4))
     });
     Ok(order)
 }
@@ -2908,7 +2917,16 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     let mut cell_values = vec![
         ("NSCellFlags", Value::Int(signed(flags))),
         ("NSCellFlags2", Value::Int(signed(flags2))),
-        ("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))),
+        // A pop-up button's title is its selected item's, not localized
+        // itself (a xib and a storyboard in Base.lproj).
+        (
+            "NSContents",
+            if popup {
+                nib.string(cell.attribute("title").unwrap_or(""))
+            } else {
+                nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))
+            },
+        ),
         (
             "NSSupport",
             if popup && font_node.attribute("usesAppearanceFont").is_none() {
@@ -3475,7 +3493,8 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     cell_values.push(("NSAlign", Value::Int(align)));
     cell_values.push(("NSScale", Value::Int(scale)));
     cell_values.push(("NSStyle", Value::Int(style)));
-    cell_values.push(("NSAnimates", Value::Bool(false)));
+    // A storyboard's animates its images, a xib's doesn't (probes).
+    cell_values.push(("NSAnimates", Value::Bool(nib.storyboard)));
     cell_values.push(("NSImageAnimation", Value::Int(-1)));
     values.push(("NSEnabled", Value::Bool(true)));
     values.push(("NSCell", Value::New(Object::new("NSImageCell", cell_values).named(cell_name))));

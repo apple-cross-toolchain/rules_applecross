@@ -2794,8 +2794,8 @@ archived as a double. A view's are in an order of their own (about
   the distance between their centres (four ties in two corpus
   storyboards that their corners don't order).
 
-Refused as not established: subviews at the same distance from the
-corner, two different constraints on the same attributes of the same
+Subviews as far from the corner go leftmost first, and at the same corner
+by their ids as bytes. Refused as not established: two different constraints on the same attributes of the same
 views or of subviews as far apart, and between subviews left and right,
 or a centre or size related to another attribute. A view controller's own view never says
 `NSDoNotTranslateAutoresizingMask`.
@@ -2893,7 +2893,8 @@ selected index unless 0 (-1 with none), the preferred edge 1, using the
 item from the menu, altering state, and the arrow position (bottom 2,
 centre 1). Its items are menu items with command as their modifiers, the
 selected item's state on, and `_popUpItemAction:` targeting the cell. A
-pop-up cell's menu font is the message font. A cell's connections come
+pop-up cell's menu font is the message font, and its title is a plain
+string even where its items' titles are localizable (Base.lproj). A cell's connections come
 from the cell.
 
 **Sliders** (about ten probes), linear: vertical when the frame is taller
@@ -2918,7 +2919,8 @@ named image as an `NSCustomResource` of the size the document's resources
 give, the image alignment (center 0, top 1, top left 2, top right 3, left
 4, bottom 5, bottom left 6, bottom right 7, right 8), scaling
 (proportionally down 0, axes independently 1, none 2, proportionally up or
-down 3), frame style (none 0, gray bezel 2), and no animation. An image
+down 3), frame style (none 0, gray bezel 2), and animation in a storyboard
+only. An image
 sizes its view, so a constrained image view is laid out by Xcode, as a
 content-sized control is. AppKit's own images (`NSAddTemplate`), which
 Xcode names in the `system` namespace, are refused.
@@ -3010,6 +3012,8 @@ app class's is.
   view, a new `NSMutableString` `AXIdentifier`, the identifier) in
   `NSAccessibilityConnectors`, by the view's id as bytes, listed again in
   `NSAccessibilityOidsKeys` with ids numbered after the other objects'.
+- Subview groups as far from the corner go leftmost first, and at the
+  same corner by their ids as bytes (nine probes).
 - A view controller shown as a single window has presentation style 1 and
   `NSStoryboardSegueDestinationOptions`, as a window controller does.
 - `simulatedAppContext` changes Xcode's layout of the text in it, so only
