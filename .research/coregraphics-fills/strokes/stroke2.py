@@ -54,11 +54,23 @@ def seg_off(s,d):
         sq=_sub(q,a,b)
         try: ok=depth>=8 or ACCEPT_ALL or _accept(sq,d)
         except Exception: ok=True
-        if ok: out.extend(seg_off_one(('c',)+tuple(sq),d) or []); return
+        if ok:
+            mid_piece=len(pre)==2 and abs(a-pre[0])<1e-12 and abs(b-pre[1])<1e-12
+            if (mid_piece and math.dist(sq[0],sq[3])<0.5) or math.dist(sq[0],sq[3])<TINY: out.extend(seg_off_fb(('c',)+tuple(sq),d))
+            else: out.extend(seg_off_one(('c',)+tuple(sq),d) or [])
+            return
         m=(a+b)/2; rec(a,m,depth+1); rec(m,b,depth+1)
     cuts=[0.0]+pre+[1.0]
     for x,y in zip(cuts,cuts[1:]): rec(x,y)
     return out
+TINY=0.1
+def seg_off_fb(s,d):
+    q=list(s[1:]); u0,u3=seg_dirs(s)
+    p3=(q[3][0]-u3[1]*d,q[3][1]+u3[0]*d)
+    t=d1(q,.5)
+    if math.hypot(*t)==0: t=(q[3][0]-q[0][0],q[3][1]-q[0][1])
+    um=norm(t); m=((q[1][0]+q[2][0])/2,(q[1][1]+q[2][1])/2); fb=(m[0]-um[1]*d,m[1]+um[0]*d)
+    return [('c',fb,fb,p3)]
 def seg_off_one(s,d):
     # elements for offset of s on the left side at distance d, excluding the start point
     if s[0]=='l':
@@ -79,8 +91,14 @@ def seg_off_one(s,d):
     L1=(2*(X1[0]-q[0][0])-h1[0]/2)*u0[0]+(2*(X1[1]-q[0][1])-h1[1]/2)*u0[1]
     L2=-((2*(X2[0]-q[3][0])-h2[0]/2)*u3[0]+(2*(X2[1]-q[3][1])-h2[1]/2)*u3[1])
     G=lambda a,b: (4/3)*a+(b*b-a*a)/(6*a*(1+b*b))
+    neg1=L1<0; neg2=L2<0
     L1-=G(t1,t2)*d; L2-=G(t2,t1)*d
-    return [('c',(p0[0]+u0[0]*L1,p0[1]+u0[1]*L1),(p3[0]-u3[0]*L2,p3[1]-u3[1]*L2),p3)]
+    c1=(p0[0]+u0[0]*L1,p0[1]+u0[1]*L1); c2=(p3[0]-u3[0]*L2,p3[1]-u3[1]*L2)
+    if neg1 or neg2:
+        m=((q[1][0]+q[2][0])/2,(q[1][1]+q[2][1])/2); n=(-um[1]*d,um[0]*d); fb=(m[0]+n[0],m[1]+n[1])
+        if neg1: c1=fb
+        if neg2: c2=fb
+    return [('c',c1,c2,p3)]
 def seg_start_off(s,d):
     u,_=seg_dirs(s); p=s[1]; return (p[0]-u[1]*d,p[1]+u[0]*d)
 def rev(s):

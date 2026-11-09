@@ -59,13 +59,21 @@ polylines with every join and cap (`strokecmp.py SEED N CLOSED JOIN CAP`):
   b = P1 − 2P2 + P3, per axis). The split is width- and scale-independent
   but depends on rotation. The family (0,0),(3,λ),(7,−1),(10,0) splits at
   ½ (x'') and (2λ+1)/(3λ+3) (y''), exactly.
-- With these rules, 12 of the 22 corpus curves that split come out with
-  exactly CoreGraphics' split points (splitcmp.py). The misses are tiny
-  curves, curves with a control point on an endpoint, and the acceptance
-  residual.
-- Corpus pixels with my own outlines: blocks needing splits 65, 121 and
-  175 wrong at 1×, 2× and 3× (of 1,471, 2,867 and 4,486 edge pixels);
-  all other wide-stroke blocks 2, 1 and 0.
+- A handle whose zero-width refit length is negative is replaced by
+  (P1+P2)/2 offset by d along (roughly) the normal of B'(½); the exact
+  direction is about 1e-4 rad off every candidate I tried. Pieces with a
+  chord under about 0.1 px, and the piece between the two coordinate
+  pre-splits when its chord is under about 0.5 px, get C1 = C2 = that
+  point. These thresholds are fitted to the corpus, not measured.
+- With these rules, 11 of the 22 corpus curves that split match
+  CoreGraphics element for element (elemcmp.py). Open cases: pieces with
+  P2 = P3 that CoreGraphics rejects although every error measure I tried
+  is tiny, and curves whose outline contains runs of lines at offset
+  cusps.
+- Corpus pixels with my own outlines: blocks needing splits 40, 100 and
+  153 wrong at 1×, 2× and 3× (bubble tail 0/0/1, userAvatar 23/59/94,
+  icon-add 16/39/57, icon-setting 1/2/1); all other wide-stroke blocks 2,
+  1 and 0.
 
 ## Thin strokes (w ≤ 1)
 
