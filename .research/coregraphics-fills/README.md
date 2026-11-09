@@ -7,10 +7,11 @@ hold only PDFs. This is a time-boxed probe, black-box throughout: CoreGraphics'
 public API from Swift on the Mac. It is not for merging, and the actool is
 unchanged.
 
-Status: in progress, inside a three-hour time-box (16:00Z to 19:00Z on
-2026-11-09). An earlier version of this file said "tabled"; it was written
-before the time-box ended. The scan conversion of sloped edges is now
-found (below).
+Status: the three-hour time-box (16:00Z to 19:00Z on 2026-11-09) found how
+CoreGraphics scan-converts general paths. On straight-edged shapes the
+model matches 99–100% of edge pixels; on glyph curves, 85–97%. Every
+remaining miss is off by one level, and most are within a few hundredths
+of a level of the boundary.
 
 ## Established
 
@@ -28,24 +29,35 @@ found (below).
   (`floor((s + 1)/32)`). The end edge is exact. Alpha is
   `floor(ax · ay / 255)`. This matches 400 of 400 random rectangles and every
   strip (`span_table.json`, `rects.json`).
-- **Other paths: two fixed-point DDAs per edge and signed area per pixel.**
-  Found by black-box probing with `cov` (`raster.py` is the model):
+- **Other paths: fixed-point DDAs per edge and a band sweep.** Found by
+  black-box probing with `cov` (`raster.py`, `fill_path`, is the model):
   1. Path coordinates go through float32, then round half up to 1/4096 of a
-     pixel.
-  2. The path is clipped to the canvas first. The top boundary fits best at
-     H + 1, which is not understood yet.
-  3. Each edge is stepped from its lower endpoint by two independent DDAs.
+     pixel. The path is clipped to the canvas.
+  2. Each edge is stepped from its lower endpoint by two independent DDAs.
      Row crossings (x at each integer y) step by dx/dy truncated to 1/4096.
      Column crossings (y at each integer x) step by dy/dx truncated to
-     1/4096. In each, the first crossing is the vertex plus
-     `floor4096(frac · slope)`.
-  4. The crossings, merged in order along the edge, make a polyline. Pieces
-     between two row crossings belong to that row, even where a column
-     crossing has drifted outside it (the two DDAs drift apart on long
-     edges).
-  5. Each pixel accumulates the signed integral of `clamp(x − X, 0, 1) dy`
-     over its row's pieces (Green's theorem). Alpha is
-     `floor(256 · |area|)`, capped at 255.
+     1/4096. The first crossing is the vertex plus
+     `floor4096(frac · slope)`. The edge ends where the row stepper reaches
+     its top y, not at the vertex.
+  3. Each edge also gets a point at every vertex y of the path inside its
+     span. Its x is stepped from the previous row crossing, with the same
+     floor.
+  4. Between consecutive points, a column crossing belongs to the row whose
+     two row crossings bracket it in x, even when it has drifted outside
+     that row in y.
+  5. Each row is swept in bands, cut at every vertex y and every edge
+     intersection. In each band the edges are ordered by x, and the winding
+     rule (nonzero or even-odd) picks the span boundaries. Only those
+     contribute their area to the right, by Green's theorem per pixel.
+     Alpha is `floor(256 · area)`, capped at 255.
+  6. Vertical edges stay exact here (the 1/256 snap is the rectangle fast
+     path's).
+  7. Cubics are halved recursively at t = ½ while
+     ¾ · max(|Δ²x|, |Δ²y|) of the control points exceeds 1/20 px. This is
+     adaptive, so the middle of an arc stays coarser than its ends. The
+     same tolerance (≈ 0.0667) fits every one of 40 random ellipses.
+  8. Strokes 1 px wide or wider equal the fill of their outline. Thinner
+     strokes take another path.
 
   The truncated slopes make long edges drift measurably: −0.022 px over 390
   rows for a slope of 0.522, exactly 390 times the truncation error. That
@@ -55,33 +67,34 @@ found (below).
 
   | Test | Wrong / total |
   | --- | --- |
-  | 20 random edges, 360–396 rows long, both windings (`gen20.py`, `signed.py`) | **0 / 10291** |
-  | 240 random triangles in 8×8, vertices inside pixels (`trieval.py`) | 30 / ~3000 (1%) |
-  | 200 wedges in 12×12, far vertices clipped (`wedge.py`) | 20 / 3208 (0.6%) |
+  | 20 random edges, 360–396 rows long, both windings (`gen20.py`) | **0 / 10291** |
+  | 16 long shallow edges (`genshallow.py`) | 4 / 6980 |
+  | 150 wedges in 64×64, unclipped (`wedge2.py`) | 13 / 14159 |
+  | 200 wedges in 12×12, clipped (`wedge.py`) | 9 / 3216 |
+  | 240 random triangles in 8×8 (`trieval.py`) | 21 / ~3000 |
+  | 2 overlapping triangles, nonzero / even-odd (`multi.py`) | 26 / 2444, 24 / 2528 |
+  | 40 ellipses of 4 cubics (`ell.py`) | 53 / 2679 |
+  | Helvetica "AXWNZ", "EHLTI" at 20 px (`pathcmp.py`) | 7 / 427, 1 / 266 |
+  | Helvetica "Rg&8", Times "Qa@" (curves) | 54 / 369, 56 / 324 |
 
-  Nearly every remaining miss is within 0.07 of an alpha level, which is
-  one 1/4096 unit of some crossing. A few sit exactly on an integer area
-  next to a clip edge. They are unit-level rounding details of the
-  vertex and clip handling, not structure. They were tested and don't come
-  from per-piece area rounding, a constant bias, float32 slopes, or
-  snapping edge extents to 1/256.
-- **Curves are flattened uniformly** into a power-of-two number of segments
-  by size (8, 16 and 32 for curves of about 4, 14 and 57 pixels).
+- **The residual.** Every miss is ±1 level, in rows that hold a vertex. In
+  those rows CG's coverage averages about 1/32 of a level above the model's
+  (`bias.py`). Its own pixel gains about 0.04 per vertex, and curves with
+  many vertices per row add these up. A single vertex of any kind (bottom,
+  top or middle) swept in 1/4096 steps matches (`vprobe.py`). These don't
+  explain it: per-piece or per-band area rounding, a constant or role-based
+  bias, chaining edges through vertices, splitting curves at extrema,
+  fixed-point curve subdivision, coarser vertex y, and outward rounding.
+  Float and 16-bit contexts, and partial-alpha fills, show only the 8-bit
+  coverage (`covf.swift`, `cova.swift`), so the probes see nothing finer.
 
 ## Remaining before exact fills
 
-- The unit-level residuals at vertices and clip edges (about 1% of edge
-  pixels).
-- The clip box (why H + 1 at the top) and vertical edges. Vertical edges
-  probe at `ceil(x · 4096) − 1`, and rectangles take their own fast path,
-  solved.
-- Curves through the same rasterizer: the flattening rule exactly.
-- Even-odd fills, several subpaths, and overlapping paths composited in
-  8 bits.
-- Not examined yet: strokes (joins, caps, dashes), clipping paths, and
-  CoreSVG for SVGs.
-- A Rust implementation in actool, checked against `cov` on the corpus's
-  46 PDF-only catalogs.
+- The vertex-row residual above. It matters most for curves.
+- Strokes: joins, caps, dashes, curve offsets, and the thin-stroke path.
+- Clipping paths, gradients and images in PDFs, and CoreSVG for SVGs.
+- A Rust implementation in actool, checked against `cov` and then against
+  Xcode on the corpus's 46 PDF-only catalogs.
 
 ## Tools
 
@@ -92,7 +105,15 @@ found (below).
 - `mkpdf.py`: writes a one-page PDF.
 - `compile.sh`, `bitmap.sh`, `check.sh`, `payloads.py`: compare Xcode's
   vector renditions with CoreGraphics' drawing.
-- `raster.py`: the current model of the general fill.
+- `raster.py`: the current model of the general fill (`fill_path`), and
+  `flat.py`: curve flattening.
+- `glyphs.swift`, `pathcmp.py`: glyph outlines as paths, compared with the
+  model. `covs.swift`: strokes. `covf.swift`, `cova.swift`: float, 16-bit and
+  partial-alpha probes.
+- `ell.py`, `curves.py`, `multi.py`, `wedge2.py`, `genshallow.py`,
+  `bias.py`, `vprobe.py`, `perturb.py`: probes for ellipses, curves,
+  overlapping subpaths, wedges, shallow edges, the vertex-row bias, vertex
+  sweeps, and unit perturbations.
 - `trieval.py`, `wedge.py`, `gen20.py`, `signed.py`, `fastfit.py`,
   `anchor3.py`, `rowfit.py`, `drift3.py`: probes and scorers for triangles,
   wedges, long edges and drift. They import each other from `/tmp/cg`, with
