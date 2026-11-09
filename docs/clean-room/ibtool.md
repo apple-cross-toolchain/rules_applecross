@@ -2975,6 +2975,17 @@ configuration), its keys are:
 - back and forward gestures off, an empty user agent, link previews on,
   magnification off at 1.
 
+**Collection views** (about ten probes), as a scroll view's document:
+an `NSCollectionView`'s view keys, then its `_NSCollectionViewCore` (the
+flow layout; `UIAllowsSelection` false when not selectable;
+`UIAllowsMultipleSelection` when it allows several), empty minimum and
+maximum grid sizes (one string), no grid row or column limits, its
+background colours, `NSSelectable` and `NSAllowsMultipleSelection` when
+set, and dragging masks -1 and 0. The flow layout, listed after its
+collection view, archives its interitem and line spacings as floats when
+not 10, then its item size when not 50 by 50. A scroll view leaves out its
+scroll amounts when all four are 10.
+
 **Top-level objects.** A xib may hold controls at its top level
 (boxes, text fields, buttons, pop-up buttons, image views, scroll views),
 without a superview or next responder, and collection view items: an
