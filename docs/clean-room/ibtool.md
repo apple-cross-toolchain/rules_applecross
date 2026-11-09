@@ -2772,6 +2772,15 @@ priority the document leaves out is Interface Builder's default, 250 or
 the safe-area, margins and clipping keys. A custom view, or a view of a
 custom class, is an `NSClassSwapper` for it.
 
+**Own classes.** A custom class naming the element's own AppKit class is
+no custom class, with or without a module: Xcode compiles the document as
+though the class weren't there. This holds for a view's or custom view's
+`NSView` in both kinds of xib, a button's `NSButton`, a window's
+`NSWindow`, a text field cell's `NSTextFieldCell` and a content
+controller's `NSViewController` (about a dozen probes). A plain view naming
+`NSView` is an `NSView`, not a class swapper; a custom view is swapped (or
+an `NSCustomView`) all the same, with no class reference.
+
 **Constraints** (`NSLayoutConstraint`): items, attributes twice
 (NSLayoutAttribute), the relation, the constant twice when given (a
 symbolic one, the standard space, as `NSSymbolicConstant` `NSSpace` in their
@@ -2839,7 +2848,27 @@ not allowing it changes nothing. A key equivalent Interface Builder writes
 in base64 (`base64-UTF8`, without padding: the escape key) is decoded. A System catalog colour carries the
 colour it resolves to, in Generic Gray Gamma 2.2 or sRGB with the profile
 embedded: the Mac's own profiles, which the SDK archive carries
-(`tools/package-sdks.sh`) rather than this repository.
+(`tools/package-sdks.sh`) rather than this repository. A round bezel
+(`bezelStyle="round"`) is `NSTextBezelStyle` 1 after the control view, in
+place of `NSDrawsBackground`; a square one, the default, changes nothing.
+
+**Search fields** (ten probes, a corpus xib) are text fields: an
+`NSSearchField`, which doesn't allow Writing Tools, with the content
+hugging of a text field and an `NSSearchFieldCell`. After its text colour
+the cell has:
+
+- `NSAutomaticTextCompletionDisabled`, without text completion;
+- its search and cancel buttons' `NSButtonCell`s, targeting the cell with
+  `_searchFieldSearch:` and `_searchFieldCancel:`; the search button's
+  contents are `search`, and the cancel button's accessibility description
+  is `cancel`, an encoded attribute of type 1;
+- `NSRecentsAutosaveName`, `NSMaximumRecents` (255 by default), and
+  `NSSendsWholeSearchString` when it does;
+- `NSSearchFieldFlags`, four bytes: 6, plus 8 when it sends the search
+  string immediately;
+- `NSAutomaticTextCompletionStored`.
+
+Centring the placeholder changes nothing.
 
 **Buttons** (around 100 probes). An `NSButton`'s view keys, then
 `NSEnabled`, the cell, and the control keys (`NSControlTextAlignment` as
@@ -2879,9 +2908,17 @@ of the same integer is the same object), the corner radius, border and
 fill colours, and `IBNSBoxIsUsingDocumentContentView` with a content view.
 Xcode lays a custom box's content view out again, inset from the box's
 bounds by its border width (1 unless given, none without a border),
-whatever its frame says; in a storyboard it clips to its bounds. A primary
-or secondary box puts its content below its title, measured with the
-Mac's fonts, and is refused.
+whatever its frame says; in a storyboard it clips to its bounds. Old
+documents write the content view without an id; nothing can refer to it.
+A box whose subviews don't autoresize clears the view flag and says so
+again through an `NSIBUserDefinedRuntimeAttributesConnector` (the box,
+`NSValues` holding a shared `NSNumber` false, `NSKeyPaths` holding
+`autoresizesSubviews`). These connectors follow the stack views'
+connectors and come before every other connection. They are ordered by
+the box's id as bytes and numbered with the connections (four probes, a
+corpus xib). A plain view with the same attribute gets no connector. A
+primary or secondary box puts its content below its title, measured with
+the Mac's fonts, and is refused.
 
 **Pop-up buttons** (about 15 probes) are buttons whose
 `NSPopUpButtonCell` holds a menu. The cell's flags add border and bezel
@@ -2969,8 +3006,7 @@ application scene is `MainMenu.nib`; a window controller
 `NSWindowController-<id>.nib`, holding its window, its content view
 controller (an `NSClassSwapper` naming its view's nib, or without a class a
 plain `NSViewController`; each with its own `storyboard` outlet) and
-storyboard placeholders, with the window's delegate its controller whether the
-document connects it or not; the content controller's view
+storyboard placeholders; the content controller's view
 `<controller>-view-<view>.nib`. When the controller has outlets, or its
 view's objects connect to it, the view's nib stands it in with an
 `NSNibExternalObjectPlaceholder` named `UpstreamPlaceholder-1`, after the
@@ -2978,7 +3014,48 @@ Application placeholder, and the controller's
 `NSExternalObjectsTableForViewLoading` maps that name to it (an empty
 dictionary otherwise). Xcode makes each controller's
 `uniqueIdentifierForStoryboardCompilation` anew on every run; this ibtool
-derives a UUID from the document and the controller's id.
+derives a UUID from the document and the controller's id. The window's
+delegate is its controller, whether the document connects it or not, in a
+document Interface Builder saved before tools version 13148; in a later one,
+only when connected (bisected with probes: the document's `toolsVersion`
+decides, not the plug-in's version).
+
+**Split view controllers** (about 20 probes, two corpus storyboards). A
+window's content may be a split view controller, which has no nib of its
+own: the window controller's nib holds it, and each item's view controller
+gets its view's nib, as a content controller does. Items pair with the
+controller's `splitItems` segues in document order.
+
+- **The controller** is an `NSSplitViewController`: presentation style 0,
+  its UUID, `privateRelationshipSegueTrackingItems` (its items in document
+  order), `NSIsVertical` false whatever the split view says, and the split
+  view. It is listed under the window, then the split view and its items,
+  in reverse document order, under it.
+- **The split view** is an `NSSplitView` without a superview: the view's
+  keys, `NSIsVertical` when vertical, the divider style (thin 2, pane
+  splitter 3; thick, the default, left out), `NSAutosaveName`, and with
+  `arrangesAllSubviews="NO"` an empty `NSMutableArray` of
+  `NSArrangedSubviews` and `NSDoesNotArrangeAllSubviews`.
+- **An item** is an `NSSplitViewItem`: its behaviour (sidebar 1, content
+  list 2, inspector 3) or, without one, its holding priority as a float
+  when not 250 and, when it can collapse, `CanCollapseFromDrag` and
+  `CanCollapseFromDoubleClick`; then `HoldingCollapsed` when collapsed,
+  `NSSplitViewItemViewController` nil, and the titlebar separator style
+  (none 1, line 2, shadow 3). A behaviour sets the holding priority and
+  collapsing whatever the document says: sidebar 260 and collapsible,
+  content list 255, inspector 261 and collapsible.
+- **Objects list:** the items' controllers' storyboard placeholders in
+  reverse, then the split view controller's; then the items' controllers,
+  under the root.
+- **Connections:** each item's `viewController` outlet to its controller,
+  without a creation selector; the document's outlets (the controller's
+  `splitView`, the split view's `delegate`); `storyboard` outlets for each
+  controller.
+- **Runtime attributes:** each item's `collapsed`, `canCollapse` and
+  `holdingPriority` (a double); the controller's `splitViewItems`, holding
+  the very array it tracks its items in.
+
+The items' controllers share one empty `NSExternalObjectsTableForViewLoading`.
 
 A window controller with a storyboard identifier is named by it: its nib,
 and its Info.plist keys sharing one string, with
@@ -3037,9 +3114,10 @@ app class's is.
   `NSStoryboardSegueDestinationOptions`, as a window controller does.
 - `simulatedAppContext` changes Xcode's layout of the text in it, so only
   `relax_ibtool_layout` compiles it.
-- A window with a hidden title has `NSWindowTitleVisibility` 1, and with a
-  transparent title bar `NSTitlebarAppearsTransparent`, after its
-  full-screen sizes.
+- After a window's full-screen sizes come its toolbar style as
+  `NSWindowToolbarStyle` (expanded 1, preference 2, unified 3; automatic,
+  the default, left out), `NSWindowTitleVisibility` 1 with a hidden title,
+  and `NSTitlebarAppearsTransparent` with a transparent title bar.
 - A window controller of a custom class is an `NSClassSwapper` for
   `NSWindowController`.
 - An older xib's Application placeholder may have outlets (its delegate).
