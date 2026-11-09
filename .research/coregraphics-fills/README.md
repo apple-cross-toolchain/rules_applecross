@@ -7,7 +7,7 @@ hold only PDFs. This is a time-boxed probe, black-box throughout: CoreGraphics'
 public API from Swift on the Mac. It is not for merging, and the actool is
 unchanged.
 
-Status: the three-hour time-box (16:00Z to 19:00Z on 2026-11-09) found how
+Status (2026-11-09 19:00Z, day-two box under way): banded rows now largely solved; see "Day two" below. The three-hour time-box (16:00Z to 19:00Z on 2026-11-09) found how
 CoreGraphics scan-converts general paths. On straight-edged shapes the
 model matches 99–100% of edge pixels; on glyph curves, 85–97%. Every
 remaining miss is off by one level, and most are within a few hundredths
@@ -217,6 +217,44 @@ of a level of the boundary.
     minus 2" fits 167 of 204 cases.
   - These also didn't help: side-dependent slope rounding, and coarser x
     on opening pieces (`CG_XQO`).
+
+## Day two (from 18:20Z)
+
+- **Instrument.** Shift a shape by whole units of 1/4096 px in x
+  (`cfit.py`, `pixsweep.py`). A pixel's true area then changes by an exact
+  amount per step, and the steps where its 8-bit value changes pin down
+  CG's internal area to well under a level. This exposed per-band rounding
+  that single renders couldn't.
+- **Banded rows: opening edges round up.** With a vertical opening edge
+  whose row is split by a band, CG rounds each band's area to the right of
+  the edge up to a whole 1/4096 px² (12 of 12 cases at every shift; exact,
+  floor and round fit none). Closing edges stay exact.
+  - The round-up applies only where the opening edge stays in one pixel
+    column for the whole band.
+  - It doesn't apply where the span's closing edge falls in the same pixel.
+  - Rows without bands are unaffected (long edges stay exact).
+- **Rectangles after truncation.** A four-point path whose sides are
+  axis-aligned once slopes truncate to 1/4096 (minor extent × 4096 <
+  major extent) takes the rectangle path on its bounding box. This
+  explains near-vertical quads exactly (thousands of misses to 0) and the
+  "exact boundary minus one" values.
+- **Results** (`rust/cgfill.rs`; suite 986 to 329):
+
+  | Case | Before | Now |
+  | --- | --- | --- |
+  | Rg&8 | 55 | 7 |
+  | Qa@ | 65 | 16 |
+  | 11 px "abcdefgh" | 96 | 12 |
+  | "The quick" | 66 | 6 |
+  | "sphinx" | 42 | 7 |
+  | Triangles | 107 | 89 |
+  | Dense 512-gon | 318 | 54 |
+
+  Corpus fills: 1615/1625, 3245/3285, 4977/5011 at 1×, 2×, 3× (99.4, 98.8,
+  99.3%).
+- **What's left:** vertex pixels where edges start or end inside the pixel
+  (mostly one level low), and bands where the opening edge crosses columns
+  (left exact; floor, round and ceil all score worse).
 
 ## Remaining before exact fills
 

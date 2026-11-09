@@ -19,6 +19,8 @@
 //! - Cubics are halved at t = 1/2 until 3/4 of the largest second difference
 //!   of their control points, per coordinate, is at most 1/20 of a pixel.
 
+pub static RAW: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
+
 /// 1/4096 of a pixel.
 const UNIT: i64 = 4096;
 fn knob(name: &str) -> String { std::env::var(name).unwrap_or_else(|_| "floor".into()) }
@@ -199,7 +201,12 @@ fn stepper2(pa: i64, pb: i64, qa: i64, qb: i64, mode: &str, side: i32, row: bool
 /// through its row crossings, the points at `breaks` (vertex ys, in units)
 /// and its column crossings to where the row stepper ends.
 fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<i64>, end_out: &mut i64, exact_end: bool, join_x: Option<i64>) -> Vec<(Fixed, Fixed, i64)> {
-    let ((vbx, by), (tx, ty)) = (bottom, top);
+    let ((mut vbx, by), (mut tx, ty)) = (bottom, top);
+    if std::env::var("CG_ZSLOPE").is_ok() && tx != vbx && ((tx - vbx) * UNIT / (ty - by)) == 0 {
+        // a slope that truncates to zero: CG keeps the edge vertical at its outer end
+        let xv = if side > 0 { vbx.min(tx) } else { vbx.max(tx) };
+        vbx = xv; tx = xv;
+    }
     let xch = std::env::var("CG_XCHAIN").is_ok() && start_x.is_some();
     let bx = if xch { floor_div(start_x.unwrap(), UNIT) } else { start_x.unwrap_or(vbx) };
     let sx = if std::env::var("CG_CHAINSLOPE").is_ok() || xch { vbx } else { bx };
@@ -354,7 +361,10 @@ fn rect_fast(polys: &[Vec<Point>], w: usize, h: usize) -> Option<Vec<Vec<u8>>> {
     let p = &polys[0];
     let xs: Vec<f64> = p.iter().map(|q| q.x).collect();
     let ys: Vec<f64> = p.iter().map(|q| q.y).collect();
-    let axis = (0..4).all(|i| { let (a, b) = (p[i], p[(i + 1) % 4]); a.x == b.x || a.y == b.y });
+    let fx = |v: f64| ((v as f32) as f64 * 4096.0 + 0.5).floor() as i64;
+    let axis = if std::env::var("CG_RECTQ").is_ok() {
+        (0..4).all(|i| { let (a, b) = (p[i], p[(i + 1) % 4]); let (dx, dy) = ((fx(b.x) - fx(a.x)).abs(), (fx(b.y) - fx(a.y)).abs()); dx * 4096 < dy || dy * 4096 < dx || dx == 0 || dy == 0 })
+    } else { (0..4).all(|i| { let (a, b) = (p[i], p[(i + 1) % 4]); a.x == b.x || a.y == b.y }) };
     let (x0, x1) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
     let (y0, y1) = (ys.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MIN, f64::max));
     if !axis || x0 == x1 || y0 == y1 { return None; }
@@ -375,6 +385,10 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
     let raws: Vec<Vec<f64>> = clipped.iter().map(|p| p.iter().map(|q| (q.x as f32) as f64 * UNIT as f64).collect()).collect();
     let polys: Vec<Vec<Fixed>> = clipped.iter().map(|p| p.iter().map(|q| (fixed(q.x), fixed(q.y))).collect()).collect();
     let mut breaks: Vec<i64> = polys.iter().flatten().map(|p| p.1).collect();
+    if let Ok(m) = std::env::var("CG_BANDY") {
+        let g: i64 = std::env::var("CG_BANDY_G").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
+        for b in breaks.iter_mut() { *b = match m.as_str() { "floor" => floor_div(*b, g) * g, "ceil" => -floor_div(-*b, g) * g, _ => floor_div(*b + g / 2, g) * g }; }
+    }
     breaks.sort_unstable();
     breaks.dedup();
     // Edges bottom to top, each with its direction in the path.
@@ -438,6 +452,10 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
             .into_iter()
             .map(|(a, b, r)| { let b = if b.1 == top.1 { (b.0 + endoff, b.1) } else { b }; let a = if a.1 == top.1 { (a.0 + endoff, a.1) } else { a }; ((a.0 as f64 / u, a.1 as f64 / u), (b.0 as f64 / u, b.1 as f64 / u), r) })
             .collect::<Vec<_>>();
+        let pcs: Vec<((f64, f64), (f64, f64), i64)> = if std::env::var("CG_VIN").is_ok() && !pcs.is_empty() && pcs.iter().all(|p| p.0 .0 == pcs[0].0 .0 && p.1 .0 == pcs[0].0 .0) {
+            let e = if side > 0 { 1e-7 } else { -1e-7 };
+            pcs.into_iter().map(|(a, b, r)| ((a.0 + e, a.1), (b.0 + e, b.1), r)).collect()
+        } else { pcs };
         if chained { ends_at.insert(top, endx); }
         let last_end_x = endx;
         prev_end.insert(top, last_end_x);
@@ -493,6 +511,13 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                 let bandq = std::env::var("CG_BQ").ok();
                 let multiband = vb.len() > 2 || sub.len() > 2;
                 let snap: Vec<f64> = if bandq.is_some() && (multiband || std::env::var("CG_BQ_ALL").is_ok()) { row.clone() } else { Vec::new() };
+                let oq = std::env::var("CG_OQ").ok().filter(|_| multiband || std::env::var("CG_OQ_ALL").is_ok());
+                let mut obuf: Vec<f64> = vec![0.0; if oq.is_some() { w } else { 0 }];
+                let shmode = std::env::var("CG_OQ_SHALLOW").ok();
+                let mut sbuf: Vec<f64> = vec![0.0; if oq.is_some() && shmode.is_some() { w } else { 0 }];
+                let span_mode = std::env::var("CG_OQ_SPAN").ok();
+                let oqc = std::env::var("CG_OQC").ok();
+                let mut cbuf: Vec<f64> = vec![0.0; if oq.is_some() && (span_mode.is_some() || oqc.is_some()) { w } else { 0 }];
                 for &(_, i) in &active {
                     let e = &edges[i];
                     let before = winding;
@@ -510,6 +535,14 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     let per_edge = std::env::var("CG_PQ_EDGE").is_ok();
                     let mut parts: Vec<f64> = vec![0.0; if per_edge { w } else { 0 }];
                     let mut touched: Vec<usize> = Vec::new();
+                    let (mut bxmin, mut bxmax) = (f64::MAX, f64::MIN);
+                    for &(a_, b_, r) in &e.pieces {
+                        if r != y as i64 { continue; }
+                        let m = (a_.1 + b_.1) / 2.0;
+                        if !((v0 <= m && m < v1) || (bi == vb.len() - 2 && m >= v1) || (bi == 0 && m < v0)) { continue; }
+                        bxmin = bxmin.min(a_.0.min(b_.0)); bxmax = bxmax.max(a_.0.max(b_.0));
+                    }
+                    let band_single = bxmin.floor() == (bxmax - 1e-12).floor();
                     for &(a, b, r) in &e.pieces {
                         if r != y as i64 {
                             continue;
@@ -539,7 +572,9 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                                 let part = match std::env::var("CG_PQ").ok().filter(|_| applies && (role > 0.0 || std::env::var("CG_PQ_BOTH").is_ok())) { Some(v) => { let (u, m) = v.split_once(':').unwrap(); let u: f64 = u.parse().unwrap(); match m { "ceil" => (part * u).ceil() / u, "floor" => (part * u).floor() / u, "round" => (part * u).round() / u, "trunc" => (part * u).trunc() / u, _ => part } } None => part };
                                 let part = if role < 0.0 && applies { match std::env::var("CG_PQC").ok() { Some(v) => { let (uu, m) = v.split_once(':').unwrap(); let uu: f64 = uu.parse().unwrap(); match m { "ceil" => (part * uu).ceil() / uu, "floor" => (part * uu).floor() / uu, "round" => (part * uu).round() / uu, _ => part } } None => part } } else { part };
                                 let padd: f64 = if applies && role > 0.0 { std::env::var("CG_PADD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0) / 4096.0 } else { 0.0 };
-                                row[x] += role * (d - part) + padd;
+                                let single = band_single;
+                                let oq_ok = oq.is_some() && role > 0.0 && (std::env::var("CG_OQ_STEEP").is_err() || single);
+                                if oq_ok { obuf[x] += d - part; } else if role > 0.0 && !sbuf.is_empty() && !single && (multiband || std::env::var("CG_OQ_ALL").is_ok()) { sbuf[x] += d - part; } else if role < 0.0 && !cbuf.is_empty() { cbuf[x] += role * (d - part); } else { row[x] += role * (d - part) + padd; }
                                 if let Ok(dbg) = std::env::var("CG_DEBUG") { let (dx, dy) = dbg.split_once(',').unwrap(); if dx.parse::<usize>().unwrap() == x && dy.parse::<usize>().unwrap() == y { eprintln!("band [{:.5},{:.5}] edge {} role {} piece ({:.5},{:.5})->({:.5},{:.5}) contrib {:.6}", s0, s1, i, role, a.0, a.1, b.0, b.1, (role * (d - part)) * 256.0); } }
                             }
                         }
@@ -554,6 +589,32 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         row[x] -= role * part;
                     }
                 }
+                if let Some(sm) = shmode.as_deref() {
+                    for x in 0..w { if !sbuf.is_empty() && sbuf[x] != 0.0 { let v = sbuf[x] * 4096.0; row[x] += match sm { "ceil" => (v - 1e-7).ceil(), "floor" => (v + 1e-7).floor(), "round" => v.round(), _ => v } / 4096.0; } }
+                }
+                if let Some(m) = oq.as_deref() {
+                    let qf = |v: f64, m: &str| match m { "ceil" => (v - 1e-7).ceil(), "floor" => (v + 1e-7).floor(), "round" => v.round(), _ => v };
+                    for x in 0..w {
+                        let o = obuf[x]; let c = if cbuf.is_empty() { 0.0 } else { cbuf[x] };
+                        if o != 0.0 && c != 0.0 {
+                            match span_mode.as_deref() {
+                                Some("net") => row[x] += qf((o + c) * 4096.0, m) / 4096.0,
+                                Some("netfloor") => row[x] += qf((o + c) * 4096.0, "floor") / 4096.0,
+                                Some("exact") => row[x] += o + c,
+                                Some("sep") => row[x] += qf(o * 4096.0, m) / 4096.0 + c,
+                                _ => row[x] += qf(o * 4096.0, m) / 4096.0 + c,
+                            }
+                        } else {
+                            if o != 0.0 { row[x] += qf(o * 4096.0, m) / 4096.0; }
+                            if c != 0.0 {
+                                match oqc.as_deref() {
+                                    Some(cm) => { let v = -c * 4096.0; let qv = match cm { "ceil" => (v - 1e-7).ceil(), "floor" => (v + 1e-7).floor(), "round" => v.round(), _ => v }; row[x] -= qv / 4096.0; }
+                                    None => row[x] += c,
+                                }
+                            }
+                        }
+                    }
+                }
                 if !snap.is_empty() {
                     let (uu, m) = bandq.as_deref().unwrap().split_once(':').unwrap();
                     let uu: f64 = uu.parse().unwrap();
@@ -566,12 +627,17 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
             }
         }
     }
+    if std::env::var("CG_RAW").is_ok() {
+        let mut g = RAW.lock().unwrap();
+        g.clear();
+        for r in &acc { for v in r { g.push(v.clamp(0.0, 1.0) * 256.0); } }
+    }
     let am = std::env::var("CG_ALPHA").ok();
     acc.into_iter().map(|r| r.into_iter().map(|v| {
         let c = v.clamp(0.0, 1.0);
         let a = match am.as_deref() {
             Some(m) => { let (uu, mode) = m.split_once(':').unwrap(); let uu: f64 = uu.parse().unwrap(); let q = match mode { "round" => (c * uu).round(), "ceil" => (c * uu - 1e-9).ceil(), _ => (c * uu + 1e-9).floor() }; (q * 256.0 / uu + 1e-9).floor() as i64 }
-            None => (c * 256.0 + 1e-9).floor() as i64,
+            None => if std::env::var("CG_DEC").is_ok() { ((c * 256.0 - 1e-9).ceil() as i64 - 1).max(0) } else { (c * 256.0 + 1e-9).floor() as i64 },
         };
         a.min(255) as u8 }).collect()).collect()
 }

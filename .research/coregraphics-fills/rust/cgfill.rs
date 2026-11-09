@@ -248,7 +248,14 @@ fn rect_fast(polys: &[Vec<Point>], w: usize, h: usize) -> Option<Vec<Vec<u8>>> {
     let p = &polys[0];
     let xs: Vec<f64> = p.iter().map(|q| q.x).collect();
     let ys: Vec<f64> = p.iter().map(|q| q.y).collect();
-    let axis = (0..4).all(|i| { let (a, b) = (p[i], p[(i + 1) % 4]); a.x == b.x || a.y == b.y });
+    // Axis-aligned once slopes are truncated to 1/4096: a side whose minor
+    // extent times 4096 is under its major extent counts as straight.
+    let fx = |v: f64| ((v as f32) as f64 * 4096.0 + 0.5).floor() as i64;
+    let axis = (0..4).all(|i| {
+        let (a, b) = (p[i], p[(i + 1) % 4]);
+        let (dx, dy) = ((fx(b.x) - fx(a.x)).abs(), (fx(b.y) - fx(a.y)).abs());
+        dx == 0 || dy == 0 || dx * 4096 < dy || dy * 4096 < dx
+    });
     let (x0, x1) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
     let (y0, y1) = (ys.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MIN, f64::max));
     if !axis || x0 == x1 || y0 == y1 { return None; }
@@ -343,6 +350,13 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     })
                     .collect();
                 active.sort_by(|a, b| a.0.total_cmp(&b.0));
+                // In a row a vertex splits into bands, the pixel an opening edge
+                // passes through (staying in one column for the band) gets the
+                // band's area to its right rounded up to 1/4096 px², unless the
+                // span's closing edge is in the same pixel.
+                let banded = vb.len() > 2 || sub.len() > 2;
+                let mut open_part = vec![0.0f64; w];
+                let mut close_part = vec![0.0f64; w];
                 let mut winding = 0;
                 for &(_, i) in &active {
                     let e = &edges[i];
@@ -358,14 +372,20 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                     if role == 0.0 {
                         continue;
                     }
-                    for &(a, b, r) in &e.pieces {
-                        if r != y as i64 {
-                            continue;
-                        }
+                    let in_band = |a: (f64, f64), b: (f64, f64), r: i64| {
                         let m = (a.1 + b.1) / 2.0;
-                        let first = bi == 0;
-                        let last = bi == vb.len() - 2;
-                        if !((v0 <= m && m < v1) || (last && m >= v1) || (first && m < v0)) {
+                        r == y as i64 && ((v0 <= m && m < v1) || (bi == vb.len() - 2 && m >= v1) || (bi == 0 && m < v0))
+                    };
+                    let (mut xmin, mut xmax) = (f64::MAX, f64::MIN);
+                    for &(a, b, r) in &e.pieces {
+                        if in_band(a, b, r) {
+                            xmin = xmin.min(a.0.min(b.0));
+                            xmax = xmax.max(a.0.max(b.0));
+                        }
+                    }
+                    let one_column = xmin.floor() == (xmax - 1e-12).floor();
+                    for &(a, b, r) in &e.pieces {
+                        if !in_band(a, b, r) {
                             continue;
                         }
                         let Some((a, b)) = clip_y(a, b, lo, hi) else { continue };
@@ -375,12 +395,27 @@ pub fn coverage(polys: &[Vec<Point>], w: usize, h: usize, rule: Rule) -> Vec<Vec
                         if x1 >= 0 {
                             for x in x0..=(x1 as usize) {
                                 let xf = x as f64;
-                                row[x] += role * (d - (integral(a, b, xf + 1.0) - integral(a, b, xf)));
+                                let right = d - (integral(a, b, xf + 1.0) - integral(a, b, xf));
+                                if banded && role > 0.0 && one_column {
+                                    open_part[x] += right;
+                                } else if banded && role < 0.0 {
+                                    close_part[x] -= right;
+                                } else {
+                                    row[x] += role * right;
+                                }
                             }
                         }
                         for v in row.iter_mut().skip((x1 + 1).max(0) as usize) {
                             *v += role * d;
                         }
+                    }
+                }
+                for x in 0..w {
+                    let (o, c) = (open_part[x], close_part[x]);
+                    if o != 0.0 && c == 0.0 {
+                        row[x] += (o * 4096.0 - 1e-7).ceil() / 4096.0;
+                    } else {
+                        row[x] += o + c;
                     }
                 }
             }
