@@ -2674,30 +2674,82 @@ accessory), and to other controllers.
 ## WatchKit storyboards
 
 Compile to `Interface.storyboardc/Interface.plist`, a binary property list
-(`controllers`: per controller `controller-<id>`, its class and items;
-`root`), which linking writes to the link directory itself. Each item is a
-dictionary of its `type` and properties (a label's `text`, `numberOfLines`,
-`fontScale` 1, a text style's WatchKit name as `fontSize` and `fontSize2`,
-`color`, an outlet's `property`; a group's `width`, alignments, `layout`,
-`items`). A label's `alignment` is left out when `left` and is the integer
-3 when the document has none; one line is left out; its keys go in in
-the order `fontSize2`, `color`, `fontSize`, `text`, `property`, `type`,
-`fontScale`, `alignment`, `numberOfLines`, which reproduces all 47 key
-orders of 80 random probes' labels (any subset of those keys). A controller's class is its runtime name: a Swift class of a
-custom module mangled (`_TtC5Other19InterfaceController`), the target's
-module (`customModuleProvider="target"`) being `--module`'s; a controller
-without items has no `items` (four probes and a corpus storyboard). A
-calibrated white of 2/3 is recorded as `B8`; other colours are not
-established.
+(`controllers`: per controller its name, class and items; `root`), with a
+storyboard's notifications in `Interface-notification.plist` beside it;
+linking writes both to the link directory itself. Observed with Xcode
+27.2 by about 200 probes and a corpus of six storyboards (rules_apple's
+and rules_applecross's examples among them), all compiled and linked as
+Xcode does.
 
-The writer shares an object between equal strings and numbers only where
-Interface Builder's writer does (by identity: everything here except the
-controller name, written once as a key and once as `root`), and Info.plist
-shares none. Dictionary keys enumerate in CoreFoundation's order for the
-order they were inserted (foundation-hashing.md): for the compiled plist,
-an order verified only for these key sets, so other items are refused;
-linking reads the plist back and writes it again, each dictionary created
-whole from its keys in the order read, which reproduces the linked file.
+**Controllers.** A controller is named by its `identifier`, else
+`controller-<id>`; its class is its runtime name, a Swift class of a custom
+module mangled (`_TtC5Other19InterfaceController`), the target's module
+(`customModuleProvider="target"`) being `--module`'s. A controller without
+items has no `items`. A SwiftUI `hostingController` is listed as a
+controller of its class. A controller nothing loads (not initial, without
+an identifier, no page leading to it) is left out. Controllers linked by
+`nextPage` segues make the root an array: the chain of pages from the
+initial controller, whatever the document's order; other page graphs are
+refused.
+
+**Items.** Each item is a dictionary of its `type` and properties. Its
+alignment is left out when `left` and is the integer 3 when the document
+has none, for every kind of item. An outlet to it is `property`.
+- A label: its `text`, `numberOfLines` (one, the default, left out),
+  `fontScale` 1, a text style's WatchKit name as `fontSize` and
+  `fontSize2`, `color` (a calibrated white of 2/3 is `B8`; other colours
+  are not established).
+- A group: `width`, `height`, `spacing`, the alignments, `layout`, `items`.
+- A button: its `title`, `width`, `height`, alignments, `enabled` false
+  when disabled, and its action's selector as `action`.
+- An image: its `image`, `width`, `height`, alignments, an aspect-fit
+  `contentMode` as 1, and `duration` false.
+In `Base.lproj`, a label's text and a button's title, unless empty, are a
+dictionary of `fallbackString` (the text) and `localizationKey`
+(`<id>.text`, `<id>.title`).
+
+**Notifications.** A static notification controller is listed under
+`categories`, by its category's identifier: `static`, its items (and its
+class as `controllerClass` when it has one; an empty dictionary without
+either), and `dynamic`, the class of the controller its
+`dynamicNotificationInterface` segue leads to, when there is one. That
+controller is not among the controllers. The outlet
+`notificationAlertLabel` makes its label `alert` true, not a `property`.
+Without a category Xcode writes nothing, and this ibtool refuses it.
+
+**Key order.** Dictionary keys enumerate in CoreFoundation's order for the
+order they were inserted (foundation-hashing.md). Xcode's insertion orders
+are found from probes of random key sets: for each kind of item, an order
+reproducing every key set probed, the last probes chosen where the orders
+still possible disagreed, until none did for any key set an item can have:
+- labels: `alert`, `fontSize2`, `color`, `fontSize`, `text`, `property`,
+  `type`, `fontScale`, `alignment`, `numberOfLines`;
+- groups: `height`, `layout`, `type`, `spacing`, `property`,
+  `verticalAlignment`, `width`, `alignment`, `items`;
+- buttons: `property`, `action`, `type`, `title`, `verticalAlignment`,
+  `enabled`, `height`, `width`, `alignment`;
+- images: `property`, `type`, `image`, `verticalAlignment`, `duration`,
+  `contentMode`, `height`, `width`, `alignment`.
+
+**Shared objects.** Interface Builder's writer shares objects by identity,
+which follows from how ibtool makes its strings (about 15 probes):
+- Strings that are tagged pointers (objc4's: up to 7 ASCII characters, 8
+  or 9 from its six-bit alphabet, 10 or 11 from the five-bit one) are one
+  object wherever they occur; longer strings are a new object at each use
+  (an outlet `interfaceImage` in five controllers is written five times).
+- Keys, and the type `image`, are constants, shared among themselves, apart
+  from an equal tagged string (an outlet `image` is another object); the
+  other types are tagged strings (an outlet `label` is the type's object).
+- A controller's identifier is one object as its key and in the root,
+  whatever its length; a generated `controller-<id>` name is formatted for
+  each and never shared.
+- Numbers are shared. A boolean is referred to as the first equal one, but
+  written again where it occurs, referred to by nothing.
+
+Linking reads the plist back and writes it again, each dictionary created
+whole from its keys in the order read. Read back, the objects keep their
+identities, but constants become tagged strings when they can be (the type
+`image` and an outlet `image` are then one object).
 
 ## AppKit
 

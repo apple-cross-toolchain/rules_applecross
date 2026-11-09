@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder.WatchKit.Storyboard" version="3.0" toolsVersion="23504" targetRuntime="watchKit" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES" initialViewController="ctl-aa-bbb">
+    <device id="watch38"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBWatchKitPlugin" version="23504"/>
+    </dependencies>
+    <scenes>
+        <scene sceneID="sc1-aa-bbb">
+            <objects>
+                <controller identifier="First" id="ctl-aa-bbb" customClass="InterfaceController" customModule="App" customModuleProvider="target">
+                    <items>
+                        <group width="1" alignment="left" layout="vertical" spacing="2" id="grp-aa-bbb">
+                            <items>
+                                <label alignment="center" text="foo" numberOfLines="0" id="lb1-aa-bbb"/>
+                                <button width="1" alignment="left" title="A title too long to tag" id="btn-aa-bbb">
+                                    <connections>
+                                        <action selector="pressedButtonWithSender:" destination="ctl-aa-bbb" id="act-aa-bbb"/>
+                                    </connections>
+                                </button>
+                            </items>
+                        </group>
+                        <imageView width="1" height="40" alignment="left" verticalAlignment="center" image="pic" contentMode="scaleAspectFit" id="im1-aa-bbb"/>
+                    </items>
+                    <connections>
+                        <outlet property="image" destination="im1-aa-bbb" id="o11-aa-bbb"/>
+                        <outlet property="label" destination="lb1-aa-bbb" id="o12-aa-bbb"/>
+                        <outlet property="group" destination="grp-aa-bbb" id="o13-aa-bbb"/>
+                        <segue destination="ct2-aa-bbb" kind="relationship" relationship="nextPage" id="nxt-aa-bbb"/>
+                    </connections>
+                </controller>
+            </objects>
+        </scene>
+        <scene sceneID="sc2-aa-bbb">
+            <objects>
+                <controller identifier="SecondPageController" id="ct2-aa-bbb" customClass="InterfaceController" customModule="App" customModuleProvider="target">
+                    <items>
+                        <label alignment="left" text="foo" id="lb2-aa-bbb"/>
+                        <button alignment="center" enabled="NO" title="A title too long to tag" id="bt2-aa-bbb"/>
+                    </items>
+                    <connections>
+                        <outlet property="interfaceLabel" destination="lb2-aa-bbb" id="o21-aa-bbb"/>
+                    </connections>
+                </controller>
+            </objects>
+        </scene>
+        <scene sceneID="sc3-aa-bbb">
+            <objects>
+                <notificationController id="ntf-aa-bbb">
+                    <items>
+                        <label alignment="left" text="Alert Label" id="lb3-aa-bbb"/>
+                    </items>
+                    <notificationCategory key="notificationCategory" identifier="myCategory" id="cat-aa-bbb"/>
+                    <connections>
+                        <outlet property="notificationAlertLabel" destination="lb3-aa-bbb" id="o31-aa-bbb"/>
+                        <segue destination="dyn-aa-bbb" kind="relationship" relationship="dynamicNotificationInterface" id="seg-aa-bbb"/>
+                    </connections>
+                </notificationController>
+            </objects>
+        </scene>
+        <scene sceneID="sc4-aa-bbb">
+            <objects>
+                <controller id="dyn-aa-bbb" customClass="NotificationController" customModule="App" customModuleProvider="target"/>
+            </objects>
+        </scene>
+    </scenes>
+</document>

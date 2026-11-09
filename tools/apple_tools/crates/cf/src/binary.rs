@@ -7,11 +7,14 @@ struct Writer<'a> {
     objects: Vec<Vec<u8>>,
     ref_size: usize,
     /// Whether an equal string or number already written is written again
-    /// or shared: Apple's writer shares by identity, so only the values a
-    /// producer reuses (constants, small numbers, one object in two places)
-    /// are shared.
-    share: &'a dyn Fn(&Value, &Position) -> bool,
-    written: Vec<(Value, usize)>,
+    /// or shared, and among which values: Apple's writer shares by
+    /// identity, so only the values a producer reuses (constants, small
+    /// numbers, one object in two places, strings it interns for one part
+    /// of a document) are shared, each in its scope.
+    scope: &'a dyn Fn(&Value, &Position) -> Option<String>,
+    written: Vec<(Value, String, usize)>,
+    /// Whether booleans are shared too (CoreFoundation's are singletons).
+    booleans: bool,
     dictionaries: Dictionaries,
 }
 
@@ -74,15 +77,22 @@ impl Writer<'_> {
 
     /// Writes `v` and everything below it; returns its object number.
     fn add(&mut self, v: &Value, at: &mut Vec<Step>) -> usize {
-        let shareable = matches!(v, Value::String(_) | Value::Integer(_) | Value::Real(_)) && (self.share)(v, at);
-        if shareable {
-            if let Some((_, n)) = self.written.iter().find(|(w, _)| w == v) {
+        let eligible = matches!(v, Value::String(_) | Value::Integer(_) | Value::Real(_)) || (self.booleans && matches!(v, Value::Boolean(_)));
+        let scope = if eligible { (self.scope)(v, at) } else { None };
+        if let Some(scope) = &scope {
+            if let Some((_, _, n)) = self.written.iter().find(|(w, s, _)| w == v && s == scope) {
+                // A boolean is referred to as the first, but written again
+                // where it occurs, referred to by nothing (WatchKit
+                // interfaces' booleans, probes).
+                if let Value::Boolean(b) = v {
+                    self.objects.push(vec![if *b { 0x09 } else { 0x08 }]);
+                }
                 return *n;
             }
         }
         let me = self.objects.len();
-        if shareable {
-            self.written.push((v.clone(), me));
+        if let Some(scope) = scope {
+            self.written.push((v.clone(), scope, me));
         }
         self.objects.push(Vec::new());
         let mut out = Vec::new();
@@ -176,12 +186,22 @@ pub fn to_bytes(v: &Value) -> Vec<u8> {
 /// As `to_bytes`, sharing the equal strings and numbers `share` accepts,
 /// with dictionaries filled as `dictionaries` says.
 pub fn to_bytes_with(v: &Value, share: &dyn Fn(&Value, &Position) -> bool, dictionaries: Dictionaries) -> Vec<u8> {
+    write(v, &|v, at| share(v, at).then(String::new), false, dictionaries)
+}
+
+/// As `to_bytes_with`, equal values (booleans too) shared only within the
+/// scope `scope` names for each (none: never shared).
+pub fn to_bytes_scoped(v: &Value, scope: &dyn Fn(&Value, &Position) -> Option<String>, dictionaries: Dictionaries) -> Vec<u8> {
+    write(v, scope, true, dictionaries)
+}
+
+fn write(v: &Value, scope: &dyn Fn(&Value, &Position) -> Option<String>, booleans: bool, dictionaries: Dictionaries) -> Vec<u8> {
     // References are sized for the objects written; count those first.
-    let mut probe = Writer { objects: Vec::new(), ref_size: 8, share, written: Vec::new(), dictionaries };
+    let mut probe = Writer { objects: Vec::new(), ref_size: 8, scope, written: Vec::new(), booleans, dictionaries };
     probe.add(v, &mut Vec::new());
     let n = probe.objects.len();
     debug_assert!(n <= count(v));
-    let mut w = Writer { objects: Vec::with_capacity(n), ref_size: width(n), share, written: Vec::new(), dictionaries };
+    let mut w = Writer { objects: Vec::with_capacity(n), ref_size: width(n), scope, written: Vec::new(), booleans, dictionaries };
     w.add(v, &mut Vec::new());
     let mut out = b"bplist00".to_vec();
     let mut offsets = Vec::with_capacity(n);
