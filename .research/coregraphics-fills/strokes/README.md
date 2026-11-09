@@ -113,4 +113,12 @@ within a band of widths for reasons I haven't found.
   exactly, but the split between rows differs from area by up to ±2, and
   a 1/256 translation sweep jitters step by step. That looks like
   fixed-point area arithmetic I haven't identified.
-- The corpus has one thin block (logo-open live, w = 1.0 at 1×).
+- In shallow width-1 lines each column is a band [bot, bot + T] in
+  integer 1/256 units with T = floor(256·secθ). The bottoms step like a
+  DDA, but their average slope isn't the line's: a rise of 4/256 over 24
+  px rises 4 units over the 22 interior columns, and −12 gives −10. It
+  looks like interpolation between rounded values at the end columns; I
+  haven't found the exact rounding (thin11.py, thin12.py).
+- The corpus has one thin block (logo-open live, w = 1.0 at 1×). It is
+  now the largest remaining corpus gap: filling CoreGraphics' own width-1
+  outline gets 770 of its 1,259 edge pixels wrong, mostly by ±1 to 3.
