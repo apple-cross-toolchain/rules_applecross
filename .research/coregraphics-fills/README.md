@@ -103,6 +103,18 @@ of a level of the boundary.
   with join wedges into one self-overlapping polygon, round joins and caps
   as cubics, and curves offset as cubics (two per side for a simple curve).
   A stroke 1 px wide or less, including exactly 1, takes another rasterizer.
+  The outline construction is plain:
+  - **Polyline:** the left offset of each segment; straight across to the
+    next segment's left offset on the inner side, with no join, just a
+    self-overlap; a butt cap; then the right side back, with the miter
+    point at the outer corner (none for bevel). All coordinates are exact
+    double offsets.
+  - **Curves:** each side is offset cubics (one per side for a symmetric
+    curve, two for an asymmetric one). Their ends are the exact normal
+    offsets and their handles keep the original tangent directions, scaled
+    (1.1635 in the probe) so the curve's midpoint lands on the offset of
+    the original midpoint. This is not Tiller–Hanson; the split rule isn't
+    found yet.
 - **Corpus PDFs.** `pdfpaths.swift` walks a page with `CGPDFScanner`,
   including form XObjects, and prints each fill in device pixels. Over the
   26 PDFs left in the corpus's working directory at 2×, the model gets

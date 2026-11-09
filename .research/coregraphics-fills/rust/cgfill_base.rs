@@ -269,6 +269,17 @@ fn pieces(bottom: Fixed, top: Fixed, breaks: &[i64], side: i32, start_x: Option<
         }
     }
     ends.sort_by_key(|p| p.1);
+    let rs = std::env::var("CG_RESTART").ok();
+    if rs.as_deref() == Some("all") || (rs.as_deref() == Some("open") && side > 0) || (rs.as_deref() == Some("close") && side < 0) {
+        let (mut anum, mut ay) = (ends[0].0 * UNIT, ends[0].1);
+        for i in 1..ends.len() {
+            let yv = ends[i].1;
+            let x = floor_div(anum + (yv - ay) * mr, UNIT);
+            ends[i].0 = x;
+            let is_band = breaks.binary_search(&yv).is_ok() && yv != ty;
+            if is_band { anum = x * UNIT; ay = yv; }
+        }
+    }
     let mut out = Vec::new();
     for w in ends.windows(2) {
         let (a, b) = (w[0], w[1]);
