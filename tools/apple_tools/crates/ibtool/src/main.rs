@@ -105,7 +105,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         let localizable = input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"));
         // An AppKit xib.
         if xml.contains("type=\"com.apple.InterfaceBuilder3.Cocoa.XIB\"") {
-            return match appkit::compile_xib(&xml, module.as_deref()) {
+            return match appkit::compile_xib(&xml, module.as_deref(), localizable) {
                 Ok(nib) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
                 Err(e) => skip(format!("{}: {e}", input.display())),
             };

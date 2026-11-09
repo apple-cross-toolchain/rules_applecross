@@ -14,6 +14,10 @@ pub enum Value {
     New(Object),
     /// An object encoded earlier, by name.
     Ref(String),
+    /// An object by name, never defined here even if not encoded yet (an
+    /// AppKit nib's conditional references, as a menu item's to its menu):
+    /// resolved once everything is encoded.
+    Conditional(String),
 }
 
 pub struct Object {
@@ -131,6 +135,14 @@ impl Encoder {
                 Value::Data(d) => Stored::Data(d),
                 Value::Nil => Stored::Nil,
                 Value::New(child) => Stored::Object(self.encode(child)),
+                Value::Conditional(name) => match self.names.get(&name) {
+                    Some(&n) => Stored::Object(n),
+                    None => {
+                        let at = self.objects[me as usize].2.len();
+                        self.pending.push((me, at, name));
+                        Stored::Object(u32::MAX)
+                    }
+                },
                 Value::Ref(name) => match self.names.get(&name) {
                     Some(&n) => Stored::Object(n),
                     None if self.defs.contains_key(&name) => {
