@@ -601,7 +601,10 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             ("customModuleProvider", None),
         ],
     )?;
-    only_children(n, &["windowStyleMask", "windowPositionMask", "rect", "value", "view", "point", "connections"])?;
+    only_children(
+        n,
+        &["windowStyleMask", "windowPositionMask", "windowCollectionBehavior", "rect", "value", "view", "point", "connections"],
+    )?;
     for p in children(n, "point") {
         if p.attribute("key") != Some("canvasLocation") {
             return fail("a window's point other than its canvas location is not supported by this ibtool");
@@ -736,6 +739,32 @@ fn window(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     ));
     if let Some(name) = n.attribute("frameAutosaveName") {
         values.push(("NSFrameAutosaveName", nib.string(name)));
+    }
+    // Its collection behaviour, NSWindowCollectionBehavior's bits (13
+    // probes; Interface Builder ignores the others).
+    if let Some(behavior) = child(n, "windowCollectionBehavior", "collectionBehavior") {
+        let mut bits = 0;
+        for a in behavior.attributes().filter(|a| a.name() != "key") {
+            if a.value() != "YES" {
+                return fail(format!("a window collection behaviour {}=\"{}\" is not supported by this ibtool", a.name(), a.value()));
+            }
+            bits |= match a.name() {
+                "canJoinAllSpaces" => 1,
+                "moveToActiveSpace" => 2,
+                "managed" => 4,
+                "transient" => 8,
+                "stationary" => 16,
+                "participatesInCycle" => 32,
+                "ignoresCycle" => 64,
+                "fullScreenPrimary" => 128,
+                "fullScreenAuxiliary" => 256,
+                "fullScreenNone" => 512,
+                "fullScreenAllowsTiling" => 2048,
+                "fullScreenDisallowsTiling" => 4096,
+                other => return fail(format!("the window collection behaviour {other} is not supported by this ibtool")),
+            };
+        }
+        values.push(("NSWindowCollectionBehavior", Value::Int(bits)));
     }
     // Restorable unless it says not (a probe).
     values.push(("NSWindowIsRestorable", Value::Bool(n.attribute("restorable").is_none())));
@@ -1631,33 +1660,60 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
         b.push(0);
         Value::Data(b)
     };
-    let fallback = Object::new(
-        "NSColor",
-        vec![
-            ("NSColorSpace", Value::Int(3)),
-            ("NSWhite", nul(white.unwrap_or_default())),
-            ("NSCustomColorSpace", space),
-            ("NSComponents", Value::Data(components.as_bytes().to_vec())),
-            ("NSLinearExposure", Value::Data(b"1".to_vec())),
-        ],
-    );
+    // Colours resolving to the same one share it (a corpus xib's label and
+    // control text colours).
+    let fallback = nib.shared(format!("resolved:{white:?}:{components}"), || {
+        Object::new(
+            "NSColor",
+            vec![
+                ("NSColorSpace", Value::Int(3)),
+                ("NSWhite", nul(white.unwrap_or_default())),
+                ("NSCustomColorSpace", space),
+                ("NSComponents", Value::Data(components.as_bytes().to_vec())),
+                ("NSLinearExposure", Value::Data(b"1".to_vec())),
+            ],
+        )
+    });
     let catalog = nib.string("System");
     let color_name = nib.string(name);
     Ok(nib.shared(key, || {
         Object::new(
             "NSColor",
-            vec![
-                ("NSColorSpace", Value::Int(6)),
-                ("NSCatalogName", catalog),
-                ("NSColorName", color_name),
-                ("NSColor", Value::New(fallback)),
-            ],
+            vec![("NSColorSpace", Value::Int(6)), ("NSCatalogName", catalog), ("NSColorName", color_name), ("NSColor", fallback)],
         )
     }))
 }
 
 /// A font: a system font by its metafont (AppKit's private names, its
 /// default size and `NSfFlags`, 26 probes), or a font by name (flags 16).
+/// A control's font, or with `usesAppearanceFont` the system font: a
+/// button's of its control size (`button`: 13, 11 or 9), a text field's at
+/// 13 whatever its size, sized by the appearance
+/// (`NSFontUsesAppearanceFontSize`; six probes).
+fn appearance_font(nib: &mut Nib, n: Node, button: Option<f64>) -> Result<Value, String> {
+    if n.attribute("usesAppearanceFont").is_none() {
+        return font(nib, n);
+    }
+    only_attributes(n, &[("key", None), ("usesAppearanceFont", Some("YES"))])?;
+    let name = nib.string(".AppleSystemUIFont");
+    Ok(match button {
+        Some(size) => nib.shared(format!("font:.AppleSystemUIFont:{size}:1044"), || {
+            Object::new("NSFont", vec![("NSName", name), ("NSSize", Value::Double(size)), ("NSfFlags", Value::Int(0x414))])
+        }),
+        None => nib.shared("font:appearance".to_string(), || {
+            Object::new(
+                "NSFont",
+                vec![
+                    ("NSName", name),
+                    ("NSFontUsesAppearanceFontSize", Value::Bool(true)),
+                    ("NSSize", Value::Double(13.0)),
+                    ("NSfFlags", Value::Int(0x414)),
+                ],
+            )
+        }),
+    })
+}
+
 fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
     only_attributes(n, &[("key", None), ("metaFont", None), ("size", None), ("name", None), ("family", None)])?;
     let size = n.attribute("size").map(number).transpose()?;
@@ -1733,8 +1789,11 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     content_sized(nib, n)?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
-    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    // Its cell comes before its own constraints in the objects' list (a
+    // corpus xib).
     let cell = child(n, "textFieldCell", "cell").ok_or("a text field without a cell")?;
+    c.parents.push((object_name(attr(cell, "id")?), name.clone()));
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
     only_attributes(
         cell,
         &[
@@ -1824,7 +1883,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     let mut cell_values = vec![("NSCellFlags", Value::Int(signed(flags))), ("NSCellFlags2", Value::Int(signed(flags2)))];
     cell_values.push(("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))));
     let font_node = child(cell, "font", "font").ok_or("a text field cell without a font")?;
-    cell_values.push(("NSSupport", font(nib, font_node)?));
+    cell_values.push(("NSSupport", appearance_font(nib, font_node, None)?));
     cell_values.push(("NSControlView", reference(name.clone())));
     if has("drawsBackground") {
         cell_values.push(("NSDrawsBackground", Value::Bool(true)));
@@ -1833,7 +1892,6 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     cell_values.push(("NSBackgroundColor", color(nib, bg)?));
     let fg = child(cell, "color", "textColor").ok_or("a text field cell without a text colour")?;
     cell_values.push(("NSTextColor", color(nib, fg)?));
-    c.parents.push((cell_name.clone(), name.clone()));
     values.push(("NSEnabled", Value::Bool(true)));
     values.push(("NSCell", Value::New(Object::new("NSTextFieldCell", cell_values).named(cell_name))));
     // A localizable document's controls allow a logical (right-to-left)
@@ -1892,6 +1950,9 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         c.connection_sources.push(id.to_string());
     }
     let cell = child(n, "buttonCell", "cell").ok_or("a button without a cell")?;
+    // Its cell comes before its own constraints in the objects' list (a
+    // probe).
+    c.parents.push((object_name(attr(cell, "id")?), name.clone()));
     only_attributes(
         cell,
         &[
@@ -2046,7 +2107,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         ("NSCellFlags", Value::Int(signed(flags))),
         ("NSCellFlags2", Value::Int(signed(flags2))),
         ("NSContents", nib.text(cell_id, "title", cell.attribute("title").unwrap_or(""))),
-        ("NSSupport", font(nib, font_node)?),
+        ("NSSupport", appearance_font(nib, font_node, Some([13.0, 11.0, 9.0][control_size as usize]))?),
         ("NSControlView", reference(name.clone())),
         ("NSButtonFlags", Value::Int(signed(flags_b))),
         ("NSButtonFlags2", Value::Int(signed(flags_b2))),
@@ -2081,7 +2142,6 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
             values.insert(at, ("NSHuggingPriority", nib.string(&hugging)));
         }
     }
-    c.parents.push((cell_name.clone(), name.clone()));
     values.push(("NSEnabled", Value::Bool(true)));
     values.push(("NSCell", Value::New(Object::new("NSButtonCell", cell_values).named(cell_name))));
     values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));

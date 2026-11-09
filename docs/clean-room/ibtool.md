@@ -2746,6 +2746,10 @@ rectangle, centred on the screen rectangle along an axis without a strut;
 `NSWTFlags`; title, an empty subtitle, the class; the content sizes'
 limits, then the content view, the screen rectangle, the frame's limits
 (the content's plus a 32-point title bar when titled), the autosave name,
+the collection behaviour (`NSWindowCollectionBehavior`'s bits: can join
+all spaces 1, move to active space 2, managed 4, transient 8, stationary
+16, participates in cycle 32, ignores cycle 64, full screen primary 128,
+auxiliary 256, none 512, allows tiling 2048, disallows tiling 4096),
 restorability and, in a xib, empty full-screen sizes. `NSWTFlags`: deferred
 0x20000000 (the default), not released when closed 0x40000000, shadowless
 0x1000, hidden on deactivation 0x80000000, tooltips while inactive 0x2000
@@ -2814,7 +2818,12 @@ alignment in bits 26 to 28 (left 0, right 1, center 2, justified 3, natural
 0x20000 and mini 0x40000 sizes, sending on end editing 0x400000, no focus
 ring 0x8000, no undo 0x1000, truncating the last line 0x100, single line
 0x40. System fonts are `.AppleSystemUIFont…` with each metafont's size and
-`NSfFlags`; named fonts flags 16. A System catalog colour carries the
+`NSfFlags`; named fonts flags 16. An appearance font (`usesAppearanceFont`)
+is a text field's system font at 13 points with
+`NSFontUsesAppearanceFontSize`, whatever its control size, and a button's
+plain system font of its control size (13, 11, 9). A control's cell comes
+before the control's own constraints in the objects' list. System colours
+that resolve to the same colour share it. A System catalog colour carries the
 colour it resolves to, in Generic Gray Gamma 2.2 or sRGB with the profile
 embedded: the Mac's own profiles, which the SDK archive carries
 (`tools/package-sdks.sh`) rather than this repository.
