@@ -1,4 +1,4 @@
-# CoreGraphics fills (research, tabled 2026-11-09)
+# CoreGraphics fills (research, 2026-11-09)
 
 Can this actool draw the bitmaps Xcode makes from PDF vector images byte for
 byte, instead of approximately (`--config=relax_actool_vector`)? Of the
@@ -7,8 +7,10 @@ hold only PDFs. This is a time-boxed probe, black-box throughout: CoreGraphics'
 public API from Swift on the Mac. It is not for merging, and the actool is
 unchanged.
 
-Status: tabled at Logan's three-hour mark and tracked as outstanding. The
-Metal project comes first.
+Status: in progress, inside a three-hour time-box (16:00Z to 19:00Z on
+2026-11-09). An earlier version of this file said "tabled"; it was written
+before the time-box ended. The scan conversion of sloped edges is now
+found (below).
 
 ## Established
 
@@ -26,33 +28,60 @@ Metal project comes first.
   (`floor((s + 1)/32)`). The end edge is exact. Alpha is
   `floor(ax · ay / 255)`. This matches 400 of 400 random rectangles and every
   strip (`span_table.json`, `rects.json`).
-- **Other paths get analytic area coverage.** Alpha is `floor(256 · area)`,
-  capped at 255. An edge's vertical extent is quantized to the 1/256 grid:
-  its lower end floors, and its upper end floors from just below itself, so
-  a full pixel gives 255. Very small coverage gives 0. Exact area matches a
-  45° sweep completely, 99.3% of 2000 random half-planes
-  (`halfplanes.json`), and about 95% of triangle edge pixels (`tri.py`,
-  `area2.py`).
+- **Other paths: two fixed-point DDAs per edge and signed area per pixel.**
+  Found by black-box probing with `cov` (`raster.py` is the model):
+  1. Path coordinates go through float32, then round half up to 1/4096 of a
+     pixel.
+  2. The path is clipped to the canvas first. The top boundary fits best at
+     H + 1, which is not understood yet.
+  3. Each edge is stepped from its lower endpoint by two independent DDAs.
+     Row crossings (x at each integer y) step by dx/dy truncated to 1/4096.
+     Column crossings (y at each integer x) step by dy/dx truncated to
+     1/4096. In each, the first crossing is the vertex plus
+     `floor4096(frac · slope)`.
+  4. The crossings, merged in order along the edge, make a polyline. Pieces
+     between two row crossings belong to that row, even where a column
+     crossing has drifted outside it (the two DDAs drift apart on long
+     edges).
+  5. Each pixel accumulates the signed integral of `clamp(x − X, 0, 1) dy`
+     over its row's pieces (Green's theorem). Alpha is
+     `floor(256 · |area|)`, capped at 255.
+
+  The truncated slopes make long edges drift measurably: −0.022 px over 390
+  rows for a slope of 0.522, exactly 390 times the truncation error. That
+  drift is how the steppers were found.
+- **Accuracy of the model** (pixels with 0 < alpha < 255, or wrongly
+  predicted):
+
+  | Test | Wrong / total |
+  | --- | --- |
+  | 20 random edges, 360–396 rows long, both windings (`gen20.py`, `signed.py`) | **0 / 10291** |
+  | 240 random triangles in 8×8, vertices inside pixels (`trieval.py`) | 30 / ~3000 (1%) |
+  | 200 wedges in 12×12, far vertices clipped (`wedge.py`) | 20 / 3208 (0.6%) |
+
+  Nearly every remaining miss is within 0.07 of an alpha level, which is
+  one 1/4096 unit of some crossing. A few sit exactly on an integer area
+  next to a clip edge. They are unit-level rounding details of the
+  vertex and clip handling, not structure. They were tested and don't come
+  from per-piece area rounding, a constant bias, float32 slopes, or
+  snapping edge extents to 1/256.
 - **Curves are flattened uniformly** into a power-of-two number of segments
   by size (8, 16 and 32 for curves of about 4, 14 and 57 pixels).
 
-## What blocks exact fills
+## Remaining before exact fills
 
-A residual error of up to about ±0.05 of an alpha level in the general
-path, which flips about 1% of edge pixels (more where vertices lie inside
-pixels). It is some internal arithmetic not yet identified. These were
-tested and don't reproduce it:
-
-- vertex quantization from 1/256 to 1/65536 (floor, round);
-- quantizing where edges cross pixel sides;
-- float32 arithmetic;
-- rounding per 1/256 band;
-- fixed-point stepping along edges (DDA);
-- a FreeType-style cell rasterizer (`gray.py`).
-
-An icon has hundreds of edge pixels, so even 1% means no catalog would
-compile byte for byte. Also not yet examined: strokes (joins, caps, dashes),
-clipping, and CoreSVG for SVGs.
+- The unit-level residuals at vertices and clip edges (about 1% of edge
+  pixels).
+- The clip box (why H + 1 at the top) and vertical edges. Vertical edges
+  probe at `ceil(x · 4096) − 1`, and rectangles take their own fast path,
+  solved.
+- Curves through the same rasterizer: the flattening rule exactly.
+- Even-odd fills, several subpaths, and overlapping paths composited in
+  8 bits.
+- Not examined yet: strokes (joins, caps, dashes), clipping paths, and
+  CoreSVG for SVGs.
+- A Rust implementation in actool, checked against `cov` on the corpus's
+  46 PDF-only catalogs.
 
 ## Tools
 
@@ -63,5 +92,10 @@ clipping, and CoreSVG for SVGs.
 - `mkpdf.py`: writes a one-page PDF.
 - `compile.sh`, `bitmap.sh`, `check.sh`, `payloads.py`: compare Xcode's
   vector renditions with CoreGraphics' drawing.
-- `model.py`, `scan.py`, `area2.py`, `gray.py`, `tri.py`: the coverage
-  models tested.
+- `raster.py`: the current model of the general fill.
+- `trieval.py`, `wedge.py`, `gen20.py`, `signed.py`, `fastfit.py`,
+  `anchor3.py`, `rowfit.py`, `drift3.py`: probes and scorers for triangles,
+  wedges, long edges and drift. They import each other from `/tmp/cg`, with
+  `cov` built there from `cov.swift`.
+- `model.py`, `scan.py`, `area2.py`, `gray.py`, `tri.py`: earlier coverage
+  models, superseded by `raster.py`.
