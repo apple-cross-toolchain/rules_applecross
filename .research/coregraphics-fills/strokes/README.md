@@ -82,25 +82,34 @@ polylines with every join and cap (`strokecmp.py SEED N CLOSED JOIN CAP`):
 
 `rust/cgstroke.rs` ports this stroker (the probe's `s W J C` command
 strokes and fills; `S W J C` prints the outline). It matches
-copy(strokingWithWidth:) on 600 of 600 random polylines. Two more fitted
-rules are on top of the Python:
-- A piece with a control point on an endpoint and a chord over 1 px is
-  rejected. CoreGraphics does reject such pieces although every error
-  measure I tried is tiny, but the threshold varies with width and shape,
-  so this rule is fitted.
-- A piece whose zero-width refit has a negative handle is rejected,
-  except the middle piece and pieces under 0.1 px. This raises random
-  single curves from 111 to 119 of 400 matching.
+copy(strokingWithWidth:) on 600 of 600 random polylines. On top of the
+Python it has these rules:
+- Acceptance tests the piece that will actually be emitted (the fallback
+  for tiny and middle pieces).
+- A second check: the piece's own points at t = 0.1 … 0.9 must lie within
+  0.15 px of the true offset curve. The tolerance is only bounded: it must
+  exceed 0.1106 so the 20 measured boundaries stay exact, and results are
+  flat from 0.115 to 0.15. This is what makes CoreGraphics split down into
+  cusps, where the true offset forms a swallowtail (a2otol.py, cusp.py).
+- Fitted: a piece with a control point on an endpoint and a chord over
+  1 px is rejected, and so is a piece whose zero-width refit has a negative
+  handle (except the middle piece and pieces under 0.1 px). Turning either
+  off makes the corpus or random curves worse.
 
-With these, 17 of 22 corpus curves that split match. End to end, stroking
-and filling in Rust against CoreGraphics' own stroke render, the corpus
-wide strokes are wrong in 25, 70 and 107 of 6,529, 15,302 and 23,914 edge
-pixels at 1×, 2× and 3× (corprs.py). The five curves that still differ:
-two that turn faster than the offset radius (CoreGraphics emits runs of
-lines there), two chains of tiny pieces with one extra split each, and
-one piece containing an inflection near its end that CoreGraphics halves
-with errors near 0.002. A further 2% of convex-curve sides are rejected
-within a band of widths for reasons I haven't found.
+End to end, stroking and filling in Rust against CoreGraphics' own stroke
+render, corpus wide strokes are wrong in 11, 16 and 15 of 6,529, 15,302
+and 23,914 edge pixels at 1×, 2× and 3× (corprs.py, corprs2.py). 17 of 22
+corpus curves that split match element for element.
+
+Still open:
+- Inside a cusp, CoreGraphics emits a fan of lines at dyadic sub-pieces
+  (points exactly on the true offset at parameters 1/8, 5/16 and 7/16 of
+  the piece), then a cubic. I emit cubics there.
+- Which pieces use the fallback point instead of regular handles. It isn't
+  the sign of either handle length (negmode.py: 422 pieces whose final
+  handle is negative keep the regular handle).
+- About 2% of convex-curve sides are rejected within a band of widths for
+  reasons I haven't found.
 
 ## Thin strokes (w ≤ 1)
 

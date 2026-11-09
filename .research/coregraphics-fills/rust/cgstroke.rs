@@ -233,9 +233,14 @@ fn piece_one(q: &[P; 4], d: f64) -> El {
     let mut l1 = (2.0 * (x1.0 - q[0].0) - h1.0 / 2.0) * u0.0 + (2.0 * (x1.1 - q[0].1) - h1.1 / 2.0) * u0.1;
     let mut l2 = -((2.0 * (x2.0 - q[3].0) - h2.0 / 2.0) * u3.0 + (2.0 * (x2.1 - q[3].1) - h2.1 / 2.0) * u3.1);
     let g = |a: f64, b: f64| 4.0 / 3.0 * a + (b * b - a * a) / (6.0 * a * (1.0 + b * b));
-    let (neg1, neg2) = (l1 < 0.0, l2 < 0.0);
+    let (mut neg1, mut neg2) = (l1 < 0.0, l2 < 0.0);
     l1 -= g(t1, t2) * d;
     l2 -= g(t2, t1) * d;
+    match std::env::var("CG_NEGMODE").as_deref() {
+        Ok("final") => { neg1 = l1 < 0.0; neg2 = l2 < 0.0; }
+        Ok("either") => { neg1 = neg1 || l1 < 0.0; neg2 = neg2 || l2 < 0.0; }
+        _ => {}
+    }
     let mut c1 = (p0.0 + u0.0 * l1, p0.1 + u0.1 * l1);
     let mut c2 = (p3.0 - u3.0 * l2, p3.1 - u3.1 * l2);
     if neg1 || neg2 {
@@ -279,7 +284,10 @@ fn fallback(q: &[P; 4], d: f64) -> El {
 /// Whether one side's piece is close enough: the true offset at five
 /// parameters within 0.1 px of it.
 fn accept(q: &[P; 4], d: f64) -> bool {
-    let El::C(c1, c2, c3) = piece_one(q, d) else { return false };
+    accept_piece(q, d, piece_one(q, d))
+}
+fn accept_piece(q: &[P; 4], d: f64, piece: El) -> bool {
+    let El::C(c1, c2, c3) = piece else { return false };
     let (u0, u3) = seg_dirs(&Seg::Cubic(*q));
     let c = [(q[0].0 - u0.1 * d, q[0].1 + u0.0 * d), c1, c2, c3];
     if std::env::var("CG_REVREJ").is_ok() {
@@ -287,10 +295,20 @@ fn accept(q: &[P; 4], d: f64) -> bool {
         let b = (c[3].0 - c[2].0) * u3.0 + (c[3].1 - c[2].1) * u3.1;
         if (a < 0.0 || b < 0.0) && dist(q[0], q[3]) >= 0.1 { return false; }
     }
-    [0.1, 0.3, 0.5, 0.7, 0.9].iter().all(|&t| {
+    let fwd = [0.1, 0.3, 0.5, 0.7, 0.9].iter().all(|&t| {
         let e = nearest(|x| bez(&c, x), off(q, t, d));
         !(e > 0.1)
-    })
+    });
+    if !fwd { return false; }
+    let tol2: f64 = std::env::var("CG_A2O").ok().and_then(|v| v.parse().ok()).unwrap_or(0.15);
+    if tol2.is_finite() {
+        let ok2 = [0.1, 0.3, 0.5, 0.7, 0.9].iter().all(|&t| {
+            let e = nearest(|x| off(q, x.clamp(1e-9, 1.0 - 1e-9), d), bez(&c, t));
+            !(e > tol2)
+        });
+        if !ok2 { return false; }
+    }
+    true
 }
 /// The parameters where x'' or y'' changes sign, in order.
 fn coord_inflections(q: &[P; 4]) -> Vec<f64> {
@@ -331,8 +349,20 @@ fn seg_off(s: &Seg, d: f64) -> Vec<El> {
         let degenerate = sq[1] == sq[0] || sq[2] == sq[3];
         let big_degenerate = degenerate && dist(sq[0], sq[3]) > 1.0 && std::env::var("CG_NODEGEN").is_err();
         let middle0 = pre.len() == 2 && (a - pre[0]).abs() < 1e-12 && (b - pre[1]).abs() < 1e-12;
-        let neg_reject = std::env::var("CG_NONEGREJ").is_err() && !middle0 && dist(sq[0], sq[3]) >= 0.1 && negative_handle(&sq);
-        if depth >= 8 || (!big_degenerate && !neg_reject && accept(&sq, d)) {
+        let neg_reject = std::env::var("CG_NONEGREJ").is_err() && !middle0 && (std::env::var("CG_NEGTINY").is_ok() || dist(sq[0], sq[3]) >= 0.1) && negative_handle(&sq);
+        let middle1 = pre.len() == 2 && (a - pre[0]).abs() < 1e-12 && (b - pre[1]).abs() < 1e-12;
+        let chord1 = dist(sq[0], sq[3]);
+        let use_fb = (middle1 && chord1 < 0.5) || chord1 < 0.1;
+        let ok = if use_fb && std::env::var("CG_NOFBACC").is_err() { accept_piece(&sq, d, fallback(&sq, d)) } else { accept(&sq, d) };
+        let line_eps: f64 = std::env::var("CG_LINEEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        if !ok && chord1 < line_eps {
+            let (_, u3) = seg_dirs(&Seg::Cubic(sq));
+            out.push(El::L((sq[3].0 - u3.1 * d, sq[3].1 + u3.0 * d)));
+            return;
+        }
+        let maxd: u32 = std::env::var("CG_MAXDEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+        if depth >= maxd || (!big_degenerate && !neg_reject && ok) {
+            if std::env::var("CG_TRACE").is_ok() { eprintln!("piece d={} [{:.4},{:.4}] depth {} chord {:.4} neg {}", d, a, b, depth, dist(sq[0], sq[3]), negative_handle(&sq)); }
             let middle = pre.len() == 2 && (a - pre[0]).abs() < 1e-12 && (b - pre[1]).abs() < 1e-12;
             let chord = dist(sq[0], sq[3]);
             out.push(if (middle && chord < 0.5) || chord < 0.1 { fallback(&sq, d) } else { piece_one(&sq, d) });
