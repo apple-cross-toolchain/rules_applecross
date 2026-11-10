@@ -85,7 +85,8 @@ fn tool(o: &Options, name: &str) -> PathBuf {
 }
 
 /// LLVM 15's -O2, spelled out: named so, speculative-execution runs on every
-/// target, as on Xcode's (whose GPU target has divergent branches).
+/// target, as on Xcode's (whose GPU target has divergent branches); without
+/// vector-combine, whose scalar-to-vector folds Xcode's LLVM doesn't make.
 static O2: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("-passes={}", include_str!("../data/o2_pipeline.txt").trim()));
 
 pub fn compile(o: &Options) -> Result<Output, String> {
