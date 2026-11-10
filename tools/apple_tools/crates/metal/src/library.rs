@@ -174,7 +174,8 @@ pub fn extract(ir: &str, name: &str) -> String {
         let mut changed = false;
         for (i, (sym, t)) in entities.iter().enumerate() {
             let Some(sym) = sym else { continue };
-            if !kept[i] || sym == name {
+            // llvm.global_ctors runs the function constants' initialisers: nothing refers to it
+            if !kept[i] || sym == name || sym.starts_with("llvm.") {
                 continue;
             }
             let re = Regex::new(&format!(r"@{}(?:[^-\w.$]|$)", regex::escape(sym))).unwrap();
@@ -219,11 +220,24 @@ pub fn extract(ir: &str, name: &str) -> String {
     let first_use = |sym: &str| body.find(&format!("@{sym}(")).unwrap_or(usize::MAX);
     let mut decls: Vec<&(Option<String>, String)> = entities.iter().zip(&kept).filter(|(e, k)| **k && e.1.lines().any(|l| l.starts_with("declare "))).map(|(e, _)| e).collect();
     decls.sort_by_key(|e| std::cmp::Reverse(first_use(e.0.as_deref().unwrap_or(""))));
-    for ((_, t), k) in entities.iter().zip(&kept) {
-        if *k && !t.lines().any(|l| l.starts_with("declare ")) {
-            out += t;
-            out += "\n";
-        }
+    // functions: static initialisers (function constants), then the rest in order
+    let defines: Vec<&String> = entities.iter().zip(&kept).filter(|(e, k)| **k && e.1.lines().any(|l| l.starts_with("define "))).map(|(e, _)| &e.1).collect();
+    let (init, other): (Vec<&String>, Vec<&String>) = defines.iter().partition(|t| t.contains("section \"air.static_init\""));
+    let functions: Vec<&String> = init.into_iter().chain(other).collect();
+    // globals: in reverse order of discovery through those functions (the unreferenced, as llvm.global_ctors, last)
+    let globals: Vec<&(Option<String>, String)> = entities.iter().zip(&kept).filter(|(e, k)| **k && e.1.starts_with('@')).map(|(e, _)| e).collect();
+    let text: String = functions.iter().map(|t| t.as_str()).collect();
+    let found = |g: &str| regex!(r"@([-\w.$]+)").find_iter(&text).position(|m| &m.as_str()[1..] == g).unwrap_or(usize::MAX);
+    let mut globals = globals;
+    globals.sort_by_key(|g| std::cmp::Reverse(found(g.0.as_deref().unwrap_or(""))));
+    for (_, t) in globals {
+        // metallib internalises the function constants' initialisers
+        out += &t.replace("linkonce_odr hidden local_unnamed_addr ", "internal unnamed_addr ");
+        out += "\n";
+    }
+    for t in functions {
+        out += t;
+        out += "\n";
     }
     for (_, t) in decls {
         out += t;
@@ -251,7 +265,16 @@ pub fn extract(ir: &str, name: &str) -> String {
             break;
         }
     }
-    out += &nodes.iter().map(|l| l.as_str()).collect::<Vec<_>>().join("\n");
+    // metallib marks each function constant the function keeps as used
+    let fc: Vec<String> = keep_named.iter().filter(|l| l.starts_with("!air.function_constants ")).flat_map(|l| regex!(r"![0-9]+").find_iter(l).map(|x| x.as_str().to_string()).collect::<Vec<_>>()).collect();
+    let nodes: Vec<String> = nodes
+        .iter()
+        .map(|l| match l.split_once(" = ") {
+            Some((id, n)) if fc.iter().any(|f| f == id) => format!("{id} = {}, i1 true}}", n.trim_end_matches('}')),
+            _ => l.to_string(),
+        })
+        .collect();
+    out += &nodes.join("\n");
     out + "\n"
 }
 
