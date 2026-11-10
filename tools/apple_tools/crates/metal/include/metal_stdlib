@@ -371,6 +371,7 @@ __MSL_PACKED(float) __MSL_PACKED(half) __MSL_PACKED(int) __MSL_PACKED(uint) __MS
 struct _sampler_t;
 namespace metal {
 enum class access { sample = 0, read = 1, write = 2, read_write = 3 };
+enum class memory_coherence { memory_coherence_threadgroup = 0, memory_coherence_device = 1 };
 struct sampler { __MSL_CONSTANT _sampler_t *__s; };
 // AIR returns (value, status) pairs directly; the driver undoes spir64's sret.
 struct __ret_v4f32 { float4 v; char status; };
