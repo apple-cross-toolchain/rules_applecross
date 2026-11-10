@@ -191,6 +191,13 @@ The plan, sent to the Manager:
       functions as Xcode: 548 of 555 math kernels. The rest are vector
       `fract` (Xcode calls a runtime helper; we use the scalar AIR function
       per element) and bool-vector `any`/`all` (inline).
+  - **Textures on the GPU:** `run/diffrun.swift` now makes every texture
+    kind and format. The texture probe was run against Xcode's code
+    (`ll2metallib.py`), twice.
+    - Every kernel with defined behaviour agrees.
+    - The ones that differ read out of bounds (`t.read(g, 1)` reads mip 1
+      past its 4×4 size): Xcode's own metallib differs from itself there
+      too.
   - **Smaller metallibs:** functions can share one module (`share_modules`;
     `MSL2AIR_SHARE=1`), and Metal loads such files. Per-function module
     splitting isn't needed.

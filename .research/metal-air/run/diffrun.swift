@@ -4,7 +4,10 @@ import Metal
 import Foundation
 
 struct Buf: Decodable { let index: Int; let bytes: Int; let fill: String; let hex: String? }
-struct Tex: Decodable { let index: Int; let width: Int; let height: Int; let fill: String }
+struct Tex: Decodable {
+    let index: Int; let width: Int; let height: Int; let fill: String
+    var kind: String? = nil; var format: String? = nil; var depth: Int? = nil
+}
 struct Const: Decodable { let index: Int; let type: String; let value: Double }
 struct Attr: Decodable { let index: Int; let format: String; let offset: Int; let buffer: Int }
 struct Render: Decodable {
@@ -46,6 +49,44 @@ func makeTexture(_ dev: MTLDevice, _ t: Tex) -> MTLTexture {
     tex.replace(region: MTLRegionMake2D(0, 0, t.width, t.height), mipmapLevel: 0, withBytes: px, bytesPerRow: t.width * 16)
     return tex
 }
+func makeAnyTexture(_ dev: MTLDevice, _ t: Tex) -> MTLTexture {
+    let fmt: MTLPixelFormat = ["half": .rgba16Float, "int": .rgba32Sint, "uint": .rgba32Uint][t.format ?? "float"] ?? .rgba32Float
+    let bpp = fmt == .rgba16Float ? 8 : 16
+    let d = MTLTextureDescriptor()
+    d.pixelFormat = fmt; d.width = t.width; d.height = t.height; d.storageMode = .shared
+    d.usage = [.shaderRead, .shaderWrite]
+    var slices = 1
+    switch t.kind ?? "2d" {
+    case "1d": d.textureType = .type1D; d.height = 1
+    case "1darray": d.textureType = .type1DArray; d.height = 1; d.arrayLength = 3; slices = 3
+    case "2darray": d.textureType = .type2DArray; d.arrayLength = 3; slices = 3; d.mipmapLevelCount = 2
+    case "3d": d.textureType = .type3D; d.depth = 3; slices = 1
+    case "cube": d.textureType = .typeCube; d.height = t.width; slices = 6; d.mipmapLevelCount = 2
+    case "cubearray": d.textureType = .typeCubeArray; d.height = t.width; d.arrayLength = 2; slices = 12
+    case "buffer": d.textureType = .typeTextureBuffer; d.height = 1; d.storageMode = .shared
+    default: d.textureType = .type2D; d.mipmapLevelCount = 2
+    }
+    if t.kind == "buffer" {
+        let buf = dev.makeBuffer(length: t.width * bpp, options: .storageModeShared)!
+        fill(buf.contents(), t.width * bpp, t.fill == "zero" ? "zero" : (fmt == .rgba32Float ? "float" : "bytes"))
+        let td = MTLTextureDescriptor.textureBufferDescriptor(with: fmt, width: t.width, resourceOptions: .storageModeShared, usage: [.shaderRead, .shaderWrite])
+        return buf.makeTexture(descriptor: td, offset: 0, bytesPerRow: t.width * bpp)!
+    }
+    let tex = dev.makeTexture(descriptor: d)!
+    let h = d.height, depth = t.kind == "3d" ? 3 : 1
+    var px = [UInt8](repeating: 0, count: t.width * h * depth * bpp)
+    px.withUnsafeMutableBytes { fill($0.baseAddress!, $0.count, t.fill == "zero" ? "zero" : (fmt == .rgba32Float ? "float" : fmt == .rgba16Float ? "half" : "bytes")) }
+    for sl in 0..<slices {
+        tex.replace(region: MTLRegionMake3D(0, 0, 0, t.width, h, depth), mipmapLevel: 0, slice: sl, withBytes: px, bytesPerRow: t.width * bpp, bytesPerImage: t.width * h * bpp)
+    }
+    if d.mipmapLevelCount > 1 {
+        for sl in 0..<slices {
+            tex.replace(region: MTLRegionMake2D(0, 0, t.width / 2, h / 2), mipmapLevel: 1, slice: sl, withBytes: px, bytesPerRow: t.width / 2 * bpp, bytesPerImage: t.width / 2 * h / 2 * bpp)
+        }
+    }
+    return tex
+}
+
 func render(_ dev: MTLDevice, _ lib: MTLLibrary, _ r: Render) throws -> [Data] {
     let pd = MTLRenderPipelineDescriptor()
     pd.vertexFunction = lib.makeFunction(name: r.vertex)!
@@ -120,23 +161,26 @@ func run(_ dev: MTLDevice, _ libPath: String, _ s: Spec) throws -> [Data] {
     for t in s.threadgroup ?? [] { enc.setThreadgroupMemoryLength(t[1], index: t[0]) }
     var texs: [MTLTexture] = []
     for t in s.textures ?? [] {
-        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: t.width, height: t.height, mipmapped: false)
-        d.usage = [.shaderRead, .shaderWrite]; d.storageMode = .shared
-        let tex = dev.makeTexture(descriptor: d)!
-        var px = [Float](repeating: 0, count: t.width * t.height * 4)
-        px.withUnsafeMutableBytes { fill($0.baseAddress!, $0.count, t.fill) }
-        tex.replace(region: MTLRegionMake2D(0, 0, t.width, t.height), mipmapLevel: 0, withBytes: px, bytesPerRow: t.width * 16)
+        let tex = makeAnyTexture(dev, t)
         enc.setTexture(tex, index: t.index); texs.append(tex)
+    }
+    if s.textures?.contains(where: { $0.kind != nil }) ?? false {
+        let sd = MTLSamplerDescriptor()
+        let intTex = s.textures!.contains(where: { $0.format == "int" || $0.format == "uint" })
+        sd.minFilter = intTex ? .nearest : .linear; sd.magFilter = intTex ? .nearest : .linear; sd.mipFilter = intTex ? .nearest : .linear
+        enc.setSamplerState(dev.makeSamplerState(descriptor: sd)!, index: 0)
     }
     enc.dispatchThreads(MTLSize(width: s.grid[0], height: s.grid[1], depth: s.grid[2]),
                         threadsPerThreadgroup: MTLSize(width: s.group[0], height: s.group[1], depth: s.group[2]))
     enc.endEncoding(); cb.commit(); cb.waitUntilCompleted()
     if let e = cb.error { throw e }
     var out = bufs.map { Data(bytes: $0.contents(), count: $0.length) }
-    for t in texs {
-        var px = [Float](repeating: 0, count: t.width * t.height * 4)
-        t.getBytes(&px, bytesPerRow: t.width * 16, from: MTLRegionMake2D(0, 0, t.width, t.height), mipmapLevel: 0)
-        out.append(px.withUnsafeBytes { Data($0) })
+    for t in texs where t.textureType != .typeTextureBuffer {
+        let bpp = t.pixelFormat == .rgba16Float ? 8 : 16
+        var px = [UInt8](repeating: 0, count: t.width * t.height * bpp)
+        t.getBytes(&px, bytesPerRow: t.width * bpp, bytesPerImage: t.width * t.height * bpp,
+                   from: MTLRegionMake2D(0, 0, t.width, t.height), mipmapLevel: 0, slice: 0)
+        out.append(Data(px))
     }
     return out
 }
@@ -151,6 +195,13 @@ for s in specs {
         var worst: Float = 0; var same = true
         for (p, q) in zip(x, y) where p != q {
             same = false
+            if ProcessInfo.processInfo.environment["DEBUGDIFF"] != nil {
+                p.withUnsafeBytes { pb in q.withUnsafeBytes { qb in
+                    let pf = pb.bindMemory(to: Float.self), qf = qb.bindMemory(to: Float.self)
+                    var shown = 0
+                    for i in 0..<pf.count where pf[i] != qf[i] && shown < 8 { print("  [\(i)] ours \(pf[i]) ref \(qf[i])"); shown += 1 }
+                } }
+            }
             p.withUnsafeBytes { pb in q.withUnsafeBytes { qb in
                 let pf = pb.bindMemory(to: Float.self), qf = qb.bindMemory(to: Float.self)
                 for i in 0..<pf.count { worst = max(worst, abs(pf[i] - qf[i])) }
