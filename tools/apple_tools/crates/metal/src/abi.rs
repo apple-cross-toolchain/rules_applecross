@@ -265,10 +265,8 @@ pub fn lower(ir: &str, xcode: &HashMap<String, Xcode>, keep_flat: &[String]) -> 
     result
 }
 
-/// Xcode's modules have no comdats, and keep a template's instance as an
-/// ordinary definition.
-pub fn strip_linkage(ir: &str) -> String {
+/// Xcode's modules have no comdats.
+pub fn strip_comdats(ir: &str) -> String {
     let ir = regex!(r"(?m)^\$[^\n]* = comdat any\n\n?").replace_all(ir, "");
-    let ir = regex!(r"(?m)^(define .*?) comdat(?:\(\$[^)]*\))?(.*)$").replace_all(&ir, "$1$2");
-    regex!(r"(?m)^(define )linkonce_odr ").replace_all(&ir, "$1").to_string()
+    regex!(r"(?m)^(define .*?) comdat(?:\(\$[^)]*\))?(.*)$").replace_all(&ir, "$1$2").to_string()
 }

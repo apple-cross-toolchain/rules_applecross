@@ -131,7 +131,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         rewrite(&text, ast_mode, air)
     };
     let base = |c: &mut Command| {
-        c.args(["-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-fno-builtin", "-Wno-unknown-attributes", "-nostdinc++"]);
+        c.args(["-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-fno-builtin", "-fno-exceptions", "-Wno-unknown-attributes", "-nostdinc++"]);
     };
     // The AST pass (address spaces as attributes; its errors are address-space
     // checks codegen doesn't have, so they don't stop us).
@@ -194,7 +194,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
     let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?))))))));
-    let text = crate::abi::strip_linkage(&crate::mangle::apply(&text, &renames));
+    let text = crate::abi::strip_comdats(&crate::mangle::apply(&text, &renames));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(
