@@ -102,6 +102,20 @@ template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R..
   }
 }
 
+// T4(a, b, ...) with its arguments as lambdas (the driver's rewrite): each is
+// evaluated as its element is inserted, as Xcode builds vectors.
+template <class V, class L0, class... L> constexpr V __vecl(L0 l0, L... l) {
+  typedef typename __elem<V>::type E;
+  if constexpr (__elem<decltype(l0())>::n == 1 && (... && (__elem<decltype(l())>::n == 1)) && 1 + sizeof...(L) == __elem<V>::n) {
+    return V{(E)l0(), (E)l()...};
+  } else if constexpr (__elem<decltype(l0())>::n > 1 && __is_same(decltype(l0()), __vector<E, __elem<decltype(l0())>::n>)) {
+    __vbuild<V> v; v.v = __widen<V>(l0(), typename __mkseq<__elem<decltype(l0())>::n>::type(), typename __mkseq<__elem<V>::n - __elem<decltype(l0())>::n>::type());
+    v.i = __elem<decltype(l0())>::n; (v.put(l()), ...); return v.v;
+  } else {
+    __vbuild<V> v; v.put(l0()); (v.put(l()), ...); return v.v;
+  }
+}
+
 enum class mem_flags { mem_none = 0, mem_device = 1, mem_threadgroup = 2, mem_texture = 4, mem_threadgroup_imageblock = 8, mem_object_data = 16 };
 // Barriers: (memory flags, 5, execution scope: 1 threadgroup, 4 simdgroup).
 extern "C" __attribute__((convergent)) void __air_wg_barrier(int, int, int) __AIR("air.wg.barrier");

@@ -58,6 +58,7 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
         format!("metal::__vec<{}>(", &c[1])
     });
     s = vector_casts(&s);
+    s = lazy_vector_args(&s);
     s = replace_where(
         &s,
         regex!(r"\b((?:float|half)[234]x[234])\s*\("),
@@ -329,6 +330,57 @@ fn vector_casts(src: &str) -> String {
         out.push_str(&src[pos..m.start()]);
         out.push_str(&format!("{f}({})", src[m.end()..end].trim()));
         pos = end;
+    }
+    out.push_str(&src[pos..]);
+    out
+}
+
+/// For each byte, whether it is in a function body (block scope).
+fn block_scope(src: &str) -> Vec<bool> {
+    let b = src.as_bytes();
+    let mut inside = vec![false; b.len() + 1];
+    let mut stack: Vec<bool> = Vec::new();
+    for i in 0..b.len() {
+        match b[i] {
+            b'{' => {
+                let parent = *stack.last().unwrap_or(&false);
+                // a function's body follows its parameter list (and qualifiers)
+                let head = src[..i].trim_end();
+                let head = regex!(r"(?:\s*\b(?:const|noexcept|override|mutable|volatile)\b)*$").replace(head, "");
+                stack.push(parent || head.ends_with(')'));
+            }
+            b'}' => {
+                stack.pop();
+            }
+            _ => {}
+        }
+        inside[i + 1] = *stack.last().unwrap_or(&false);
+    }
+    inside
+}
+
+/// `__vec<T>(a, b, ...)` -> `__vecl<T>(lambda, ...)`: each argument evaluated as
+/// its element is inserted, as Xcode builds a vector from its arguments.
+fn lazy_vector_args(src: &str) -> String {
+    let scope = block_scope(src);
+    let call = regex!(r"metal::__vec<(\w+)>\(");
+    let (mut out, mut pos) = (String::new(), 0);
+    for c in call.captures_iter(src) {
+        let m = c.get(0).unwrap();
+        if m.start() < pos {
+            continue;
+        }
+        let open = m.end() - 1;
+        let close = balanced(src.as_bytes(), open, b'(', b')');
+        let args = split_args(&src[open + 1..close - 1]);
+        if args.len() < 2 {
+            continue;
+        }
+        let cap = if scope[m.start()] { "[&]" } else { "[]" };
+        let wrapped: Vec<String> = args.iter().map(|a| format!("{cap}() {{ return ({}); }}", lazy_vector_args(a.trim()))).collect();
+        out.push_str(&src[pos..m.start()]);
+        out.push_str(&format!("metal::__vecl<{}>({})", &c[1], wrapped.join(", ")));
+        pos = close;
     }
     out.push_str(&src[pos..]);
     out
