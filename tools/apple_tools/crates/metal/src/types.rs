@@ -163,6 +163,37 @@ impl<'a> Types<'a> {
     }
 }
 
+impl Types<'_> {
+    /// Each record's fields as clang's !tbaa.struct lists them for a copy:
+    /// (offset, size, the element type of a vector field), nested records flattened.
+    pub fn tbaa_struct_fields(&self) -> Vec<Vec<(u32, u32, Option<String>)>> {
+        fn walk(t: &Types, name: &str, base: u32, out: &mut Vec<(u32, u32, Option<String>)>, depth: u32) -> bool {
+            let Some(l) = t.layouts.get(name) else { return false };
+            for (off, ty, _) in &l.fields {
+                let ty = t.msl_name(&t.resolve(ty));
+                if depth < 8 && t.layouts.contains_key(&ty) {
+                    if !walk(t, &ty, base + off, out, depth + 1) {
+                        return false;
+                    }
+                    continue;
+                }
+                let Ok((size, _)) = t.size(&ty) else { return false };
+                let elem = regex!(r"^(\w+?)([234])$").captures(&ty).filter(|c| scalar(&c[1]).is_some()).map(|c| c[1].to_string());
+                out.push((base + off, size, elem));
+            }
+            true
+        }
+        let mut all = Vec::new();
+        for name in self.layouts.keys() {
+            let mut f = Vec::new();
+            if walk(self, name, 0, &mut f, 0) && f.iter().any(|x| x.2.is_some()) {
+                all.push(f);
+            }
+        }
+        all
+    }
+}
+
 /// Itanium mangling of a scalar or vector (function constants, generated keys).
 pub fn itanium(t: &str) -> String {
     let code = |s: &str| -> String {

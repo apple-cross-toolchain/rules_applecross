@@ -440,8 +440,10 @@ pub fn alias_scopes(ir: &str) -> String {
 }
 
 /// clang 15's TBAA gives a vector access the type `omnipotent char`; Xcode's
-/// gives it the element's scalar type (float4 -> "float").
-pub fn vector_tbaa(ir: &str) -> String {
+/// gives it the element's scalar type (float4 -> "float"), for a vector field of
+/// a struct copy's !tbaa.struct too. `structs`: each record's struct-copy fields
+/// (offset, size, the element type of a vector field).
+pub fn vector_tbaa(ir: &str, structs: &[Vec<(u32, u32, Option<String>)>]) -> String {
     let node = regex!(r#"(?m)^!(\d+) = !\{!"omnipotent char", !(\d+), i64 0\}$"#);
     let Some(c) = node.captures(ir) else { return ir.to_string() };
     let char_id = c[1].to_string();
@@ -478,7 +480,49 @@ pub fn vector_tbaa(ir: &str) -> String {
             line.replacen(&format!("!tbaa !{}", &c[3]), &format!("!tbaa !{tag}"), 1)
         })
         .collect();
-    lines.join("\n") + "\n" + &nodes
+    let mut ir = lines.join("\n") + "\n";
+    // struct copies: a node that is exactly one record's fields
+    let tbaa_struct = regex!(r"(?m)^!(\d+) = !\{((?:i64 \d+, i64 \d+, !\d+(?:, )?)+)\}$");
+    let mut edits = Vec::new();
+    for c in tbaa_struct.captures_iter(&ir) {
+        let items: Vec<(u32, u32, String)> = regex!(r"i64 (\d+), i64 (\d+), !(\d+)").captures_iter(&c[2]).map(|f| (f[1].parse().unwrap(), f[2].parse().unwrap(), f[3].to_string())).collect();
+        let matching: Vec<&Vec<(u32, u32, Option<String>)>> = structs.iter().filter(|r| r.len() == items.len() && r.iter().zip(&items).all(|(a, b)| a.0 == b.0 && a.1 == b.1)).collect();
+        let Some(r) = matching.first() else { continue };
+        if matching.iter().any(|m| m.iter().map(|x| &x.2).ne(r.iter().map(|x| &x.2))) {
+            continue;
+        }
+        let mut changed = false;
+        let mut parts = Vec::new();
+        for ((off, size, tag), (_, _, elem)) in items.iter().zip(r.iter()) {
+            let name = match elem.as_deref() {
+                Some("float") => "float",
+                Some("half") => "half",
+                Some("int") | Some("uint") => "int",
+                Some("short") | Some("ushort") => "short",
+                Some("long") | Some("ulong") => "long",
+                _ => "",
+            };
+            if !name.is_empty() && char_tag.contains(tag) {
+                let t = *tags.entry(name).or_insert_with(|| {
+                    let (t, g) = (next, next + 1);
+                    next += 2;
+                    nodes += &format!("!{t} = !{{!\"{name}\", !{char_id}, i64 0}}\n!{g} = !{{!{t}, !{t}, i64 0}}\n");
+                    g
+                });
+                parts.push(format!("i64 {off}, i64 {size}, !{t}"));
+                changed = true;
+            } else {
+                parts.push(format!("i64 {off}, i64 {size}, !{tag}"));
+            }
+        }
+        if changed {
+            edits.push((c[0].to_string(), format!("!{} = !{{{}}}", &c[1], parts.join(", "))));
+        }
+    }
+    for (a, b) in edits {
+        ir = ir.replacen(&a, &b, 1);
+    }
+    ir + &nodes
 }
 
 /// Xcode lowers conversions between integers and floats, and between float
@@ -692,6 +736,14 @@ mod tests {
         let out = speculate_and_sink(ir);
         let order: Vec<&str> = out.lines().filter(|l| l.contains(" = ") || l.trim_start().starts_with("store")).map(|l| l.trim().split(' ').next().unwrap()).collect();
         assert_eq!(order, vec!["%i", "%po", "%pa", "%v", "store"]);
+    }
+
+    #[test]
+    fn struct_copy_vector_fields_get_element_tags() {
+        let ir = "  %v = load <2 x float>, <2 x float>* %p, align 16, !tbaa.struct !1\n!1 = !{i64 0, i64 8, !2, i64 16, i64 16, !2}\n!2 = !{!3, !3, i64 0}\n!3 = !{!\"omnipotent char\", !4, i64 0}\n!4 = !{!\"Simple C++ TBAA\"}\n";
+        let out = vector_tbaa(ir, &[vec![(0, 8, Some("float".into())), (16, 16, Some("float".into()))]]);
+        assert!(out.contains("!1 = !{i64 0, i64 8, !6, i64 16, i64 16, !6}"));
+        assert!(out.contains("!5 = !{!\"float\", !3, i64 0}"));
     }
 
     #[test]

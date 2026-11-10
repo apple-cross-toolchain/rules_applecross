@@ -165,7 +165,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);
     let entries: Vec<String> = program.functions.iter().map(|f| f.name.clone()).collect();
-    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries)), &entries)));
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries), &types.tbaa_struct_fields()), &entries)));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
