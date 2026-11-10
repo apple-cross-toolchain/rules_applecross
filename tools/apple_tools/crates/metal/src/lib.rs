@@ -4,6 +4,7 @@
 
 pub mod air;
 pub mod ast;
+pub mod bitcode;
 pub mod container;
 pub mod descriptors;
 pub mod driver;

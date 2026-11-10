@@ -201,7 +201,17 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         }
     }
     let ir = run(Command::new(tool(o, "llvm-dis")).arg("-o").arg("-").arg(&bc))?;
-    Ok(Output { ir: String::from_utf8_lossy(&ir.stdout).to_string(), air: std::fs::read(&bc).map_err(|e| e.to_string())? })
+    let air = crate::bitcode::as_xcode(&std::fs::read(&bc).map_err(|e| e.to_string())?, crate::air::PRODUCER, crate::bitcode::Writer::Frontend)?;
+    Ok(Output { ir: String::from_utf8_lossy(&ir.stdout).to_string(), air })
+}
+
+/// One function's module text -> its bitcode, as metallib writes it.
+pub fn assemble(llvm_bin: &Path, ir: &str) -> Result<Vec<u8>, String> {
+    let tmp = scratch()?;
+    let (ll, bc) = (tmp.0.join("f.ll"), tmp.0.join("f.bc"));
+    std::fs::write(&ll, ir).map_err(|e| e.to_string())?;
+    run(Command::new(llvm_bin.join("llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
+    crate::bitcode::as_xcode(&std::fs::read(&bc).map_err(|e| e.to_string())?, crate::air::PRODUCER, crate::bitcode::Writer::Metallib)
 }
 
 /// Disassemble an .air file (for `metallib`).

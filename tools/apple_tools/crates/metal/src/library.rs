@@ -109,17 +109,138 @@ fn public(ir: &str, m: &Module, name: &str, stage: &str, descs: &[String]) -> Ve
     block(&tags)
 }
 
-/// `ir`: each module's text (llvm-dis); `bitcode`: the matching `.air` contents.
-pub fn link(modules: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
+/// One function's module, as metallib writes it: the function and what it
+/// refers to, its stage list naming it alone, and its name as the source file.
+pub fn extract(ir: &str, name: &str) -> String {
+    // top-level entities: (symbol defined, text including its attribute comment)
+    let mut header = Vec::new();
+    let mut entities: Vec<(Option<String>, String)> = Vec::new();
+    let mut named = Vec::new();
+    let mut rest = Vec::new();
+    let mut lines = ir.lines().peekable();
+    let mut comment = String::new();
+    while let Some(l) = lines.next() {
+        if l.starts_with("; Function Attrs:") {
+            comment = format!("{l}\n");
+        } else if l.starts_with("define ") {
+            let mut t = std::mem::take(&mut comment) + l + "\n";
+            for b in lines.by_ref() {
+                t += b;
+                t += "\n";
+                if b == "}" {
+                    break;
+                }
+            }
+            entities.push((regex!(r"@([-\w.$]+|\x22[^\x22]*\x22)\(").captures(l).map(|c| c[1].to_string()), t));
+        } else if l.starts_with("declare ") {
+            entities.push((regex!(r"@([-\w.$]+|\x22[^\x22]*\x22)\(").captures(l).map(|c| c[1].to_string()), std::mem::take(&mut comment) + l + "\n"));
+        } else if l.starts_with('@') {
+            entities.push((regex!(r"^@([-\w.$]+|\x22[^\x22]*\x22) =").captures(l).map(|c| c[1].to_string()), format!("{l}\n")));
+        } else if regex!(r"^![a-z]").is_match(l) {
+            named.push(l.to_string());
+        } else if l.starts_with('!') || l.starts_with("attributes ") {
+            rest.push(l.to_string());
+        } else if l.starts_with("source_filename") {
+            header.push(format!("source_filename = \"{name}\""));
+        } else if !l.starts_with("; ModuleID") {
+            header.push(l.to_string());
+        }
+    }
+    // the stage list naming this function alone; no source file; Xcode's order
+    let m = Module::parse(ir);
+    let mut keep_named = Vec::new();
+    for key in ["llvm.module.flags", "llvm.ident", "air.version", "air.language_version", "air.compile_options"] {
+        keep_named.extend(named.iter().filter(|l| l.starts_with(&format!("!{key} ="))).cloned());
+    }
+    for stage in ["kernel", "vertex", "fragment"] {
+        for r in m.named.get(&format!("air.{stage}")).into_iter().flatten() {
+            if regex!(r"@([\w.$]+)").captures(m.node(r)).map(|c| c[1] == *name).unwrap_or(false) {
+                keep_named.push(format!("!air.{stage} = !{{{r}}}"));
+            }
+        }
+    }
+    for l in &named {
+        let key = l.split(' ').next().unwrap_or("");
+        if !keep_named.iter().any(|k| k.split(' ').next() == Some(key)) && !regex!(r"^!(air\.(kernel|vertex|fragment|source_file_name|version|language_version|compile_options)|llvm\.(module\.flags|ident)) ").is_match(l) {
+            keep_named.push(l.clone());
+        }
+    }
+    // other entry points go, then whatever nothing kept refers to
+    let entries: Vec<String> = ["kernel", "vertex", "fragment"].iter().flat_map(|st| m.named.get(&format!("air.{st}")).cloned().unwrap_or_default()).filter_map(|r| regex!(r"@([\w.$]+)").captures(m.node(&r)).map(|c| c[1].to_string())).collect();
+    let mut kept: Vec<bool> = entities.iter().map(|(sym, _)| sym.as_deref().map(|s| s == name || !entries.iter().any(|e| e == s)).unwrap_or(true)).collect();
+    // metadata the kept named metadata reaches (it may name globals)
+    let mut md = String::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut todo: Vec<String> = keep_named.iter().flat_map(|l| regex!(r"![0-9]+").find_iter(l).map(|x| x.as_str().to_string()).collect::<Vec<_>>()).collect();
+    while let Some(r) = todo.pop() {
+        if seen.insert(r.clone()) {
+            let n = m.node(&r);
+            md += n;
+            todo.extend(regex!(r"![0-9]+").find_iter(n).map(|x| x.as_str().to_string()));
+        }
+    }
+    loop {
+        let text: String = entities.iter().zip(&kept).filter(|(_, k)| **k).map(|(e, _)| e.1.as_str()).collect::<String>() + &md;
+        let mut changed = false;
+        for (i, (sym, t)) in entities.iter().enumerate() {
+            let Some(sym) = sym else { continue };
+            if !kept[i] || sym == name {
+                continue;
+            }
+            let re = Regex::new(&format!(r"@{}(?:[^-\w.$]|$)", regex::escape(sym))).unwrap();
+            let own = re.find_iter(t).count();
+            if re.find_iter(&text).count() <= own {
+                kept[i] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut out = header.join("\n") + "\n\n";
+    for ((_, t), k) in entities.iter().zip(&kept) {
+        if *k {
+            out += t;
+            out += "\n";
+        }
+    }
+    out += &rest.iter().filter(|l| l.starts_with("attributes ")).cloned().collect::<Vec<_>>().join("\n");
+    out += "\n\n";
+    out += &keep_named.join("\n");
+    out += "\n\n";
+    // numbered metadata naming what went (another entry point's descriptor), and what refers to that
+    let gone: Vec<Regex> = entities.iter().zip(&kept).filter(|(e, k)| !**k && e.0.is_some()).map(|(e, _)| Regex::new(&format!(r"@{}(?:[^-\w.$]|$)", regex::escape(e.0.as_ref().unwrap()))).unwrap()).collect();
+    let mut nodes: Vec<&String> = rest.iter().filter(|l| l.starts_with('!')).collect();
+    let mut dropped: Vec<String> = Vec::new();
+    loop {
+        let before = nodes.len();
+        nodes.retain(|l| {
+            let id = l.split(' ').next().unwrap_or("").to_string();
+            let refs_gone = gone.iter().any(|g| g.is_match(l)) || regex!(r"![0-9]+").find_iter(&l[id.len()..]).any(|x| dropped.contains(&x.as_str().to_string()));
+            if refs_gone {
+                dropped.push(id);
+            }
+            !refs_gone
+        });
+        if nodes.len() == before {
+            break;
+        }
+    }
+    out += &nodes.iter().map(|l| l.as_str()).collect::<Vec<_>>().join("\n");
+    out + "\n"
+}
+
+/// `ir`: each module's text (llvm-dis); `assemble`: one function's module text -> its bitcode.
+pub fn link(modules: &[String], assemble: &dyn Fn(&str) -> Result<Vec<u8>, String>) -> Result<Vec<u8>, String> {
     let mut lib = Library { header: [0; 6], modules: Vec::new(), functions: Vec::new() };
-    for (mi, (ir, bitcode)) in modules.iter().enumerate() {
+    for (mi, ir) in modules.iter().enumerate() {
         let triple = regex!(r#"target triple = "([^"]*)""#).captures(ir).ok_or("a module without a target triple")?[1].to_string();
         let target = Target::from_triple(&triple)?;
         if mi == 0 {
             lib.header = target.header();
         }
         let (air, lang) = target.versions();
-        lib.modules.push(wrap(bitcode));
         let m = Module::parse(ir);
         // files in order; within one, kernels, then vertex, then fragment functions (as Xcode orders them)
         for (stage, kind) in [("kernel", 2u8), ("vertex", 0), ("fragment", 1)] {
@@ -127,7 +248,9 @@ pub fn link(modules: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
                 let items = m.items(r);
                 let name = regex!(r"@([\w.]+)").captures(items.first().map(String::as_str).unwrap_or("")).map(|c| c[1].to_string()).ok_or("a stage function without a name")?;
                 let descs = items.get(2).map(|d| m.items(d)).unwrap_or_default();
-                lib.functions.push(Function { name: name.clone(), kind, module: mi, air, lang, public: public(ir, &m, &name, stage, &descs) });
+                // each function gets a module of its own
+                lib.modules.push(wrap(&assemble(&extract(ir, &name))?));
+                lib.functions.push(Function { name: name.clone(), kind, module: lib.modules.len() - 1, air, lang, public: public(ir, &m, &name, stage, &descs) });
             }
         }
     }

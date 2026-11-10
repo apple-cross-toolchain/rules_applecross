@@ -17,6 +17,9 @@ macro_rules! regex {
     }};
 }
 
+/// The Metal front end we match: its llvm.ident and its bitcode's producer.
+pub const PRODUCER: &str = "32023.922.4";
+
 pub const DATALAYOUT: &str = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128-v192:256:256-v256:256:256-v512:512:512-v1024:1024:1024-n8:16:32";
 
 pub struct Inputs<'a, 'b> {
@@ -141,7 +144,7 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
         snodes.push(d.md.add(format!("!{{!\"air.sampler_state\", {ty} addrspace(2)* @{name}}}")));
     }
     let opts = ["air.compile.denorms_disable", "air.compile.fast_math_enable", "air.compile.framebuffer_fetch_enable"].map(|o| d.md.add(format!("!{{{}}}", s(o))));
-    let ident = d.md.add("!{!\"Apple metal version 32023.922 (metalfe-32023.922.4)\"}".into());
+    let ident = d.md.add(format!("!{{!\"Apple metal version {} (metalfe-{PRODUCER})\"}}", PRODUCER.rsplit_once('.').unwrap().0));
     let vers = d.md.add(format!("!{{i32 2, i32 {}, i32 0}}", air.1));
     let langv = d.md.add(format!("!{{!\"Metal\", i32 {}, i32 {}, i32 0}}", lang.0, lang.1));
     let srcn = d.md.add(format!("!{{{}}}", s(x.source_path)));
