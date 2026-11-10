@@ -359,8 +359,8 @@ fn block_scope(src: &str) -> Vec<bool> {
     inside
 }
 
-/// `__vec<T>(a, b, ...)` -> `__vecl<T>(lambda, ...)`: each argument evaluated as
-/// its element is inserted, as Xcode builds a vector from its arguments.
+/// `__vec<T>(a, b, ...)` in a function -> a statement expression putting each
+/// argument as it is evaluated, as Xcode builds a vector.
 fn lazy_vector_args(src: &str) -> String {
     let scope = block_scope(src);
     let call = regex!(r"metal::__vec<(\w+)>\(");
@@ -373,13 +373,14 @@ fn lazy_vector_args(src: &str) -> String {
         let open = m.end() - 1;
         let close = balanced(src.as_bytes(), open, b'(', b')');
         let args = split_args(&src[open + 1..close - 1]);
-        if args.len() < 2 {
+        // a statement expression needs a function body (and isn't constant)
+        let stmt_start = src[..m.start()].rfind(|ch: char| ch == ';' || ch == '{' || ch == '}').map_or(0, |x| x + 1);
+        if args.len() < 2 || !scope[m.start()] || src[stmt_start..m.start()].contains("constexpr") {
             continue;
         }
-        let cap = if scope[m.start()] { "[&]" } else { "[]" };
-        let wrapped: Vec<String> = args.iter().map(|a| format!("{cap}() {{ return ({}); }}", lazy_vector_args(a.trim()))).collect();
+        let puts: String = args.iter().map(|a| format!(" __vb.put({});", lazy_vector_args(a.trim()))).collect();
         out.push_str(&src[pos..m.start()]);
-        out.push_str(&format!("metal::__vecl<{}>({})", &c[1], wrapped.join(", ")));
+        out.push_str(&format!("({{ metal::__vbuild<{}> __vb;{puts} __vb.v; }})", &c[1]));
         pos = close;
     }
     out.push_str(&src[pos..]);

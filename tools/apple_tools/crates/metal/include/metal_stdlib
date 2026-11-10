@@ -63,10 +63,7 @@ __MSL_ELEM(long) __MSL_ELEM(ulong) __MSL_ELEM(half) __MSL_ELEM(float)
 template <class V, class E = typename __elem<V>::type, int N = __elem<V>::n>
 struct __vbuild {
   V v; int i = 0;
-  template <class A> __attribute__((always_inline)) void put(A a) {
-    if constexpr (__elem<A>::n == 1) v[i++] = E(a);
-    else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
-  }
+  template <class A> __attribute__((always_inline)) void put(A a);
 };
 template <class T, int N> struct __packed;
 template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
@@ -91,6 +88,19 @@ template <class V, class A> constexpr V __vec(A a) {
 template <class V, class A, int... I, int... U> __attribute__((always_inline)) V __widen(A a, __seq<I...>, __seq<U...>) {
   return __builtin_shufflevector(a, a, I..., ((void)U, -1)...);
 }
+// Each element as its argument comes (the driver writes T4(a, b, ...) in a
+// function as a statement expression of puts): a leading vector of the same
+// element type widens by a shuffle.
+template <class V, class E, int N> template <class A> __attribute__((always_inline)) void __vbuild<V, E, N>::put(A a) {
+  if constexpr (__elem<A>::n == 1) {
+    v[i++] = E(a);
+  } else if constexpr (__elem<A>::n < N && __is_same(A, __vector<E, __elem<A>::n>)) {
+    if (i == 0) { v = __widen<V>(a, typename __mkseq<__elem<A>::n>::type(), typename __mkseq<N - __elem<A>::n>::type()); i = __elem<A>::n; }
+    else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
+  } else {
+    for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
+  }
+}
 template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R... r) {
   if constexpr (__elem<A>::n == 1 && __elem<B>::n == 1 && (... && (__elem<R>::n == 1)) && 2 + sizeof...(R) == __elem<V>::n) {
     typedef typename __elem<V>::type E; return V{(E)a, (E)b, (E)r...};
@@ -99,20 +109,6 @@ template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R..
     v.put(b); (v.put(r), ...); return v.v;
   } else {
     __vbuild<V> v; v.put(a); v.put(b); (v.put(r), ...); return v.v;
-  }
-}
-
-// T4(a, b, ...) with its arguments as lambdas (the driver's rewrite): each is
-// evaluated as its element is inserted, as Xcode builds vectors.
-template <class V, class L0, class... L> constexpr V __vecl(L0 l0, L... l) {
-  typedef typename __elem<V>::type E;
-  if constexpr (__elem<decltype(l0())>::n == 1 && (... && (__elem<decltype(l())>::n == 1)) && 1 + sizeof...(L) == __elem<V>::n) {
-    return V{(E)l0(), (E)l()...};
-  } else if constexpr (__elem<decltype(l0())>::n > 1 && __is_same(decltype(l0()), __vector<E, __elem<decltype(l0())>::n>)) {
-    __vbuild<V> v; v.v = __widen<V>(l0(), typename __mkseq<__elem<decltype(l0())>::n>::type(), typename __mkseq<__elem<V>::n - __elem<decltype(l0())>::n>::type());
-    v.i = __elem<decltype(l0())>::n; (v.put(l()), ...); return v.v;
-  } else {
-    __vbuild<V> v; v.put(l0()); (v.put(l()), ...); return v.v;
   }
 }
 

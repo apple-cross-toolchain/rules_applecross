@@ -516,7 +516,7 @@ fn convert(ir: &str, user_scalars: bool) -> String {
         .lines()
         .map(|l| {
             if user_scalars && l.starts_with("define ") {
-                user = !regex!(r"@(?:_ZN5metal|_ZNK5metal|_ZZN5metal|__msl|_ZN11__air_entry)").is_match(l);
+                user = !regex!(r"@\x22?(?:_ZN5metal|_ZNK5metal|_ZZN5metal|__msl|_ZN11__air_entry)").is_match(l);
             }
             let Some(c) = conv.captures(l) else { return l.to_string() };
             let (op, src, v, dst) = (&c[3], &c[4], &c[5], &c[6]);
