@@ -619,10 +619,12 @@ def stage_in_descriptor(md, i, fld, stage, used):
     return md.add('!{' + ', '.join(f) + '}')
 
 # ---------------------------------------------------------------- 3. entry points
-HANDLES = {'texture1d': AS1 + ' _texture_1d_t *', 'texture2d': AS1 + ' _texture_2d_t *',
-           'texture2d_array': AS1 + ' _texture_2d_array_t *', 'texture3d': AS1 + ' _texture_3d_t *',
-           'texturecube': AS1 + ' _texture_cube_t *', 'depth2d': AS1 + ' _depth_2d_t *',
-           'texture_buffer': AS1 + ' _texture_buffer_1d_t *', 'sampler': AS2 + ' _sampler_t *'}
+HANDLES = {msl: AS1 + ' _%s_t *' % air for msl, air in (
+    ('texture1d', 'texture_1d'), ('texture1d_array', 'texture_1d_array'), ('texture2d', 'texture_2d'),
+    ('texture2d_array', 'texture_2d_array'), ('texture3d', 'texture_3d'), ('texturecube', 'texture_cube'),
+    ('texturecube_array', 'texture_cube_array'), ('texture2d_ms', 'texture_2d_ms'), ('texture_buffer', 'texture_buffer_1d'),
+    ('depth2d', 'depth_2d'), ('depth2d_array', 'depth_2d_array'), ('depthcube', 'depth_cube'), ('depth2d_ms', 'depth_2d_ms'))}
+HANDLES['sampler'] = AS2 + ' _sampler_t *'
 
 def resolve(t):
     """Expand known typedef names inside a type string (one level at a time)."""
@@ -820,7 +822,7 @@ def to_air(ir, funcs, layouts, target, src_path, fcs=()):
     return ir.rstrip() + '\n\n' + '\n'.join(named) + '\n\n' + md.text(), air, lang, (os_name, ver, sim)
 
 # AIR functions return small structs directly; spir64 lowers them to sret.
-RETURNS = {'__ret_v4f32': '{ <4 x float>, i8 }', '__ret_v4f16': '{ <4 x half>, i8 }', '__ret_f32': '{ float, i8 }', '__ret_v4u32': '{ <4 x i32>, i8 }'}
+RETURNS = {'__ret_v4f32': '{ <4 x float>, i8 }', '__ret_v4f16': '{ <4 x half>, i8 }', '__ret_f32': '{ float, i8 }', '__ret_v4u32': '{ <4 x i32>, i8 }', '__ret_v4i32': '{ <4 x i32>, i8 }'}
 
 def direct_returns(ir):
     n = [0]
@@ -885,24 +887,50 @@ def address_space_of(ir, v, depth=0):
     return None
 
 def resolve_atomics(ir):
-    """__msl_atomic_<op>_<u|s>_i32(i32* p, v, order) -> air.atomic.<global|local>.<op>.<u|s>.i32 on p's address space."""
+    """__msl_atomic_<op>_<u|s|n>_i32 placeholders -> air.atomic.<global|local>.<op>[.<u|s>].i32 on the
+    pointer's address space (scope 2 device, 1 threadgroup). Shapes observed: ops (p, v, order, scope,
+    0, false); xchg and store the same without a sign; load (p, order, scope, 0, false)."""
     n = [0]
-    def call(m):
-        indent, res, op, sg, ptr, val, order = m.groups()
+    def space_of(ptr):
         space = address_space_of(ir, ptr)
         if space not in ('1', '3'):
             raise SystemExit('atomic on a pointer of unknown address space: %s' % ptr)
-        kind, scope = {'1': ('global', 2), '3': ('local', 1)}[space]
+        return space, {'1': ('global', 2), '3': ('local', 1)}[space]
+    def cast(indent, ptr, space):
         n[0] += 1
-        return ('%s%%__atomp%d = addrspacecast i32* %s to i32 addrspace(%s)*\n' % (indent, n[0], ptr, space)
-                + '%s%s = call i32 @air.atomic.%s.%s.%s.i32(i32 addrspace(%s)* %%__atomp%d, i32 %s, i32 %s, i32 %d, i32 0, i1 false)'
-                % (indent, res, kind, op, sg, space, n[0], val, order, scope))
-    out = re.sub(r'^(\s*)(%[\w.]+) = (?:tail )?call (?:spir_func )?(?:noundef )?i32 @__msl_atomic_(\w+?)_([us])_i32\(i32\* (?:noundef )?(%[\w.]+), i32 (?:noundef )?([^,]+), i32 (?:noundef )?([^)]+)\)(?: #\d+)?$', call, ir, flags=re.M)
-    decls = set(re.findall(r'@(air\.atomic\.\w+\.\w+\.[us]\.i32)\(i32 addrspace\((\d)\)', out))
+        return '%s%%__atomp%d = addrspacecast i32* %s to i32 addrspace(%s)*\n' % (indent, n[0], ptr, space), '%%__atomp%d' % n[0]
+    def call(m):
+        indent, res, op, sg, ptr, rest = m.groups()
+        args = [x.strip() for x in split_args(rest)]
+        args = [re.sub(r'^i32 (?:noundef )?', '', x) for x in args]
+        space, (kind, scope) = space_of(ptr)
+        pre, p = cast(indent, ptr, space)
+        name = 'air.atomic.%s.%s%s.i32' % (kind, op, '' if sg == 'n' else '.' + sg)
+        if op == 'load':
+            body = 'call i32 @%s(i32 addrspace(%s)* %s, i32 %s, i32 %d, i32 0, i1 false)' % (name, space, p, args[0], scope)
+        else:
+            body = 'call %s @%s(i32 addrspace(%s)* %s, i32 %s, i32 %s, i32 %d, i32 0, i1 false)' % ('void' if op == 'store' else 'i32', name, space, p, args[0], args[1], scope)
+        ATOMIC_DECLS.add((name, space, op))
+        return pre + indent + (res + ' = ' if res else '') + body
+    ATOMIC_DECLS.clear()
+    # one function at a time: value names repeat across functions
+    pat = re.compile(r'^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:spir_func )?(?:noundef )?(?:i32|void) @__msl_atomic_(\w+?)_([usn])_i32\(i32\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?$', re.M)
+    def per_function(fm):
+        nonlocal ir
+        whole, ir = ir, fm.group(0)
+        try:
+            return pat.sub(call, fm.group(0))
+        finally:
+            ir = whole
+    out = re.sub(r'^define .*?^\}$', per_function, ir, flags=re.M | re.S)
     out = re.sub(r'^declare [^\n]*@__msl_atomic_\w+\([^\n]*\n', '', out, flags=re.M)
-    for name, space in sorted(decls):
-        out += '\ndeclare i32 @%s(i32 addrspace(%s)*, i32, i32, i32, i32, i1)\n' % (name, space)
+    for name, space, op in sorted(ATOMIC_DECLS):
+        if op == 'load':
+            out += '\ndeclare i32 @%s(i32 addrspace(%s)*, i32, i32, i32, i1)\n' % (name, space)
+        else:
+            out += '\ndeclare %s @%s(i32 addrspace(%s)*, i32, i32, i32, i32, i1)\n' % ('void' if op == 'store' else 'i32', name, space)
     return out
+ATOMIC_DECLS = set()
 
 def find_define(ir, name):
     m = re.search(r'^define [^@]*@%s\(' % re.escape(name), ir, re.M)
@@ -1009,7 +1037,8 @@ def main(argv):
         funcs = stage_functions(ast_tree(ast))
         open(rew, 'w').write(code + '\n' + entry_points(funcs))
         llf = os.path.join(tmp, 'out.ll')
-        r = subprocess.run(base + ['-O2', '-Xclang', '-disable-llvm-passes', '-Xclang', '-no-opaque-pointers', '-S', '-emit-llvm',
+        # -fpreserve-vec3-type: store 3-vectors as 3 elements, as Xcode does (the 4th lane is padding)
+        r = subprocess.run(base + ['-O2', '-Xclang', '-disable-llvm-passes', '-Xclang', '-no-opaque-pointers', '-Xclang', '-fpreserve-vec3-type', '-S', '-emit-llvm',
                                    '-o', llf + '.0', '-Xclang', '-fdump-record-layouts', rew], capture_output=True, text=True)
         if r.returncode:
             sys.stderr.write(r.stderr); raise SystemExit(1)
@@ -1038,7 +1067,7 @@ def main(argv):
         fl = [dict(name=f['name'], type={'vertex': 0, 'fragment': 1, 'kernel': 2}[f['stage']], module=module,
                    air=air, lang=lang, pub=public_md(air_ll, f['name'], FC_CHECKED, f))
               for f in sorted(funcs, key=lambda f: ('kernel', 'vertex', 'fragment').index(f['stage']))]
-        open(out, 'wb').write(mtlb.metallib(fl, header(os_name, ver, sim, air)))
+        open(out, 'wb').write(mtlb.metallib(fl, header(os_name, ver, sim, air), share_modules=bool(os.environ.get('MSL2AIR_SHARE'))))
 
 if __name__ == '__main__':
     main(sys.argv[1:])

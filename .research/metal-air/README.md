@@ -169,8 +169,32 @@ The plan, sent to the Manager:
       AIR functions) for the next step.
     - llama.cpp's kernels are templates instantiated with `[[host_name]]`,
       which isn't supported yet.
+  - **Texture library from a probe:** `gen_textures.py` generates
+    `include/__metal_textures.h`.
+    - It covers every texture kind (1D, 1D array, 2D, 2D array, 3D, cube,
+      cube array, 2D multisample, buffer, and the four depth kinds), for
+      float, half, int and uint, in each access mode.
+    - Only operations the probe shows are generated: queries,
+      sample (level, bias, offset, gradient), gather, read, write, fence,
+      and depth compare.
+    - All 92 probe kernels match Xcode's metadata and call the same set of
+      AIR functions.
+  - **Checking against Xcode's own code on the GPU:**
+    - LLVM 15's `llvm-as` reads Xcode's `-S -emit-llvm` output, and
+      `ll2metallib.py` packages it with our writer. That gives a
+      Xcode-compiled reference without a Mac VM.
+    - All 553 kernels of the math probe now give bit-identical output to
+      Xcode's. This needed `-fpreserve-vec3-type`: Xcode stores 3-vectors
+      as three elements and leaves the padding lane alone.
+    - The probe suite is still 22 of 22.
+    - `compare_calls.py` checks, per function, that we call the same AIR
+      functions as Xcode: 548 of 555 math kernels. The rest are vector
+      `fract` (Xcode calls a runtime helper; we use the scalar AIR function
+      per element) and bool-vector `any`/`all` (inline).
+  - **Smaller metallibs:** functions can share one module (`share_modules`;
+    `MSL2AIR_SHARE=1`), and Metal loads such files. Per-function module
+    splitting isn't needed.
   - **Still to do:**
-    - the texture library from p31;
     - template kernels (`host_name`);
     - a Rust port;
     - runtime checks for argument buffers, framebuffer fetch and MRT;

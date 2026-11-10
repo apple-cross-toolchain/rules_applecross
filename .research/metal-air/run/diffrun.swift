@@ -23,6 +23,7 @@ func fill(_ p: UnsafeMutableRawPointer, _ n: Int, _ how: String) {
     switch how {
     case "float": for i in 0..<n/4 { p.storeBytes(of: Float(rnd() >> 8) / Float(1 << 24) * 2 - 0.5, toByteOffset: i * 4, as: Float.self) }
     case "bytes": for i in 0..<n { p.storeBytes(of: UInt8(truncatingIfNeeded: rnd() >> 24), toByteOffset: i, as: UInt8.self) }
+    case "half": for i in 0..<n/2 { p.storeBytes(of: Float16(Float(rnd() >> 8) / Float(1 << 24) * 2 - 0.5), toByteOffset: i * 2, as: Float16.self) }
     default: memset(p, 0, n)
     }
 }

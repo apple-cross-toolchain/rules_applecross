@@ -118,6 +118,14 @@ typedef _atomic<int> atomic_int;
   extern "C" int __msl_atomic_##op##_s_i32(int *, int, int); \
   __attribute__((always_inline)) inline uint atomic_fetch_##op##_explicit(device atomic_uint *a, uint v, memory_order o) { return __msl_atomic_##op##_u_i32((uint *)&a->__s, v, int(o)); } \
   __attribute__((always_inline)) inline int atomic_fetch_##op##_explicit(device atomic_int *a, int v, memory_order o) { return __msl_atomic_##op##_s_i32((int *)&a->__s, v, int(o)); }
+extern "C" uint __msl_atomic_xchg_n_i32(uint *, uint, int);
+extern "C" uint __msl_atomic_load_n_i32(uint *, int);
+extern "C" void __msl_atomic_store_n_i32(uint *, uint, int);
+#define __MSL_ATOMIC_LS(T) \
+  __attribute__((always_inline)) inline T atomic_load_explicit(device _atomic<T> *a, memory_order o) { return (T)__msl_atomic_load_n_i32((uint *)&a->__s, int(o)); } \
+  __attribute__((always_inline)) inline void atomic_store_explicit(device _atomic<T> *a, T v, memory_order o) { __msl_atomic_store_n_i32((uint *)&a->__s, (uint)v, int(o)); } \
+  __attribute__((always_inline)) inline T atomic_exchange_explicit(device _atomic<T> *a, T v, memory_order o) { return (T)__msl_atomic_xchg_n_i32((uint *)&a->__s, (uint)v, int(o)); }
+__MSL_ATOMIC_LS(int) __MSL_ATOMIC_LS(uint)
 __MSL_ATOMIC(add) __MSL_ATOMIC(sub) __MSL_ATOMIC(min) __MSL_ATOMIC(max) __MSL_ATOMIC(and) __MSL_ATOMIC(or) __MSL_ATOMIC(xor)
 
 // ---- bool vectors: fields x..w, built from a bool (splat) or a comparison
@@ -128,6 +136,8 @@ template <int N> struct __boolvec;
   __attribute__((always_inline)) __boolvec(bool b) { for (int k = 0; k < N; k++) (*this)[k] = b; } \
   template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
   __attribute__((always_inline)) __boolvec(V m) { for (int k = 0; k < N; k++) (*this)[k] = m[k] != 0; } \
+  template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
+  __attribute__((always_inline)) explicit operator V() const { V r; for (int k = 0; k < N; k++) r[k] = (typename __elem<V>::type)(*this)[k]; return r; } \
   __attribute__((always_inline)) bool &operator[](int k) { return (&x)[k]; } \
   __attribute__((always_inline)) bool operator[](int k) const { return (&x)[k]; }
 template <> struct __boolvec<2> { bool x, y; __MSL_BOOLVEC_OPS(2) };
@@ -138,6 +148,9 @@ template <int N> __attribute__((always_inline)) inline bool any(__boolvec<N> b) 
 template <int N> __attribute__((always_inline)) inline bool all(__boolvec<N> b) { bool r = true; for (int k = 0; k < N; k++) r = r && b[k]; return r; }
 template <class V, int N> __attribute__((always_inline)) inline V select(V a, V b, __boolvec<N> c) { V r = a; for (int k = 0; k < N; k++) if (c[k]) r[k] = b[k]; return r; }
 template <class V> __attribute__((always_inline)) inline V select(V a, V b, bool c) { return c ? b : a; }
+
+// as_type: reinterpret the bits (same size)
+template <class T, class U> __attribute__((always_inline)) inline T as_type(U u) { return __builtin_bit_cast(T, u); }
 
 // ---- type traits (MSL specification, <metal_type_traits>)
 template <bool B, class T, class F> struct conditional { typedef T type; };
@@ -270,8 +283,7 @@ template <class T, int N> struct __packed {
 __MSL_PACKED(float) __MSL_PACKED(half) __MSL_PACKED(int) __MSL_PACKED(uint) __MSL_PACKED(short) __MSL_PACKED(ushort) __MSL_PACKED(char) __MSL_PACKED(uchar)
 
 // ---- textures and samplers: opaque handles, as in AIR.
-struct _texture_1d_t; struct _texture_2d_t; struct _texture_2d_array_t; struct _texture_3d_t; struct _texture_cube_t;
-struct _depth_2d_t; struct _texture_buffer_1d_t; struct _sampler_t;
+struct _sampler_t;
 namespace metal {
 enum class access { sample = 0, read = 1, write = 2, read_write = 3 };
 struct sampler { __MSL_CONSTANT _sampler_t *__s; };
@@ -279,76 +291,18 @@ struct sampler { __MSL_CONSTANT _sampler_t *__s; };
 struct __ret_v4f32 { float4 v; char status; };
 struct __ret_v4f16 { half4 v; char status; };
 struct __ret_f32 { float v; char status; };
+struct __ret_v4i32 { int4 v; char status; };
 struct __ret_v4u32 { uint4 v; char status; };
 template <class T> struct __texel;
 template <> struct __texel<float> { typedef float4 v4; typedef __ret_v4f32 ret; };
 template <> struct __texel<half> { typedef half4 v4; typedef __ret_v4f16 ret; };
+template <> struct __texel<int> { typedef int4 v4; typedef __ret_v4i32 ret; };
 template <> struct __texel<uint> { typedef uint4 v4; typedef __ret_v4u32 ret; };
 extern "C" __MSL_CONSTANT _sampler_t *__air_get_read_sampler() __AIR("air.get_read_sampler");
-extern "C" __ret_v4u32 __air_read_texture_2d_u_v4i32(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, uint2, uint2, int, int) __AIR("air.read_texture_2d.u.v4i32");
-__attribute__((always_inline)) inline __ret_v4u32 __read2d(__MSL_DEVICE _texture_2d_t *t, uint2 c, uint lod, int a, uint) { return __air_read_texture_2d_u_v4i32(t, __air_get_read_sampler(), c, uint2{0u, 0u}, lod, a); }
-
-// Observed call shapes, one per texture kind (FORMAT.md, "Textures").
-#define __MSL_TEX_QUERY(K) \
-  extern "C" uint __air_get_width_##K(__MSL_DEVICE _##K##_t *, int) __AIR("air.get_width_" #K); \
-  extern "C" uint __air_get_height_##K(__MSL_DEVICE _##K##_t *, int) __AIR("air.get_height_" #K);
-__MSL_TEX_QUERY(texture_2d)
-#define __MSL_TEX_FNS(SFX, T) \
-  extern "C" __ret_##SFX __air_sample_texture_1d_##SFX(__MSL_DEVICE _texture_1d_t *, __MSL_CONSTANT _sampler_t *, float, bool, int, bool, float, float, int) __AIR("air.sample_texture_1d." #SFX); \
-  extern "C" __ret_##SFX __air_sample_texture_2d_##SFX(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, float2, bool, int2, bool, float, float, int) __AIR("air.sample_texture_2d." #SFX); \
-  extern "C" __ret_##SFX __air_sample_texture_2d_array_##SFX(__MSL_DEVICE _texture_2d_array_t *, __MSL_CONSTANT _sampler_t *, float2, uint, bool, int2, bool, float, float, int) __AIR("air.sample_texture_2d_array." #SFX); \
-  extern "C" __ret_##SFX __air_sample_texture_cube_##SFX(__MSL_DEVICE _texture_cube_t *, __MSL_CONSTANT _sampler_t *, float3, bool, float, float, int) __AIR("air.sample_texture_cube." #SFX); \
-  extern "C" __ret_##SFX __air_read_texture_2d_##SFX(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, uint2, uint2, int, int) __AIR("air.read_texture_2d." #SFX); \
-  extern "C" __ret_##SFX __air_read_texture_3d_##SFX(__MSL_DEVICE _texture_3d_t *, __MSL_CONSTANT _sampler_t *, uint3, uint3, int, int) __AIR("air.read_texture_3d." #SFX); \
-  extern "C" void __air_write_texture_2d_##SFX(__MSL_DEVICE _texture_2d_t *, uint2, T##4, int, int) __AIR("air.write_texture_2d." #SFX); \
-  extern "C" void __air_write_texture_buffer_1d_##SFX(__MSL_DEVICE _texture_buffer_1d_t *, uint, T##4, int) __AIR("air.write_texture_buffer_1d." #SFX); \
-  __attribute__((always_inline)) inline __ret_##SFX __sample1d(__MSL_DEVICE _texture_1d_t *t, sampler s, float c, T) { return __air_sample_texture_1d_##SFX(t, s.__s, c, false, 0, false, 0.0f, 0.0f, 0); } \
-  __attribute__((always_inline)) inline __ret_##SFX __sample2d(__MSL_DEVICE _texture_2d_t *t, sampler s, float2 c, T) { return __air_sample_texture_2d_##SFX(t, s.__s, c, true, int2{0, 0}, false, 0.0f, 0.0f, 0); } \
-  __attribute__((always_inline)) inline __ret_##SFX __sample2da(__MSL_DEVICE _texture_2d_array_t *t, sampler s, float2 c, uint a, T) { return __air_sample_texture_2d_array_##SFX(t, s.__s, c, a, true, int2{0, 0}, false, 0.0f, 0.0f, 0); } \
-  __attribute__((always_inline)) inline __ret_##SFX __samplecube(__MSL_DEVICE _texture_cube_t *t, sampler s, float3 c, T) { return __air_sample_texture_cube_##SFX(t, s.__s, c, false, 0.0f, 0.0f, 0); } \
-  __attribute__((always_inline)) inline __ret_##SFX __read2d(__MSL_DEVICE _texture_2d_t *t, uint2 c, uint lod, int a, T) { return __air_read_texture_2d_##SFX(t, __air_get_read_sampler(), c, uint2{0u, 0u}, lod, a); } \
-  __attribute__((always_inline)) inline __ret_##SFX __read3d(__MSL_DEVICE _texture_3d_t *t, uint3 c, uint lod, int a, T) { return __air_read_texture_3d_##SFX(t, __air_get_read_sampler(), c, uint3{0u, 0u, 0u}, lod, a); } \
-  __attribute__((always_inline)) inline void __write2d(__MSL_DEVICE _texture_2d_t *t, T##4 v, uint2 c, uint lod, int a) { __air_write_texture_2d_##SFX(t, c, v, lod, a); } \
-  __attribute__((always_inline)) inline void __writebuf(__MSL_DEVICE _texture_buffer_1d_t *t, T##4 v, uint c, int a) { __air_write_texture_buffer_1d_##SFX(t, c, v, a); }
-__MSL_TEX_FNS(v4f32, float) __MSL_TEX_FNS(v4f16, half)
-extern "C" __ret_f32 __air_sample_depth_2d_f32(__MSL_DEVICE _depth_2d_t *, __MSL_CONSTANT _sampler_t *, int, float2, bool, int2, bool, float, float, int) __AIR("air.sample_depth_2d.f32");
-
 #define __MSL_AI __attribute__((always_inline))
 struct gradient2d { float2 dPdx, dPdy; __MSL_AI gradient2d(float2 x, float2 y) : dPdx(x), dPdy(y) {} };
-extern "C" __ret_v4f32 __air_sample_texture_2d_grad_v4f32(__MSL_DEVICE _texture_2d_t *, __MSL_CONSTANT _sampler_t *, float2, float2, float2, float, bool, int2, int) __AIR("air.sample_texture_2d_grad.v4f32");
-template <class T, access A = access::sample> struct texture1d {
-  __MSL_DEVICE _texture_1d_t *__t;
-  __MSL_AI typename __texel<T>::v4 sample(sampler s, float c) const { return __sample1d(__t, s, c, T()).v; }
-};
-template <class T, access A = access::sample> struct texture2d {
-  __MSL_DEVICE _texture_2d_t *__t;
-  __MSL_AI uint get_width(uint lod = 0) const { return __air_get_width_texture_2d(__t, lod); }
-  __MSL_AI uint get_height(uint lod = 0) const { return __air_get_height_texture_2d(__t, lod); }
-  __MSL_AI typename __texel<T>::v4 sample(sampler s, float2 c) const { return __sample2d(__t, s, c, T()).v; }
-  __MSL_AI float4 sample(sampler s, float2 c, gradient2d g) const { return __air_sample_texture_2d_grad_v4f32(__t, s.__s, c, g.dPdx, g.dPdy, 0.0f, true, int2{0, 0}, 0).v; }
-  __MSL_AI typename __texel<T>::v4 read(uint2 c, uint lod = 0) const { return __read2d(__t, c, lod, int(A), T()).v; }
-  __MSL_AI void write(typename __texel<T>::v4 v, uint2 c, uint lod = 0) const { __write2d(__t, v, c, lod, int(A)); }
-};
-template <class T, access A = access::sample> struct texture2d_array {
-  __MSL_DEVICE _texture_2d_array_t *__t;
-  __MSL_AI typename __texel<T>::v4 sample(sampler s, float2 c, uint a) const { return __sample2da(__t, s, c, a, T()).v; }
-};
-template <class T, access A = access::sample> struct texture3d {
-  __MSL_DEVICE _texture_3d_t *__t;
-  __MSL_AI typename __texel<T>::v4 read(uint3 c, uint lod = 0) const { return __read3d(__t, c, lod, int(A), T()).v; }
-};
-template <class T, access A = access::sample> struct texturecube {
-  __MSL_DEVICE _texture_cube_t *__t;
-  __MSL_AI typename __texel<T>::v4 sample(sampler s, float3 c) const { return __samplecube(__t, s, c, T()).v; }
-};
-template <class T, access A = access::sample> struct depth2d {
-  __MSL_DEVICE _depth_2d_t *__t;
-  __MSL_AI float sample(sampler s, float2 c) const { return __air_sample_depth_2d_f32(__t, s.__s, 1, c, true, int2{0, 0}, false, 0.0f, 0.0f, 0).v; }
-};
-template <class T, access A = access::write> struct texture_buffer {
-  __MSL_DEVICE _texture_buffer_1d_t *__t;
-  __MSL_AI void write(typename __texel<T>::v4 v, uint c) const { __writebuf(__t, v, c, int(A)); }
-};
+// Every texture kind: generated from the observed call shapes (gen_textures.py).
+#include "__metal_textures.h"
 // constexpr sampler arguments: the driver computes the state; these only parse.
 enum class coord { normalized, pixel };
 enum class address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
