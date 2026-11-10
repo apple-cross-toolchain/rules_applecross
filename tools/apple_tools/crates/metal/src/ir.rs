@@ -187,7 +187,7 @@ pub fn resolve_atomics(ir: &str) -> Result<String, String> {
     let mut decls: BTreeSet<(String, String, String, String)> = BTreeSet::new();
     let mut err = None;
     let mut n = 0;
-    let pat = regex!(r"(?m)^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:(?:spir_func|noundef|fast) )*(?:i32|float|void) @__msl_atomic_(\w+?)_([usn])_(i32|f32)\((?:i32|float)\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?(?:, ![\w.]+ !\d+)*$");
+    let pat = regex!(r"(?m)^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:(?:spir_func|noundef|fast|nnan|ninf|nsz|arcp|contract|afn|reassoc) )*(?:i32|float|void) @__msl_atomic_(\w+?)_([usn])_(i32|f32)\((?:i32|float)\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?(?:, ![\w.]+ !\d+)*$");
     let out = map_functions(ir, |body| {
         replace_all(body, pat, |c: &Captures| {
             let (indent, op, sg, ty, ptr) = (&c[1], &c[3], &c[4], &c[5], &c[6]);
@@ -561,4 +561,112 @@ fn convert(ir: &str, user_scalars: bool) -> String {
         ir.insert_str(at, &text);
     }
     ir
+}
+
+
+/// Xcode's GPU target runs LLVM's SpeculativeExecution (branches diverge), as
+/// our pipeline now does: an if-then block's cheap instructions go up to the
+/// branch, and InstCombine sinks those used only there back to the top of the
+/// block. LLVM 15 sinks them back in their order; Xcode's InstCombine moves
+/// each to the front once all its users are in the block. So the then-block's
+/// leading run of such instructions is put in Xcode's order.
+pub fn speculate_and_sink(ir: &str) -> String {
+    map_functions(ir, |f| {
+        let lines: Vec<&str> = f.lines().collect();
+        // blocks: (label, first line, last line inclusive)
+        let mut blocks: Vec<(String, usize, usize)> = Vec::new();
+        for (i, l) in lines.iter().enumerate() {
+            if i == 0 {
+                continue;
+            }
+            if let Some(c) = regex!(r"^([-\w.$]+):").captures(l) {
+                if let Some(b) = blocks.last_mut() {
+                    b.2 = i - 1;
+                }
+                blocks.push((c[1].to_string(), i + 1, i));
+            } else if blocks.is_empty() && !l.trim().is_empty() && *l != "}" {
+                blocks.push((String::new(), i, i));
+            }
+            if *l == "}" {
+                if let Some(b) = blocks.last_mut() {
+                    b.2 = i - 1;
+                }
+            }
+        }
+        let term = |b: &(String, usize, usize)| -> &str {
+            (b.1..=b.2).rev().map(|i| lines[i].trim()).find(|l| !l.is_empty()).unwrap_or("")
+        };
+        let preds = |label: &str| -> Vec<usize> {
+            let re = Regex::new(&format!(r"label %{}\b", regex::escape(label))).unwrap();
+            blocks.iter().enumerate().filter(|(_, b)| re.is_match(term(b))).map(|(k, _)| k).collect()
+        };
+        let mut new_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        for (bi, b) in blocks.iter().enumerate() {
+            if b.0.is_empty() {
+                continue;
+            }
+            // a triangle's then-block: one predecessor ending in a conditional branch to it and to our successor
+            let p = preds(&b.0);
+            if p.len() != 1 {
+                continue;
+            }
+            let pt = term(&blocks[p[0]]);
+            let Some(pc) = regex!(r"^br i1 [^,]+, label %([-\w.$]+), label %([-\w.$]+)(?:, !.*)?$").captures(pt) else { continue };
+            let Some(succ) = regex!(r"^br label %([-\w.$]+)(?:, !.*)?$").captures(term(b)).map(|c| c[1].to_string()) else { continue };
+            let other = if pc[1] == b.0 { pc[2].to_string() } else { pc[1].to_string() };
+            if other != succ || blocks.iter().position(|x| x.0 == b.0) != Some(bi) {
+                continue;
+            }
+            // the leading run of speculatable instructions, in order
+            let body: Vec<usize> = (b.1..=b.2).filter(|&i| !lines[i].trim().is_empty() && !lines[i].trim_start().starts_with("br ")).collect();
+            let mut hoisted: Vec<usize> = Vec::new();
+            for &i in &body {
+                let l = lines[i].trim();
+                let op = regex!(r"^%[\w.]+ = (\w+)").captures(l).map(|c| c[1].to_string()).unwrap_or_default();
+                let cheap = matches!(op.as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector");
+                if !cheap {
+                    break;
+                }
+                hoisted.push(i);
+            }
+            if hoisted.len() < 2 {
+                continue;
+            }
+            // sink back: forward, each to the front once its users are all in the block
+            let mut front: Vec<usize> = Vec::new();
+            let mut pending: Vec<usize> = hoisted.clone();
+            let users_back = |i: usize, pending: &Vec<usize>| -> bool {
+                let Some(d) = regex!(r"^\s+(%[\w.]+) = ").captures(lines[i]).map(|c| c[1].to_string()) else { return true };
+                let re = Regex::new(&format!(r"{}\b", regex::escape(&d))).unwrap();
+                !pending.iter().any(|&j| j != i && re.is_match(lines[j].split_once(" = ").map_or(lines[j], |x| x.1)))
+            };
+            let mut work: Vec<usize> = hoisted.iter().rev().cloned().collect();
+            while let Some(i) = work.pop() {
+                if !pending.contains(&i) || !users_back(i, &pending) {
+                    continue;
+                }
+                pending.retain(|&j| j != i);
+                front.insert(0, i);
+                // its operands among the hoisted come up next
+                for &j in hoisted.iter().rev() {
+                    if pending.contains(&j) {
+                        work.push(j);
+                    }
+                }
+            }
+            if !pending.is_empty() {
+                continue;
+            }
+            let rest: Vec<usize> = body.iter().filter(|i| !hoisted.contains(i)).cloned().collect();
+            let order: Vec<usize> = front.into_iter().chain(rest).collect();
+            for (slot, src) in body.iter().zip(order) {
+                new_lines[*slot] = lines[src].to_string();
+            }
+        }
+        let mut out = new_lines.join("\n");
+        if f.ends_with('\n') {
+            out.push('\n');
+        }
+        out
+    })
 }

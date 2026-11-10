@@ -84,6 +84,10 @@ fn tool(o: &Options, name: &str) -> PathBuf {
     o.llvm_bin.join(name)
 }
 
+/// LLVM 15's -O2, spelled out: named so, speculative-execution runs on every
+/// target, as on Xcode's (whose GPU target has divergent branches).
+static O2: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("-passes={}", include_str!("../data/o2_pipeline.txt").trim()));
+
 pub fn compile(o: &Options) -> Result<Output, String> {
     let tmp = scratch()?;
     let inc = tmp.0.join("include");
@@ -170,13 +174,11 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         std::fs::read_to_string(&out).map_err(|e| e.to_string())
     };
     // conversions become air.convert calls once constants are folded, before the last attribute inference
-    let o2 = std::env::var("METAL_EXP_O2").unwrap_or("-O2".into());
-    let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &o2.split(' ').collect::<Vec<_>>())?));
+    let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &[O2.as_str()])?));
     let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
-    let o2b = std::env::var("METAL_EXP_O2B").unwrap_or("-O2".into());
-    let text = ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &o2b.split(' ').collect::<Vec<_>>())?)));
+    let text = ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?))));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(
@@ -235,11 +237,6 @@ pub fn assemble(llvm_bin: &Path, ir: &str) -> Result<Vec<u8>, String> {
         std::fs::write(&ll, text.replacen("target triple = \"spir64-unknown-unknown\"", &format!("target triple = \"{triple}\""), 1)).map_err(|e| e.to_string())?;
     }
     run(Command::new(llvm_bin.join("llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
-    if let Ok(keep) = std::env::var("METALLIB_KEEP") {
-        let n = std::fs::read_dir(&keep).map(|d| d.count()).unwrap_or(0);
-        let _ = std::fs::copy(&ll, Path::new(&keep).join(format!("{n}.ll")));
-        let _ = std::fs::copy(&bc, Path::new(&keep).join(format!("{n}.bc")));
-    }
     crate::bitcode::as_xcode(&std::fs::read(&bc).map_err(|e| e.to_string())?, crate::air::PRODUCER, crate::bitcode::Writer::Metallib)
 }
 
