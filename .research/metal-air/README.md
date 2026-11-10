@@ -229,6 +229,29 @@ The plan, sent to the Manager:
 - **M4:** replace the relax_metal stub.
 - **M5:** widen.
 
+## M4 design (replacing the relax_metal stub)
+
+rules_apple compiles each `.metal` with `xcrun metal -c -target … -o x.air`
+and links them with `xcrun metallib -o out.metallib *.air`. Under
+relax_metal both tools are stubs today (`toolchain/stubs/metal_unavailable.sh`).
+The work splits the same way:
+
+- **`metal -c`:** the front end (`msl2air.py` up to the AIR module). It
+  writes a `.air`: bitcode in the `0B17C0DE` wrapper with the AIR metadata,
+  as Xcode's `.air` files are.
+- **`metallib`:** reads each `.air`. It takes the function list from
+  `!air.kernel`/`!air.vertex`/`!air.fragment` and derives the public
+  metadata from the module's own metadata:
+  - VATT/VATY from the vertex inputs and their use;
+  - CNST from `!air.function_constants` and the function's loads.
+
+  It writes the container in stage order, one shared module per `.air`.
+- **Toolchain:** clang, opt and llvm-as from LLVM 15.0.6, the last release
+  with typed pointers; 340 MB unpacked. The include directory is ours.
+- **Open questions (Manager/Logan):**
+  - fetch LLVM's release tarball versus build a trimmed one;
+  - ship the Python driver first, or port to Rust before M4.
+
 ## Clean-room provenance
 
 - The approach (rewrite MSL into C++, compile with clang 15 for typed
