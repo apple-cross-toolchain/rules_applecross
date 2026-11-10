@@ -37,6 +37,7 @@ bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "llvm", version = "0.8.25")
 bazel_dep(name = "bazel_linux_packages", version = "0.4.1")
 bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "toolchains_llvm", version = "1.13.0")
 bazel_dep(name = "xctestrunner", version = "0.0.1", dev_dependency = True)
 
 bazel_dep(name = "fmt", version = "12.1.0", dev_dependency = True)
@@ -138,3 +139,14 @@ apple_cross_toolchain.configure(
 use_repo(apple_cross_toolchain, "apple_cross_toolchain")
 
 register_toolchains("@apple_cross_toolchain//:all", dev_dependency = True)
+
+# LLVM 15's clang, opt and llvm-as for Metal shaders under relax_metal: the
+# last LLVM with typed pointers, which AIR uses (tools/apple_tools/crates/metal).
+# Only its tools are used, not registered as a C++ toolchain, and only builds
+# with --//toolchain:relax_metal fetch it.
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
+llvm.toolchain(
+    name = "applecross_metal_llvm",
+    llvm_version = "15.0.6",
+)
+use_repo(llvm, "applecross_metal_llvm_llvm")

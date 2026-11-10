@@ -57,8 +57,10 @@ build:relax_momc --action_env=RULES_APPLECROSS_RELAX_MOMC=1
 # iOS PNGs this pngcrush can't reproduce (other than 8-bit RGB and RGBA),
 # copied as they are rather than iPhone-optimized.
 build:relax_pngcrush --action_env=RULES_APPLECROSS_RELAX_PNGCRUSH=1
-# Metal shaders, compiled to an empty library (they fail at run time).
+# Metal shaders, compiled by this repository's metal with LLVM 15 (working,
+# not Xcode's bytes).
 build:relax_metal --action_env=RULES_APPLECROSS_RELAX_METAL=1
+build:relax_metal --//toolchain:relax_metal
 # String Catalog entries not yet reproduced, written in their nearest form.
 build:relax_xcstrings --action_env=RULES_APPLECROSS_RELAX_XCSTRINGS=1
 # App Intents not yet reproduced, left out of the app's metadata.

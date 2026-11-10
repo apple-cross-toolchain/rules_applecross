@@ -1,0 +1,18 @@
+[package]
+name = "metal"
+description = "Metal shaders without a Mac: MSL to AIR with LLVM 15 and our own stdlib, packaged as a metallib (relax_metal)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "metal"
+path = "src/bin/metal.rs"
+
+[[bin]]
+name = "metallib"
+path = "src/bin/metallib.rs"
+
+[dependencies]
+regex = "1"
+sha2 = "0.10"

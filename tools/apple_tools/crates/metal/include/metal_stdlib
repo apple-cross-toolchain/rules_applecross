@@ -1,0 +1,367 @@
+// Our own Metal Shading Language subset for clang 15, written from the MSL
+// specification and from the AIR Xcode emits for our probe shaders.
+#pragma once
+// The driver reads [[attributes]] (rewritten to __MSL_ATTR) and stage keywords
+// from an AST pass with __MSL_AST defined; codegen sees neither.
+#ifdef __MSL_AST
+#define __MSL_ATTR(x) __attribute__((annotate(x)))
+#else
+#define __MSL_ATTR(x)
+#endif
+// Stage keywords survive preprocessing as placeholders the driver rewrites
+// (template instantiations with [[host_name]] need to see them).
+#define kernel __msl_stage_kernel
+#define vertex __msl_stage_vertex
+#define fragment __msl_stage_fragment
+// Address spaces: the AST pass sees them (for the metadata); codegen compiles
+// flat and the driver infers them back from the entry points (MSL's member
+// functions and operators then work on objects in any address space).
+#define __MSL_DEVICE __attribute__((address_space(1)))
+#define __MSL_CONSTANT __attribute__((address_space(2)))
+#define __MSL_THREADGROUP __attribute__((address_space(3)))
+#ifdef __MSL_AST
+#define device __attribute__((address_space(1)))
+#define constant __attribute__((address_space(2)))
+#define threadgroup __attribute__((address_space(3)))
+#else
+#define device
+#define constant
+#define threadgroup
+#endif
+#define thread
+#define __AIR(name) __asm__(name)
+#define METAL_FUNC inline __attribute__((always_inline))
+
+typedef signed char int8_t; typedef unsigned char uint8_t; typedef short int16_t; typedef unsigned short uint16_t;
+typedef int int32_t; typedef unsigned int uint32_t; typedef long int64_t; typedef unsigned long uint64_t;
+typedef unsigned long size_t; typedef long ptrdiff_t; typedef long intptr_t; typedef unsigned long uintptr_t;
+typedef unsigned char uchar;
+typedef unsigned short ushort;
+typedef unsigned int uint;
+typedef unsigned long ulong;
+typedef _Float16 half;
+#define __MSL_VEC(T) \
+  typedef T T##2 __attribute__((ext_vector_type(2))); \
+  typedef T T##3 __attribute__((ext_vector_type(3))); \
+  typedef T T##4 __attribute__((ext_vector_type(4)));
+__MSL_VEC(char) __MSL_VEC(uchar) __MSL_VEC(short) __MSL_VEC(ushort) __MSL_VEC(int) __MSL_VEC(uint)
+__MSL_VEC(long) __MSL_VEC(ulong) __MSL_VEC(half) __MSL_VEC(float)
+
+namespace metal {
+template <class T, int N> using __vector = T __attribute__((ext_vector_type(N)));
+template <class T> struct __elem { typedef T type; static constexpr int n = 1; };
+#define __MSL_ELEM(T) \
+  template <> struct __elem<T##2> { typedef T type; static constexpr int n = 2; }; \
+  template <> struct __elem<T##3> { typedef T type; static constexpr int n = 3; }; \
+  template <> struct __elem<T##4> { typedef T type; static constexpr int n = 4; };
+__MSL_ELEM(char) __MSL_ELEM(uchar) __MSL_ELEM(short) __MSL_ELEM(ushort) __MSL_ELEM(int) __MSL_ELEM(uint)
+__MSL_ELEM(long) __MSL_ELEM(ulong) __MSL_ELEM(half) __MSL_ELEM(float)
+
+// Vector constructors: T4(a, b, ...) takes scalars and vectors in order;
+// T4(s) splats a scalar; T4(v) converts a vector of the same width.
+template <class V, class E = typename __elem<V>::type, int N = __elem<V>::n>
+struct __vbuild {
+  V v; int i = 0;
+  template <class A> __attribute__((always_inline)) void put(A a) {
+    if constexpr (__elem<A>::n == 1) v[i++] = E(a);
+    else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
+  }
+};
+template <class T, int N> struct __packed;
+template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
+template <bool B, class T = void> struct enable_if {};
+template <class T> struct enable_if<true, T> { typedef T type; };
+template <int... I> struct __seq {};
+template <int N, int... I> struct __mkseq : __mkseq<N - 1, N - 1, I...> {};
+template <int... I> struct __mkseq<0, I...> { typedef __seq<I...> type; };
+template <class V> constexpr V __vec() { return V{}; }
+// Scalars only: brace construction, which clang can constant-evaluate (program-scope constants).
+template <class V, int... I, class S> constexpr V __splat(__seq<I...>, S s) { return V{((void)I, (typename __elem<V>::type)s)...}; }
+template <class V, class A> constexpr V __vec(A a) {
+  if constexpr (__elem<A>::n == 1) return __splat<V>(typename __mkseq<__elem<V>::n>::type(), a);
+  else { V r; for (int k = 0; k < __elem<V>::n; k++) r[k] = (typename __elem<V>::type)a[k]; return r; }
+}
+template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R... r) {
+  if constexpr (__elem<A>::n == 1 && __elem<B>::n == 1 && (... && (__elem<R>::n == 1)) && 2 + sizeof...(R) == __elem<V>::n) {
+    typedef typename __elem<V>::type E; return V{(E)a, (E)b, (E)r...};
+  } else {
+    __vbuild<V> v; v.put(a); v.put(b); (v.put(r), ...); return v.v;
+  }
+}
+
+enum class mem_flags { mem_none = 0, mem_device = 1, mem_threadgroup = 2, mem_texture = 4, mem_threadgroup_imageblock = 8, mem_object_data = 16 };
+// Barriers: (memory flags, 5, execution scope: 1 threadgroup, 4 simdgroup).
+extern "C" __attribute__((convergent)) void __air_wg_barrier(int, int, int) __AIR("air.wg.barrier");
+extern "C" __attribute__((convergent)) void __air_simdgroup_barrier(int, int, int) __AIR("air.simdgroup.barrier");
+__attribute__((always_inline)) inline void threadgroup_barrier(mem_flags f) { __air_wg_barrier(int(f), 5, 1); }
+__attribute__((always_inline)) inline void simdgroup_barrier(mem_flags f) { __air_simdgroup_barrier(int(f), 5, 4); }
+
+// ---- simdgroup and quadgroup functions, 8x8 simdgroup matrices: generated (gen_simd.py)
+#include "__metal_simd.h"
+
+// ---- fragment functions
+extern "C" void __air_discard_fragment() __AIR("air.discard_fragment");
+__attribute__((always_inline)) inline void discard_fragment() { __air_discard_fragment(); }
+
+// ---- function constants (the driver rewrites is_function_constant_defined)
+extern "C" bool __air_is_function_constant_defined(__MSL_CONSTANT void *) __AIR("air.is_function_constant_defined");
+
+// ---- atomics (observed: air.atomic.global.<op>.<u|s>.i32(ptr, value, order, scope 2, 0, volatile))
+enum memory_order { memory_order_relaxed = 0 };
+template <class T> struct _atomic { T __s; };
+typedef _atomic<uint> atomic_uint;
+typedef _atomic<int> atomic_int;
+// The driver turns __msl_atomic_* calls into air.atomic.global.* or .local.*
+// once the pointer's address space is known.
+#define __MSL_ATOMIC(op) \
+  extern "C" uint __msl_atomic_##op##_u_i32(uint *, uint, int); \
+  extern "C" int __msl_atomic_##op##_s_i32(int *, int, int); \
+  __attribute__((always_inline)) inline uint atomic_fetch_##op##_explicit(device atomic_uint *a, uint v, memory_order o) { return __msl_atomic_##op##_u_i32((uint *)&a->__s, v, int(o)); } \
+  __attribute__((always_inline)) inline int atomic_fetch_##op##_explicit(device atomic_int *a, int v, memory_order o) { return __msl_atomic_##op##_s_i32((int *)&a->__s, v, int(o)); }
+extern "C" uint __msl_atomic_xchg_n_i32(uint *, uint, int);
+extern "C" uint __msl_atomic_load_n_i32(uint *, int);
+extern "C" void __msl_atomic_store_n_i32(uint *, uint, int);
+#define __MSL_ATOMIC_LS(T) \
+  __attribute__((always_inline)) inline T atomic_load_explicit(device _atomic<T> *a, memory_order o) { return (T)__msl_atomic_load_n_i32((uint *)&a->__s, int(o)); } \
+  __attribute__((always_inline)) inline void atomic_store_explicit(device _atomic<T> *a, T v, memory_order o) { __msl_atomic_store_n_i32((uint *)&a->__s, (uint)v, int(o)); } \
+  __attribute__((always_inline)) inline T atomic_exchange_explicit(device _atomic<T> *a, T v, memory_order o) { return (T)__msl_atomic_xchg_n_i32((uint *)&a->__s, (uint)v, int(o)); }
+__MSL_ATOMIC_LS(int) __MSL_ATOMIC_LS(uint)
+typedef _atomic<float> atomic_float;
+extern "C" float __msl_atomic_add_n_f32(float *, float, int);
+__attribute__((always_inline)) inline float atomic_fetch_add_explicit(device atomic_float *a, float v, memory_order o) { return __msl_atomic_add_n_f32((float *)&a->__s, v, int(o)); }
+// compare-exchange: the AIR function updates *expected itself and returns the old value
+extern "C" uint __msl_atomic_cmpxchg_n_i32(uint *, uint *, uint, int, int);
+#define __MSL_CMPXCHG(T) __attribute__((always_inline)) inline bool atomic_compare_exchange_weak_explicit(device _atomic<T> *a, thread T *expected, T desired, memory_order s, memory_order f) { \
+  T e = *expected; return (T)__msl_atomic_cmpxchg_n_i32((uint *)&a->__s, (uint *)expected, (uint)desired, int(s), int(f)) == e; }
+__MSL_CMPXCHG(int) __MSL_CMPXCHG(uint)
+__MSL_ATOMIC(add) __MSL_ATOMIC(sub) __MSL_ATOMIC(min) __MSL_ATOMIC(max) __MSL_ATOMIC(and) __MSL_ATOMIC(or) __MSL_ATOMIC(xor)
+
+// ---- bool vectors: fields x..w, built from a bool (splat) or a comparison
+// mask (nonzero is true); converting to a number gives 0 or 1, as in MSL.
+template <int N> struct __boolvec;
+#define __MSL_BOOLVEC_OPS(N) \
+  __boolvec() = default; \
+  __attribute__((always_inline)) __boolvec(bool b) { for (int k = 0; k < N; k++) (*this)[k] = b; } \
+  template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
+  __attribute__((always_inline)) __boolvec(V m) { for (int k = 0; k < N; k++) (*this)[k] = m[k] != 0; } \
+  template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
+  __attribute__((always_inline)) explicit operator V() const { V r; for (int k = 0; k < N; k++) r[k] = (typename __elem<V>::type)(*this)[k]; return r; } \
+  __attribute__((always_inline)) bool &operator[](int k) { return (&x)[k]; } \
+  __attribute__((always_inline)) bool operator[](int k) const { return (&x)[k]; }
+template <> struct __boolvec<2> { bool x, y; __MSL_BOOLVEC_OPS(2) };
+template <> struct __boolvec<3> { bool x, y, z; __MSL_BOOLVEC_OPS(3) };
+template <> struct __boolvec<4> { bool x, y, z, w; __MSL_BOOLVEC_OPS(4) };
+template <int N> struct __elem<__boolvec<N>> { typedef bool type; static constexpr int n = N; };
+template <int N> __attribute__((always_inline)) inline bool any(__boolvec<N> b) { bool r = false; for (int k = 0; k < N; k++) r = r || b[k]; return r; }
+template <int N> __attribute__((always_inline)) inline bool all(__boolvec<N> b) { bool r = true; for (int k = 0; k < N; k++) r = r && b[k]; return r; }
+template <class V, int N> __attribute__((always_inline)) inline V select(V a, V b, __boolvec<N> c) { V r = a; for (int k = 0; k < N; k++) if (c[k]) r[k] = b[k]; return r; }
+template <class V> __attribute__((always_inline)) inline V select(V a, V b, bool c) { return c ? b : a; }
+
+// pack/unpack (observed names)
+extern "C" uint __air_pack_unorm4x8_v4f32(float4) __AIR("air.pack.unorm4x8.v4f32");
+extern "C" uint __air_pack_snorm2x16_v2f32(float2) __AIR("air.pack.snorm2x16.v2f32");
+extern "C" float4 __air_unpack_unorm4x8_v4f32(uint) __AIR("air.unpack.unorm4x8.v4f32");
+extern "C" float2 __air_unpack_snorm2x16_v2f32(uint) __AIR("air.unpack.snorm2x16.v2f32");
+__attribute__((always_inline)) inline uint pack_float_to_unorm4x8(float4 v) { return __air_pack_unorm4x8_v4f32(v); }
+__attribute__((always_inline)) inline uint pack_float_to_snorm2x16(float2 v) { return __air_pack_snorm2x16_v2f32(v); }
+__attribute__((always_inline)) inline float4 unpack_unorm4x8_to_float(uint v) { return __air_unpack_unorm4x8_v4f32(v); }
+__attribute__((always_inline)) inline float2 unpack_snorm2x16_to_float(uint v) { return __air_unpack_snorm2x16_v2f32(v); }
+
+// bfloat: clang 15 has no __bf16 on this target, so 16 bits with IEEE
+// conversions (round to nearest even from float, NaN kept quiet).
+struct bfloat {
+  ushort __b;
+  bfloat() = default;
+  __attribute__((always_inline)) bfloat(float f) {
+    uint u = __builtin_bit_cast(uint, f);
+    __b = (u & 0x7fffffffu) > 0x7f800000u ? (ushort)((u >> 16) | 0x40u) : (ushort)((u + 0x7fffu + ((u >> 16) & 1u)) >> 16);
+  }
+  __attribute__((always_inline)) operator float() const { return __builtin_bit_cast(float, (uint)__b << 16); }
+};
+
+// as_type: reinterpret the bits (same size)
+template <class T, class U> __attribute__((always_inline)) inline T as_type(U u) { return __builtin_bit_cast(T, u); }
+
+// ---- type traits (MSL specification, <metal_type_traits>)
+template <bool B, class T, class F> struct conditional { typedef T type; };
+template <class T, class F> struct conditional<false, T, F> { typedef F type; };
+template <class T, class U> struct is_same { static constexpr bool value = false; };
+template <class T> struct is_same<T, T> { static constexpr bool value = true; };
+template <class T> struct remove_cv { typedef T type; };
+template <class T> struct remove_cv<const T> { typedef T type; };
+template <class T> struct make_scalar { typedef typename __elem<T>::type type; };
+template <class T> struct is_vector { static constexpr bool value = __elem<T>::n > 1; };
+template <class T> struct vec_elements { static constexpr int value = __elem<T>::n; };
+template <class T> struct is_floating_point { static constexpr bool value = is_same<T, float>::value || is_same<T, half>::value; };
+template <class T> struct is_integral { static constexpr bool value = !is_floating_point<T>::value && __elem<T>::n == 1 && !is_same<T, bool>::value; };
+template <class T> struct is_scalar { static constexpr bool value = __elem<T>::n == 1; };
+template <class T, int N> struct __vec_alias { typedef __vector<T, N> type; };
+template <class T> struct __vec_alias<T, 1> { typedef T type; };
+template <class T, int N> using vec = typename __vec_alias<T, N>::type;
+
+// ---- constants (MSL specification)
+#define M_E_F 2.71828182845904523536028747135266250f
+#define M_LOG2E_F 1.44269504088896340735992468100189214f
+#define M_LOG10E_F 0.434294481903251827651128918916605082f
+#define M_LN2_F 0.693147180559945309417232121458176568f
+#define M_LN10_F 2.30258509299404568401799145468436421f
+#define M_PI_F 3.14159265358979323846264338327950288f
+#define M_PI_2_F 1.57079632679489661923132169163975144f
+#define M_PI_4_F 0.785398163397448309615660845819875721f
+#define M_1_PI_F 0.318309886183790671537767526745028724f
+#define M_2_PI_F 0.636619772367581343075535053490057448f
+#define M_2_SQRTPI_F 1.12837916709551257389615890312154517f
+#define M_SQRT2_F 1.41421356237309504880168872420969808f
+#define M_SQRT1_2_F 0.707106781186547524400844362104849039f
+#define M_PI_H ((half)M_PI_F)
+#define M_PI_2_H ((half)M_PI_2_F)
+#define M_E_H ((half)M_E_F)
+#define MAXFLOAT 3.40282346638528859811704183484516925e+38f
+#define FLT_MAX 3.40282346638528859811704183484516925e+38f
+#define FLT_MIN 1.17549435082228750796873653722224568e-38f
+#define FLT_EPSILON 1.1920928955078125e-7f
+#define HALF_MAX ((half)65504.0f)
+#define HALF_MIN ((half)6.103515625e-05f)
+#define HALF_EPSILON ((half)0.0009765625f)
+#define CHAR_BIT 8
+#define SCHAR_MAX 127
+#define SCHAR_MIN (-128)
+#define UCHAR_MAX 255
+#define SHRT_MAX 32767
+#define SHRT_MIN (-32768)
+#define USHRT_MAX 65535
+#define INT_MAX 2147483647
+#define INT_MIN (-2147483647 - 1)
+#define UINT_MAX 4294967295u
+#define LONG_MAX 9223372036854775807l
+#define LONG_MIN (-9223372036854775807l - 1)
+#define ULONG_MAX 18446744073709551615ul
+#define MAXHALF ((half)65504.0f)
+#define INFINITY __builtin_inff()
+#define NAN __builtin_nanf("")
+
+// ---- math: generated from the observed AIR names (gen_math.py)
+#include "__metal_math.h"
+
+// refract (MSL specification)
+#define __MSL_REFRACT(V, S) __attribute__((always_inline)) inline V refract(V i, V n, S eta) { \
+  S k = (S)1 - eta * eta * ((S)1 - dot(n, i) * dot(n, i)); \
+  return k < (S)0 ? (V)(S)0 : eta * i - (eta * dot(n, i) + sqrt(k)) * n; }
+__MSL_REFRACT(float2, float) __MSL_REFRACT(float3, float) __MSL_REFRACT(float4, float)
+__MSL_REFRACT(half2, half) __MSL_REFRACT(half3, half) __MSL_REFRACT(half4, half)
+
+// ---- matrices: column-major, columns[c] is a vector of R elements.
+template <bool B> struct __enable_cols {};
+template <> struct __enable_cols<true> { typedef void type; };
+// One member per column, so { {..}, {..}, {..} } initialises columns as MSL does.
+template <class T, int C, int R> struct matrix;
+#define __MSL_MATRIX_OPS(C) \
+  __attribute__((always_inline)) __vector<T, R> &operator[](int c) { return (&__c0)[c]; } \
+  __attribute__((always_inline)) const __vector<T, R> &operator[](int c) const { return (&__c0)[c]; }
+template <class T, int R> struct matrix<T, 2, R> { __vector<T, R> __c0, __c1; __MSL_MATRIX_OPS(2) };
+template <class T, int R> struct matrix<T, 3, R> { __vector<T, R> __c0, __c1, __c2; __MSL_MATRIX_OPS(3) };
+template <class T, int R> struct matrix<T, 4, R> { __vector<T, R> __c0, __c1, __c2, __c3; __MSL_MATRIX_OPS(4) };
+template <class T, int C, int R> struct __elem<matrix<T, C, R>> { typedef T type; static constexpr int n = -1; };
+template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(const matrix<T, C, R> &m, __vector<T, C> v) {
+  __vector<T, R> r = m[0] * v[0];
+  for (int c = 1; c < C; c++) r += m[c] * v[c];
+  return r;
+}
+template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) {
+  __vector<T, C> r;
+  for (int c = 0; c < C; c++) { __vector<T, R> p = v * m[c]; T s = p[0]; for (int k = 1; k < R; k++) s += p[k]; r[c] = s; }
+  return r;
+}
+template <class T, int K, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, K, R> &a, const matrix<T, C, K> &b) {
+  matrix<T, C, R> m;
+  for (int c = 0; c < C; c++) m[c] = a * b[c];
+  return m;
+}
+// T CxR(...) constructors, rewritten by the driver to __mat: C columns, one
+// scalar for the diagonal, or C*R scalars in column order.
+template <class X, class... R> __attribute__((always_inline)) inline X __first(X x, R...) { return x; }
+template <class M> struct __mat_traits;
+template <class T, int C, int R> struct __mat_traits<matrix<T, C, R>> { typedef T E; static constexpr int c = C, r = R; };
+template <class C, int... J, class E> constexpr C __col(const E *v, int base, __seq<J...>) { return C{v[base + J]...}; }
+template <class M, int... I, class... A> constexpr M __mat_scalars(__seq<I...>, A... a) {
+  typedef __mat_traits<M> tr; typedef typename tr::E E; typedef __vector<E, tr::r> C;
+  E v[] = {(E)a...};
+  return M{__col<C>(v, I * tr::r, typename __mkseq<tr::r>::type())...};
+}
+template <class M, class... A> constexpr M __mat(A... a) {
+  typedef __mat_traits<M> tr; typedef __vector<typename tr::E, tr::r> C;
+  if constexpr (sizeof...(A) == tr::c && (... && (__elem<A>::n == tr::r))) {
+    return M{C(a)...};
+  } else if constexpr (sizeof...(A) == 1 && (... && (__elem<A>::n == 1))) {
+    M m{}; typename tr::E d = (typename tr::E)__first(a...);
+    for (int c = 0; c < tr::c; c++) { m[c] = (typename tr::E)0; if (c < tr::r) m[c][c] = d; }
+    return m;
+  } else if constexpr (sizeof...(A) == 1) {
+    M m{}; auto s = __first(a...);   // another matrix: convert column by column
+    for (int c = 0; c < tr::c; c++) for (int r = 0; r < tr::r; r++) m[c][r] = (typename tr::E)s[c][r];
+    return m;
+  } else {
+    return __mat_scalars<M>(typename __mkseq<tr::c>::type(), a...);
+  }
+}
+#define __MSL_MAT(T) typedef matrix<T, 2, 2> T##2x2; typedef matrix<T, 2, 3> T##2x3; typedef matrix<T, 2, 4> T##2x4; \
+  typedef matrix<T, 3, 2> T##3x2; typedef matrix<T, 3, 3> T##3x3; typedef matrix<T, 3, 4> T##3x4; \
+  typedef matrix<T, 4, 2> T##4x2; typedef matrix<T, 4, 3> T##4x3; typedef matrix<T, 4, 4> T##4x4;
+__MSL_MAT(float) __MSL_MAT(half)
+}  // namespace metal
+typedef metal::__boolvec<2> bool2; typedef metal::__boolvec<3> bool3; typedef metal::__boolvec<4> bool4;
+using metal::float2x2; using metal::float3x3; using metal::float4x4; using metal::float2x3; using metal::float3x4;
+using metal::float4x3; using metal::float2x4; using metal::float3x2; using metal::float4x2;
+using metal::half2x2; using metal::half3x3; using metal::half4x4;
+
+// ---- array<T, N> (argument buffers) and packed vectors
+namespace metal {
+template <class T, int N> struct array {
+  T __e[N];
+  __attribute__((always_inline)) T &operator[](int i) { return __e[i]; }
+  __attribute__((always_inline)) const T &operator[](int i) const { return __e[i]; }
+};
+template <class T, int N> struct __packed {
+  T __e[N];
+  __attribute__((always_inline)) T &operator[](int i) { return __e[i]; }
+  __attribute__((always_inline)) T operator[](int i) const { return __e[i]; }
+  __attribute__((always_inline)) operator __vector<T, N>() const { __vector<T, N> v; for (int i = 0; i < N; i++) v[i] = __e[i]; return v; }
+};
+}  // namespace metal
+#define __MSL_PACKED(T) typedef metal::__packed<T, 2> packed_##T##2; typedef metal::__packed<T, 3> packed_##T##3; typedef metal::__packed<T, 4> packed_##T##4;
+__MSL_PACKED(float) __MSL_PACKED(half) __MSL_PACKED(int) __MSL_PACKED(uint) __MSL_PACKED(short) __MSL_PACKED(ushort) __MSL_PACKED(char) __MSL_PACKED(uchar)
+
+// ---- textures and samplers: opaque handles, as in AIR.
+struct _sampler_t;
+namespace metal {
+enum class access { sample = 0, read = 1, write = 2, read_write = 3 };
+struct sampler { __MSL_CONSTANT _sampler_t *__s; };
+// AIR returns (value, status) pairs directly; the driver undoes spir64's sret.
+struct __ret_v4f32 { float4 v; char status; };
+struct __ret_v4f16 { half4 v; char status; };
+struct __ret_f32 { float v; char status; };
+struct __ret_v4i32 { int4 v; char status; };
+struct __ret_v4u32 { uint4 v; char status; };
+template <class T> struct __texel;
+template <> struct __texel<float> { typedef float4 v4; typedef __ret_v4f32 ret; };
+template <> struct __texel<half> { typedef half4 v4; typedef __ret_v4f16 ret; };
+template <> struct __texel<int> { typedef int4 v4; typedef __ret_v4i32 ret; };
+template <> struct __texel<uint> { typedef uint4 v4; typedef __ret_v4u32 ret; };
+extern "C" __MSL_CONSTANT _sampler_t *__air_get_read_sampler() __AIR("air.get_read_sampler");
+#define __MSL_AI __attribute__((always_inline))
+struct gradient2d { float2 dPdx, dPdy; __MSL_AI gradient2d(float2 x, float2 y) : dPdx(x), dPdy(y) {} };
+// Every texture kind: generated from the observed call shapes (gen_textures.py).
+#include "__metal_textures.h"
+// constexpr sampler arguments: the driver computes the state; these only parse.
+enum class coord { normalized, pixel };
+enum class address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class s_address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class t_address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class r_address { clamp_to_zero, clamp_to_edge, repeat, mirrored_repeat, clamp_to_border };
+enum class filter { nearest, linear };
+enum class mag_filter { nearest, linear };
+enum class min_filter { nearest, linear };
+enum class mip_filter { none, nearest, linear };
+enum class compare_func { none, less, less_equal, greater, greater_equal, equal, not_equal, always, never };
+enum class border_color { transparent_black, opaque_black, opaque_white };
+}  // namespace metal
