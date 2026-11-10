@@ -1,7 +1,7 @@
 //! Passes over LLVM IR text between clang and AIR.
 
 use crate::ast::Function;
-use crate::text::{map_functions, replace_all, split_args};
+use crate::text::{balanced, map_functions, replace_all, split_args};
 use crate::types::Types;
 use regex::{Captures, Regex};
 use std::collections::BTreeSet;
@@ -187,7 +187,7 @@ pub fn resolve_atomics(ir: &str) -> Result<String, String> {
     let mut decls: BTreeSet<(String, String, String, String)> = BTreeSet::new();
     let mut err = None;
     let mut n = 0;
-    let pat = regex!(r"(?m)^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:(?:spir_func|noundef|fast) )*(?:i32|float|void) @__msl_atomic_(\w+?)_([usn])_(i32|f32)\((?:i32|float)\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?$");
+    let pat = regex!(r"(?m)^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:(?:spir_func|noundef|fast) )*(?:i32|float|void) @__msl_atomic_(\w+?)_([usn])_(i32|f32)\((?:i32|float)\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?(?:, ![\w.]+ !\d+)*$");
     let out = map_functions(ir, |body| {
         replace_all(body, pat, |c: &Captures| {
             let (indent, op, sg, ty, ptr) = (&c[1], &c[3], &c[4], &c[5], &c[6]);
@@ -248,7 +248,7 @@ pub fn resolve_as_markers(ir: &str) -> Result<String, String> {
     let mut used: BTreeSet<(String, String, usize, String)> = BTreeSet::new();
     let mut err = None;
     let mut n = 0;
-    let call_re = regex!(r#"(?m)^(\s*)(%[\w.]+ = )?((?:tail )?call [^@]*)@"(air\.[^"]*%AS%[^"]*)"\((.*)\)(?: #\d+)?$"#);
+    let call_re = regex!(r#"(?m)^(\s*)(%[\w.]+ = )?((?:tail )?call [^@]*)@"(air\.[^"]*%AS%[^"]*)"\((.*)\)(?: #\d+)?(?:, ![\w.]+ !\d+)*$"#);
     let ptr_re = regex!(r"^(.*?)\* (?:(?:noundef|nonnull|nocapture|readonly|writeonly|align \d+) )*(%[\w.]+)$");
     let mut out = map_functions(ir, |body| {
         replace_all(body, call_re, |c: &Captures| {
@@ -291,4 +291,189 @@ pub fn resolve_as_markers(ir: &str) -> Result<String, String> {
         out += &format!("\n{head}@\"{real}\"({})\n", params.join(", "));
     }
     Ok(out)
+}
+
+/// Xcode's scoped-alias metadata comes from inlining an entry point whose
+/// resource parameters are noalias. So each entry point becomes a call to an
+/// internal copy with noalias pointer parameters (named for their kind and
+/// index, which `alias_scopes` reads back), and opt's inliner adds the scopes.
+pub fn noalias_entries(ir: &str, entries: &[String]) -> String {
+    let mut ir = ir.to_string();
+    for e in entries {
+        let needle = format!("@{e}(");
+        let Some(at) = ir.match_indices(&needle).map(|(i, _)| i).find(|&i| ir[..i].rfind('\n').map_or(0, |x| x + 1) == ir[..i].rfind("define ").unwrap_or(usize::MAX)) else { continue };
+        let line = ir[..at].rfind('\n').map_or(0, |x| x + 1);
+        let open = at + needle.len() - 1;
+        let close = balanced(ir.as_bytes(), open, b'(', b')');
+        let brace = close + ir[close..].find('{').unwrap();
+        let end = brace + ir[brace..].find("\n}\n").unwrap() + 3;
+        let (prefix, sig, tail, body) = (&ir[line..at], &ir[open + 1..close - 1], &ir[close..brace], &ir[brace..end]);
+        let ret = regex!(r"\b(?:define|dso_local|internal|spir_func|spir_kernel|noundef|zeroext|signext|local_unnamed_addr) ").replace_all(prefix, "").trim().to_string();
+        let mut inner_params = Vec::new();
+        let mut call_args = Vec::new();
+        let mut body = body.to_string();
+        for (k, p) in split_args(sig).iter().enumerate() {
+            let p = p.trim();
+            let (head, name) = p.rsplit_once(' ').unwrap();
+            let ty = regex!(r#"\s+(?:noalias|nocapture|noundef|readonly|writeonly|readnone|nonnull|zeroext|signext|"[^"]*"|align \d+|dereferenceable(?:_or_null)?\(\d+\))"#).replace_all(head, "").to_string();
+            call_args.push(format!("{ty} {name}"));
+            if !ty.ends_with('*') {
+                inner_params.push(p.to_string());
+                continue;
+            }
+            let kind = if ty.contains("_sampler_t") {
+                "smp"
+            } else if regex!(r"%struct\._(?:texture|depth)_").is_match(&ty) {
+                "tex"
+            } else {
+                "arg"
+            };
+            let new = format!("%__air_{kind}_{k}");
+            body = Regex::new(&format!(r"{}\b", regex::escape(name))).unwrap().replace_all(&body, new.as_str()).to_string();
+            inner_params.push(format!("{head} noalias {new}"));
+        }
+        let cc = if prefix.contains("spir_func ") { "spir_func " } else { "" };
+        let call = format!("call {cc}{ret} @__msl_entry.{e}({})", call_args.join(", "));
+        let outer_body = if ret == "void" { format!("{{\nentry:\n  {call}\n  ret void\n}}\n") } else { format!("{{\nentry:\n  %r = {call}\n  ret {ret} %r\n}}\n") };
+        let inner_prefix = prefix.replacen("define ", "define internal ", 1).replace("dso_local ", "");
+        let inner_tail = regex!(r"(#\d+)\s*$").replace(tail, "alwaysinline $1 ");
+        let inner = format!("{inner_prefix}@__msl_entry.{e}({}){inner_tail}{body}", inner_params.join(", "));
+        let outer = format!("{prefix}@{e}({sig}){tail}{outer_body}");
+        ir = format!("{}{outer}\n{inner}{}", &ir[..line], &ir[end..]);
+    }
+    ir
+}
+
+/// The inliner's scope declarations: Xcode's modules have none (and they would
+/// keep opt from inferring argmemonly).
+pub fn drop_scope_decls(ir: &str) -> String {
+    let ir = regex!(r"(?m)^\s*(?:tail )?call void @llvm\.experimental\.noalias\.scope\.decl\(metadata !\d+\)(?: #\d+)?\n").replace_all(ir, "");
+    regex!(r"(?m)^(?:; Function Attrs: .*\n)?declare void @llvm\.experimental\.noalias\.scope\.decl\(metadata\).*\n").replace_all(&ir, "").to_string()
+}
+
+/// After inlining: name the scopes as Xcode does (air-alias-scopes(<fn>),
+/// air-alias-scope-arg(<k>)), one scope for all textures and one for all
+/// samplers, and an access's noalias list without its own scopes.
+pub fn alias_scopes(ir: &str) -> String {
+    let dom = regex!(r#"(?m)^!(\d+) = distinct !\{!\d+, !"__msl_entry\.([\w.$]+)"\}$"#);
+    let scope = regex!(r#"(?m)^!(\d+) = distinct !\{!\d+, !(\d+), !"__msl_entry\.([\w.$]+): %__air_(tex|smp|arg)_(\d+)"\}$"#);
+    let mut ir = replace_all(ir, dom, |c| format!("!{} = distinct !{{!{}, !\"air-alias-scopes({})\"}}", &c[1], &c[1], &c[2]));
+    // each scope node -> the node standing for its group
+    let mut rep: std::collections::HashMap<String, String> = Default::default();
+    let mut group_node: std::collections::HashMap<(String, String), String> = Default::default();
+    for c in scope.captures_iter(&ir.clone()) {
+        let label = match &c[4] {
+            "tex" => "textures".to_string(),
+            "smp" => "samplers".to_string(),
+            _ => format!("arg({})", &c[5]),
+        };
+        let key = (c[2].to_string(), label.clone());
+        match group_node.get(&key) {
+            Some(n) => {
+                rep.insert(c[1].to_string(), n.clone());
+            }
+            None => {
+                group_node.insert(key, c[1].to_string());
+                rep.insert(c[1].to_string(), c[1].to_string());
+                ir = ir.replace(&c[0], &format!("!{} = distinct !{{!{}, !{}, !\"air-alias-scope-{label}\"}}", &c[1], &c[1], &c[2]));
+            }
+        }
+    }
+    if rep.is_empty() {
+        return ir;
+    }
+    let lists: std::collections::HashMap<String, Vec<String>> = regex!(r"(?m)^!(\d+) = !\{(!\d+(?:, !\d+)*)\}$")
+        .captures_iter(&ir)
+        .map(|c| (c[1].to_string(), c[2].split(", ").map(|x| x[1..].to_string()).collect()))
+        .collect();
+    let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(&ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
+    let mut made: std::collections::HashMap<Vec<String>, usize> = Default::default();
+    let mut new_nodes = String::new();
+    let mut node = |ids: Vec<String>| -> usize {
+        *made.entry(ids.clone()).or_insert_with(|| {
+            let n = next;
+            next += 1;
+            new_nodes += &format!("!{n} = !{{{}}}\n", ids.iter().map(|i| format!("!{i}")).collect::<Vec<_>>().join(", "));
+            n
+        })
+    };
+    let map = |l: &str| -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for i in lists.get(l).into_iter().flatten() {
+            let r = rep.get(i).cloned().unwrap_or(i.clone());
+            if !out.contains(&r) {
+                out.push(r);
+            }
+        }
+        out
+    };
+    let sc = regex!(r", !alias\.scope !(\d+)");
+    let na = regex!(r", !noalias !(\d+)");
+    let lines: Vec<String> = ir
+        .lines()
+        .map(|line| {
+            let (a, n) = (sc.captures(line), na.captures(line));
+            if a.is_none() && n.is_none() {
+                return line.to_string();
+            }
+            let mut out = na.replace(&sc.replace(line, ""), "").to_string();
+            // Xcode leaves a call through a global (a constexpr sampler) unannotated
+            if regex!(r"\bcall .*@[\w.$\x22]+\(.*@").is_match(line) {
+                return out;
+            }
+            let s = a.map(|c| map(&c[1])).unwrap_or_default();
+            let n: Vec<String> = n.map(|c| map(&c[1])).unwrap_or_default().into_iter().filter(|x| !s.contains(x)).collect();
+            if !s.is_empty() {
+                out += &format!(", !alias.scope !{}", node(s));
+            }
+            if !n.is_empty() {
+                out += &format!(", !noalias !{}", node(n));
+            }
+            out
+        })
+        .collect();
+    let ir = lines.join("\n");
+    ir.trim_end().to_string() + "\n" + &new_nodes
+}
+
+/// clang 15's TBAA gives a vector access the type `omnipotent char`; Xcode's
+/// gives it the element's scalar type (float4 -> "float").
+pub fn vector_tbaa(ir: &str) -> String {
+    let node = regex!(r#"(?m)^!(\d+) = !\{!"omnipotent char", !(\d+), i64 0\}$"#);
+    let Some(c) = node.captures(ir) else { return ir.to_string() };
+    let char_id = c[1].to_string();
+    let char_tag: BTreeSet<String> = Regex::new(&format!(r"(?m)^!(\d+) = !\{{!{char_id}, !{char_id}, i64 0\}}$")).unwrap().captures_iter(ir).map(|c| c[1].to_string()).collect();
+    if char_tag.is_empty() {
+        return ir.to_string();
+    }
+    let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
+    let mut tags: std::collections::HashMap<&str, usize> = Default::default();
+    let mut nodes = String::new();
+    let access = regex!(r"^\s+(?:(?:%[\w.]+ = )?load (?:volatile )?<\d+ x (\w+)>, |store (?:volatile )?<\d+ x (\w+)> ).*, !tbaa !(\d+)");
+    let lines: Vec<String> = ir
+        .lines()
+        .map(|line| {
+            let Some(c) = access.captures(line) else { return line.to_string() };
+            let elem = c.get(1).or(c.get(2)).unwrap().as_str();
+            let name = match elem {
+                "float" => "float",
+                "half" => "half",
+                "i32" => "int",
+                "i16" => "short",
+                "i64" => "long",
+                _ => return line.to_string(),
+            };
+            if !char_tag.contains(&c[3]) {
+                return line.to_string();
+            }
+            let tag = *tags.entry(name).or_insert_with(|| {
+                let (t, g) = (next, next + 1);
+                next += 2;
+                nodes += &format!("!{t} = !{{!\"{name}\", !{char_id}, i64 0}}\n!{g} = !{{!{t}, !{t}, i64 0}}\n");
+                g
+            });
+            line.replacen(&format!("!tbaa !{}", &c[3]), &format!("!tbaa !{tag}"), 1)
+        })
+        .collect();
+    lines.join("\n") + "\n" + &nodes
 }

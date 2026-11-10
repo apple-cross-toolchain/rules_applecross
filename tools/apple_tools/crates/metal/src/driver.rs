@@ -11,6 +11,7 @@
 //! 6. Add the AIR metadata (crate::air) and write bitcode with llvm-as.
 
 use crate::air::{to_air, Inputs};
+use crate::intrinsics;
 use crate::entry::entry_points;
 use crate::rewrite::rewrite;
 use crate::target::Target;
@@ -145,7 +146,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let mut c = Command::new(&clang);
     base(&mut c);
     // -fpreserve-vec3-type: store 3-vectors as 3 elements, as Xcode does (the 4th lane is padding)
-    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-S", "-emit-llvm", "-o"])
+    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-Xclang", "-fconvergent-functions", "-S", "-emit-llvm", "-o"])
         .arg(&ll0)
         .args(["-Xclang", "-fdump-record-layouts"])
         .arg(&cpp);
@@ -158,7 +159,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);
     let entries: Vec<String> = program.functions.iter().map(|f| f.name.clone()).collect();
-    let text = ir::prepare_flat(&text, &entries);
+    let text = intrinsics::apply(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&text, &entries)), &entries));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
@@ -167,9 +168,10 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         std::fs::read_to_string(&out).map_err(|e| e.to_string())
     };
     let text = step(&text, "o2", &["-O2"])?;
-    let text = ir::resolve_as_markers(&ir::resolve_atomics(&text)?)?;
+    let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
-    let text = step(&text, "o2b", &["-O2"])?;
+    // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
+    let text = ir::alias_scopes(&intrinsics::apply(&step(&intrinsics::apply(&text), "o2b", &["-O2"])?));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(
@@ -179,22 +181,27 @@ pub fn compile(o: &Options) -> Result<Output, String> {
             program: &program,
             target: &o.target,
             source_path: &source_path.to_string_lossy(),
+            source_name: &o.source.to_string_lossy(),
             constants: &constants,
             constant_order: &order,
             samplers: code.samplers.len(),
         },
     )?;
+    // Xcode keeps no local value names
+    let air_ir = crate::text::discard_value_names(&air_ir);
     let ll = tmp.0.join("air.ll");
     std::fs::write(&ll, &air_ir).map_err(|e| e.to_string())?;
     let bc = tmp.0.join("air.bc");
-    run(Command::new(tool(o, "llvm-as")).arg("-o").arg(&bc).arg(&ll))?;
+    // clang's writer doesn't keep use-list order (llvm-as does by default), so it sorts constants
+    run(Command::new(tool(o, "llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
     if let Some(keep) = &o.keep {
         let _ = std::fs::create_dir_all(keep);
         for f in ["source.cpp", "out.0.ll", "o2.ll", "infer.ll", "o2b.ll", "air.ll"] {
             let _ = std::fs::copy(tmp.0.join(f), keep.join(f));
         }
     }
-    Ok(Output { ir: air_ir, air: std::fs::read(&bc).map_err(|e| e.to_string())? })
+    let ir = run(Command::new(tool(o, "llvm-dis")).arg("-o").arg("-").arg(&bc))?;
+    Ok(Output { ir: String::from_utf8_lossy(&ir.stdout).to_string(), air: std::fs::read(&bc).map_err(|e| e.to_string())? })
 }
 
 /// Disassemble an .air file (for `metallib`).

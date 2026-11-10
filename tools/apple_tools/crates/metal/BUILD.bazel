@@ -9,7 +9,7 @@ rust_library(
         exclude = ["src/bin/**"],
     ),
     # Our MSL headers, embedded with include_str!.
-    compile_data = glob(["include/**"]),
+    compile_data = glob(["include/**", "data/**"]),
     crate_name = "metal",
     deps = [
         "@crates//:regex",
@@ -33,6 +33,6 @@ rust_binary(
 
 rust_test(
     name = "test",
-    compile_data = glob(["include/**"]),
+    compile_data = glob(["include/**", "data/**"]),
     crate = ":metal_lib",
 )

@@ -8,6 +8,7 @@ pub mod container;
 pub mod descriptors;
 pub mod driver;
 pub mod entry;
+pub mod intrinsics;
 pub mod ir;
 pub mod library;
 pub mod rewrite;

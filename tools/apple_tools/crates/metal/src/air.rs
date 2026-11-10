@@ -24,6 +24,8 @@ pub struct Inputs<'a, 'b> {
     pub program: &'a Program,
     pub target: &'b Target,
     pub source_path: &'b str,
+    /// The source as named on the command line (the module's source_filename).
+    pub source_name: &'b str,
     /// Function constants the module declares, and their source order.
     pub constants: &'b [ConstantEntry],
     pub constant_order: &'b [String],
@@ -34,7 +36,13 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     let (air, lang) = x.target.versions();
     let mut ir = regex!(r#"target datalayout = ".*""#).replace(ir, format!("target datalayout = \"{DATALAYOUT}\"").as_str()).to_string();
     ir = regex!(r#"target triple = ".*""#).replace(&ir, format!("target triple = \"{}\"", x.target.triple()).as_str()).to_string();
+    ir = regex!(r#"(?m)^source_filename = ".*""#).replace(&ir, format!("source_filename = \"{}\"", x.source_name).as_str()).to_string();
     ir = ir.replace("dso_local ", "").replace("spir_func ", "").replace("spir_kernel ", "");
+    // Xcode gives return values no noundef
+    ir = regex!(r"(?m)^(define (?:linkonce_odr |internal |weak_odr )?(?:local_unnamed_addr )?)noundef ").replace_all(&ir, "$1").to_string();
+    ir = regex!(r"(call (?:fast )?)noundef ").replace_all(&ir, "$1").to_string();
+    // TBAA names MSL's half as such
+    ir = ir.replace("!\"_Float16\"", "!\"half\"");
     // clang's own named metadata goes; its numbered nodes (TBAA etc.) are renumbered after ours
     ir = regex!(r"(?m)^!(llvm\.module\.flags|llvm\.ident|opencl\.\w+) = .*\n").replace_all(&ir, "").to_string();
     let mut d = Descriptors { types: x.types, air, md: Md::default() };
@@ -70,23 +78,35 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
             })
             .collect();
         let mut extra = String::new();
+        let mut fn_attrs = String::new();
         for a in &f.attrs {
             if let Some(c) = regex!(r"^max_total_threads_per_threadgroup\((\d+)\)").captures(a) {
                 extra += &format!(", {}", d.md.add(format!("!{{!\"air.max_work_group_size\", i32 {}}}", &c[1])));
+                fn_attrs += &format!(" \"max-work-group-size\"=\"{}\"", &c[1]);
             }
         }
         let outs = d.outputs(f);
         let args = d.md.list(&descs);
         let node = d.md.add(format!("!{{{fty} ({})* @{}, {outs}, {args}{extra}}}", argtys.join(", "), f.name));
         stages.iter_mut().find(|(s, _)| *s == f.stage).unwrap().1.push(node);
-        // buffers get "air-buffer-no-alias"
+        // buffers get "air-buffer-no-alias"; stage_in values and textures and samplers no noundef
         let mut args = split_args(&sig);
-        for (k, p) in f.params.iter().enumerate() {
-            if k < args.len() && p.attrs.first().map(|a| a.starts_with("buffer(")).unwrap_or(false) && !args[k].contains("\"air-buffer-no-alias\"") {
+        for (k, p) in params.iter().enumerate() {
+            if k >= args.len() {
+                break;
+            }
+            if p.attrs.first().map(|a| a.starts_with("buffer(")).unwrap_or(false) && !args[k].contains("\"air-buffer-no-alias\"") {
                 args[k] = regex!(r" (%[\w.]+)$").replace(&args[k], " \"air-buffer-no-alias\" $1").to_string();
+            }
+            if p.stage_in || regex!(r"%struct\._(?:texture|depth)_\w+ addrspace|%struct\._sampler_t addrspace").is_match(&args[k]) {
+                args[k] = args[k].replace(" noundef", "");
             }
         }
         ir = ir.replacen(&format!("@{}({})", f.name, sig), &format!("@{}({})", f.name, args.join(", ")), 1);
+        if !fn_attrs.is_empty() {
+            let def = Regex::new(&format!(r"(?m)^(define [^@]*@{}\(.*\).*?)( \{{)$", regex::escape(&f.name))).unwrap();
+            ir = def.replace(&ir, |c: &regex::Captures| format!("{}{fn_attrs}{}", &c[1], &c[2])).to_string();
+        }
     }
     // function constants: name the initializers as Xcode does
     let mut fcnodes = Vec::new();
