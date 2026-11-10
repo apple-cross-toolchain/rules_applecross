@@ -173,7 +173,7 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     // Xcode's front end builds aggregates on undef
     ir = regex!(r"(insertvalue (?:<\{[^}]*\}>|\{[^}]*\}|\[[^\]]*\]|%[\w.\x22:]+)) poison,").replace_all(&ir, "$1 undef,").to_string();
     let entries: Vec<&str> = x.program.functions.iter().map(|f| f.name.as_str()).collect();
-    ir = constant_reads(&min_legal_vector_width(&ir, &entries), &entries);
+    ir = constant_reads(&ir, &entries);
     // the static initialiser of function constants: Xcode's front end gives it no vector width
     let inits: Vec<String> = regex!(r#"(?m)^define [^@]*@([\w.$]+)\(.*section "air\.static_init""#).captures_iter(&ir).map(|c| c[1].to_string()).collect();
     for f in inits {
@@ -181,25 +181,6 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     }
     let md: String = d.md.nodes.iter().enumerate().map(|(i, b)| format!("!{i} = {b}\n")).collect();
     Ok(format!("{}\n\n{}\n\n{}", ir.trim_end(), named.join("\n"), md))
-}
-
-/// The widest vector (in bits) in an IR type, looking into structs and arrays (as clang does).
-fn vector_width(t: &str) -> usize {
-    // a pointer to a vector is no vector
-    let t = regex!(r"<\d+ x \w+>(?: addrspace\(\d+\))?\*").replace_all(t, "");
-    regex!(r"<(\d+) x (half|float|double|bfloat|i\d+)>")
-        .captures_iter(&t)
-        .map(|c| {
-            let bits = match &c[2] {
-                "half" | "bfloat" => 16,
-                "float" => 32,
-                "double" => 64,
-                i => i[1..].parse().unwrap_or(0),
-            };
-            c[1].parse::<usize>().unwrap_or(0) * bits
-        })
-        .max()
-        .unwrap_or(0)
 }
 
 /// Give `name`'s definition its own copy of its attribute group, edited.
@@ -217,25 +198,88 @@ fn edit_attrs(ir: &str, name: &str, edit: impl Fn(&str) -> String) -> String {
     ir.trim_end().to_string() + &format!("\nattributes #{n} = {{ {new_attrs} }}\n")
 }
 
-/// An entry point's "min-legal-vector-width" as Xcode's front end sets it: its
-/// own parameters and the calls it makes (not its return value, which the
-/// front end builds for it, nor what got inlined).
-fn min_legal_vector_width(ir: &str, entries: &[&str]) -> String {
-    let mut ir = ir.to_string();
-    for e in entries {
-        let def = Regex::new(&format!(r"(?m)^define .*?@{}\((.*)\)", regex::escape(e))).unwrap();
-        let Some(params) = def.captures(&ir).map(|c| c[1].to_string()) else { continue };
-        let Some((_, body)) = find_define(&ir, e) else { continue };
-        let mut width = vector_width(&params);
-        // air.convert calls come after the front end (which sets the width)
-        for call in regex!(r"(?m)\bcall [^@]*@[\w.$\x22]+\(.*\)").find_iter(body) {
-            if !call.as_str().contains("@air.convert.") {
-                width = width.max(vector_width(call.as_str()));
+/// Each function's "min-legal-vector-width" as clang 15 sets it in Xcode's front
+/// end, before inlining merges them: its vector parameters and return value and
+/// the vectors its calls pass and return. Our own stdlib helpers (metal::__*),
+/// which Xcode's front end has no calls to, don't count.
+pub fn vector_widths(ir: &str) -> String {
+    fn direct(t: &str) -> usize {
+        let t = t.trim();
+        // a vector, not a pointer to one
+        if regex!(r"^<\d+ x \w+>\s*(?:\*|addrspace)").is_match(t) {
+            return 0;
+        }
+        regex!(r"^<(\d+) x (half|float|double|bfloat|i\d+)>")
+            .captures(t)
+            .map(|c| {
+                let bits = match &c[2] {
+                    "half" | "bfloat" => 16,
+                    "float" => 32,
+                    "double" => 64,
+                    i => i[1..].parse().unwrap_or(0),
+                };
+                c[1].parse::<usize>().unwrap_or(0) * bits
+            })
+            .unwrap_or(0)
+    }
+    let helper = regex!(r#"^"?_ZNK?5metal\d+__"#);
+    let mut widths: Vec<(usize, usize)> = Vec::new(); // (define line start, width)
+    for (start, end) in crate::text::functions(ir) {
+        let f = &ir[start..end];
+        let head = f.lines().next().unwrap_or("");
+        let Some(at) = head.find(" @") else { continue };
+        // our helpers have no counterpart to merge into what inlines them
+        if helper.is_match(&head[at + 2..]) {
+            widths.push((start, 0));
+            continue;
+        }
+        let open = at + head[at..].find('(').unwrap_or(0);
+        let close = crate::text::balanced(head.as_bytes(), open, b'(', b')');
+        let mut w = direct(regex!(r"(<\d+ x \w+>)$").captures(&head[..at]).map(|c| c[1].to_string()).unwrap_or_default().as_str());
+        for a in split_args(&head[open + 1..close - 1]) {
+            w = w.max(direct(&a));
+        }
+        for l in f.lines().skip(1) {
+            let Some(c) = regex!(r#"\bcall (?:[a-z_]+ )*(<\d+ x \w+>|[^ @]+) @("?[^("]+"?)\((.*)\)"#).captures(l) else { continue };
+            if helper.is_match(&c[2]) {
+                continue;
+            }
+            w = w.max(direct(&c[1]));
+            for a in split_args(&c[3]) {
+                w = w.max(direct(&a));
             }
         }
-        ir = edit_attrs(&ir, e, |a| regex!(r#""min-legal-vector-width"="\d+""#).replace(a, format!("\"min-legal-vector-width\"=\"{width}\"").as_str()).to_string());
+        widths.push((start, w));
     }
-    ir
+    // one attribute group per (group, width)
+    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let mut next = groups.keys().filter_map(|k| k.parse::<usize>().ok()).max().map_or(0, |m| m + 1);
+    let mut made: std::collections::HashMap<(String, usize), usize> = Default::default();
+    let mut new_groups = String::new();
+    let mut out = String::with_capacity(ir.len());
+    let mut pos = 0;
+    for (start, w) in widths {
+        let line_end = start + ir[start..].find('\n').unwrap_or(ir.len() - start);
+        let line = &ir[start..line_end];
+        let Some(c) = regex!(r"#(\d+)[^#]*$").captures(line) else { continue };
+        let Some(attrs) = groups.get(&c[1]) else { continue };
+        if !attrs.contains("\"min-legal-vector-width\"") {
+            continue;
+        }
+        let id = *made.entry((c[1].to_string(), w)).or_insert_with(|| {
+            let n = next;
+            next += 1;
+            let a = regex!(r#""min-legal-vector-width"="\d+""#).replace(attrs, format!("\"min-legal-vector-width\"=\"{w}\"").as_str());
+            new_groups += &format!("attributes #{n} = {{ {a} }}\n");
+            n
+        });
+        let m = c.get(1).unwrap();
+        out.push_str(&ir[pos..start + m.start()]);
+        out.push_str(&id.to_string());
+        pos = start + m.end();
+    }
+    out.push_str(&ir[pos..]);
+    out.trim_end().to_string() + "\n" + &new_groups
 }
 
 /// Xcode's alias analysis knows address space 2 is constant: a function that
