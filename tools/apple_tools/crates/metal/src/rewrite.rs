@@ -53,6 +53,7 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
         format!("static __MSL_ATTR(\"msl.stage:{}\") __attribute__((always_inline))", &c[1])
     });
     s = function_constants(&s, &mut r);
+    s = program_scope_constants(&s);
     s = replace_all(&s, regex!(r"\b((?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234])\s*\("), |c| {
         format!("metal::__vec<{}>(", &c[1])
     });
@@ -175,10 +176,57 @@ fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
     res
 }
 
+/// Codegen's `constant` (`__msl_constant`): `static` at program scope, where MSL's
+/// variables are constants (and so internal, as Xcode's are), else nothing.
+fn program_scope_constants(src: &str) -> String {
+    const MARK: &str = "__msl_constant";
+    if !src.contains(MARK) {
+        return src.to_string();
+    }
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    // braces that open a scope (true) or only group declarations (namespace, extern "C")
+    let mut braces: Vec<bool> = Vec::new();
+    let (mut parens, mut i, mut last) = (0i32, 0, 0);
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'(' => parens += 1,
+            b')' => parens -= 1,
+            b'{' => {
+                let head = src[src[..i].rfind(|c: char| c == ';' || c == '}' || c == '{').map_or(0, |x| x + 1)..i].trim();
+                braces.push(!regex!(r#"^(?:inline\s+)?namespace\b|^extern\s*"C""#).is_match(head));
+            }
+            b'}' => {
+                braces.pop();
+            }
+            _ if src[i..].starts_with(MARK) && (i == 0 || !is_word(b[i - 1])) && !is_word(at(src, i + MARK.len())) => {
+                out.push_str(&src[last..i]);
+                let program_scope = parens == 0 && !braces.iter().any(|s| *s);
+                // static rather than const: internal as Xcode's, without clang's invariant.start after a dynamic initialiser
+                let already = regex!(r"\bstatic\s*$").is_match(&out);
+                out.push_str(if program_scope && !already { "static" } else { "" });
+                i += MARK.len();
+                last = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out.push_str(&src[last..]);
+    out
+}
+
 /// `constant T x [[function_constant(i)]];` becomes an internal global copied at
 /// static-init time from an external initializer the IR pass turns into AIR's.
 fn function_constants(src: &str, r: &mut Rewritten) -> String {
-    let fc = regex!(r#"(?m)^[ \t]*(?:__attribute__\(\(address_space\(2\)\)\)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;"#);
+    let fc = regex!(r#"(?m)^[ \t]*(?:(?:__attribute__\(\(address_space\(2\)\)\)|__msl_constant)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;"#);
     for c in fc.captures_iter(src) {
         r.constants.push(FunctionConstant { index: c[3].parse().unwrap(), name: c[2].to_string() });
     }

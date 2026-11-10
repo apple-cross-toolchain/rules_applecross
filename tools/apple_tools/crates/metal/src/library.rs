@@ -224,20 +224,38 @@ pub fn extract(ir: &str, name: &str) -> String {
     let defines: Vec<&String> = entities.iter().zip(&kept).filter(|(e, k)| **k && e.1.lines().any(|l| l.starts_with("define "))).map(|(e, _)| &e.1).collect();
     let (init, other): (Vec<&String>, Vec<&String>) = defines.iter().partition(|t| t.contains("section \"air.static_init\""));
     let functions: Vec<&String> = init.into_iter().chain(other).collect();
-    // globals: in reverse order of discovery through those functions (the unreferenced, as llvm.global_ctors, last)
+    // globals: as metallib moves them (the unreferenced, as llvm.global_ctors, first)
     let globals: Vec<&(Option<String>, String)> = entities.iter().zip(&kept).filter(|(e, k)| **k && e.1.starts_with('@')).map(|(e, _)| e).collect();
-    let text: String = functions.iter().map(|t| t.as_str()).collect();
-    let found = |g: &str| regex!(r"@([-\w.$]+)").find_iter(&text).position(|m| &m.as_str()[1..] == g).unwrap_or(usize::MAX);
+    // metallib materialises the function first, then the static initialisers
+    let text: String = functions.iter().filter(|t| !t.contains("section \"air.static_init\"")).chain(functions.iter().filter(|t| t.contains("section \"air.static_init\""))).map(|t| t.as_str()).collect();
+    // each reference moves a global to the front: in reverse order of last use
+    let refs: Vec<&str> = regex!(r"@([-\w.$]+)").find_iter(&text).map(|m| &m.as_str()[1..]).collect();
+    let found = |g: &str| refs.iter().rposition(|r| *r == g).unwrap_or(usize::MAX);
     let mut globals = globals;
     globals.sort_by_key(|g| std::cmp::Reverse(found(g.0.as_deref().unwrap_or(""))));
     for (_, t) in globals {
         // metallib internalises the function constants' initialisers
-        out += &t.replace("linkonce_odr hidden local_unnamed_addr ", "internal unnamed_addr ");
+        out += &t.replace("linkonce_odr hidden local_unnamed_addr ", "internal unnamed_addr ").replace("linkonce_odr hidden ", "internal ");
         out += "\n";
     }
-    for t in functions {
+    // what only the static initialisers call follows them; the rest follows the function
+    let init_text: String = functions.iter().filter(|t| t.contains("section \"air.static_init\"")).map(|t| t.as_str()).collect();
+    let other_text: String = functions.iter().filter(|t| !t.contains("section \"air.static_init\"")).map(|t| t.as_str()).collect();
+    let only_init = |d: &&(Option<String>, String)| {
+        let call = format!("@{}(", d.0.as_deref().unwrap_or(""));
+        init_text.contains(&call) && !other_text.contains(&call)
+    };
+    let (init_decls, decls): (Vec<_>, Vec<_>) = decls.into_iter().partition(only_init);
+    for t in &functions {
+        let is_init = t.contains("section \"air.static_init\"");
         out += t;
         out += "\n";
+        if is_init && functions.iter().all(|f| !f.contains("section \"air.static_init\"") || std::ptr::eq(*f, *t) || functions.iter().position(|x| std::ptr::eq(*x, *f)) < functions.iter().position(|x| std::ptr::eq(*x, *t))) {
+            for (_, d) in &init_decls {
+                out += d;
+                out += "\n";
+            }
+        }
     }
     for (_, t) in decls {
         out += t;

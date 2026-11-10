@@ -25,7 +25,8 @@
 #define threadgroup __attribute__((address_space(3)))
 #else
 #define device
-#define constant
+// resolved by the driver: static at program scope (MSL's program-scope constants are internal), else nothing
+#define constant __msl_constant
 #define threadgroup
 #endif
 #define thread

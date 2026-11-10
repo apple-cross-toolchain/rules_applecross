@@ -78,7 +78,7 @@ pub fn apply(ir: &str) -> String {
             let Some(d) = lookup(name, tys.len()) else { return c[0].to_string() };
             types.insert(name.to_string(), tys.clone());
             let ps: Vec<String> = tys.iter().zip(&d.params).map(|(t, a)| with_attrs(t, a, None)).collect();
-            let ret = regex!(r"^(?:(?:noundef|zeroext|signext) )*").replace(ret, "");
+            let ret = regex!(r"\b(?:noundef|zeroext|signext) ").replace_all(ret, "");
             format!("declare {ret} @{name}({}) local_unnamed_addr {}", ps.join(", "), d.fn_attrs)
         })
         .to_string();

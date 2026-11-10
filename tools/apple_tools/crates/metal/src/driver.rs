@@ -170,7 +170,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         std::fs::read_to_string(&out).map_err(|e| e.to_string())
     };
     // conversions become air.convert calls once constants are folded, before the last attribute inference
-    let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &["-O2"])?));
+    let o2 = std::env::var("METAL_EXP_O2").unwrap_or("-O2".into());
+    let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &o2.split(' ').collect::<Vec<_>>())?));
     let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
@@ -214,6 +215,25 @@ pub fn assemble(llvm_bin: &Path, ir: &str) -> Result<Vec<u8>, String> {
     let tmp = scratch()?;
     let (ll, bc) = (tmp.0.join("f.ll"), tmp.0.join("f.bc"));
     std::fs::write(&ll, ir).map_err(|e| e.to_string())?;
+    // function constants this function doesn't read: metallib drops their initialisers'
+    // stores, as GlobalOpt does (opt takes no AIR triple, so it borrows spir64's)
+    if ir.contains("\"air.fc_initializer\"") {
+        let triple = regex::Regex::new(r#"(?m)^target triple = "(.*)""#).unwrap().captures(ir).map(|c| c[1].to_string()).unwrap_or_default();
+        std::fs::write(&ll, ir.replacen(&format!("target triple = \"{triple}\""), "target triple = \"spir64-unknown-unknown\"", 1)).map_err(|e| e.to_string())?;
+        let opt_ll = tmp.0.join("f.opt.ll");
+        run(Command::new(llvm_bin.join("opt")).args(["-passes=globalopt,globaldce", "-S", "-o"]).arg(&opt_ll).arg(&ll))?;
+        let text = std::fs::read_to_string(&opt_ll).map_err(|e| e.to_string())?;
+        // and the function constants whose initialiser went
+        let gone: Vec<String> = regex::Regex::new(r"(?m)^(![0-9]+) = distinct !\{null, ").unwrap().captures_iter(&text).map(|c| c[1].to_string()).collect();
+        let text = regex::Regex::new(r"(?m)^!air\.function_constants = !\{(.*)\}$")
+            .unwrap()
+            .replace(&text, |c: &regex::Captures| {
+                let keep: Vec<&str> = c[1].split(", ").filter(|r| !gone.iter().any(|g| g == r)).collect();
+                if keep.is_empty() { String::new() } else { format!("!air.function_constants = !{{{}}}", keep.join(", ")) }
+            })
+            .to_string();
+        std::fs::write(&ll, text.replacen("target triple = \"spir64-unknown-unknown\"", &format!("target triple = \"{triple}\""), 1)).map_err(|e| e.to_string())?;
+    }
     run(Command::new(llvm_bin.join("llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
     if let Ok(keep) = std::env::var("METALLIB_KEEP") {
         let n = std::fs::read_dir(&keep).map(|d| d.count()).unwrap_or(0);

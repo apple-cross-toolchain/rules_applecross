@@ -174,6 +174,11 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     ir = regex!(r"(insertvalue (?:<\{[^}]*\}>|\{[^}]*\}|\[[^\]]*\]|%[\w.\x22:]+)) poison,").replace_all(&ir, "$1 undef,").to_string();
     let entries: Vec<&str> = x.program.functions.iter().map(|f| f.name.as_str()).collect();
     ir = constant_reads(&min_legal_vector_width(&ir, &entries), &entries);
+    // the static initialiser of function constants: Xcode's front end gives it no vector width
+    let inits: Vec<String> = regex!(r#"(?m)^define [^@]*@([\w.$]+)\(.*section "air\.static_init""#).captures_iter(&ir).map(|c| c[1].to_string()).collect();
+    for f in inits {
+        ir = edit_attrs(&ir, &f, |a| regex!(r#""min-legal-vector-width"="\d+""#).replace(a, "\"min-legal-vector-width\"=\"0\"").to_string());
+    }
     let md: String = d.md.nodes.iter().enumerate().map(|(i, b)| format!("!{i} = {b}\n")).collect();
     Ok(format!("{}\n\n{}\n\n{}", ir.trim_end(), named.join("\n"), md))
 }
@@ -222,8 +227,11 @@ fn min_legal_vector_width(ir: &str, entries: &[&str]) -> String {
         let Some(params) = def.captures(&ir).map(|c| c[1].to_string()) else { continue };
         let Some((_, body)) = find_define(&ir, e) else { continue };
         let mut width = vector_width(&params);
+        // air.convert calls come after the front end (which sets the width)
         for call in regex!(r"(?m)\bcall [^@]*@[\w.$\x22]+\(.*\)").find_iter(body) {
-            width = width.max(vector_width(call.as_str()));
+            if !call.as_str().contains("@air.convert.") {
+                width = width.max(vector_width(call.as_str()));
+            }
         }
         ir = edit_attrs(&ir, e, |a| regex!(r#""min-legal-vector-width"="\d+""#).replace(a, format!("\"min-legal-vector-width\"=\"{width}\"").as_str()).to_string());
     }
