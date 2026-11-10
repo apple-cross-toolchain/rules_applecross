@@ -747,6 +747,17 @@ mod tests {
     }
 
     #[test]
+    fn packed_vectors_are_bare_arrays() {
+        let ir = "%\"struct.metal::__packed\" = type { [3 x float] }\n%struct.V = type { %\"struct.metal::__packed\", float }\n@g = internal addrspace(2) constant %\"struct.metal::__packed\" { [3 x float] [float 1.0, float 2.0, float 3.0] }, align 4\ndefine void @f(%struct.V addrspace(1)* %p, %\"struct.metal::__packed\" addrspace(1)* %q) {\n  %a = getelementptr inbounds %struct.V, %struct.V addrspace(1)* %p, i64 %i, i32 0, i32 0, i64 2\n  %b = getelementptr inbounds %\"struct.metal::__packed\", %\"struct.metal::__packed\" addrspace(1)* %q, i64 1, i32 0, i64 0\n  ret void\n}\n";
+        let out = unwrap_packed(ir);
+        assert!(out.contains("%struct.V = type { [3 x float], float }"));
+        assert!(out.contains("@g = internal addrspace(2) constant [3 x float] [float 1.0, float 2.0, float 3.0], align 4"));
+        assert!(out.contains("%a = getelementptr inbounds %struct.V, %struct.V addrspace(1)* %p, i64 %i, i32 0, i64 2"));
+        assert!(out.contains("%b = getelementptr inbounds [3 x float], [3 x float] addrspace(1)* %q, i64 1, i64 0"));
+        assert!(!out.contains("__packed"));
+    }
+
+    #[test]
     fn alias_scopes_named_as_xcode() {
         let ir = "  %v = load float, float addrspace(1)* %p, align 4, !alias.scope !3, !noalias !5\n!1 = distinct !{!1, !\"__msl_entry.k\"}\n!2 = distinct !{!2, !1, !\"__msl_entry.k: %__air_arg_1\"}\n!3 = !{!2}\n!4 = distinct !{!4, !1, !\"__msl_entry.k: %__air_tex_0\"}\n!5 = !{!4}\n";
         let out = alias_scopes(ir);
@@ -754,4 +765,165 @@ mod tests {
         assert!(out.contains("!\"air-alias-scope-arg(1)\""));
         assert!(out.contains("!\"air-alias-scope-textures\""));
     }
+}
+
+/// Xcode's splats insert into poison (instcombine leaves ours on undef when it
+/// forms one from an element insert).
+pub fn splat_poison(ir: &str) -> String {
+    let lines: Vec<&str> = ir.lines().collect();
+    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    for i in 0..lines.len().saturating_sub(1) {
+        let Some(c) = regex!(r"^(\s+(%[\w.]+) = insertelement (<\d+ x \w+>)) undef, (.*, i(?:32|64) 0)$").captures(lines[i]) else { continue };
+        let shuffle = format!("shufflevector {} {}, {} ", &c[3], &c[2], &c[3]);
+        if lines[i + 1].contains(&shuffle) && lines[i + 1].ends_with("zeroinitializer") {
+            out[i] = format!("{} poison, {}", &c[1], &c[4]);
+        }
+    }
+    out.join("\n") + if ir.ends_with('\n') { "\n" } else { "" }
+}
+
+/// A scalar access split from a struct copy keeps no !tbaa.struct in Xcode's
+/// modules (a packed vector's element, say).
+pub fn scalar_tbaa_struct(ir: &str) -> String {
+    regex!(r"(?m)^(\s+(?:%[\w.]+ = load (?:float|half|double|i\d+), |store (?:float|half|double|i\d+) ).*?), !tbaa\.struct !\d+")
+        .replace_all(ir, "$1")
+        .to_string()
+}
+
+/// Xcode lays out a packed vector (packed_float3 ...) as a bare array; ours is a
+/// struct holding one (`metal::__packed`). Each such struct type becomes its
+/// array: the index stepping into it goes from GEPs and extract/insertvalue,
+/// a constant of it becomes the array constant, and its name the array type.
+pub fn unwrap_packed(ir: &str) -> String {
+    let defs: std::collections::HashMap<String, String> = regex!(r#"(?m)^(%[\w.]+|%"[^"]+") = type (.*)$"#).captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let packed: std::collections::HashMap<String, String> = defs
+        .iter()
+        .filter(|(n, _)| regex!(r#"^%"struct\.metal::__packed(?:\.\d+)?"$"#).is_match(n))
+        .filter_map(|(n, b)| regex!(r"^\{ (\[\d+ x [^\]]+\]) \}$").captures(b).map(|c| (n.clone(), c[1].to_string())))
+        .collect();
+    if packed.is_empty() {
+        return ir.to_string();
+    }
+    let fields = |t: &str| -> Vec<String> {
+        let body = defs.get(t).map(String::as_str).unwrap_or(t);
+        let inner = body.trim().trim_start_matches('<').trim_end_matches('>');
+        inner.strip_prefix('{').and_then(|x| x.strip_suffix('}')).map(|x| split_args(x).into_iter().map(|f| f.trim().to_string()).collect()).unwrap_or_default()
+    };
+    let element = |t: &str| -> Option<String> { regex!(r"^[\[<]\d+ x (.*)[\]>]$").captures(t.trim()).map(|c| c[1].to_string()) };
+    // walk the indices from `ty`, dropping the one into a packed struct
+    let walk = |ty: &str, idx: &[String]| -> Vec<String> {
+        let mut cur = ty.trim().to_string();
+        let mut out = Vec::new();
+        for i in idx {
+            if let Some(a) = packed.get(&cur) {
+                cur = a.clone();
+                continue;
+            }
+            out.push(i.clone());
+            let k = i.trim().rsplit(' ').next().and_then(|x| x.parse::<usize>().ok());
+            cur = if cur.starts_with('[') || cur.starts_with('<') && !cur.starts_with("<{") {
+                element(&cur).unwrap_or_default()
+            } else {
+                k.and_then(|k| fields(&cur).get(k).cloned()).unwrap_or_default()
+            };
+        }
+        out
+    };
+    let gep = regex!(r"getelementptr (inbounds )?(\(?)");
+    let mut out = String::with_capacity(ir.len());
+    for line in ir.lines() {
+        let mut l = line.to_string();
+        // instruction and constant-expression GEPs
+        let mut from = 0;
+        while let Some(m) = gep.find_at(&l.clone(), from) {
+            let start = m.end();
+            let (args_s, end) = if l[m.start()..m.end()].ends_with('(') {
+                let close = balanced(l.as_bytes(), m.end() - 1, b'(', b')');
+                (l[start..close - 1].to_string(), close - 1)
+            } else {
+                let tail = l[start..].split(", !").next().unwrap().to_string();
+                (tail.clone(), start + tail.len())
+            };
+            let args = split_args(&args_s);
+            if args.len() >= 3 {
+                let ty = args[0].trim().to_string();
+                let idx: Vec<String> = args[2..].to_vec();
+                let kept = walk(&ty, &idx[1..]);
+                if kept.len() + 1 != idx.len() {
+                    let mut new_args = vec![args[0].trim().to_string(), args[1].trim().to_string(), idx[0].trim().to_string()];
+                    new_args.extend(kept.iter().map(|x| x.trim().to_string()));
+                    l = format!("{}{}{}", &l[..start], new_args.join(", "), &l[end..]);
+                }
+            }
+            from = start;
+        }
+        if let Some(c) = regex!(r"^(\s+%[\w.]+ = (?:extractvalue|insertvalue) )(.*)$").captures(&l) {
+            let args = split_args(&c[2]);
+            let is_insert = l.contains("insertvalue");
+            let n = if is_insert { 2 } else { 1 };
+            if args.len() > n {
+                let agg = args[0].trim();
+                let ty = agg.rsplit_once(' ').map(|x| x.0).unwrap_or(agg);
+                let kept = walk(ty, &args[n..]);
+                if kept.len() != args.len() - n {
+                    let mut new_args: Vec<String> = args[..n].iter().map(|x| x.trim().to_string()).collect();
+                    new_args.extend(kept.iter().map(|x| x.trim().to_string()));
+                    l = format!("{}{}", &c[1], new_args.join(", "));
+                }
+            }
+        }
+        out.push_str(&l);
+        out.push('\n');
+    }
+    // constants: `%"...__packed" { [N x T] [...] }` -> `[N x T] [...]`
+    let mut names: Vec<&String> = packed.keys().collect();
+    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+    for n in &names {
+        let pat = format!("{n} {{ ");
+        while let Some(i) = out.find(&pat) {
+            let open = i + n.len() + 1;
+            let close = balanced(out.as_bytes(), open, b'{', b'}');
+            let inner = out[open + 1..close - 1].trim().to_string();
+            out.replace_range(i..close, &inner);
+        }
+    }
+    // TBAA: a struct's packed member is its element type, as in Xcode's modules
+    let char_id = regex!(r#"(?m)^!(\d+) = !\{!"omnipotent char", !\d+, i64 0\}$"#).captures(&out).map(|c| c[1].to_string());
+    if let Some(char_id) = char_id {
+        let nodes: Vec<(String, String)> = regex!(r#"(?m)^!(\d+) = !\{!"_ZTSN5metal8__packedI(\w+?)Li\dEEE", !\d+, i64 0\}$"#).captures_iter(&out).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+        let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(&out).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
+        let mut extra = String::new();
+        for (id, mangled) in nodes {
+            let name = match mangled.as_str() {
+                "f" => "float",
+                "Dh" | "DF16_" => "half",
+                "i" | "j" => "int",
+                "s" | "t" => "short",
+                "l" | "m" => "long",
+                _ => continue,
+            };
+            let existing = Regex::new(&format!(r#"(?m)^!(\d+) = !\{{!"{name}", !{char_id}, i64 0\}}$"#)).unwrap().captures(&out).map(|c| c[1].to_string());
+            let elem = existing.unwrap_or_else(|| {
+                let n = next;
+                next += 1;
+                extra += &format!("!{n} = !{{!\"{name}\", !{char_id}, i64 0}}\n");
+                n.to_string()
+            });
+            let re = Regex::new(&format!(r"(?m)^(!\d+ = !\{{!\x22_ZTS.*?)!{id}\b")).unwrap();
+            loop {
+                let next_out = re.replace_all(&out, format!("${{1}}!{elem}").as_str()).to_string();
+                if next_out == out {
+                    break;
+                }
+                out = next_out;
+            }
+        }
+        out += &extra;
+    }
+    // the types themselves
+    for n in names {
+        out = regex!(r"(?m)^%.*= type .*$").replace_all(&out, |c: &regex::Captures| if c[0].starts_with(&format!("{n} = type")) { String::new() } else { c[0].to_string() }).to_string();
+        out = out.replace(n.as_str(), &packed[n]);
+    }
+    out
 }
