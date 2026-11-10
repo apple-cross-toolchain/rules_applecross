@@ -767,6 +767,35 @@ mod tests {
     }
 }
 
+/// Xcode's front end declares a scalar conversion as it emits the function that
+/// first makes it, so its declaration follows that function's definition.
+pub fn place_scalar_conversions(ir: &str) -> String {
+    let decl = regex!(r"(?m)^(?:; Function Attrs: .*\n)?declare [^@\n]*@(air\.convert\.[a-z]\.[a-z]+\d+\.[a-z]\.[a-z]+\d+)\(.*\n\n?");
+    let decls: Vec<(String, String)> = decl.captures_iter(ir).map(|c| (c[1].to_string(), c[0].trim_end().to_string() + "\n\n")).collect();
+    if decls.is_empty() {
+        return ir.to_string();
+    }
+    let mut out = decl.replace_all(ir, "").to_string();
+    // each function's end, in order, and what it calls
+    let mut placed: Vec<&str> = Vec::new();
+    let mut inserts: Vec<(usize, String)> = Vec::new();
+    for (start, end) in crate::text::functions(&out) {
+        let body = &out[start..end];
+        let mut here: Vec<(usize, &(String, String))> = decls.iter().filter(|(n, _)| !placed.contains(&n.as_str())).filter_map(|d| body.find(&format!("@{}(", d.0)).map(|i| (i, d))).collect();
+        here.sort_by_key(|x| x.0);
+        if here.is_empty() {
+            continue;
+        }
+        let text: String = here.iter().map(|(_, d)| format!("\n{}", d.1.trim_end())).collect::<String>() + "\n";
+        placed.extend(here.iter().map(|(_, d)| d.0.as_str()));
+        inserts.push((end, text));
+    }
+    for (at, text) in inserts.into_iter().rev() {
+        out.insert_str(at, &text);
+    }
+    out
+}
+
 /// Xcode's splats insert into poison (instcombine leaves ours on undef when it
 /// forms one from an element insert).
 pub fn splat_poison(ir: &str) -> String {
