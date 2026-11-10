@@ -131,7 +131,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         rewrite(&text, ast_mode, air)
     };
     let base = |c: &mut Command| {
-        c.args(["-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-fno-builtin", "-Wno-unknown-attributes", "-nostdinc++"]);
+        c.args(["-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-fno-builtin", "-fno-exceptions", "-Wno-unknown-attributes", "-nostdinc++"]);
     };
     // The AST pass (address spaces as attributes; its errors are address-space
     // checks codegen doesn't have, so they don't stop us).
@@ -145,10 +145,21 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     c.args(["-fsyntax-only", "-Xclang", "-ast-dump", "-fno-color-diagnostics"]).arg(&cpp);
     let dump = c.output().map_err(|e| e.to_string())?;
     let program = ast::program(&String::from_utf8_lossy(&dump.stdout), &ast_src.instances);
+    // functions' names with their parameters' address spaces (for Xcode's mangled names)
+    let json_decls = |path: &Path| -> Result<Vec<(String, String, String)>, String> {
+        let mut c = Command::new(&clang);
+        base(&mut c);
+        c.args(["-fsyntax-only", "-Xclang", "-ast-dump=json"]).arg(path);
+        Ok(crate::mangle::decls(&String::from_utf8_lossy(&c.output().map_err(|e| e.to_string())?.stdout)))
+    };
+    let spaced = json_decls(&cpp)?;
     // Codegen
     let code = preprocess(false)?;
     let mut types = Types { program: &program, layouts: Default::default() };
     std::fs::write(&cpp, format!("{}\n{}", code.code, entry_points(&types, &program))).map_err(|e| e.to_string())?;
+    let flat: Vec<(String, String)> = json_decls(&cpp)?.into_iter().map(|(n, m, _)| (n, m)).collect();
+    let user = crate::mangle::user_functions(&spaced, &flat);
+    let renames: std::collections::HashMap<String, String> = user.iter().map(|(k, v)| (k.clone(), v.name.clone())).collect();
     let ll0 = tmp.0.join("out.0.ll");
     let mut c = Command::new(&clang);
     base(&mut c);
@@ -166,7 +177,10 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);
     let entries: Vec<String> = program.functions.iter().map(|f| f.name.clone()).collect();
-    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries), &types.tbaa_struct_fields()), &entries)));
+    // the user's functions as Xcode calls them (their stage functions are inlined into the entry points)
+    let stages = crate::abi::stage_functions(&text, &entries);
+    let text = crate::abi::lower(&text, &user, &stages);
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()), &entries)));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
@@ -180,6 +194,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
     let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?))))))));
+    let text = crate::abi::strip_comdats(&crate::mangle::apply(&text, &renames));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(

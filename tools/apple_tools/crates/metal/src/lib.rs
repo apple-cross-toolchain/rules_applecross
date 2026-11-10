@@ -3,6 +3,7 @@
 //! own probe shaders (README.md, FORMAT.md): the AIR, its optimisation and its
 //! bitcode as Xcode's front end and metallib write them.
 
+pub mod abi;
 pub mod air;
 pub mod ast;
 pub mod bitcode;
@@ -13,6 +14,7 @@ pub mod entry;
 pub mod intrinsics;
 pub mod ir;
 pub mod library;
+pub mod mangle;
 pub mod rewrite;
 pub mod target;
 pub mod text;

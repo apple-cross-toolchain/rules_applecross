@@ -170,10 +170,11 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     named.push(format!("!air.version = !{{{vers}}}"));
     named.push(format!("!air.language_version = !{{{langv}}}"));
     named.push(format!("!air.source_file_name = !{{{srcn}}}"));
-    // Xcode's front end builds aggregates on undef
-    ir = regex!(r"(insertvalue (?:<\{[^}]*\}>|\{[^}]*\}|\[[^\]]*\]|%[\w.\x22:]+)) poison,").replace_all(&ir, "$1 undef,").to_string();
-    let entries: Vec<&str> = x.program.functions.iter().map(|f| f.name.as_str()).collect();
-    ir = constant_reads(&ir, &entries);
+    // Xcode's front end builds a stage function's packed return on undef
+    ir = regex!(r"(insertvalue <\{[^}]*\}>) poison,").replace_all(&ir, "$1 undef,").to_string();
+    let defined: Vec<String> = regex!(r#"(?m)^define [^@\n]*@("?[\w.$]+"?)\("#).captures_iter(&ir).map(|c| c[1].to_string()).collect();
+    ir = constant_reads(&ir, &defined.iter().map(String::as_str).collect::<Vec<_>>());
+    ir = after_constant_reads(&ir);
     // the static initialiser of function constants: Xcode's front end gives it no vector width
     let inits: Vec<String> = regex!(r#"(?m)^define [^@]*@([\w.$]+)\(.*section "air\.static_init""#).captures_iter(&ir).map(|c| c[1].to_string()).collect();
     for f in inits {
@@ -280,6 +281,24 @@ pub fn vector_widths(ir: &str) -> String {
     }
     out.push_str(&ir[pos..]);
     out.trim_end().to_string() + "\n" + &new_groups
+}
+
+/// A call to a function that reads no memory carries no alias scopes (the
+/// inliner adds none), and Xcode's LLVM gives lifetime markers mustprogress.
+fn after_constant_reads(ir: &str) -> String {
+    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let readnone: Vec<String> = regex!(r#"(?m)^define [^@\n]*@("?[\w.$]+"?)\(.*\)[^#\n]*#(\d+)"#)
+        .captures_iter(ir)
+        .filter(|c| groups.get(&c[2]).is_some_and(|g| g.split(' ').any(|a| a == "readnone")))
+        .map(|c| c[1].to_string())
+        .collect();
+    let ir = regex!(r#"(?m)^(\s+(?:%[\w.]+ = )?(?:tail )?call [^@\n]*@("?[\w.$]+"?)\(.*?)(, !alias\.scope !\d+)?(, !noalias !\d+)?$"#)
+        .replace_all(ir, |c: &regex::Captures| if readnone.iter().any(|r| *r == c[2]) { c[1].to_string() } else { c[0].to_string() })
+        .to_string();
+    let lifetime: Vec<String> = regex!(r"(?m)^declare void @llvm\.lifetime\.\w+\.p0i8\(.*\) #(\d+)$").captures_iter(&ir).map(|c| c[1].to_string()).collect();
+    regex!(r"(?m)^attributes #(\d+) = \{ argmemonly (nocallback .*)\}$")
+        .replace_all(&ir, |c: &regex::Captures| if lifetime.contains(&c[1].to_string()) { format!("attributes #{} = {{ argmemonly mustprogress {}}}", &c[1], &c[2]) } else { c[0].to_string() })
+        .to_string()
 }
 
 /// Xcode's alias analysis knows address space 2 is constant: a function that
