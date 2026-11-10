@@ -50,7 +50,7 @@ jobs:
       - name: Generate stub SDKs
         run: tools/stub-sdks.py
       - name: Build and check apps against stub SDKs
-        run: bazel test --keep_going //tests/stub_sdks/... //tests/xcode_xip/... //tests/xcstringstool/... //tests/appintentsmetadataprocessor/... //tests/coremlc/... //tests/momc/... //tests/xcode_equivalence/... //tests/swift_toolchain_attrs/... //tests/linux_swift/... //tests/swift_synthesize_interface/... //tests/layering_check/... //tests/clang_apple_flags/... //tests/xcode_pin/...
+        run: bazel test --keep_going //tests/stub_sdks/... //tests/xcode_xip/... //tests/xcstringstool/... //tests/appintentsmetadataprocessor/... //tests/coremlc/... //tests/momc/... //tests/xcode_equivalence/... //tests/swift_toolchain_attrs/... //tests/linux_swift/... //tests/swift_synthesize_interface/... //tests/layering_check/... //tests/clang_apple_flags/... //tests/xcode_pin/... //tests/metal/...
       - name: Analyze the examples against stub SDKs
         run: >-
           bazel
