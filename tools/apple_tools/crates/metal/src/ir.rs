@@ -135,10 +135,17 @@ fn global_type(rest: &str) -> &str {
 
 /// Before opt: inline everything into the entry points (address spaces are
 /// inferred within one function), and put program-scope constants in address space 2.
-pub fn prepare_flat(ir: &str, entries: &[String]) -> String {
+pub fn prepare_flat(ir: &str, entries: &[String], stages: &[String]) -> String {
     let mut ir = replace_all(ir, regex!(r"(?m)^(define [^{]*\)[^{#]*)(#\d+)?\s*\{$"), |c| {
         let is_entry = entries.iter().any(|e| c[1].contains(&format!("@{e}(")));
-        if is_entry {
+        // the user's functions are inlined as Xcode's inliner decides (their stage functions always)
+        let name = regex!(r#"@("?[\w.$]+"?)\("#).captures(&c[1]).map(|n| n[1].to_string()).unwrap_or_default();
+        if crate::abi::is_user(&name) && !stages.contains(&name) {
+            return c[0].to_string();
+        }
+        // the user's [[noinline]] stays a call
+        let noinline = c.get(2).is_some_and(|g| regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).any(|a| a[1] == g.as_str()[1..] && a[2].split(' ').any(|x| x == "noinline")));
+        if is_entry || noinline {
             c[0].to_string()
         } else {
             format!("{}alwaysinline {} {{", &c[1], c.get(2).map(|m| m.as_str()).unwrap_or(""))
@@ -418,10 +425,13 @@ pub fn alias_scopes(ir: &str) -> String {
                 return line.to_string();
             }
             let mut out = na.replace(&sc.replace(line, ""), "").to_string();
-            // Xcode leaves an access through a global (a constexpr sampler, a function constant), or a call without pointers, unannotated
+            // Xcode leaves an access through a global (a constexpr sampler, a function constant), a call
+            // without pointers, or one to thread memory (no address space), unannotated
+            let thread_only = |t: &str| t.contains('*') && !t.contains("addrspace(");
             match regex!(r"\bcall [^@]*@[\w.$\x22%]+\((.*)\)").captures(line) {
-                Some(args) if args[1].contains('@') || !args[1].contains('*') => return out,
+                Some(args) if args[1].contains('@') || !args[1].contains('*') || thread_only(&args[1]) => return out,
                 None if line.contains('@') => return out,
+                None if thread_only(line.split(", !").next().unwrap_or("")) => return out,
                 _ => {}
             }
             let s = a.map(|c| map(&c[1])).unwrap_or_default();
