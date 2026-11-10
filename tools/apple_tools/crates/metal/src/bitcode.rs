@@ -26,7 +26,8 @@ impl Writer {
     fn added(self) -> &'static [&'static str] {
         match self {
             Writer::Frontend => &[],
-            Writer::Metallib => &["air.function_groups"],
+            // LLVM 15 registers heapallocsite only for some modules; metallib's always has it
+            Writer::Metallib => &["heapallocsite", "air.function_groups"],
         }
     }
 }
@@ -480,6 +481,14 @@ fn blob(items: &mut [Item]) -> Option<&mut Vec<u8>> {
 
 /// The module's metadata kinds as Xcode's LLVM numbers them.
 fn edit_module(items: &mut [Item], writer: Writer) -> Result<(), String> {
+    // MODULE_CODE_GLOBALVAR: LLVM 15 appends the sanitizer metadata field Xcode's LLVM doesn't write
+    for it in items.iter_mut() {
+        if let Item::Record { abbrev: None, code: 7, ops, .. } = it {
+            if ops.len() == 19 && ops[18] == 0 {
+                ops.pop();
+            }
+        }
+    }
     // old kind id -> new
     let mut renumber: std::collections::HashMap<u64, Option<u64>> = Default::default();
     for it in items.iter_mut() {
@@ -509,8 +518,10 @@ fn edit_module(items: &mut [Item], writer: Writer) -> Result<(), String> {
                 last = last.max(ops[0]);
             }
         }
-        for (i, name) in writer.added().iter().enumerate() {
-            let mut ops = vec![last + 1 + i as u64];
+        let present: Vec<String> = keep.iter().filter_map(|k| if let Item::Record { code: 6, ops, .. } = k { Some(kind_name(ops)) } else { None }).collect();
+        for name in writer.added().iter().filter(|n| !present.iter().any(|p| p == *n)) {
+            last += 1;
+            let mut ops = vec![last];
             ops.extend(name.bytes().map(u64::from));
             keep.push(Item::Record { abbrev: None, code: 6, ops, blob: None });
         }

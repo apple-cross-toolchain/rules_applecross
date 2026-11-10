@@ -168,6 +168,58 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     named.push(format!("!air.version = !{{{vers}}}"));
     named.push(format!("!air.language_version = !{{{langv}}}"));
     named.push(format!("!air.source_file_name = !{{{srcn}}}"));
+    // Xcode's front end builds aggregates on undef
+    ir = regex!(r"(insertvalue (?:<\{[^}]*\}>|\{[^}]*\}|\[[^\]]*\]|%[\w.\x22:]+)) poison,").replace_all(&ir, "$1 undef,").to_string();
+    ir = min_legal_vector_width(&ir, &x.program.functions.iter().map(|f| f.name.as_str()).collect::<Vec<_>>());
     let md: String = d.md.nodes.iter().enumerate().map(|(i, b)| format!("!{i} = {b}\n")).collect();
     Ok(format!("{}\n\n{}\n\n{}", ir.trim_end(), named.join("\n"), md))
+}
+
+/// The widest vector (in bits) in an IR type, looking into structs and arrays (as clang does).
+fn vector_width(t: &str) -> usize {
+    // a pointer to a vector is no vector
+    let t = regex!(r"<\d+ x \w+>(?: addrspace\(\d+\))?\*").replace_all(t, "");
+    regex!(r"<(\d+) x (half|float|double|bfloat|i\d+)>")
+        .captures_iter(&t)
+        .map(|c| {
+            let bits = match &c[2] {
+                "half" | "bfloat" => 16,
+                "float" => 32,
+                "double" => 64,
+                i => i[1..].parse().unwrap_or(0),
+            };
+            c[1].parse::<usize>().unwrap_or(0) * bits
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// An entry point's "min-legal-vector-width" as Xcode's front end sets it: its
+/// own parameters and the calls it makes (not its return value, which the
+/// front end builds for it, nor what got inlined).
+fn min_legal_vector_width(ir: &str, entries: &[&str]) -> String {
+    let mut ir = ir.to_string();
+    let mut next = regex!(r"(?m)^attributes #(\d+) = ").captures_iter(&ir).map(|c| c[1].parse::<usize>().unwrap()).max().map_or(0, |m| m + 1);
+    for e in entries {
+        let def = Regex::new(&format!(r"(?m)^define (.*?)@{}\((.*)\)[^#\n]*#(\d+)", regex::escape(e))).unwrap();
+        let Some(c) = def.captures(&ir) else { continue };
+        let (params, group) = (c[2].to_string(), c[3].to_string());
+        let Some((_, body)) = find_define(&ir, e) else { continue };
+        let mut width = vector_width(&params);
+        for call in regex!(r"(?m)\bcall [^@]*@[\w.$\x22]+\(.*\)").find_iter(body) {
+            width = width.max(vector_width(call.as_str()));
+        }
+        let gre = Regex::new(&format!(r"(?m)^attributes #{group} = \{{ (.*) \}}$")).unwrap();
+        let Some(g) = gre.captures(&ir) else { continue };
+        let attrs = g[1].to_string();
+        let new_attrs = regex!(r#""min-legal-vector-width"="\d+""#).replace(&attrs, format!("\"min-legal-vector-width\"=\"{width}\"").as_str()).to_string();
+        if new_attrs == attrs {
+            continue;
+        }
+        let n = next;
+        next += 1;
+        ir = def.replace(&ir, |c: &regex::Captures| c[0].replacen(&format!("#{}", &c[3]), &format!("#{n}"), 1)).to_string();
+        ir = ir.trim_end().to_string() + &format!("\nattributes #{n} = {{ {new_attrs} }}\n");
+    }
+    ir
 }

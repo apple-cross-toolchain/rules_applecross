@@ -159,7 +159,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);
     let entries: Vec<String> = program.functions.iter().map(|f| f.name.clone()).collect();
-    let text = intrinsics::apply(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&text, &entries)), &entries));
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&text, &entries)), &entries)));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
@@ -167,11 +167,12 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         run(Command::new(tool(o, "opt")).args(passes).args(["-S", "-o"]).arg(&out).arg(&i))?;
         std::fs::read_to_string(&out).map_err(|e| e.to_string())
     };
-    let text = step(&text, "o2", &["-O2"])?;
+    // conversions become air.convert calls once constants are folded, before the last attribute inference
+    let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &["-O2"])?));
     let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
-    let text = ir::alias_scopes(&intrinsics::apply(&step(&intrinsics::apply(&text), "o2b", &["-O2"])?));
+    let text = ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &["-O2"])?)));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(
@@ -211,6 +212,11 @@ pub fn assemble(llvm_bin: &Path, ir: &str) -> Result<Vec<u8>, String> {
     let (ll, bc) = (tmp.0.join("f.ll"), tmp.0.join("f.bc"));
     std::fs::write(&ll, ir).map_err(|e| e.to_string())?;
     run(Command::new(llvm_bin.join("llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
+    if let Ok(keep) = std::env::var("METALLIB_KEEP") {
+        let n = std::fs::read_dir(&keep).map(|d| d.count()).unwrap_or(0);
+        let _ = std::fs::copy(&ll, Path::new(&keep).join(format!("{n}.ll")));
+        let _ = std::fs::copy(&bc, Path::new(&keep).join(format!("{n}.bc")));
+    }
     crate::bitcode::as_xcode(&std::fs::read(&bc).map_err(|e| e.to_string())?, crate::air::PRODUCER, crate::bitcode::Writer::Metallib)
 }
 

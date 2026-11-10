@@ -399,8 +399,9 @@ pub fn alias_scopes(ir: &str) -> String {
     };
     let map = |l: &str| -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
+        // scopes of other inlined functions' noalias parameters go
         for i in lists.get(l).into_iter().flatten() {
-            let r = rep.get(i).cloned().unwrap_or(i.clone());
+            let Some(r) = rep.get(i).cloned() else { continue };
             if !out.contains(&r) {
                 out.push(r);
             }
@@ -417,9 +418,11 @@ pub fn alias_scopes(ir: &str) -> String {
                 return line.to_string();
             }
             let mut out = na.replace(&sc.replace(line, ""), "").to_string();
-            // Xcode leaves a call through a global (a constexpr sampler) unannotated
-            if regex!(r"\bcall .*@[\w.$\x22]+\(.*@").is_match(line) {
-                return out;
+            // Xcode leaves a call through a global (a constexpr sampler), or without pointers, unannotated
+            if let Some(args) = regex!(r"\bcall [^@]*@[\w.$\x22%]+\((.*)\)").captures(line) {
+                if args[1].contains('@') || !args[1].contains('*') {
+                    return out;
+                }
             }
             let s = a.map(|c| map(&c[1])).unwrap_or_default();
             let n: Vec<String> = n.map(|c| map(&c[1])).unwrap_or_default().into_iter().filter(|x| !s.contains(x)).collect();
@@ -476,4 +479,77 @@ pub fn vector_tbaa(ir: &str) -> String {
         })
         .collect();
     lines.join("\n") + "\n" + &nodes
+}
+
+/// Xcode lowers conversions between integers and floats, and between float
+/// vectors, to air.convert calls after optimisation (a scalar fpext or fptrunc
+/// stays); the declarations follow the module's others.
+pub fn air_conversions(ir: &str) -> String {
+    convert(ir, false)
+}
+
+/// What Xcode's front end converts as it emits the user's code: scalars, in the
+/// user's own functions (not our stdlib's, whose conversions fold once inlined).
+pub fn user_scalar_conversions(ir: &str) -> String {
+    convert(ir, true)
+}
+
+fn convert(ir: &str, user_scalars: bool) -> String {
+    fn name(t: &str) -> Option<String> {
+        let (n, e) = match regex!(r"^<(\d+) x (\w+)>$").captures(t) {
+            Some(c) => (Some(c[1].to_string()), c[2].to_string()),
+            None => (None, t.to_string()),
+        };
+        let e = match e.as_str() {
+            "float" => "f32".to_string(),
+            "half" => "f16".to_string(),
+            "bfloat" => "bf16".to_string(),
+            i if regex!(r"^i\d+$").is_match(i) => i.to_string(),
+            _ => return None,
+        };
+        Some(n.map(|n| format!("v{n}{e}")).unwrap_or(e))
+    }
+    let conv = regex!(r"^(\s+)(%[\w.]+) = (sitofp|uitofp|fptosi|fptoui|fpext|fptrunc) (<\d+ x \w+>|\w+) (%[\w.]+) to (<\d+ x \w+>|\w+)$");
+    let mut decls: Vec<String> = Vec::new();
+    let mut user = !user_scalars;
+    let lines: Vec<String> = ir
+        .lines()
+        .map(|l| {
+            if user_scalars && l.starts_with("define ") {
+                user = !regex!(r"@(?:_ZN5metal|_ZNK5metal|_ZZN5metal|__msl|_ZN11__air_entry)").is_match(l);
+            }
+            let Some(c) = conv.captures(l) else { return l.to_string() };
+            let (op, src, v, dst) = (&c[3], &c[4], &c[5], &c[6]);
+            if matches!(op, "fpext" | "fptrunc") && !src.starts_with('<') || !user || user_scalars && (src.starts_with('<') || dst.starts_with('<')) {
+                return l.to_string();
+            }
+            let (Some(sn), Some(dn)) = (name(src), name(dst)) else { return l.to_string() };
+            let (sk, dk) = match op {
+                "sitofp" => ("s", "f"),
+                "uitofp" => ("u", "f"),
+                "fptosi" => ("f", "s"),
+                "fptoui" => ("f", "u"),
+                _ => ("f", "f"),
+            };
+            let f = format!("air.convert.{dk}.{dn}.{sk}.{sn}");
+            let decl = format!("declare {dst} @{f}({src})");
+            if !decls.contains(&decl) {
+                decls.push(decl);
+            }
+            let fast = if dk == "f" { "fast " } else { "" };
+            format!("{}{} = tail call {fast}{dst} @{f}({src} {v})", &c[1], &c[2])
+        })
+        .collect();
+    let mut ir = lines.join("\n") + "\n";
+    let existing: BTreeSet<String> = regex!(r"(?m)^declare .*? @([\w.]+)\(").captures_iter(&ir).map(|c| c[1].to_string()).collect();
+    let mut new: Vec<&String> = decls.iter().filter(|d| !existing.contains(regex!(r"@([\w.]+)\(").captures(d).unwrap().get(1).unwrap().as_str())).collect();
+    // Xcode's front end converts scalars itself; vectors come later
+    new.sort_by_key(|d| d.starts_with("declare <"));
+    if !new.is_empty() {
+        // after the last function
+        let at = ir.rfind("\n}\n").map(|i| i + 3).into_iter().chain(ir.rfind("\ndeclare ").map(|i| i + 1 + ir[i + 1..].find('\n').unwrap() + 1)).max().unwrap_or(ir.len());
+        let text: String = new.iter().map(|d| format!("\n{d}\n")).collect();
+        ir.insert_str(at, &text);
+    }
+    ir
 }

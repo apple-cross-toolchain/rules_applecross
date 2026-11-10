@@ -168,19 +168,9 @@ pub fn extract(ir: &str, name: &str) -> String {
     // other entry points go, then whatever nothing kept refers to
     let entries: Vec<String> = ["kernel", "vertex", "fragment"].iter().flat_map(|st| m.named.get(&format!("air.{st}")).cloned().unwrap_or_default()).filter_map(|r| regex!(r"@([\w.$]+)").captures(m.node(&r)).map(|c| c[1].to_string())).collect();
     let mut kept: Vec<bool> = entities.iter().map(|(sym, _)| sym.as_deref().map(|s| s == name || !entries.iter().any(|e| e == s)).unwrap_or(true)).collect();
-    // metadata the kept named metadata reaches (it may name globals)
-    let mut md = String::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut todo: Vec<String> = keep_named.iter().flat_map(|l| regex!(r"![0-9]+").find_iter(l).map(|x| x.as_str().to_string()).collect::<Vec<_>>()).collect();
-    while let Some(r) = todo.pop() {
-        if seen.insert(r.clone()) {
-            let n = m.node(&r);
-            md += n;
-            todo.extend(regex!(r"![0-9]+").find_iter(n).map(|x| x.as_str().to_string()));
-        }
-    }
+    // what the code kept refers to (metadata naming a global doesn't keep it)
     loop {
-        let text: String = entities.iter().zip(&kept).filter(|(_, k)| **k).map(|(e, _)| e.1.as_str()).collect::<String>() + &md;
+        let text: String = entities.iter().zip(&kept).filter(|(_, k)| **k).map(|(e, _)| e.1.as_str()).collect::<String>();
         let mut changed = false;
         for (i, (sym, t)) in entities.iter().enumerate() {
             let Some(sym) = sym else { continue };
@@ -198,12 +188,46 @@ pub fn extract(ir: &str, name: &str) -> String {
             break;
         }
     }
+    // named metadata keeps the entries whose globals the code kept (a sampler it uses), and goes if none
+    let globals_kept: Vec<&str> = entities.iter().zip(&kept).filter(|(e, k)| **k && e.0.is_some()).map(|(e, _)| e.0.as_deref().unwrap()).collect();
+    let names_kept = |r: &str| -> bool {
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = vec![r.to_string()];
+        while let Some(r) = todo.pop() {
+            if !seen.insert(r.clone()) {
+                continue;
+            }
+            let n = m.node(&r);
+            if regex!(r"@([-\w.$]+)").captures_iter(n).any(|c| !globals_kept.contains(&&c[1])) {
+                return false;
+            }
+            todo.extend(regex!(r"![0-9]+").find_iter(n).map(|x| x.as_str().to_string()));
+        }
+        true
+    };
+    let keep_named: Vec<String> = keep_named
+        .into_iter()
+        .filter_map(|l| {
+            let c = regex!(r"^(![\w.]+) = !\{(.*)\}$").captures(&l)?;
+            let refs: Vec<&str> = regex!(r"![0-9]+").find_iter(&c[2]).map(|x| x.as_str()).filter(|r| names_kept(r)).collect();
+            (!refs.is_empty() || c[2].is_empty()).then(|| format!("{} = !{{{}}}", &c[1], refs.join(", ")))
+        })
+        .collect();
     let mut out = header.join("\n") + "\n\n";
+    // metallib declares what the function calls in reverse order of first use
+    let body: String = entities.iter().zip(&kept).filter(|(e, k)| **k && e.1.starts_with("define") || **k && e.1.contains("\ndefine ")).map(|(e, _)| e.1.as_str()).collect();
+    let first_use = |sym: &str| body.find(&format!("@{sym}(")).unwrap_or(usize::MAX);
+    let mut decls: Vec<&(Option<String>, String)> = entities.iter().zip(&kept).filter(|(e, k)| **k && e.1.lines().any(|l| l.starts_with("declare "))).map(|(e, _)| e).collect();
+    decls.sort_by_key(|e| std::cmp::Reverse(first_use(e.0.as_deref().unwrap_or(""))));
     for ((_, t), k) in entities.iter().zip(&kept) {
-        if *k {
+        if *k && !t.lines().any(|l| l.starts_with("declare ")) {
             out += t;
             out += "\n";
         }
+    }
+    for (_, t) in decls {
+        out += t;
+        out += "\n";
     }
     out += &rest.iter().filter(|l| l.starts_with("attributes ")).cloned().collect::<Vec<_>>().join("\n");
     out += "\n\n";
