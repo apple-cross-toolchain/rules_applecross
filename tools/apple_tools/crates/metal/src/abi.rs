@@ -270,3 +270,21 @@ pub fn strip_comdats(ir: &str) -> String {
     let ir = regex!(r"(?m)^\$[^\n]* = comdat any\n\n?").replace_all(ir, "");
     regex!(r"(?m)^(define .*?) comdat(?:\(\$[^)]*\))?(.*)$").replace_all(&ir, "$1$2").to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pointers_and_textures_lowered_with_their_calls() {
+        let ir = "%\"struct.metal::texture2d\" = type { %struct._texture_2d_t addrspace(1)* }\ndefine spir_func float @_Z1fPfN5metal9texture2dE(float* noundef %p, %\"struct.metal::texture2d\"* noundef byval(%\"struct.metal::texture2d\") align 8 %t) #0 {\nbb:\n  %v = load float, float* %p, align 4\n  ret float %v\n}\n\ndefine spir_func void @k(float* %q, %\"struct.metal::texture2d\"* %tt) #0 {\nbb:\n  %r = call spir_func float @_Z1fPfN5metal9texture2dE(float* noundef %q, %\"struct.metal::texture2d\"* noundef byval(%\"struct.metal::texture2d\") align 8 %tt)\n  ret void\n}\n";
+        let x: HashMap<String, Xcode> = [("_Z1fPfN5metal9texture2dE".to_string(), Xcode { name: "n".into(), spaces: vec![Some(1), None] })].into();
+        let out = lower(ir, &x, &[]);
+        assert!(out.contains("define spir_func float @_Z1fPfN5metal9texture2dE(float addrspace(1)* noundef %p.as, %struct._texture_2d_t addrspace(1)* %t.h) #0 {"));
+        assert!(out.contains("  %p = addrspacecast float addrspace(1)* %p.as to float*"));
+        assert!(out.contains("  store %struct._texture_2d_t addrspace(1)* %t.h, %struct._texture_2d_t addrspace(1)** %t.p"));
+        assert!(out.contains("addrspacecast float* %q to float addrspace(1)*"));
+        assert!(out.contains("call spir_func float @_Z1fPfN5metal9texture2dE(float addrspace(1)* noundef %__abi1.as, %struct._texture_2d_t addrspace(1)* %__abi3.h)"));
+    }
+}
+

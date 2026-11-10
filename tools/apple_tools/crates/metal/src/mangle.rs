@@ -24,11 +24,6 @@ pub fn decls(json: &str) -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// Each function declaration's (name, mangled name), in order.
-pub fn names(json: &str) -> Vec<(String, String)> {
-    decls(json).into_iter().map(|(n, m, _)| (n, m)).collect()
-}
-
 /// The address space of each parameter of a function type that is a pointer or
 /// reference into one (`float (__attribute__((address_space(1))) float *, uint)`).
 pub fn param_spaces(fn_type: &str) -> Vec<Option<u32>> {
@@ -93,30 +88,6 @@ pub fn xcode_spelling(mangled: &str) -> String {
     s.replace("U3AS1", "U9MTLdevice").replace("U3AS3", "U14MTLthreadgroup")
 }
 
-/// Flat name -> Xcode's, for the functions whose names differ.
-pub fn renames(with_spaces: &[(String, String)], flat: &[(String, String)]) -> HashMap<String, String> {
-    // pair the k-th declaration of each name in both
-    let mut seen: HashMap<&str, usize> = HashMap::new();
-    let mut by_key: HashMap<(String, usize), &str> = HashMap::new();
-    for (n, m) in with_spaces {
-        let k = seen.entry(n).or_insert(0);
-        by_key.insert((n.clone(), *k), m);
-        *k += 1;
-    }
-    let mut seen: HashMap<&str, usize> = HashMap::new();
-    let mut out = HashMap::new();
-    for (n, m) in flat {
-        let k = seen.entry(n).or_insert(0);
-        if let Some(a) = by_key.get(&(n.clone(), *k)) {
-            if a.contains("U3AS") {
-                out.insert(m.clone(), xcode_spelling(a));
-            }
-        }
-        *k += 1;
-    }
-    out
-}
-
 /// The functions of `ir` renamed.
 pub fn apply(ir: &str, renames: &HashMap<String, String>) -> String {
     if renames.is_empty() {
@@ -148,10 +119,11 @@ mod tests {
 
     #[test]
     fn pairs_declarations_by_name_and_order() {
-        let a = vec![("f".to_string(), "_Z1fPU3AS1f".to_string()), ("f".to_string(), "_Z1fi".to_string())];
+        let a = vec![("f".to_string(), "_Z1fPU3AS1f".to_string(), "float (__attribute__((address_space(1))) float *)".to_string()), ("f".to_string(), "_Z1fi".to_string(), "float (int)".to_string())];
         let b = vec![("f".to_string(), "_Z1fPf".to_string()), ("f".to_string(), "_Z1fi".to_string())];
-        let r = renames(&a, &b);
-        assert_eq!(r.get("_Z1fPf").map(String::as_str), Some("_Z1fPU9MTLdevicef"));
+        let r = user_functions(&a, &b);
+        assert_eq!(r.get("_Z1fPf").map(|x| x.name.as_str()), Some("_Z1fPU9MTLdevicef"));
+        assert_eq!(r.get("_Z1fPf").map(|x| x.spaces.clone()), Some(vec![Some(1)]));
         assert_eq!(r.len(), 1);
     }
 }
