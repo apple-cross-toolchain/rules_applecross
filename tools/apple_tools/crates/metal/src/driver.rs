@@ -131,7 +131,9 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // The AST pass (address spaces as attributes; its errors are address-space
     // checks codegen doesn't have, so they don't stop us).
     let ast_src = preprocess(true)?;
-    let cpp = tmp.0.join("source.cpp");
+    // named as the source, which names its static initializer (_GLOBAL__sub_I_<file>)
+    let cpp_name = o.source.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or("source.metal".into());
+    let cpp = tmp.0.join(&cpp_name);
     std::fs::write(&cpp, &ast_src.code).map_err(|e| e.to_string())?;
     let mut c = Command::new(&clang);
     base(&mut c);
@@ -172,7 +174,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
-    let text = ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &["-O2"])?)));
+    let o2b = std::env::var("METAL_EXP_O2B").unwrap_or("-O2".into());
+    let text = ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &o2b.split(' ').collect::<Vec<_>>())?)));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(
@@ -197,7 +200,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     run(Command::new(tool(o, "llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
     if let Some(keep) = &o.keep {
         let _ = std::fs::create_dir_all(keep);
-        for f in ["source.cpp", "out.0.ll", "o2.ll", "infer.ll", "o2b.ll", "air.ll"] {
+        for f in [cpp_name.as_str(), "out.0.ll", "o2.ll", "infer.ll", "o2b.ll", "air.ll"] {
             let _ = std::fs::copy(tmp.0.join(f), keep.join(f));
         }
     }

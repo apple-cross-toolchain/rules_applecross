@@ -104,6 +104,8 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
             if p.stage_in || regex!(r"%struct\._(?:texture|depth)_\w+ addrspace|%struct\._sampler_t addrspace").is_match(&args[k]) {
                 args[k] = args[k].replace(" noundef", "");
             }
+            // no extension attributes on an entry point's parameters
+            args[k] = args[k].replace(" zeroext", "").replace(" signext", "");
         }
         ir = ir.replacen(&format!("@{}({})", f.name, sig), &format!("@{}({})", f.name, args.join(", ")), 1);
         if !fn_attrs.is_empty() {
@@ -170,7 +172,8 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     named.push(format!("!air.source_file_name = !{{{srcn}}}"));
     // Xcode's front end builds aggregates on undef
     ir = regex!(r"(insertvalue (?:<\{[^}]*\}>|\{[^}]*\}|\[[^\]]*\]|%[\w.\x22:]+)) poison,").replace_all(&ir, "$1 undef,").to_string();
-    ir = min_legal_vector_width(&ir, &x.program.functions.iter().map(|f| f.name.as_str()).collect::<Vec<_>>());
+    let entries: Vec<&str> = x.program.functions.iter().map(|f| f.name.as_str()).collect();
+    ir = constant_reads(&min_legal_vector_width(&ir, &entries), &entries);
     let md: String = d.md.nodes.iter().enumerate().map(|(i, b)| format!("!{i} = {b}\n")).collect();
     Ok(format!("{}\n\n{}\n\n{}", ir.trim_end(), named.join("\n"), md))
 }
@@ -194,32 +197,61 @@ fn vector_width(t: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// Give `name`'s definition its own copy of its attribute group, edited.
+fn edit_attrs(ir: &str, name: &str, edit: impl Fn(&str) -> String) -> String {
+    let def = Regex::new(&format!(r"(?m)^(define .*?@{}\(.*\)[^#\n]*#)(\d+)", regex::escape(name))).unwrap();
+    let Some(c) = def.captures(ir) else { return ir.to_string() };
+    let gre = Regex::new(&format!(r"(?m)^attributes #{} = \{{ (.*) \}}$", &c[2])).unwrap();
+    let Some(g) = gre.captures(ir) else { return ir.to_string() };
+    let new_attrs = edit(&g[1]);
+    if new_attrs == g[1] {
+        return ir.to_string();
+    }
+    let n = regex!(r"(?m)^attributes #(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().map_or(0, |m| m + 1);
+    let ir = def.replace(ir, |c: &regex::Captures| format!("{}{n}", &c[1])).to_string();
+    ir.trim_end().to_string() + &format!("\nattributes #{n} = {{ {new_attrs} }}\n")
+}
+
 /// An entry point's "min-legal-vector-width" as Xcode's front end sets it: its
 /// own parameters and the calls it makes (not its return value, which the
 /// front end builds for it, nor what got inlined).
 fn min_legal_vector_width(ir: &str, entries: &[&str]) -> String {
     let mut ir = ir.to_string();
-    let mut next = regex!(r"(?m)^attributes #(\d+) = ").captures_iter(&ir).map(|c| c[1].parse::<usize>().unwrap()).max().map_or(0, |m| m + 1);
     for e in entries {
-        let def = Regex::new(&format!(r"(?m)^define (.*?)@{}\((.*)\)[^#\n]*#(\d+)", regex::escape(e))).unwrap();
-        let Some(c) = def.captures(&ir) else { continue };
-        let (params, group) = (c[2].to_string(), c[3].to_string());
+        let def = Regex::new(&format!(r"(?m)^define .*?@{}\((.*)\)", regex::escape(e))).unwrap();
+        let Some(params) = def.captures(&ir).map(|c| c[1].to_string()) else { continue };
         let Some((_, body)) = find_define(&ir, e) else { continue };
         let mut width = vector_width(&params);
         for call in regex!(r"(?m)\bcall [^@]*@[\w.$\x22]+\(.*\)").find_iter(body) {
             width = width.max(vector_width(call.as_str()));
         }
-        let gre = Regex::new(&format!(r"(?m)^attributes #{group} = \{{ (.*) \}}$")).unwrap();
-        let Some(g) = gre.captures(&ir) else { continue };
-        let attrs = g[1].to_string();
-        let new_attrs = regex!(r#""min-legal-vector-width"="\d+""#).replace(&attrs, format!("\"min-legal-vector-width\"=\"{width}\"").as_str()).to_string();
-        if new_attrs == attrs {
+        ir = edit_attrs(&ir, e, |a| regex!(r#""min-legal-vector-width"="\d+""#).replace(a, format!("\"min-legal-vector-width\"=\"{width}\"").as_str()).to_string());
+    }
+    ir
+}
+
+/// Xcode's alias analysis knows address space 2 is constant: a function that
+/// only reads it reads no memory.
+fn constant_reads(ir: &str, entries: &[&str]) -> String {
+    let mut ir = ir.to_string();
+    let readnone: Vec<String> = regex!(r"(?m)^declare .*? @([\w.]+)\(.*\).*\breadnone\b").captures_iter(&ir).map(|c| c[1].to_string()).collect();
+    for e in entries {
+        let Some((_, body)) = find_define(&ir, e) else { continue };
+        let reads_other = body.lines().any(|l| {
+            let l = l.trim();
+            l.starts_with("store ")
+                || regex!(r"= load ").is_match(l) && !regex!(r"= load [^,]*, [^,]* addrspace\(2\)\*").is_match(l)
+                || regex!(r"\bcall [^@]*@([\w.]+)\(").captures(l).map(|c| !readnone.iter().any(|r| *r == c[1])).unwrap_or(false)
+        });
+        if reads_other {
             continue;
         }
-        let n = next;
-        next += 1;
-        ir = def.replace(&ir, |c: &regex::Captures| c[0].replacen(&format!("#{}", &c[3]), &format!("#{n}"), 1)).to_string();
-        ir = ir.trim_end().to_string() + &format!("\nattributes #{n} = {{ {new_attrs} }}\n");
+        ir = edit_attrs(&ir, e, |a| {
+            if !regex!(r"\breadonly\b").is_match(a) {
+                return a.to_string();
+            }
+            a.replace("argmemonly ", "").replace("readonly", "readnone")
+        });
     }
     ir
 }

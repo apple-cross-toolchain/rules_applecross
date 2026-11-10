@@ -418,11 +418,11 @@ pub fn alias_scopes(ir: &str) -> String {
                 return line.to_string();
             }
             let mut out = na.replace(&sc.replace(line, ""), "").to_string();
-            // Xcode leaves a call through a global (a constexpr sampler), or without pointers, unannotated
-            if let Some(args) = regex!(r"\bcall [^@]*@[\w.$\x22%]+\((.*)\)").captures(line) {
-                if args[1].contains('@') || !args[1].contains('*') {
-                    return out;
-                }
+            // Xcode leaves an access through a global (a constexpr sampler, a function constant), or a call without pointers, unannotated
+            match regex!(r"\bcall [^@]*@[\w.$\x22%]+\((.*)\)").captures(line) {
+                Some(args) if args[1].contains('@') || !args[1].contains('*') => return out,
+                None if line.contains('@') => return out,
+                _ => {}
             }
             let s = a.map(|c| map(&c[1])).unwrap_or_default();
             let n: Vec<String> = n.map(|c| map(&c[1])).unwrap_or_default().into_iter().filter(|x| !s.contains(x)).collect();
@@ -531,6 +531,15 @@ fn convert(ir: &str, user_scalars: bool) -> String {
                 "fptoui" => ("f", "u"),
                 _ => ("f", "f"),
             };
+            // a bool converts as the int it promotes to
+            if op == "uitofp" && src == "i1" {
+                let f = format!("air.convert.{dk}.{dn}.s.i32");
+                let decl = format!("declare {dst} @{f}(i32)");
+                if !decls.contains(&decl) {
+                    decls.push(decl);
+                }
+                return format!("{0}{1}.i = zext i1 {v} to i32\n{0}{1} = tail call fast {dst} @{f}(i32 {1}.i)", &c[1], &c[2]);
+            }
             let f = format!("air.convert.{dk}.{dn}.{sk}.{sn}");
             let decl = format!("declare {dst} @{f}({src})");
             if !decls.contains(&decl) {
