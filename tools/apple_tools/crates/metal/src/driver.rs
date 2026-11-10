@@ -11,6 +11,7 @@
 //! 6. Add the AIR metadata (crate::air) and write bitcode with llvm-as.
 
 use crate::air::{to_air, Inputs};
+use crate::intrinsics;
 use crate::entry::entry_points;
 use crate::rewrite::rewrite;
 use crate::target::Target;
@@ -83,6 +84,10 @@ fn tool(o: &Options, name: &str) -> PathBuf {
     o.llvm_bin.join(name)
 }
 
+/// LLVM 15's -O2, spelled out: named so, speculative-execution runs on every
+/// target, as on Xcode's (whose GPU target has divergent branches).
+static O2: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("-passes={}", include_str!("../data/o2_pipeline.txt").trim()));
+
 pub fn compile(o: &Options) -> Result<Output, String> {
     let tmp = scratch()?;
     let inc = tmp.0.join("include");
@@ -130,7 +135,9 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // The AST pass (address spaces as attributes; its errors are address-space
     // checks codegen doesn't have, so they don't stop us).
     let ast_src = preprocess(true)?;
-    let cpp = tmp.0.join("source.cpp");
+    // named as the source, which names its static initializer (_GLOBAL__sub_I_<file>)
+    let cpp_name = o.source.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or("source.metal".into());
+    let cpp = tmp.0.join(&cpp_name);
     std::fs::write(&cpp, &ast_src.code).map_err(|e| e.to_string())?;
     let mut c = Command::new(&clang);
     base(&mut c);
@@ -145,7 +152,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let mut c = Command::new(&clang);
     base(&mut c);
     // -fpreserve-vec3-type: store 3-vectors as 3 elements, as Xcode does (the 4th lane is padding)
-    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-S", "-emit-llvm", "-o"])
+    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-Xclang", "-fconvergent-functions", "-S", "-emit-llvm", "-o"])
         .arg(&ll0)
         .args(["-Xclang", "-fdump-record-layouts"])
         .arg(&cpp);
@@ -158,7 +165,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);
     let entries: Vec<String> = program.functions.iter().map(|f| f.name.clone()).collect();
-    let text = ir::prepare_flat(&text, &entries);
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries)), &entries)));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
@@ -166,10 +173,12 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         run(Command::new(tool(o, "opt")).args(passes).args(["-S", "-o"]).arg(&out).arg(&i))?;
         std::fs::read_to_string(&out).map_err(|e| e.to_string())
     };
-    let text = step(&text, "o2", &["-O2"])?;
-    let text = ir::resolve_as_markers(&ir::resolve_atomics(&text)?)?;
+    // conversions become air.convert calls once constants are folded, before the last attribute inference
+    let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &[O2.as_str()])?));
+    let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
-    let text = step(&text, "o2b", &["-O2"])?;
+    // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
+    let text = ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?))));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(
@@ -179,22 +188,56 @@ pub fn compile(o: &Options) -> Result<Output, String> {
             program: &program,
             target: &o.target,
             source_path: &source_path.to_string_lossy(),
+            source_name: &o.source.to_string_lossy(),
             constants: &constants,
             constant_order: &order,
             samplers: code.samplers.len(),
         },
     )?;
+    // Xcode keeps no local value names
+    let air_ir = crate::text::discard_value_names(&air_ir);
     let ll = tmp.0.join("air.ll");
     std::fs::write(&ll, &air_ir).map_err(|e| e.to_string())?;
     let bc = tmp.0.join("air.bc");
-    run(Command::new(tool(o, "llvm-as")).arg("-o").arg(&bc).arg(&ll))?;
+    // clang's writer doesn't keep use-list order (llvm-as does by default), so it sorts constants
+    run(Command::new(tool(o, "llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
     if let Some(keep) = &o.keep {
         let _ = std::fs::create_dir_all(keep);
-        for f in ["source.cpp", "out.0.ll", "o2.ll", "infer.ll", "o2b.ll", "air.ll"] {
+        for f in [cpp_name.as_str(), "out.0.ll", "o2.in.ll", "o2.ll", "infer.ll", "o2b.in.ll", "o2b.ll", "air.ll"] {
             let _ = std::fs::copy(tmp.0.join(f), keep.join(f));
         }
     }
-    Ok(Output { ir: air_ir, air: std::fs::read(&bc).map_err(|e| e.to_string())? })
+    let ir = run(Command::new(tool(o, "llvm-dis")).arg("-o").arg("-").arg(&bc))?;
+    let air = crate::bitcode::as_xcode(&std::fs::read(&bc).map_err(|e| e.to_string())?, crate::air::PRODUCER, crate::bitcode::Writer::Frontend)?;
+    Ok(Output { ir: String::from_utf8_lossy(&ir.stdout).to_string(), air })
+}
+
+/// One function's module text -> its bitcode, as metallib writes it.
+pub fn assemble(llvm_bin: &Path, ir: &str) -> Result<Vec<u8>, String> {
+    let tmp = scratch()?;
+    let (ll, bc) = (tmp.0.join("f.ll"), tmp.0.join("f.bc"));
+    std::fs::write(&ll, ir).map_err(|e| e.to_string())?;
+    // function constants this function doesn't read: metallib drops their initialisers'
+    // stores, as GlobalOpt does (opt takes no AIR triple, so it borrows spir64's)
+    if ir.contains("\"air.fc_initializer\"") {
+        let triple = regex::Regex::new(r#"(?m)^target triple = "(.*)""#).unwrap().captures(ir).map(|c| c[1].to_string()).unwrap_or_default();
+        std::fs::write(&ll, ir.replacen(&format!("target triple = \"{triple}\""), "target triple = \"spir64-unknown-unknown\"", 1)).map_err(|e| e.to_string())?;
+        let opt_ll = tmp.0.join("f.opt.ll");
+        run(Command::new(llvm_bin.join("opt")).args(["-passes=globalopt,globaldce", "-S", "-o"]).arg(&opt_ll).arg(&ll))?;
+        let text = std::fs::read_to_string(&opt_ll).map_err(|e| e.to_string())?;
+        // and the function constants whose initialiser went
+        let gone: Vec<String> = regex::Regex::new(r"(?m)^(![0-9]+) = distinct !\{null, ").unwrap().captures_iter(&text).map(|c| c[1].to_string()).collect();
+        let text = regex::Regex::new(r"(?m)^!air\.function_constants = !\{(.*)\}$")
+            .unwrap()
+            .replace(&text, |c: &regex::Captures| {
+                let keep: Vec<&str> = c[1].split(", ").filter(|r| !gone.iter().any(|g| g == r)).collect();
+                if keep.is_empty() { String::new() } else { format!("!air.function_constants = !{{{}}}", keep.join(", ")) }
+            })
+            .to_string();
+        std::fs::write(&ll, text.replacen("target triple = \"spir64-unknown-unknown\"", &format!("target triple = \"{triple}\""), 1)).map_err(|e| e.to_string())?;
+    }
+    run(Command::new(llvm_bin.join("llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
+    crate::bitcode::as_xcode(&std::fs::read(&bc).map_err(|e| e.to_string())?, crate::air::PRODUCER, crate::bitcode::Writer::Metallib)
 }
 
 /// Disassemble an .air file (for `metallib`).

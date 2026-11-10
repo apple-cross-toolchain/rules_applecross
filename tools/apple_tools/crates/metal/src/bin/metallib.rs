@@ -1,6 +1,6 @@
 //! `metallib -o out.metallib a.air b.air ...`, as rules_apple runs it.
 
-use metal::driver::{disassemble, llvm_bin};
+use metal::driver::{assemble, disassemble, llvm_bin};
 use metal::library::link;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -30,8 +30,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let bin = llvm_bin(llvm)?;
     let mut modules = Vec::new();
     for i in &inputs {
-        let bitcode = std::fs::read(i).map_err(|e| format!("{}: {e}", i.display()))?;
-        modules.push((disassemble(&bin, i)?, bitcode));
+        modules.push(disassemble(&bin, i)?);
     }
-    std::fs::write(&out, link(&modules)?).map_err(|e| format!("{out}: {e}"))
+    std::fs::write(&out, link(&modules, &|ir| assemble(&bin, ir))?).map_err(|e| format!("{out}: {e}"))
 }

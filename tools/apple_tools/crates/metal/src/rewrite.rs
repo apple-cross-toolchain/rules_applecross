@@ -53,10 +53,12 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
         format!("static __MSL_ATTR(\"msl.stage:{}\") __attribute__((always_inline))", &c[1])
     });
     s = function_constants(&s, &mut r);
+    s = program_scope_constants(&s);
     s = replace_all(&s, regex!(r"\b((?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234])\s*\("), |c| {
         format!("metal::__vec<{}>(", &c[1])
     });
     s = vector_casts(&s);
+    s = lazy_vector_args(&s);
     s = replace_where(
         &s,
         regex!(r"\b((?:float|half)[234]x[234])\s*\("),
@@ -175,10 +177,57 @@ fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
     res
 }
 
+/// Codegen's `constant` (`__msl_constant`): `static` at program scope, where MSL's
+/// variables are constants (and so internal, as Xcode's are), else nothing.
+fn program_scope_constants(src: &str) -> String {
+    const MARK: &str = "__msl_constant";
+    if !src.contains(MARK) {
+        return src.to_string();
+    }
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    // braces that open a scope (true) or only group declarations (namespace, extern "C")
+    let mut braces: Vec<bool> = Vec::new();
+    let (mut parens, mut i, mut last) = (0i32, 0, 0);
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'(' => parens += 1,
+            b')' => parens -= 1,
+            b'{' => {
+                let head = src[src[..i].rfind(|c: char| c == ';' || c == '}' || c == '{').map_or(0, |x| x + 1)..i].trim();
+                braces.push(!regex!(r#"^(?:inline\s+)?namespace\b|^extern\s*"C""#).is_match(head));
+            }
+            b'}' => {
+                braces.pop();
+            }
+            _ if src[i..].starts_with(MARK) && (i == 0 || !is_word(b[i - 1])) && !is_word(at(src, i + MARK.len())) => {
+                out.push_str(&src[last..i]);
+                let program_scope = parens == 0 && !braces.iter().any(|s| *s);
+                // static rather than const: internal as Xcode's, without clang's invariant.start after a dynamic initialiser
+                let already = regex!(r"\bstatic\s*$").is_match(&out);
+                out.push_str(if program_scope && !already { "static" } else { "" });
+                i += MARK.len();
+                last = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out.push_str(&src[last..]);
+    out
+}
+
 /// `constant T x [[function_constant(i)]];` becomes an internal global copied at
 /// static-init time from an external initializer the IR pass turns into AIR's.
 fn function_constants(src: &str, r: &mut Rewritten) -> String {
-    let fc = regex!(r#"(?m)^[ \t]*(?:__attribute__\(\(address_space\(2\)\)\)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;"#);
+    let fc = regex!(r#"(?m)^[ \t]*(?:(?:__attribute__\(\(address_space\(2\)\)\)|__msl_constant)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;"#);
     for c in fc.captures_iter(src) {
         r.constants.push(FunctionConstant { index: c[3].parse().unwrap(), name: c[2].to_string() });
     }
@@ -281,6 +330,58 @@ fn vector_casts(src: &str) -> String {
         out.push_str(&src[pos..m.start()]);
         out.push_str(&format!("{f}({})", src[m.end()..end].trim()));
         pos = end;
+    }
+    out.push_str(&src[pos..]);
+    out
+}
+
+/// For each byte, whether it is in a function body (block scope).
+fn block_scope(src: &str) -> Vec<bool> {
+    let b = src.as_bytes();
+    let mut inside = vec![false; b.len() + 1];
+    let mut stack: Vec<bool> = Vec::new();
+    for i in 0..b.len() {
+        match b[i] {
+            b'{' => {
+                let parent = *stack.last().unwrap_or(&false);
+                // a function's body follows its parameter list (and qualifiers)
+                let head = src[..i].trim_end();
+                let head = regex!(r"(?:\s*\b(?:const|noexcept|override|mutable|volatile)\b)*$").replace(head, "");
+                stack.push(parent || head.ends_with(')'));
+            }
+            b'}' => {
+                stack.pop();
+            }
+            _ => {}
+        }
+        inside[i + 1] = *stack.last().unwrap_or(&false);
+    }
+    inside
+}
+
+/// `__vec<T>(a, b, ...)` in a function -> a statement expression putting each
+/// argument as it is evaluated, as Xcode builds a vector.
+fn lazy_vector_args(src: &str) -> String {
+    let scope = block_scope(src);
+    let call = regex!(r"metal::__vec<(\w+)>\(");
+    let (mut out, mut pos) = (String::new(), 0);
+    for c in call.captures_iter(src) {
+        let m = c.get(0).unwrap();
+        if m.start() < pos {
+            continue;
+        }
+        let open = m.end() - 1;
+        let close = balanced(src.as_bytes(), open, b'(', b')');
+        let args = split_args(&src[open + 1..close - 1]);
+        // a statement expression needs a function body (and isn't constant)
+        let stmt_start = src[..m.start()].rfind(|ch: char| ch == ';' || ch == '{' || ch == '}').map_or(0, |x| x + 1);
+        if args.len() < 2 || !scope[m.start()] || src[stmt_start..m.start()].contains("constexpr") {
+            continue;
+        }
+        let puts: String = args.iter().map(|a| format!(" __vb.put({});", lazy_vector_args(a.trim()))).collect();
+        out.push_str(&src[pos..m.start()]);
+        out.push_str(&format!("({{ metal::__vbuild<{}> __vb;{puts} __vb.v; }})", &c[1]));
+        pos = close;
     }
     out.push_str(&src[pos..]);
     out
@@ -437,5 +538,23 @@ mod tests {
         assert!(r.code.contains("metal::__vec<float4>(h)"), "{}", r.code);
         assert!(r.code.contains("metal::__vec<float2>(0.5f, 1.0f)"), "{}", r.code);
         assert!(r.code.contains("((half)0.5)"), "{}", r.code);
+    }
+
+    #[test]
+    fn program_scope_constants_are_static() {
+        let src = "__msl_constant float k = 2;\nnamespace n { __msl_constant int j = 1; }\nvoid f(__msl_constant float *p) { __msl_constant float *q = p; }\nstatic __msl_constant bool b = true;";
+        let out = program_scope_constants(src);
+        assert!(out.starts_with("static float k = 2;"));
+        assert!(out.contains("namespace n { static int j = 1; }"));
+        assert!(out.contains("void f( float *p) {  float *q = p; }"));
+        assert!(out.contains("static  bool b = true;"));
+    }
+
+    #[test]
+    fn vectors_built_in_functions_put_each_argument() {
+        let src = "void f(float a) { float4 v = metal::__vec<float4>(g(a), a, 0, 1); }\nfloat4 c = metal::__vec<float4>(1, 2, 3, 4);";
+        let out = lazy_vector_args(src);
+        assert!(out.contains("({ metal::__vbuild<float4> __vb; __vb.put(g(a)); __vb.put(a); __vb.put(0); __vb.put(1); __vb.v; })"));
+        assert!(out.contains("float4 c = metal::__vec<float4>(1, 2, 3, 4);"));
     }
 }

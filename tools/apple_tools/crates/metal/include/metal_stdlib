@@ -25,7 +25,8 @@
 #define threadgroup __attribute__((address_space(3)))
 #else
 #define device
-#define constant
+// resolved by the driver: static at program scope (MSL's program-scope constants are internal), else nothing
+#define constant __msl_constant
 #define threadgroup
 #endif
 #define thread
@@ -62,10 +63,7 @@ __MSL_ELEM(long) __MSL_ELEM(ulong) __MSL_ELEM(half) __MSL_ELEM(float)
 template <class V, class E = typename __elem<V>::type, int N = __elem<V>::n>
 struct __vbuild {
   V v; int i = 0;
-  template <class A> __attribute__((always_inline)) void put(A a) {
-    if constexpr (__elem<A>::n == 1) v[i++] = E(a);
-    else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
-  }
+  template <class A> __attribute__((always_inline)) void put(A a);
 };
 template <class T, int N> struct __packed;
 template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
@@ -77,13 +75,38 @@ template <int... I> struct __mkseq<0, I...> { typedef __seq<I...> type; };
 template <class V> constexpr V __vec() { return V{}; }
 // Scalars only: brace construction, which clang can constant-evaluate (program-scope constants).
 template <class V, int... I, class S> constexpr V __splat(__seq<I...>, S s) { return V{((void)I, (typename __elem<V>::type)s)...}; }
+// As Xcode builds vectors: a scalar splats (insert and shuffle), a vector of the
+// same width converts as a whole, and a leading vector widens by a shuffle
+// before the rest is inserted.
 template <class V, class A> constexpr V __vec(A a) {
-  if constexpr (__elem<A>::n == 1) return __splat<V>(typename __mkseq<__elem<V>::n>::type(), a);
-  else { V r; for (int k = 0; k < __elem<V>::n; k++) r[k] = (typename __elem<V>::type)a[k]; return r; }
+  typedef typename __elem<V>::type E;
+  if constexpr (__elem<A>::n == 1) return (V)(E)a;
+  else if constexpr (__is_same(A, V)) return a;
+  else if constexpr (__is_same(A, __vector<typename __elem<A>::type, __elem<A>::n>)) return __builtin_convertvector(a, V);
+  else { V r; for (int k = 0; k < __elem<V>::n; k++) r[k] = (E)a[k]; return r; }
+}
+template <class V, class A, int... I, int... U> __attribute__((always_inline)) V __widen(A a, __seq<I...>, __seq<U...>) {
+  return __builtin_shufflevector(a, a, I..., ((void)U, -1)...);
+}
+// Each element as its argument comes (the driver writes T4(a, b, ...) in a
+// function as a statement expression of puts): a leading vector of the same
+// element type widens by a shuffle.
+template <class V, class E, int N> template <class A> __attribute__((always_inline)) void __vbuild<V, E, N>::put(A a) {
+  if constexpr (__elem<A>::n == 1) {
+    v[i++] = E(a);
+  } else if constexpr (__elem<A>::n < N && __is_same(A, __vector<E, __elem<A>::n>)) {
+    if (i == 0) { v = __widen<V>(a, typename __mkseq<__elem<A>::n>::type(), typename __mkseq<N - __elem<A>::n>::type()); i = __elem<A>::n; }
+    else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
+  } else {
+    for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
+  }
 }
 template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R... r) {
   if constexpr (__elem<A>::n == 1 && __elem<B>::n == 1 && (... && (__elem<R>::n == 1)) && 2 + sizeof...(R) == __elem<V>::n) {
     typedef typename __elem<V>::type E; return V{(E)a, (E)b, (E)r...};
+  } else if constexpr (__elem<A>::n > 1 && __is_same(A, __vector<typename __elem<V>::type, __elem<A>::n>)) {
+    __vbuild<V> v; v.v = __widen<V>(a, typename __mkseq<__elem<A>::n>::type(), typename __mkseq<__elem<V>::n - __elem<A>::n>::type()); v.i = __elem<A>::n;
+    v.put(b); (v.put(r), ...); return v.v;
   } else {
     __vbuild<V> v; v.put(a); v.put(b); (v.put(r), ...); return v.v;
   }
@@ -253,14 +276,27 @@ __MSL_REFRACT(half2, half) __MSL_REFRACT(half3, half) __MSL_REFRACT(half4, half)
 // ---- matrices: column-major, columns[c] is a vector of R elements.
 template <bool B> struct __enable_cols {};
 template <> struct __enable_cols<true> { typedef void type; };
-// One member per column, so { {..}, {..}, {..} } initialises columns as MSL does.
+// The columns as one array (as Xcode lays a matrix out: { [C x <R x T>] }),
+// constructed from C columns, so { {..}, {..}, {..} } initialises columns as MSL does.
 template <class T, int C, int R> struct matrix;
-#define __MSL_MATRIX_OPS(C) \
-  __attribute__((always_inline)) __vector<T, R> &operator[](int c) { return (&__c0)[c]; } \
-  __attribute__((always_inline)) const __vector<T, R> &operator[](int c) const { return (&__c0)[c]; }
-template <class T, int R> struct matrix<T, 2, R> { __vector<T, R> __c0, __c1; __MSL_MATRIX_OPS(2) };
-template <class T, int R> struct matrix<T, 3, R> { __vector<T, R> __c0, __c1, __c2; __MSL_MATRIX_OPS(3) };
-template <class T, int R> struct matrix<T, 4, R> { __vector<T, R> __c0, __c1, __c2, __c3; __MSL_MATRIX_OPS(4) };
+// A column argument: a vector, or a braced list of elements converted as MSL does.
+template <class T, int R> struct __column {
+  __vector<T, R> v;
+  constexpr __column(__vector<T, R> c) : v(c) {}
+  template <class... X> constexpr __column(X... x) : v{(T)x...} {}
+};
+#define __MSL_MATRIX(C, PARAMS, ARGS) \
+  template <class T, int R> struct matrix<T, C, R> { \
+    __vector<T, R> columns[C]; \
+    matrix() = default; \
+    constexpr matrix(PARAMS) : columns{ARGS} {} \
+    __attribute__((always_inline)) __vector<T, R> &operator[](int c) { return columns[c]; } \
+    __attribute__((always_inline)) const __vector<T, R> &operator[](int c) const { return columns[c]; } \
+  };
+#define __MSL_COMMA ,
+__MSL_MATRIX(2, __column<T __MSL_COMMA R> c0 __MSL_COMMA __column<T __MSL_COMMA R> c1, c0.v __MSL_COMMA c1.v)
+__MSL_MATRIX(3, __column<T __MSL_COMMA R> c0 __MSL_COMMA __column<T __MSL_COMMA R> c1 __MSL_COMMA __column<T __MSL_COMMA R> c2, c0.v __MSL_COMMA c1.v __MSL_COMMA c2.v)
+__MSL_MATRIX(4, __column<T __MSL_COMMA R> c0 __MSL_COMMA __column<T __MSL_COMMA R> c1 __MSL_COMMA __column<T __MSL_COMMA R> c2 __MSL_COMMA __column<T __MSL_COMMA R> c3, c0.v __MSL_COMMA c1.v __MSL_COMMA c2.v __MSL_COMMA c3.v)
 template <class T, int C, int R> struct __elem<matrix<T, C, R>> { typedef T type; static constexpr int n = -1; };
 template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(const matrix<T, C, R> &m, __vector<T, C> v) {
   __vector<T, R> r = m[0] * v[0];

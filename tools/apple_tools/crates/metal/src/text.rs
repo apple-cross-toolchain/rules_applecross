@@ -1,6 +1,7 @@
 //! Small text helpers shared by the source rewrite and the IR passes.
 
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// Split a comma-separated list at depth zero of ()[]{}<>.
 pub fn split_args(s: &str) -> Vec<String> {
@@ -123,6 +124,59 @@ pub fn map_functions(ir: &str, mut f: impl FnMut(&str) -> String) -> String {
     out
 }
 
+/// Number every function's local values as an unnamed module would: the
+/// arguments, then each block and each value-producing instruction in order (an
+/// unnamed entry block takes a number too). Xcode's modules keep no local names.
+pub fn discard_value_names(ir: &str) -> String {
+    static VALUE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"%([-\w$.]+|"[^"]*")"#).unwrap());
+    static LABEL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^([-\w$.]+|"[^"]*"):"#).unwrap());
+    static DEF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^\s+%([-\w$.]+|"[^"]*") = "#).unwrap());
+    map_functions(ir, |f| {
+        let open = f.find('(').unwrap();
+        let close = balanced(f.as_bytes(), open, b'(', b')');
+        let mut names = std::collections::HashMap::new();
+        let mut n = 0usize;
+        // unnamed values already numbered: an unnamed entry block's number follows them
+        let mut unnamed = 0usize;
+        for a in split_args(&f[open + 1..close - 1]) {
+            if let Some(c) = VALUE.captures_iter(a.trim()).last() {
+                if a.trim().ends_with(&c[0]) {
+                    names.insert(c[1].to_string(), n);
+                    unnamed += c[1].bytes().all(|b| b.is_ascii_digit()) as usize;
+                }
+            }
+            n += 1;
+        }
+        let body = f[close..].find("{\n").map(|i| close + i + 2).unwrap_or(f.len());
+        let mut first = true;
+        for line in f[body..].lines() {
+            if let Some(c) = LABEL.captures(line) {
+                names.insert(c[1].to_string(), n);
+                n += 1;
+            } else if first && !line.trim().is_empty() {
+                names.insert(unnamed.to_string(), n); // the unnamed entry block
+                n += 1;
+            }
+            if !line.trim().is_empty() {
+                first = false;
+            }
+            if let Some(c) = DEF.captures(line) {
+                names.insert(c[1].to_string(), n);
+                n += 1;
+            }
+        }
+        let rename = |t: &str| -> String { VALUE.replace_all(t, |c: &regex::Captures| names.get(&c[1]).map_or(c[0].to_string(), |k| format!("%{k}"))).to_string() };
+        let mut out = rename(&f[..body]);
+        for line in f[body..].split_inclusive('\n') {
+            match LABEL.captures(line) {
+                Some(c) => out += &format!("{}:\n", names[&c[1]]),
+                None => out += &rename(line),
+            }
+        }
+        out
+    })
+}
+
 /// The parameter list and body of `define ... @name(...)`.
 pub fn find_define<'a>(ir: &'a str, name: &str) -> Option<(&'a str, &'a str)> {
     let needle = format!("@{}(", name);
@@ -162,5 +216,16 @@ mod tests {
         let (sig, body) = find_define(ir, "f").unwrap();
         assert_eq!(sig, "i32 %a, <2 x i32> %b");
         assert!(body.contains("ret void"));
+    }
+
+    #[test]
+    fn numbers_unnamed_values() {
+        let ir = "define void @f(i32 %a, i32 %b) {\n  %x = add i32 %a, %b\n  br label %next\n\nnext:                ; preds = %0\n  %y = mul i32 %x, %x\n  ret void\n}\n";
+        let out = discard_value_names(ir);
+        assert!(out.contains("define void @f(i32 %0, i32 %1)"));
+        assert!(out.contains("%3 = add i32 %0, %1"));
+        assert!(out.contains("br label %4"));
+        assert!(out.contains("\n4:\n"));
+        assert!(out.contains("%5 = mul i32 %3, %3"));
     }
 }
