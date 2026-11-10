@@ -415,7 +415,7 @@ def record_layouts(text):
     return out
 
 # ---------------------------------------------------------------- types
-SCALARS = {'bool': (1, 1), 'char': (1, 1), 'uchar': (1, 1), 'short': (2, 2), 'ushort': (2, 2),
+SCALARS = {'bfloat': (2, 2), 'bool': (1, 1), 'char': (1, 1), 'uchar': (1, 1), 'short': (2, 2), 'ushort': (2, 2),
            'int': (4, 4), 'uint': (4, 4), 'long': (8, 8), 'ulong': (8, 8), 'half': (2, 2), 'float': (4, 4)}
 CANON = {'unsigned int': 'uint', 'unsigned char': 'uchar', 'unsigned short': 'ushort',
          'unsigned long': 'ulong', 'signed char': 'char', '_Float16': 'half', '_Bool': 'bool'}
@@ -1007,34 +1007,36 @@ def address_space_of(ir, v, depth=0):
     return None
 
 def resolve_atomics(ir):
-    """__msl_atomic_<op>_<u|s|n>_i32 placeholders -> air.atomic.<global|local>.<op>[.<u|s>].i32 on the
-    pointer's address space (scope 2 device, 1 threadgroup). Shapes observed: ops (p, v, order, scope,
-    0, false); xchg and store the same without a sign; load (p, order, scope, 0, false)."""
+    """__msl_atomic_<op>_<u|s|n>_<i32|f32> placeholders -> air.atomic.<global|local>.<op>[.<u|s>].<i32|f32>
+    on the pointer's address space (scope 2 device, 1 threadgroup). Observed shapes: ops (p, v, order,
+    scope, 0, false); load (p, order, scope, 0, false); cmpxchg.weak (p, expected*, desired, order,
+    order, scope, 0, false)."""
     n = [0]
-    def space_of(ptr):
+    def call(m):
+        indent, res, op, sg, ty, ptr, rest = m.groups()
+        lt = 'float' if ty == 'f32' else 'i32'
+        args = [re.sub(r'^(?:i32|float)\*? (?:noundef )?(?:nonnull )?', '', x.strip()) for x in split_args(rest)]
         space = address_space_of(ir, ptr)
         if space not in ('1', '3'):
             raise SystemExit('atomic on a pointer of unknown address space: %s' % ptr)
-        return space, {'1': ('global', 2), '3': ('local', 1)}[space]
-    def cast(indent, ptr, space):
+        kind, scope = {'1': ('global', 2), '3': ('local', 1)}[space]
         n[0] += 1
-        return '%s%%__atomp%d = addrspacecast i32* %s to i32 addrspace(%s)*\n' % (indent, n[0], ptr, space), '%%__atomp%d' % n[0]
-    def call(m):
-        indent, res, op, sg, ptr, rest = m.groups()
-        args = [x.strip() for x in split_args(rest)]
-        args = [re.sub(r'^i32 (?:noundef )?', '', x) for x in args]
-        space, (kind, scope) = space_of(ptr)
-        pre, p = cast(indent, ptr, space)
-        name = 'air.atomic.%s.%s%s.i32' % (kind, op, '' if sg == 'n' else '.' + sg)
-        if op == 'load':
-            body = 'call i32 @%s(i32 addrspace(%s)* %s, i32 %s, i32 %d, i32 0, i1 false)' % (name, space, p, args[0], scope)
+        p = '%%__atomp%d' % n[0]
+        pre = '%s%s = addrspacecast %s* %s to %s addrspace(%s)*\n' % (indent, p, lt, ptr, lt, space)
+        if op == 'cmpxchg':
+            name = 'air.atomic.%s.cmpxchg.weak.i32' % kind
+            body = 'call i32 @%s(i32 addrspace(%s)* %s, i32* %s, i32 %s, i32 %s, i32 %s, i32 %d, i32 0, i1 false)' % (name, space, p, args[0], args[1], args[2], args[3], scope)
+            ATOMIC_DECLS.add((name, space, op, lt))
         else:
-            body = 'call %s @%s(i32 addrspace(%s)* %s, i32 %s, i32 %s, i32 %d, i32 0, i1 false)' % ('void' if op == 'store' else 'i32', name, space, p, args[0], args[1], scope)
-        ATOMIC_DECLS.add((name, space, op))
+            name = 'air.atomic.%s.%s%s.%s' % (kind, 'xchg' if op == 'xchg' else op, '' if sg == 'n' else '.' + sg, ty)
+            if op == 'load':
+                body = 'call %s @%s(%s addrspace(%s)* %s, i32 %s, i32 %d, i32 0, i1 false)' % (lt, name, lt, space, p, args[0], scope)
+            else:
+                body = 'call %s @%s(%s addrspace(%s)* %s, %s %s, i32 %s, i32 %d, i32 0, i1 false)' % ('void' if op == 'store' else lt, name, lt, space, p, lt, args[0], args[1], scope)
+            ATOMIC_DECLS.add((name, space, op, lt))
         return pre + indent + (res + ' = ' if res else '') + body
     ATOMIC_DECLS.clear()
-    # one function at a time: value names repeat across functions
-    pat = re.compile(r'^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:spir_func )?(?:noundef )?(?:i32|void) @__msl_atomic_(\w+?)_([usn])_i32\(i32\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?$', re.M)
+    pat = re.compile(r'^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:(?:spir_func|noundef|fast) )*(?:i32|float|void) @__msl_atomic_(\w+?)_([usn])_(i32|f32)\((?:i32|float)\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?$', re.M)
     def per_function(fm):
         nonlocal ir
         whole, ir = ir, fm.group(0)
@@ -1044,13 +1046,55 @@ def resolve_atomics(ir):
             ir = whole
     out = re.sub(r'^define .*?^\}$', per_function, ir, flags=re.M | re.S)
     out = re.sub(r'^declare [^\n]*@__msl_atomic_\w+\([^\n]*\n', '', out, flags=re.M)
-    for name, space, op in sorted(ATOMIC_DECLS):
+    for name, space, op, lt in sorted(ATOMIC_DECLS):
         if op == 'load':
-            out += '\ndeclare i32 @%s(i32 addrspace(%s)*, i32, i32, i32, i1)\n' % (name, space)
+            out += '\ndeclare %s @%s(%s addrspace(%s)*, i32, i32, i32, i1)\n' % (lt, name, lt, space)
+        elif op == 'cmpxchg':
+            out += '\ndeclare i32 @%s(i32 addrspace(%s)*, i32*, i32, i32, i32, i32, i32, i1)\n' % (name, space)
         else:
-            out += '\ndeclare %s @%s(i32 addrspace(%s)*, i32, i32, i32, i32, i1)\n' % ('void' if op == 'store' else 'i32', name, space)
+            out += '\ndeclare %s @%s(%s addrspace(%s)*, %s, i32, i32, i32, i1)\n' % ('void' if op == 'store' else lt, name, lt, space, lt)
     return out
 ATOMIC_DECLS = set()
+
+def resolve_as_markers(ir):
+    """Calls to @"air....%AS%..." name the address space of their first pointer
+    argument (e.g. simdgroup matrix load/store .p1f32 / .p3f32): trace it,
+    cast the pointer and fill the name in."""
+    decls = {m.group(1): m.group(0) for m in re.finditer(r'^declare [^\n]*@"(air\.[^"]*%AS%[^"]*)"\([^\n]*$', ir, re.M)}
+    if not decls:
+        return ir
+    used = set()
+    n = [0]
+    def per_function(fm):
+        body = fm.group(0)
+        def call(m):
+            indent, lhs, name, args = m.group(1), m.group(2) or '', m.group(3), m.group(4)
+            parts = split_args(args)
+            for k, a in enumerate(parts):
+                pm = re.match(r'(.*?)\* (?:(?:noundef|nonnull|nocapture|readonly|writeonly|align \d+) )*(%[\w.]+)$', a)
+                if pm and 'addrspace' not in pm.group(1):
+                    space = address_space_of(body, pm.group(2))
+                    if space not in ('1', '2', '3'):
+                        raise SystemExit('%s on a pointer of unknown address space' % name)
+                    n[0] += 1
+                    ty = pm.group(1).strip()
+                    cast = '%s%%__asp%d = addrspacecast %s* %s to %s addrspace(%s)*\n' % (indent, n[0], ty, pm.group(2), ty, space)
+                    parts[k] = '%s addrspace(%s)* %%__asp%d' % (ty, space, n[0])
+                    real = name.replace('%AS%', space)
+                    used.add((name, real, k, space))
+                    return cast + '%s%s%s@"%s"(%s)' % (indent, lhs, m.group(0)[len(indent) + len(lhs):m.group(0).index('@"')], real, ', '.join(parts))
+            raise SystemExit('%s: no pointer argument' % name)
+        return re.sub(r'^(\s*)(%[\w.]+ = )?(?:tail )?call [^@]*@"(air\.[^"]*%AS%[^"]*)"\((.*)\)(?: #\d+)?$', call, body, flags=re.M)
+    out = re.sub(r'^define .*?^\}$', per_function, ir, flags=re.M | re.S)
+    for name, d in decls.items():
+        out = out.replace(d + '\n', '')
+    for name, real, k, space in sorted(used):
+        d = decls[name]
+        head, rest = d.split('@"%s"(' % name, 1)
+        params = split_args(rest[:rest.rindex(')')])
+        params[k] = re.sub(r'^(.*?)\*', lambda q: '%s addrspace(%s)*' % (q.group(1), space), params[k], count=1)
+        out += '\n%s@"%s"(%s)\n' % (head, real, ', '.join(params))
+    return out
 
 def find_define(ir, name):
     m = re.search(r'^define [^@]*@%s\(' % re.escape(name), ir, re.M)
@@ -1171,7 +1215,7 @@ def main(argv):
         if os.environ.get('MSL2AIR_KEEP'):
             shutil.copy(llf + '.0', out + '.0.ll'); shutil.copy(llf + '.1', out + '.1.ll'); shutil.copy(rew, out + '.cpp')
         subprocess.run([LLVM + '/opt', '-O2', '-S', '-o', llf + '.2', llf + '.1'], check=True)
-        ir2 = resolve_atomics(open(llf + '.2').read())
+        ir2 = resolve_as_markers(resolve_atomics(open(llf + '.2').read()))
         open(llf + '.2', 'w').write(ir2)
         subprocess.run([LLVM + '/opt', '-passes=infer-address-spaces', '-assume-default-is-flat-addrspace', '-S', '-o', llf + '.3', llf + '.2'], check=True)
         subprocess.run([LLVM + '/opt', '-O2', '-S', '-o', llf + '.4', llf + '.3'], check=True)

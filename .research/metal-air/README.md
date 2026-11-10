@@ -217,8 +217,22 @@ The plan, sent to the Manager:
     the simd family (`simd_max`, `simd_shuffle`, `simd_vote`, …) and
     simdgroup matrices. Those names come from the next VM probe.
     `allerrs.py` lists what's missing.
+  - **simd family and simdgroup matrices from a second probe**
+    (`probes/p33_simd.metal`, 236 kernels). `gen_simd.py` generates
+    `include/__metal_simd.h`:
+    - every simdgroup and quadgroup reduction, prefix, broadcast and
+      shuffle, for float, half and the integer types;
+    - 8×8 simdgroup matrices: load, store, fill, multiply,
+      multiply-accumulate (mixed half/float), `thread_elements`.
+    - Matrix load/store name the pointer's address space (`.p1f32` /
+      `.p3f32`). Their declarations carry an `%AS%` marker, which an IR
+      pass fills in by tracing the pointer, as for atomics.
+    - Also float atomic add, compare-exchange, pack/unpack, and `bfloat`
+      (16 bits with IEEE conversions; clang 15 has no `__bf16` here).
+    - All 236 kernels match Xcode's metadata and call the same AIR
+      functions. On the GPU, all 228 simd/quad kernels are bit-identical to
+      Xcode's code.
   - **Still to do:**
-    - simd family and simdgroup matrices (next VM probe);
     - a Rust port;
     - runtime checks for argument buffers, framebuffer fetch and MRT;
     - unprobed intrinsic variants (int simd, threadgroup atomics, more

@@ -96,13 +96,8 @@ extern "C" __attribute__((convergent)) void __air_simdgroup_barrier(int, int, in
 __attribute__((always_inline)) inline void threadgroup_barrier(mem_flags f) { __air_wg_barrier(int(f), 5, 1); }
 __attribute__((always_inline)) inline void simdgroup_barrier(mem_flags f) { __air_simdgroup_barrier(int(f), 5, 4); }
 
-// ---- simdgroup and quadgroup functions (convergent; lane arguments are ushort)
-#define __MSL_SIMD1(n) extern "C" __attribute__((convergent)) float __air_##n##_f32(float) __AIR("air." #n ".f32"); \
-  __attribute__((always_inline)) inline float n(float x) { return __air_##n##_f32(x); }
-#define __MSL_SIMD2(n) extern "C" __attribute__((convergent)) float __air_##n##_f32(float, ushort) __AIR("air." #n ".f32"); \
-  __attribute__((always_inline)) inline float n(float x, ushort l) { return __air_##n##_f32(x, l); }
-__MSL_SIMD1(simd_sum) __MSL_SIMD1(simd_prefix_exclusive_sum)
-__MSL_SIMD2(simd_shuffle_down) __MSL_SIMD2(quad_broadcast)
+// ---- simdgroup and quadgroup functions, 8x8 simdgroup matrices: generated (gen_simd.py)
+#include "__metal_simd.h"
 
 // ---- fragment functions
 extern "C" void __air_discard_fragment() __AIR("air.discard_fragment");
@@ -131,6 +126,14 @@ extern "C" void __msl_atomic_store_n_i32(uint *, uint, int);
   __attribute__((always_inline)) inline void atomic_store_explicit(device _atomic<T> *a, T v, memory_order o) { __msl_atomic_store_n_i32((uint *)&a->__s, (uint)v, int(o)); } \
   __attribute__((always_inline)) inline T atomic_exchange_explicit(device _atomic<T> *a, T v, memory_order o) { return (T)__msl_atomic_xchg_n_i32((uint *)&a->__s, (uint)v, int(o)); }
 __MSL_ATOMIC_LS(int) __MSL_ATOMIC_LS(uint)
+typedef _atomic<float> atomic_float;
+extern "C" float __msl_atomic_add_n_f32(float *, float, int);
+__attribute__((always_inline)) inline float atomic_fetch_add_explicit(device atomic_float *a, float v, memory_order o) { return __msl_atomic_add_n_f32((float *)&a->__s, v, int(o)); }
+// compare-exchange: the AIR function updates *expected itself and returns the old value
+extern "C" uint __msl_atomic_cmpxchg_n_i32(uint *, uint *, uint, int, int);
+#define __MSL_CMPXCHG(T) __attribute__((always_inline)) inline bool atomic_compare_exchange_weak_explicit(device _atomic<T> *a, thread T *expected, T desired, memory_order s, memory_order f) { \
+  T e = *expected; return (T)__msl_atomic_cmpxchg_n_i32((uint *)&a->__s, (uint *)expected, (uint)desired, int(s), int(f)) == e; }
+__MSL_CMPXCHG(int) __MSL_CMPXCHG(uint)
 __MSL_ATOMIC(add) __MSL_ATOMIC(sub) __MSL_ATOMIC(min) __MSL_ATOMIC(max) __MSL_ATOMIC(and) __MSL_ATOMIC(or) __MSL_ATOMIC(xor)
 
 // ---- bool vectors: fields x..w, built from a bool (splat) or a comparison
@@ -153,6 +156,28 @@ template <int N> __attribute__((always_inline)) inline bool any(__boolvec<N> b) 
 template <int N> __attribute__((always_inline)) inline bool all(__boolvec<N> b) { bool r = true; for (int k = 0; k < N; k++) r = r && b[k]; return r; }
 template <class V, int N> __attribute__((always_inline)) inline V select(V a, V b, __boolvec<N> c) { V r = a; for (int k = 0; k < N; k++) if (c[k]) r[k] = b[k]; return r; }
 template <class V> __attribute__((always_inline)) inline V select(V a, V b, bool c) { return c ? b : a; }
+
+// pack/unpack (observed names)
+extern "C" uint __air_pack_unorm4x8_v4f32(float4) __AIR("air.pack.unorm4x8.v4f32");
+extern "C" uint __air_pack_snorm2x16_v2f32(float2) __AIR("air.pack.snorm2x16.v2f32");
+extern "C" float4 __air_unpack_unorm4x8_v4f32(uint) __AIR("air.unpack.unorm4x8.v4f32");
+extern "C" float2 __air_unpack_snorm2x16_v2f32(uint) __AIR("air.unpack.snorm2x16.v2f32");
+__attribute__((always_inline)) inline uint pack_float_to_unorm4x8(float4 v) { return __air_pack_unorm4x8_v4f32(v); }
+__attribute__((always_inline)) inline uint pack_float_to_snorm2x16(float2 v) { return __air_pack_snorm2x16_v2f32(v); }
+__attribute__((always_inline)) inline float4 unpack_unorm4x8_to_float(uint v) { return __air_unpack_unorm4x8_v4f32(v); }
+__attribute__((always_inline)) inline float2 unpack_snorm2x16_to_float(uint v) { return __air_unpack_snorm2x16_v2f32(v); }
+
+// bfloat: clang 15 has no __bf16 on this target, so 16 bits with IEEE
+// conversions (round to nearest even from float, NaN kept quiet).
+struct bfloat {
+  ushort __b;
+  bfloat() = default;
+  __attribute__((always_inline)) bfloat(float f) {
+    uint u = __builtin_bit_cast(uint, f);
+    __b = (u & 0x7fffffffu) > 0x7f800000u ? (ushort)((u >> 16) | 0x40u) : (ushort)((u + 0x7fffu + ((u >> 16) & 1u)) >> 16);
+  }
+  __attribute__((always_inline)) operator float() const { return __builtin_bit_cast(float, (uint)__b << 16); }
+};
 
 // as_type: reinterpret the bits (same size)
 template <class T, class U> __attribute__((always_inline)) inline T as_type(U u) { return __builtin_bit_cast(T, u); }
