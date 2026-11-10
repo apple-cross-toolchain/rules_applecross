@@ -8,9 +8,11 @@
 #else
 #define __MSL_ATTR(x)
 #endif
-#define kernel static __MSL_ATTR("msl.stage:kernel") __attribute__((always_inline))
-#define vertex static __MSL_ATTR("msl.stage:vertex") __attribute__((always_inline))
-#define fragment static __MSL_ATTR("msl.stage:fragment") __attribute__((always_inline))
+// Stage keywords survive preprocessing as placeholders the driver rewrites
+// (template instantiations with [[host_name]] need to see them).
+#define kernel __msl_stage_kernel
+#define vertex __msl_stage_vertex
+#define fragment __msl_stage_fragment
 // Address spaces: the AST pass sees them (for the metadata); codegen compiles
 // flat and the driver infers them back from the entry points (MSL's member
 // functions and operators then work on objects in any address space).
@@ -30,6 +32,9 @@
 #define __AIR(name) __asm__(name)
 #define METAL_FUNC inline __attribute__((always_inline))
 
+typedef signed char int8_t; typedef unsigned char uint8_t; typedef short int16_t; typedef unsigned short uint16_t;
+typedef int int32_t; typedef unsigned int uint32_t; typedef long int64_t; typedef unsigned long uint64_t;
+typedef unsigned long size_t; typedef long ptrdiff_t; typedef long intptr_t; typedef unsigned long uintptr_t;
 typedef unsigned char uchar;
 typedef unsigned short ushort;
 typedef unsigned int uint;
@@ -187,6 +192,25 @@ template <class T, int N> using vec = typename __vec_alias<T, N>::type;
 #define M_PI_2_H ((half)M_PI_2_F)
 #define M_E_H ((half)M_E_F)
 #define MAXFLOAT 3.40282346638528859811704183484516925e+38f
+#define FLT_MAX 3.40282346638528859811704183484516925e+38f
+#define FLT_MIN 1.17549435082228750796873653722224568e-38f
+#define FLT_EPSILON 1.1920928955078125e-7f
+#define HALF_MAX ((half)65504.0f)
+#define HALF_MIN ((half)6.103515625e-05f)
+#define HALF_EPSILON ((half)0.0009765625f)
+#define CHAR_BIT 8
+#define SCHAR_MAX 127
+#define SCHAR_MIN (-128)
+#define UCHAR_MAX 255
+#define SHRT_MAX 32767
+#define SHRT_MIN (-32768)
+#define USHRT_MAX 65535
+#define INT_MAX 2147483647
+#define INT_MIN (-2147483647 - 1)
+#define UINT_MAX 4294967295u
+#define LONG_MAX 9223372036854775807l
+#define LONG_MIN (-9223372036854775807l - 1)
+#define ULONG_MAX 18446744073709551615ul
 #define MAXHALF ((half)65504.0f)
 #define INFINITY __builtin_inff()
 #define NAN __builtin_nanf("")

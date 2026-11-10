@@ -194,8 +194,24 @@ The plan, sent to the Manager:
   - **Smaller metallibs:** functions can share one module (`share_modules`;
     `MSL2AIR_SHARE=1`), and Metal loads such files. Per-function module
     splitting isn't needed.
+  - **Template kernels:** `template [[host_name("n")]] kernel F_t f<args>;`
+    becomes an explicit instantiation. The entry point `n` takes its
+    parameters from clang's specialization of `f` and calls `f<args>`
+    (`probes/p32_templates.metal`).
+    - Stage keywords now survive preprocessing as placeholder tokens, so
+      the rewrite can see them.
+  - **More front end:**
+    - MSL's C-style vector and matrix conversions (`(float4)h` converts per
+      element; clang would reinterpret or reject) are rewritten to the
+      vector and matrix builders, with a small operand scanner;
+    - limits (`FLT_MAX` and friends);
+    - fixed-width integer types.
+  - **llama.cpp's Metal kernels** (MIT, /tmp only): these need the rest of
+    the simd family (`simd_max`, `simd_shuffle`, `simd_vote`, …) and
+    simdgroup matrices. Those names come from the next VM probe.
+    `allerrs.py` lists what's missing.
   - **Still to do:**
-    - template kernels (`host_name`);
+    - simd family and simdgroup matrices (next VM probe);
     - a Rust port;
     - runtime checks for argument buffers, framebuffer fetch and MRT;
     - unprobed intrinsic variants (int simd, threadgroup atomics, more

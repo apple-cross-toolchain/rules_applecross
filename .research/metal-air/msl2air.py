@@ -53,6 +53,75 @@ def parse_target(t):
 # ---------------------------------------------------------------- 1. rewrite
 VEC = r'(?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234]'
 AS1, AS2, AS3 = '__attribute__((address_space(1)))', '__attribute__((address_space(2)))', '__attribute__((address_space(3)))'
+def operand_end(src, i):
+    """End of the unary expression starting at i: unary operators, a primary
+    (identifier, number, parenthesised), then postfix [..] (..) .x ->x ++ --."""
+    n = len(src)
+    while i < n and src[i] in ' \t':
+        i += 1
+    while i < n and src[i] in '-+!~*&' and not src.startswith(('++', '--'), i):
+        i += 1
+        while i < n and src[i] in ' \t':
+            i += 1
+    def balanced(j, o, c):
+        d = 0
+        while j < n:
+            d += src[j] == o
+            d -= src[j] == c
+            j += 1
+            if d == 0:
+                return j
+        return j
+    if i < n and src[i] == '(':
+        j = balanced(i, '(', ')')
+        k = j
+        while k < n and src[k] in ' \t':
+            k += 1
+        # (type) followed by an operand is itself a cast: its operand is part of ours
+        if re.match(r'\(\s*[\w:]+(?:\s*<[^()]*>)?\s*\)$', src[i:j]) and k < n and (src[k].isalnum() or src[k] in '_('):
+            return operand_end(src, k)
+        i = j
+    else:
+        m = re.match(r'(?:::)?[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*|[0-9][\w.]*(?:[eE][-+]?\d+)?\w*', src[i:])
+        if not m:
+            return None
+        i += m.end()
+    while i < n:
+        if src[i] == '[':
+            i = balanced(i, '[', ']')
+        elif src[i] == '(':
+            i = balanced(i, '(', ')')
+        elif src[i] == '.' and i + 1 < n and (src[i + 1].isalpha() or src[i + 1] == '_'):
+            i += 1 + re.match(r'\w+', src[i + 1:]).end()
+        elif src.startswith('->', i):
+            i += 2 + re.match(r'\s*\w+', src[i + 2:]).end()
+        else:
+            break
+    return i
+
+CAST = re.compile(r'\(\s*((?:metal::)?(?:(?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234](?:x[234])?|(?:half|float)[234]x[234]))\s*\)(?=\s*[\w(!~+\-*&.])')
+def rewrite_vector_casts(src):
+    """MSL's (float4)h converts element by element; clang would reinterpret.
+    (T)expr becomes metal::__vec<T>(expr) (or __mat for matrices)."""
+    out, pos = [], 0
+    for m in CAST.finditer(src):
+        if m.start() < pos:
+            continue
+        b = m.start() - 1
+        while b >= 0 and src[b] in ' \t\n':
+            b -= 1
+        if b >= 0 and (src[b].isalnum() or src[b] in '_)]>'):
+            continue  # a call or a declaration's parameter list, not a cast
+        end = operand_end(src, m.end())
+        if end is None:
+            continue
+        t = m.group(1).replace('metal::', '')
+        fn = 'metal::__mat<metal::%s>' % t if 'x' in t[-3:] else 'metal::__vec<%s>' % t
+        out.append(src[pos:m.start()] + fn + '(' + src[m.end():end].strip() + ')')
+        pos = end
+    out.append(src[pos:])
+    return ''.join(out)
+
 def rewrite(src, ast_mode):
     # [[a, b(c)]] -> __attribute__((annotate("msl:a"), annotate("msl:b(c)")))
     def attr(m):
@@ -68,8 +137,12 @@ def rewrite(src, ast_mode):
         parts.append(cur.strip())
         return ' '.join('__MSL_ATTR("msl:%s")' % p.replace('"', '\\"') for p in parts if p)
     src = re.sub(r'\[\[\s*((?:[^\[\]]|\[[^\[\]]*\])*?)\s*\]\]', attr, src)
+    src = rewrite_host_names(src)
+    src = re.sub(r'\b__msl_stage_(kernel|vertex|fragment)\b',
+                 lambda m: 'static __MSL_ATTR("msl.stage:%s") __attribute__((always_inline))' % m.group(1), src)
     src = rewrite_function_constants(src)
     src = re.sub(r'\b(' + VEC + r')\s*\(', r'metal::__vec<\1>(', src)
+    src = rewrite_vector_casts(src)
     src = re.sub(r'(?<![\w:])((?:float|half)[234]x[234])\s*\(', r'metal::__mat<metal::\1>(', src)
     # the AST pass sees attributes as annotations; codegen doesn't see them
     src = re.sub(r'__MSL_ATTR\(("(?:[^"\\]|\\.)*")\)', (lambda m: '__attribute__((annotate(%s)))' % m.group(1)) if ast_mode else '', src)
@@ -78,6 +151,32 @@ def rewrite(src, ast_mode):
     src = re.sub(r'(?<![\w.])(\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?[hH]\b',
                  lambda m: '((half)' + m.group(0)[:-1] + ')', src)
     return src
+
+INSTANCES = []    # (host name, stage, template, template arguments) in source order
+def rewrite_host_names(src):
+    """template [[host_name("n")]] kernel F_t f<args>;  ->  an explicit instantiation;
+    the entry point named n calls f<args> (llama.cpp and MLX declare kernels this way)."""
+    def one(m):
+        INSTANCES.append((m.group(1), m.group(2), m.group(4), m.group(5)))
+        return 'template %s %s<%s>;' % (m.group(3), m.group(4), m.group(5))
+    pat = re.compile(r'\btemplate\s+__MSL_ATTR\("msl:host_name\(\\"([^"\\]+)\\"\)"\)\s+__msl_stage_(kernel|vertex|fragment)\s+([\w:]+)\s+([\w:]+)\s*<')
+    out, pos = [], 0
+    for m in pat.finditer(src):
+        if m.start() < pos:
+            continue
+        j, d = m.end(), 1
+        while j < len(src) and d:
+            d += src[j] in '<('
+            d -= src[j] in '>)'
+            j += 1
+        k = re.match(r'\s*;', src[j:])
+        if not k:
+            continue
+        INSTANCES.append((m.group(1), m.group(2), m.group(4), src[m.end():j - 1]))
+        out.append(src[pos:m.start()] + 'template %s %s<%s>;' % (m.group(3), m.group(4), src[m.end():j - 1]))
+        pos = j + k.end()
+    out.append(src[pos:])
+    return ''.join(out)
 
 FC = re.compile(r'^[ \t]*(?:__attribute__\(\(address_space\(2\)\)\)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;', re.M)
 def rewrite_function_constants(src):
@@ -256,6 +355,27 @@ def stage_functions(tree):
                     TYPEDEFS.setdefault(tn, td)
             elif k['kind'] == 'LinkageSpecDecl':
                 walk(k, ns)
+            elif k['kind'] == 'FunctionTemplateDecl':
+                decls = [c for c in k['kids'] if c['kind'] == 'FunctionDecl']
+                if not decls:
+                    continue
+                pattern = decls[0]
+                stage = [a.split(':', 1)[1] for a in annotations(pattern) if a.startswith('msl.stage:')]
+                if not stage:
+                    continue
+                tname = decl_name_type(pattern['rest'])[0]
+                mine = [i for i in INSTANCES if i[2].split('::')[-1] == tname]
+                for spec, inst in zip(decls[1:], mine):
+                    _, ftype, _ = decl_name_type(spec['rest'])
+                    params = []
+                    for p in spec['kids']:
+                        if p['kind'] == 'ParmVarDecl':
+                            pn, pt, pd = decl_name_type(p['rest'])
+                            params.append(dict(name=pn, type=pt, desugared=pd,
+                                               attrs=[a[4:] for a in annotations(p) if a.startswith('msl:')]))
+                    out.append(dict(name=inst[0], stage=stage[0], type=ftype, params=params, ns=ns,
+                                    attrs=[a[4:] for a in annotations(pattern) if a.startswith('msl:')],
+                                    call='%s<%s>' % (inst[2], inst[3])))
             elif k['kind'] == 'FunctionDecl':
                 ann = annotations(k)
                 stage = [a.split(':', 1)[1] for a in ann if a.startswith('msl.stage:')]
@@ -702,7 +822,7 @@ def entry_points(funcs):
                 ps.append('%s %s' % (t, p['name'])); args.append(p['name'])
         ret = ret_type(f)
         rf = ret_fields(f)
-        call = '::%s%s(%s)' % (f.get('ns', ''), f['name'], ', '.join(args))
+        call = '::%s%s(%s)' % (f.get('ns', ''), f.get('call', f['name']), ', '.join(args))
         if rf:
             out.append('struct __attribute__((packed)) __ret_%s { %s };' % (f['name'], ' '.join('%s f%d;' % (fld['type'], k) for k, fld in enumerate(rf))))
             body = '%s __o = %s; __ret_%s __r; %s return __r;' % (ret, call, f['name'], ' '.join('__r.f%d = __o.%s;' % (k, fld['name']) for k, fld in enumerate(rf)))
@@ -778,7 +898,7 @@ def to_air(ir, funcs, layouts, target, src_path, fcs=()):
         args = split_args(sig)
         for k, p in enumerate(f['params']):
             if p['attrs'] and re.match(r'buffer\(', p['attrs'][0]) and '"air-buffer-no-alias"' not in args[k]:
-                args[k] = re.sub(r' (%\d+)$', r' "air-buffer-no-alias" \1', args[k])
+                args[k] = re.sub(r' (%[\w.]+)$', r' "air-buffer-no-alias" \1', args[k])
         ir = ir.replace('@%s(%s)' % (f['name'], sig), '@%s(%s)' % (f['name'], ', '.join(args)), 1)
     fcnodes = []
     for idx, name, lty in sorted(fcs, key=lambda e: FC_ORDER.index(e[1])):
@@ -1025,7 +1145,7 @@ def main(argv):
             r = subprocess.run(pp + (['-D__MSL_AST'] if ast_mode else []) + [src], capture_output=True, text=True)
             if r.returncode:
                 sys.stderr.write(r.stderr); raise SystemExit(1)
-            del SAMPLERS[:]; FC_CHECKED.clear()
+            del SAMPLERS[:]; FC_CHECKED.clear(); del INSTANCES[:]
             return rewrite_samplers(rewrite(r.stdout, ast_mode), air_v)
         base = [LLVM + '/clang++', '-x', 'c++', '-std=c++17', '-target', 'spir64', '-ffast-math', '-fno-builtin',
                 '-Wno-unknown-attributes', '-nostdinc++']
