@@ -1,0 +1,38 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+rust_library(
+    name = "metal_lib",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/bin/**"],
+    ),
+    # Our MSL headers, embedded with include_str!.
+    compile_data = glob(["include/**"]),
+    crate_name = "metal",
+    deps = [
+        "@crates//:regex",
+        "@crates//:sha2",
+    ],
+)
+
+rust_binary(
+    name = "metal",
+    srcs = ["src/bin/metal.rs"],
+    visibility = ["//visibility:public"],
+    deps = [":metal_lib"],
+)
+
+rust_binary(
+    name = "metallib",
+    srcs = ["src/bin/metallib.rs"],
+    visibility = ["//visibility:public"],
+    deps = [":metal_lib"],
+)
+
+rust_test(
+    name = "test",
+    compile_data = glob(["include/**"]),
+    crate = ":metal_lib",
+)
