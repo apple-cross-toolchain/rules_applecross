@@ -670,3 +670,36 @@ pub fn speculate_and_sink(ir: &str) -> String {
         out
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conversions_become_air_convert() {
+        let ir = "define void @f(i32 %a, <2 x half> %h, float %s) {\n  %x = sitofp i32 %a to float\n  %y = fpext <2 x half> %h to <2 x float>\n  %z = fpext float %s to double\n  ret void\n}\n";
+        let out = air_conversions(ir);
+        assert!(out.contains("%x = tail call fast float @air.convert.f.f32.s.i32(i32 %a)"));
+        assert!(out.contains("%y = tail call fast <2 x float> @air.convert.f.v2f32.f.v2f16(<2 x half> %h)"));
+        assert!(out.contains("%z = fpext float %s to double"));
+        // scalars declared first
+        assert!(out.find("declare float @air.convert.f.f32.s.i32").unwrap() < out.find("declare <2 x float>").unwrap());
+    }
+
+    #[test]
+    fn then_block_sinks_in_xcode_order() {
+        let ir = "define void @k(float* %o, float* %a) {\n  br i1 %c, label %then, label %end\n\nthen:\n  %i = zext i32 %n to i64\n  %pa = getelementptr inbounds float, float* %a, i64 %i\n  %po = getelementptr inbounds float, float* %o, i64 %i\n  %v = load float, float* %pa, align 4\n  store float %v, float* %po, align 4\n  br label %end\n\nend:\n  ret void\n}\n";
+        let out = speculate_and_sink(ir);
+        let order: Vec<&str> = out.lines().filter(|l| l.contains(" = ") || l.trim_start().starts_with("store")).map(|l| l.trim().split(' ').next().unwrap()).collect();
+        assert_eq!(order, vec!["%i", "%po", "%pa", "%v", "store"]);
+    }
+
+    #[test]
+    fn alias_scopes_named_as_xcode() {
+        let ir = "  %v = load float, float addrspace(1)* %p, align 4, !alias.scope !3, !noalias !5\n!1 = distinct !{!1, !\"__msl_entry.k\"}\n!2 = distinct !{!2, !1, !\"__msl_entry.k: %__air_arg_1\"}\n!3 = !{!2}\n!4 = distinct !{!4, !1, !\"__msl_entry.k: %__air_tex_0\"}\n!5 = !{!4}\n";
+        let out = alias_scopes(ir);
+        assert!(out.contains("!\"air-alias-scopes(k)\""));
+        assert!(out.contains("!\"air-alias-scope-arg(1)\""));
+        assert!(out.contains("!\"air-alias-scope-textures\""));
+    }
+}

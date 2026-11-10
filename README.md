@@ -78,8 +78,9 @@ compiles stay on Linux, and Xcode's `metal` compiles the shaders);
 `--config=relax_metal` instead compiles them with this repository's `metal`
 and `metallib` (`tools/apple_tools/crates/metal`): the MSL is compiled to AIR
 by LLVM 15, the last LLVM with the typed pointers AIR uses, with headers of our own, learned
-from Xcode's output for our own shaders. The shaders work, but their bytes
-aren't Xcode's. Only that config (its `--@rules_applecross//toolchain:relax_metal`)
+from Xcode's output for our own shaders. The shaders work, and many are
+Xcode's bytes, but not yet all, so the compile stays relaxed until it matches
+Xcode across a measured corpus. Only that config (its `--@rules_applecross//toolchain:relax_metal`)
 fetches LLVM 15, from toolchains_llvm. String
 Catalogs compile as Xcode compiles them; the few it can't yet reproduce, it
 refuses unless `--config=relax_xcstrings`
@@ -299,7 +300,7 @@ draw the icon from its layers:
 | `relax_ibtool_layout` | `RULES_APPLECROSS_RELAX_IBTOOL_LAYOUT` | AppKit controls Auto Layout sizes by their content, which Xcode lays out again as it compiles, compiled with the document's frames |
 | `relax_momc` | `RULES_APPLECROSS_RELAX_MOMC` | Core Data models with several versions or a derived attribute, whose `VersionInfo.plist` has no entity version hashes or checksums, without the `.omo` Xcode writes beside a versioned model's current version; generated classes whose header doesn't name the user and the date |
 | `relax_pngcrush` | `RULES_APPLECROSS_RELAX_PNGCRUSH` | iOS PNG resources this pngcrush can't make Xcode's iPhone-optimized PNG of (other than 8-bit RGB and RGBA), copied as they are |
-| `relax_metal` | `RULES_APPLECROSS_RELAX_METAL`, with `--@rules_applecross//toolchain:relax_metal` | Metal shaders compiled with LLVM 15 and this repository's `metal` (working, not Xcode's bytes; bundling on a Mac compiles them as Xcode does). Without the flag, an empty library, whose shaders fail at run time |
+| `relax_metal` | `RULES_APPLECROSS_RELAX_METAL`, with `--@rules_applecross//toolchain:relax_metal` | Metal shaders compiled with LLVM 15 and this repository's `metal` (working; Xcode's bytes for many, not yet all; bundling on a Mac compiles them as Xcode does). Without the flag, an empty library, whose shaders fail at run time |
 | `relax_xcstrings` | `RULES_APPLECROSS_RELAX_XCSTRINGS` | String Catalog entries not yet reproduced, in their nearest form |
 | `relax_app_intents` | `RULES_APPLECROSS_RELAX_APP_INTENTS` | App Intents not yet reproduced, left out |
 | `relax_app_intents_flexible_matching` | `RULES_APPLECROSS_RELAX_APP_INTENTS_FLEXIBLE_MATCHING` | App Shortcuts Flexible Matching's assets, left out |

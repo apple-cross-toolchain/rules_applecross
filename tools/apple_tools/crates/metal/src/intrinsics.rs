@@ -105,3 +105,17 @@ pub fn apply(ir: &str) -> String {
     })
     .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn declarations_and_calls_get_xcodes_attributes() {
+        let ir = "declare spir_func noundef float @air.fast_sin.f32(float noundef) #1\ndefine void @f(float %x) {\n  %y = tail call fast spir_func noundef float @air.fast_sin.f32(float noundef %x) #2\n  ret void\n}\n";
+        let out = apply(ir);
+        assert!(out.contains("declare spir_func float @air.fast_sin.f32(float) local_unnamed_addr mustprogress nofree nosync nounwind readnone willreturn"));
+        assert!(out.contains("call fast spir_func float @air.fast_sin.f32(float %x) nounwind readnone willreturn"));
+        assert_eq!(apply(&out), out);
+    }
+}

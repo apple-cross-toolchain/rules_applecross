@@ -1,6 +1,7 @@
 //! Metal shaders without a Mac: MSL compiled to AIR with LLVM 15 and our own
 //! stdlib, packaged as a metallib. Learned black-box from Xcode's output for our
-//! own probe shaders (README.md, FORMAT.md).
+//! own probe shaders (README.md, FORMAT.md): the AIR, its optimisation and its
+//! bitcode as Xcode's front end and metallib write them.
 
 pub mod air;
 pub mod ast;

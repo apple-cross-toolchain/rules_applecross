@@ -217,4 +217,15 @@ mod tests {
         assert_eq!(sig, "i32 %a, <2 x i32> %b");
         assert!(body.contains("ret void"));
     }
+
+    #[test]
+    fn numbers_unnamed_values() {
+        let ir = "define void @f(i32 %a, i32 %b) {\n  %x = add i32 %a, %b\n  br label %next\n\nnext:                ; preds = %0\n  %y = mul i32 %x, %x\n  ret void\n}\n";
+        let out = discard_value_names(ir);
+        assert!(out.contains("define void @f(i32 %0, i32 %1)"));
+        assert!(out.contains("%3 = add i32 %0, %1"));
+        assert!(out.contains("br label %4"));
+        assert!(out.contains("\n4:\n"));
+        assert!(out.contains("%5 = mul i32 %3, %3"));
+    }
 }

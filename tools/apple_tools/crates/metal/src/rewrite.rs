@@ -539,4 +539,22 @@ mod tests {
         assert!(r.code.contains("metal::__vec<float2>(0.5f, 1.0f)"), "{}", r.code);
         assert!(r.code.contains("((half)0.5)"), "{}", r.code);
     }
+
+    #[test]
+    fn program_scope_constants_are_static() {
+        let src = "__msl_constant float k = 2;\nnamespace n { __msl_constant int j = 1; }\nvoid f(__msl_constant float *p) { __msl_constant float *q = p; }\nstatic __msl_constant bool b = true;";
+        let out = program_scope_constants(src);
+        assert!(out.starts_with("static float k = 2;"));
+        assert!(out.contains("namespace n { static int j = 1; }"));
+        assert!(out.contains("void f( float *p) {  float *q = p; }"));
+        assert!(out.contains("static  bool b = true;"));
+    }
+
+    #[test]
+    fn vectors_built_in_functions_put_each_argument() {
+        let src = "void f(float a) { float4 v = metal::__vec<float4>(g(a), a, 0, 1); }\nfloat4 c = metal::__vec<float4>(1, 2, 3, 4);";
+        let out = lazy_vector_args(src);
+        assert!(out.contains("({ metal::__vbuild<float4> __vb; __vb.put(g(a)); __vb.put(a); __vb.put(0); __vb.put(1); __vb.v; })"));
+        assert!(out.contains("float4 c = metal::__vec<float4>(1, 2, 3, 4);"));
+    }
 }

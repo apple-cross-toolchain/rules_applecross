@@ -556,3 +556,41 @@ fn renumber_attachments(items: &mut [Item], map: &std::collections::HashMap<u64,
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stream with BLOCKINFO, an abbreviated record (char6 array and blob) and nested blocks.
+    fn sample() -> Vec<Item> {
+        vec![
+            Item::Block { id: 0, width: 2, items: vec![Item::Record { abbrev: None, code: 1, ops: vec![13], blob: None }, Item::Abbrev(vec![Op::Literal(1), Op::Array, Op::Char6])] },
+            Item::Block { id: 13, width: 5, items: vec![Item::Record { abbrev: Some(4), code: 1, ops: b"LLVM15".iter().map(|&c| match c { b'0'..=b'9' => 52 + (c - b'0') as u64, b'A'..=b'Z' => 26 + (c - b'A') as u64, _ => 0 }).collect(), blob: None }] },
+            Item::Block {
+                id: 8,
+                width: 3,
+                items: vec![
+                    Item::Abbrev(vec![Op::Literal(7), Op::Vbr(6), Op::Fixed(3), Op::Blob]),
+                    Item::Record { abbrev: Some(4), code: 7, ops: vec![300, 5], blob: Some(b"abc".to_vec()) },
+                    Item::Block { id: 22, width: 3, items: vec![Item::Record { abbrev: None, code: 6, ops: vec![31, 120], blob: None }] },
+                ],
+            },
+        ]
+    }
+
+    #[test]
+    fn round_trips() {
+        let (bytes, _) = write(&sample()).unwrap();
+        let (items, _) = parse(&bytes).unwrap();
+        assert_eq!(write(&items).unwrap().0, bytes);
+    }
+
+    #[test]
+    fn identification_string_emptied() {
+        let (bytes, _) = write(&sample()).unwrap();
+        let out = as_xcode(&bytes, "32023.922.4", Writer::Frontend).unwrap();
+        let (items, _) = parse(&out).unwrap();
+        let Item::Block { items: ident, .. } = &items[1] else { panic!() };
+        assert!(matches!(&ident[0], Item::Record { code: 1, ops, .. } if ops.is_empty()));
+    }
+}
