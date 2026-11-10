@@ -4,6 +4,8 @@ filegroup(
         "//crates/actool",
         "//crates/codesign",
         "//crates/ibtool",
+        "//crates/metal",
+        "//crates/metal:metallib",
         "//crates/pngcrush",
         "//crates/swift-stdlib-tool",
         "//xcbuild/tools/PlistBuddy",

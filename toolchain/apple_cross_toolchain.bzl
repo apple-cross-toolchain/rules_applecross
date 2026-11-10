@@ -409,7 +409,7 @@ _RULE_INPUT_FILES = [
     "repo_tools/patch_swiftinterfaces.py",
     "repo_tools/read_xcode_versions.py",
     "repo_tools/layering_check_modulemap.py",
-    "stubs/metal_unavailable.sh",
+    "stubs/metal.sh",
     "stubs/intentbuilderc.py",
     "stubs/intentbuilderc.sh",
     "stubs/codesign_identity.sh",
@@ -756,12 +756,22 @@ toolchain(
 
     _install_executable(rctx, "stubs/strip.sh", xcode_toolchain_bindir + "strip")
 
-    # Create metal/metallib stubs for Linux (Metal compiler is macOS-only).
+    # metal and metallib for Linux (Apple's are macOS-only): stubs/metal.sh
+    # fails strict builds and, relaxed, runs the ported tools beside it with
+    # LLVM 15, which only --//toolchain:relax_metal makes an action input
+    # (BUILD.template.bzl). Its path in the execution root comes from the
+    # repository's canonical name, without fetching it here.
+    _metal_llvm_bin = "external/" + Label("@applecross_metal_llvm_llvm//:BUILD.bazel").repo_name + "/bin"
     for _tool_name in ["metal", "metallib"]:
         _tool_path = xcode_toolchain_bindir + _tool_name
-        result = rctx.execute(["test", "-e", _tool_path])
-        if result.return_code != 0:
-            _install_executable(rctx, "stubs/metal_unavailable.sh", _tool_path)
+        if rctx.execute(["test", "-e", _tool_path]).return_code == 0:
+            rctx.execute(["mv", _tool_path, _tool_path + ".ported"])
+        rctx.template(
+            _tool_path,
+            _toolchain_path(rctx, "stubs/metal.sh"),
+            {"%{llvm_bin}": _metal_llvm_bin},
+            executable = True,
+        )
 
     # Create intentbuilderc stub for Linux.
     _intentbuilderc_path = xcode_toolchain_bindir + "intentbuilderc"

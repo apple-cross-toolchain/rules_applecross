@@ -1,4 +1,4 @@
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
 load("//toolchain:apple_bundling_toolchain.bzl", "apple_bundling_toolchain")
 
 package(default_visibility = ["//visibility:public"])
@@ -48,6 +48,19 @@ string_flag(
 config_setting(
     name = "apple_bundling_default",
     flag_values = {":apple_bundling": "default"},
+)
+
+# Metal shaders compiled off a Mac (--config=relax_metal sets this beside
+# RULES_APPLECROSS_RELAX_METAL): the toolchain's metal and metallib then get
+# LLVM 15's tools as inputs. Off, nothing fetches LLVM 15.
+bool_flag(
+    name = "relax_metal",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "relax_metal_enabled",
+    flag_values = {":relax_metal": "true"},
 )
 
 toolchain(

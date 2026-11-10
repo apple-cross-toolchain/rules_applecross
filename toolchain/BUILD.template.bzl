@@ -354,7 +354,17 @@ filegroup(
             ]
         ],
         allow_empty = True,
-    ),
+    ) + select({
+        # LLVM 15 for metal and metallib (stubs/metal.sh); fetched only then.
+        "@rules_applecross//toolchain:relax_metal_enabled": ["@applecross_metal_llvm_llvm//:" + tool for tool in [
+            "bin/clang",
+            "bin/clang-15",
+            "bin/llvm-as",
+            "bin/llvm-dis",
+            "bin/opt",
+        ]],
+        "//conditions:default": [],
+    }),
 )
 
 filegroup(
