@@ -19,7 +19,13 @@
 #define __MSL_DEVICE __attribute__((address_space(1)))
 #define __MSL_CONSTANT __attribute__((address_space(2)))
 #define __MSL_THREADGROUP __attribute__((address_space(3)))
-#ifdef __MSL_AST
+#if defined(__MSL_AST) && defined(__MSL_MANGLE)
+// for Xcode's mangled names only: constant is const, and an explicit thread an address space
+#define device __attribute__((address_space(1)))
+#define constant const __attribute__((address_space(2)))
+#define threadgroup __attribute__((address_space(3)))
+#define thread __attribute__((address_space(9)))
+#elif defined(__MSL_AST)
 #define device __attribute__((address_space(1)))
 #define constant __attribute__((address_space(2)))
 #define threadgroup __attribute__((address_space(3)))
@@ -29,7 +35,9 @@
 #define constant __msl_constant
 #define threadgroup
 #endif
+#ifndef __MSL_MANGLE
 #define thread
+#endif
 #define __AIR(name) __asm__(name)
 #define METAL_FUNC inline __attribute__((always_inline))
 

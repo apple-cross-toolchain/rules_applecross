@@ -1,7 +1,8 @@
 //! Xcode's mangled names for the user's functions. Codegen compiles flat, so
 //! its names lack the address spaces of pointer and reference parameters;
 //! Xcode's carry them as vendor qualifiers (device: U9MTLdevice, constant:
-//! U11MTLconstant, which is const too, threadgroup: U14MTLthreadgroup). The
+//! U11MTLconstant, which is const too, threadgroup: U14MTLthreadgroup, an
+//! explicit thread: U9MTLthread). The
 //! AST pass's source has the address spaces, so clang mangles them there
 //! (U3AS<n>): each function's name in both, paired, gives the renaming.
 
@@ -85,7 +86,7 @@ pub fn user_functions(with_spaces: &[(String, String, String)], flat: &[(String,
 /// clang's address-space qualifiers as Xcode spells them (constant implies const).
 pub fn xcode_spelling(mangled: &str) -> String {
     let s = regex!(r"U3AS2(K?)").replace_all(mangled, "U11MTLconstantK");
-    s.replace("U3AS1", "U9MTLdevice").replace("U3AS3", "U14MTLthreadgroup")
+    s.replace("U3AS1", "U9MTLdevice").replace("U3AS3", "U14MTLthreadgroup").replace("U3AS9", "U9MTLthread")
 }
 
 /// The functions of `ir` renamed.
@@ -109,6 +110,7 @@ mod tests {
     #[test]
     fn spells_address_spaces_as_xcode() {
         assert_eq!(xcode_spelling("_Z1fPU3AS1fRU3AS2K1SPU3AS3fPU3AS2f"), "_Z1fPU9MTLdevicefRU11MTLconstantK1SPU14MTLthreadgroupfPU11MTLconstantKf");
+        assert_eq!(xcode_spelling("_Z2g5RU3AS9K1S"), "_Z2g5RU9MTLthreadK1S");
     }
 
     #[test]
