@@ -115,6 +115,7 @@ air.convert.f.v4f32.u.v4i32	<4 x float>	<4 x i32>	mustprogress nofree nosync nou
 air.convert.f.v4f32.u.v4i8	<4 x float>	<4 x i8>	mustprogress nofree nosync nounwind readnone willreturn
 air.convert.s.i32.f.f32	i32	float	mustprogress nofree nosync nounwind readnone willreturn
 air.convert.s.v4i32.f.v4f32	<4 x i32>	<4 x float>	mustprogress nofree nosync nounwind readnone willreturn
+air.convert.u.i1.f.f32	i1	float	mustprogress nofree nosync nounwind readnone willreturn
 air.convert.u.i32.f.f32	i32	float	mustprogress nofree nosync nounwind readnone willreturn
 air.cos.f16	half	half	mustprogress nofree nosync nounwind readnone willreturn
 air.cos.v2f16	<2 x half>	<2 x half>	mustprogress nofree nosync nounwind readnone willreturn
@@ -135,6 +136,8 @@ air.ctz.v2i16	<2 x i16>	<2 x i16>, i1	mustprogress nofree nosync nounwind readno
 air.ctz.v2i32	<2 x i32>	<2 x i32>, i1	mustprogress nofree nosync nounwind readnone willreturn
 air.ctz.v4i32	<4 x i32>	<4 x i32>, i1	mustprogress nofree nosync nounwind readnone willreturn
 air.ctz.v4i8	<4 x i8>	<4 x i8>, i1	mustprogress nofree nosync nounwind readnone willreturn
+air.dfdx.v2f32	<2 x float>	<2 x float>	convergent mustprogress nounwind willreturn
+air.dfdy.v2f32	<2 x float>	<2 x float>	convergent mustprogress nounwind willreturn
 air.discard_fragment	void		mustprogress nounwind willreturn
 air.dot.v2f16	half	<2 x half>, <2 x half>	mustprogress nofree nosync nounwind readnone willreturn
 air.dot.v2f32	float	<2 x float>, <2 x float>	mustprogress nofree nosync nounwind readnone willreturn
@@ -366,6 +369,7 @@ air.fract.v2f32	<2 x float>	<2 x float>	mustprogress nofree nosync nounwind read
 air.fract.v3f16	<3 x half>	<3 x half>	mustprogress nofree nosync nounwind readnone willreturn
 air.fract.v3f32	<3 x float>	<3 x float>	mustprogress nofree nosync nounwind readnone willreturn
 air.fract.v4f16	<4 x half>	<4 x half>	mustprogress nofree nosync nounwind readnone willreturn
+air.fwidth.v2f32	<2 x float>	<2 x float>	convergent mustprogress nounwind willreturn
 air.gather_compare_depth_2d.f32	{ <4 x float>, i8 }	%struct._depth_2d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, i32, <2 x float>, float, i1, <2 x i32>, i32	argmemonly mustprogress nofree nounwind readonly willreturn
 air.gather_depth_2d.v4f32	{ <4 x float>, i8 }	%struct._depth_2d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, i32, <2 x float>, i1, <2 x i32>, i32	argmemonly mustprogress nofree nounwind readonly willreturn
 air.gather_texture_2d.s.v4i32	{ <4 x i32>, i8 }	%struct._texture_2d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <2 x float>, i1, <2 x i32>, i32, i32	argmemonly mustprogress nofree nounwind readonly willreturn
@@ -602,6 +606,7 @@ air.sample_texture_2d_array.u.v4i32	{ <4 x i32>, i8 }	%struct._texture_2d_array_
 air.sample_texture_2d_array.v4f16	<4 x half>	%struct._texture_2d_array_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <2 x float>, i32, i1, <2 x i32>, i1, float, i32	argmemonly convergent mustprogress nofree nounwind readonly willreturn
 air.sample_texture_2d_array.v4f16	{ <4 x half>, i8 }	%struct._texture_2d_array_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <2 x float>, i32, i1, <2 x i32>, i1, float, float, i32	argmemonly convergent mustprogress nofree nounwind readonly willreturn
 air.sample_texture_2d_array.v4f32	{ <4 x float>, i8 }	%struct._texture_2d_array_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <2 x float>, i32, i1, <2 x i32>, i1, float, float, i32	argmemonly convergent mustprogress nofree nounwind readonly willreturn
+air.sample_texture_2d_grad.v4f32	{ <4 x float>, i8 }	%struct._texture_2d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <2 x float>, <2 x float>, <2 x float>, float, i1, <2 x i32>, i32	argmemonly mustprogress nofree nounwind readonly willreturn
 air.sample_texture_3d.s.v4i32	{ <4 x i32>, i8 }	%struct._texture_3d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <3 x float>, i1, <3 x i32>, i1, float, float, i32	argmemonly convergent mustprogress nofree nounwind readonly willreturn
 air.sample_texture_3d.u.v4i32	{ <4 x i32>, i8 }	%struct._texture_3d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <3 x float>, i1, <3 x i32>, i1, float, float, i32	argmemonly convergent mustprogress nofree nounwind readonly willreturn
 air.sample_texture_3d.v4f16	{ <4 x half>, i8 }	%struct._texture_3d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <3 x float>, i1, <3 x i32>, i1, float, float, i32	argmemonly convergent mustprogress nofree nounwind readonly willreturn
