@@ -72,7 +72,9 @@ template <bool B, class T = void> struct enable_if {};
 template <class T> struct enable_if<true, T> { typedef T type; };
 template <class V, class E = typename __elem<V>::type, int N = __elem<V>::n>
 struct __vbuild {
-  V v; int i = 0;
+  // no initialiser (a constructor call): the user sets i, as an implicit
+  // constructor's lack of mustprogress would cost the function it inlines into its own
+  V v; int i;
   // a scalar converts at the call, in the user's code, as Xcode converts it
   __attribute__((always_inline)) void put(E e) { v[i++] = e; }
   template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) void put(A a);
@@ -117,7 +119,7 @@ template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R..
     __vbuild<V> v; v.v = __widen<V>(a, typename __mkseq<__elem<A>::n>::type(), typename __mkseq<__elem<V>::n - __elem<A>::n>::type()); v.i = __elem<A>::n;
     v.put(b); (v.put(r), ...); return v.v;
   } else {
-    __vbuild<V> v; v.put(a); v.put(b); (v.put(r), ...); return v.v;
+    __vbuild<V> v; v.i = 0; v.put(a); v.put(b); (v.put(r), ...); return v.v;
   }
 }
 
