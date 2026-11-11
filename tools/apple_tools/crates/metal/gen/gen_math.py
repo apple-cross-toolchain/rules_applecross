@@ -163,8 +163,10 @@ def emit():
             out.append('extern "C" %s __air_abs_%s_%s(%s) __AIR("air.abs.%s.%s");' % (t, sign, c, t, sign, sfx))
             out.append('%s %s abs(%s x) { return __air_abs_%s_%s(x); }' % (AI, t, t, sign, c))
             for fn, air in INT_UNARY_UNSIGNED.items():
-                out.append('extern "C" %s __air_%s_%s_%s(%s) __AIR("air.%s.%s");' % (t, air, sign, c, t, air, sfx))
-                out.append('%s %s %s(%s x) { return __air_%s_%s_%s(x); }' % (AI, t, fn, t, air, sign, c))
+                # clz and ctz take LLVM's "zero is undefined" flag, always false (MSL defines them at 0)
+                flag = fn in ('clz', 'ctz')
+                out.append('extern "C" %s __air_%s_%s_%s(%s%s) __AIR("air.%s.%s");' % (t, air, sign, c, t, ', bool' if flag else '', air, sfx))
+                out.append('%s %s %s(%s x) { return __air_%s_%s_%s(x%s); }' % (AI, t, fn, t, air, sign, c, ', false' if flag else ''))
             out.append('extern "C" %s __air_rotate_%s_%s(%s, %s) __AIR("air.rotate.%s");' % (t, sign, c, t, t, sfx))
             out.append('%s %s rotate(%s x, %s y) { return __air_rotate_%s_%s(x, y); }' % (AI, t, t, t, sign, c))
             out.append('%s %s max3(%s a, %s b, %s c) { return max(max(a, b), c); }' % (AI, t, t, t, t))

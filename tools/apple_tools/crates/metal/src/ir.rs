@@ -53,6 +53,25 @@ pub fn renumber_types(ir: &str) -> String {
     })
 }
 
+/// Xcode's frontend freezes the value a SIMD-group or quad-group function moves
+/// between threads (shuffles and broadcasts; not reductions or scans) before
+/// the call. clang 15's C++ has no freeze; inside our stdlib's wrapper it would
+/// freeze a `noundef` parameter, which instcombine drops, so it goes in once
+/// the wrappers are inlined.
+pub fn freeze_moved_values(ir: &str) -> String {
+    let n = std::cell::Cell::new(0);
+    replace_all(ir, regex!(r#"(?m)^(\s*)((?:%[\w.]+ = )?(?:tail )?call .*? @"?air\.(?:simd|quad)_(?:shuffle|broadcast)\w*\.[\w.]+"?)\((.*)\)(.*)$"#), |c| {
+        let mut args = split_args(&c[3]);
+        let Some(first) = args.first().cloned() else { return c[0].to_string() };
+        let Some((head, value)) = first.rsplit_once(' ') else { return c[0].to_string() };
+        let ty = regex!(r" (?:noundef|zeroext|signext)\b").replace_all(head, "");
+        n.set(n.get() + 1);
+        let frozen = format!("%__fz{}", n.get());
+        args[0] = format!("{head} {frozen}");
+        format!("{ind}{frozen} = freeze {ty} {value}\n{ind}{}({}){}", &c[2], args.join(", "), &c[4], ind = &c[1])
+    })
+}
+
 /// Calls to air.* functions through sret become direct calls whose result is stored.
 pub fn direct_returns(ir: &str) -> String {
     let ir = replace_all(ir, regex!(r#"declare (?:dso_local )?(?:spir_func )?void (@"?air\.[\w.]+"?)\((%"?struct\.[\w:.]*__ret_\w+"?\*) sret\([^)]*\)(?: align \d+)?(?:, )?"#), |c| {
@@ -755,6 +774,15 @@ pub fn speculate_and_sink(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_values_are_frozen() {
+        let ir = "define float @f(float %x, i16 %l) {\n  %a = call spir_func noundef float @air.simd_shuffle.f32(float noundef %x, i16 noundef zeroext %l) #3\n  %b = call spir_func noundef float @air.simd_sum.f32(float noundef %a) #3\n  ret float %b\n}\n";
+        let out = freeze_moved_values(ir);
+        assert!(out.contains("  %__fz1 = freeze float %x\n  %a = call spir_func noundef float @air.simd_shuffle.f32(float noundef %__fz1, i16 noundef zeroext %l) #3\n"));
+        assert!(out.contains("@air.simd_sum.f32(float noundef %a)"));
+        assert!(!out.contains("%__fz2"));
+    }
 
     #[test]
     fn helper_type_clashes_do_not_number_user_types() {

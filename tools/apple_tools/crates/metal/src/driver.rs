@@ -196,7 +196,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     };
     // conversions become air.convert calls once constants are folded, before the last attribute inference
     let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &[O2.as_str()])?));
-    let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
+    // the stdlib wrappers are inlined by now, so the freeze lands on the caller's value as Xcode's does
+    let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
     let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?))))))));
