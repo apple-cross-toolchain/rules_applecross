@@ -316,7 +316,8 @@ template <class T, int C, int R> __attribute__((always_inline)) inline __vector<
 }
 template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) {
   __vector<T, C> r;
-  for (int c = 0; c < C; c++) { __vector<T, R> p = v * m[c]; T s = p[0]; for (int k = 1; k < R; k++) s += p[k]; r[c] = s; }
+  // each column's dot product (air.dot), as Xcode computes v * M
+  for (int c = 0; c < C; c++) r[c] = dot(v, m[c]);
   return r;
 }
 template <class T, int K, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, K, R> &a, const matrix<T, C, K> &b) {
