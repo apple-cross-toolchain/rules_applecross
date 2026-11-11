@@ -60,15 +60,17 @@ __MSL_ELEM(long) __MSL_ELEM(ulong) __MSL_ELEM(half) __MSL_ELEM(float)
 
 // Vector constructors: T4(a, b, ...) takes scalars and vectors in order;
 // T4(s) splats a scalar; T4(v) converts a vector of the same width.
+template <bool B, class T = void> struct enable_if {};
+template <class T> struct enable_if<true, T> { typedef T type; };
 template <class V, class E = typename __elem<V>::type, int N = __elem<V>::n>
 struct __vbuild {
   V v; int i = 0;
-  template <class A> __attribute__((always_inline)) void put(A a);
+  // a scalar converts at the call, in the user's code, as Xcode converts it
+  __attribute__((always_inline)) void put(E e) { v[i++] = e; }
+  template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) void put(A a);
 };
 template <class T, int N> struct __packed;
 template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
-template <bool B, class T = void> struct enable_if {};
-template <class T> struct enable_if<true, T> { typedef T type; };
 template <int... I> struct __seq {};
 template <int N, int... I> struct __mkseq : __mkseq<N - 1, N - 1, I...> {};
 template <int... I> struct __mkseq<0, I...> { typedef __seq<I...> type; };
@@ -78,10 +80,11 @@ template <class V, int... I, class S> constexpr V __splat(__seq<I...>, S s) { re
 // As Xcode builds vectors: a scalar splats (insert and shuffle), a vector of the
 // same width converts as a whole, and a leading vector widens by a shuffle
 // before the rest is inserted.
-template <class V, class A> constexpr V __vec(A a) {
+// A scalar converts at the call (in the user's code, as Xcode converts it), then splats.
+template <class V> constexpr V __vec(typename __elem<V>::type e) { return (V)e; }
+template <class V, class A, class = typename enable_if<(__elem<A>::n > 1)>::type> constexpr V __vec(A a) {
   typedef typename __elem<V>::type E;
-  if constexpr (__elem<A>::n == 1) return (V)(E)a;
-  else if constexpr (__is_same(A, V)) return a;
+  if constexpr (__is_same(A, V)) return a;
   else if constexpr (__is_same(A, __vector<typename __elem<A>::type, __elem<A>::n>)) return __builtin_convertvector(a, V);
   else { V r; for (int k = 0; k < __elem<V>::n; k++) r[k] = (E)a[k]; return r; }
 }
@@ -91,10 +94,8 @@ template <class V, class A, int... I, int... U> __attribute__((always_inline)) V
 // Each element as its argument comes (the driver writes T4(a, b, ...) in a
 // function as a statement expression of puts): a leading vector of the same
 // element type widens by a shuffle.
-template <class V, class E, int N> template <class A> __attribute__((always_inline)) void __vbuild<V, E, N>::put(A a) {
-  if constexpr (__elem<A>::n == 1) {
-    v[i++] = E(a);
-  } else if constexpr (__elem<A>::n < N && __is_same(A, __vector<E, __elem<A>::n>)) {
+template <class V, class E, int N> template <class A, class> __attribute__((always_inline)) void __vbuild<V, E, N>::put(A a) {
+  if constexpr (__elem<A>::n < N && __is_same(A, __vector<E, __elem<A>::n>)) {
     if (i == 0) { v = __widen<V>(a, typename __mkseq<__elem<A>::n>::type(), typename __mkseq<N - __elem<A>::n>::type()); i = __elem<A>::n; }
     else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
   } else {
