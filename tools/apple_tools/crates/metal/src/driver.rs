@@ -102,7 +102,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let (air, lang) = o.target.versions();
     let src_dir = o.source.parent().map(Path::to_path_buf).unwrap_or_default();
     let clang = tool(o, "clang");
-    let preprocess = |ast_mode: bool| -> Result<crate::rewrite::Rewritten, String> {
+    let preprocess = |ast_mode: bool, mangle: bool| -> Result<crate::rewrite::Rewritten, String> {
         let mut c = Command::new(&clang);
         c.args(["-E", "-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-nostdinc++", "-I"]).arg(&inc).args(["-include", "metal_stdlib", "-I"]).arg(&src_dir);
         c.arg(format!("-D__METAL_VERSION__={}", lang.0 * 100 + lang.1 * 10));
@@ -126,6 +126,9 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         if ast_mode {
             c.arg("-D__MSL_AST");
         }
+        if mangle {
+            c.arg("-D__MSL_MANGLE");
+        }
         c.args(&o.includes).args(&o.defines).arg(&o.source);
         let text = String::from_utf8_lossy(&run(&mut c)?.stdout).to_string();
         rewrite(&text, ast_mode, air)
@@ -135,7 +138,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     };
     // The AST pass (address spaces as attributes; its errors are address-space
     // checks codegen doesn't have, so they don't stop us).
-    let ast_src = preprocess(true)?;
+    let ast_src = preprocess(true, false)?;
     // named as the source, which names its static initializer (_GLOBAL__sub_I_<file>)
     let cpp_name = o.source.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or("source.metal".into());
     let cpp = tmp.0.join(&cpp_name);
@@ -149,12 +152,15 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let json_decls = |path: &Path| -> Result<Vec<(String, String, String)>, String> {
         let mut c = Command::new(&clang);
         base(&mut c);
-        c.args(["-fsyntax-only", "-Xclang", "-ast-dump=json"]).arg(path);
+        c.args(["-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json"]).arg(path);
         Ok(crate::mangle::decls(&String::from_utf8_lossy(&c.output().map_err(|e| e.to_string())?.stdout)))
     };
+    // Xcode's names: from the source with explicit thread and const constant too
+    let mangle_src = preprocess(true, true)?;
+    std::fs::write(&cpp, &mangle_src.code).map_err(|e| e.to_string())?;
     let spaced = json_decls(&cpp)?;
     // Codegen
-    let code = preprocess(false)?;
+    let code = preprocess(false, false)?;
     let mut types = Types { program: &program, layouts: Default::default() };
     std::fs::write(&cpp, format!("{}\n{}", code.code, entry_points(&types, &program))).map_err(|e| e.to_string())?;
     let flat: Vec<(String, String)> = json_decls(&cpp)?.into_iter().map(|(n, m, _)| (n, m)).collect();
