@@ -13,6 +13,18 @@ template <class V> __attribute__((always_inline)) inline V __msl_fdim(V x, V y) 
 #else
 #define __MSL_F(n) "air." #n
 #endif
+#ifdef __FAST_MATH__
+#define __MSL_FRACT_MODE 0
+#else
+#define __MSL_FRACT_MODE 3
+#endif
+extern "C" float ___metal_fract_float(float, int);
+extern "C" float2 ___metal_fract_v2float(float2, int);
+extern "C" float3 ___metal_fract_v3float(float3, int);
+extern "C" float4 ___metal_fract_v4float(float4, int);
+extern "C" half2 ___metal_fract_v2half(half2, int);
+extern "C" half3 ___metal_fract_v3half(half3, int);
+extern "C" half4 ___metal_fract_v4half(half4, int);
 extern "C" float __air_sin_f32(float) __AIR(__MSL_F(sin) ".f32");
 __attribute__((always_inline)) inline float sin(float x) { return __air_sin_f32(x); }
 extern "C" float __air_cos_f32(float) __AIR(__MSL_F(cos) ".f32");
@@ -65,8 +77,12 @@ extern "C" float __air_rint_f32(float) __AIR(__MSL_F(rint) ".f32");
 __attribute__((always_inline)) inline float rint(float x) { return __air_rint_f32(x); }
 extern "C" float __air_trunc_f32(float) __AIR(__MSL_F(trunc) ".f32");
 __attribute__((always_inline)) inline float trunc(float x) { return __air_trunc_f32(x); }
+#if !defined(__MSL_TARGET_MACOS) && !defined(__FAST_MATH__)
+__attribute__((always_inline)) inline float fract(float x) { return ___metal_fract_float(x, __MSL_FRACT_MODE); }
+#else
 extern "C" float __air_fract_f32(float) __AIR(__MSL_F(fract) ".f32");
 __attribute__((always_inline)) inline float fract(float x) { return __air_fract_f32(x); }
+#endif
 extern "C" float __air_saturate_f32(float) __AIR(__MSL_F(saturate) ".f32");
 __attribute__((always_inline)) inline float saturate(float x) { return __air_saturate_f32(x); }
 extern "C" float __air_sign_f32(float) __AIR("air.sign.f32");
@@ -161,7 +177,12 @@ extern "C" float2 __air_rint_v2f32(float2) __AIR(__MSL_F(rint) ".v2f32");
 __attribute__((always_inline)) inline float2 rint(float2 x) { return __air_rint_v2f32(x); }
 extern "C" float2 __air_trunc_v2f32(float2) __AIR(__MSL_F(trunc) ".v2f32");
 __attribute__((always_inline)) inline float2 trunc(float2 x) { return __air_trunc_v2f32(x); }
-__attribute__((always_inline)) inline float2 fract(float2 x) { float2 r; for (int k = 0; k < __elem<float2>::n; k++) r[k] = fract((float)x[k]); return r; }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float2 fract(float2 x) { return ___metal_fract_v2float(x, __MSL_FRACT_MODE); }
+#else
+extern "C" float2 __air_fract_v2f32(float2) __AIR(__MSL_F(fract) ".v2f32");
+__attribute__((always_inline)) inline float2 fract(float2 x) { return __air_fract_v2f32(x); }
+#endif
 extern "C" float2 __air_saturate_v2f32(float2) __AIR(__MSL_F(saturate) ".v2f32");
 __attribute__((always_inline)) inline float2 saturate(float2 x) { return __air_saturate_v2f32(x); }
 extern "C" float2 __air_sign_v2f32(float2) __AIR("air.sign.v2f32");
@@ -287,7 +308,12 @@ extern "C" float3 __air_rint_v3f32(float3) __AIR(__MSL_F(rint) ".v3f32");
 __attribute__((always_inline)) inline float3 rint(float3 x) { return __air_rint_v3f32(x); }
 extern "C" float3 __air_trunc_v3f32(float3) __AIR(__MSL_F(trunc) ".v3f32");
 __attribute__((always_inline)) inline float3 trunc(float3 x) { return __air_trunc_v3f32(x); }
-__attribute__((always_inline)) inline float3 fract(float3 x) { float3 r; for (int k = 0; k < __elem<float3>::n; k++) r[k] = fract((float)x[k]); return r; }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float3 fract(float3 x) { return ___metal_fract_v3float(x, __MSL_FRACT_MODE); }
+#else
+extern "C" float3 __air_fract_v3f32(float3) __AIR(__MSL_F(fract) ".v3f32");
+__attribute__((always_inline)) inline float3 fract(float3 x) { return __air_fract_v3f32(x); }
+#endif
 extern "C" float3 __air_saturate_v3f32(float3) __AIR(__MSL_F(saturate) ".v3f32");
 __attribute__((always_inline)) inline float3 saturate(float3 x) { return __air_saturate_v3f32(x); }
 extern "C" float3 __air_sign_v3f32(float3) __AIR("air.sign.v3f32");
@@ -414,7 +440,12 @@ extern "C" float4 __air_rint_v4f32(float4) __AIR(__MSL_F(rint) ".v4f32");
 __attribute__((always_inline)) inline float4 rint(float4 x) { return __air_rint_v4f32(x); }
 extern "C" float4 __air_trunc_v4f32(float4) __AIR(__MSL_F(trunc) ".v4f32");
 __attribute__((always_inline)) inline float4 trunc(float4 x) { return __air_trunc_v4f32(x); }
-__attribute__((always_inline)) inline float4 fract(float4 x) { float4 r; for (int k = 0; k < __elem<float4>::n; k++) r[k] = fract((float)x[k]); return r; }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float4 fract(float4 x) { return ___metal_fract_v4float(x, __MSL_FRACT_MODE); }
+#else
+extern "C" float4 __air_fract_v4f32(float4) __AIR(__MSL_F(fract) ".v4f32");
+__attribute__((always_inline)) inline float4 fract(float4 x) { return __air_fract_v4f32(x); }
+#endif
 extern "C" float4 __air_saturate_v4f32(float4) __AIR(__MSL_F(saturate) ".v4f32");
 __attribute__((always_inline)) inline float4 saturate(float4 x) { return __air_saturate_v4f32(x); }
 extern "C" float4 __air_sign_v4f32(float4) __AIR("air.sign.v4f32");
@@ -636,7 +667,12 @@ extern "C" half2 __air_rint_v2f16(half2) __AIR("air.rint.v2f16");
 __attribute__((always_inline)) inline half2 rint(half2 x) { return __air_rint_v2f16(x); }
 extern "C" half2 __air_trunc_v2f16(half2) __AIR("air.trunc.v2f16");
 __attribute__((always_inline)) inline half2 trunc(half2 x) { return __air_trunc_v2f16(x); }
-__attribute__((always_inline)) inline half2 fract(half2 x) { half2 r; for (int k = 0; k < __elem<half2>::n; k++) r[k] = fract((half)x[k]); return r; }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline half2 fract(half2 x) { return ___metal_fract_v2half(x, __MSL_FRACT_MODE); }
+#else
+extern "C" half2 __air_fract_v2f16(half2) __AIR("air.fract.v2f16");
+__attribute__((always_inline)) inline half2 fract(half2 x) { return __air_fract_v2f16(x); }
+#endif
 extern "C" half2 __air_saturate_v2f16(half2) __AIR("air.saturate.v2f16");
 __attribute__((always_inline)) inline half2 saturate(half2 x) { return __air_saturate_v2f16(x); }
 extern "C" half2 __air_sign_v2f16(half2) __AIR("air.sign.v2f16");
@@ -762,7 +798,12 @@ extern "C" half3 __air_rint_v3f16(half3) __AIR("air.rint.v3f16");
 __attribute__((always_inline)) inline half3 rint(half3 x) { return __air_rint_v3f16(x); }
 extern "C" half3 __air_trunc_v3f16(half3) __AIR("air.trunc.v3f16");
 __attribute__((always_inline)) inline half3 trunc(half3 x) { return __air_trunc_v3f16(x); }
-__attribute__((always_inline)) inline half3 fract(half3 x) { half3 r; for (int k = 0; k < __elem<half3>::n; k++) r[k] = fract((half)x[k]); return r; }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline half3 fract(half3 x) { return ___metal_fract_v3half(x, __MSL_FRACT_MODE); }
+#else
+extern "C" half3 __air_fract_v3f16(half3) __AIR("air.fract.v3f16");
+__attribute__((always_inline)) inline half3 fract(half3 x) { return __air_fract_v3f16(x); }
+#endif
 extern "C" half3 __air_saturate_v3f16(half3) __AIR("air.saturate.v3f16");
 __attribute__((always_inline)) inline half3 saturate(half3 x) { return __air_saturate_v3f16(x); }
 extern "C" half3 __air_sign_v3f16(half3) __AIR("air.sign.v3f16");
@@ -889,7 +930,12 @@ extern "C" half4 __air_rint_v4f16(half4) __AIR("air.rint.v4f16");
 __attribute__((always_inline)) inline half4 rint(half4 x) { return __air_rint_v4f16(x); }
 extern "C" half4 __air_trunc_v4f16(half4) __AIR("air.trunc.v4f16");
 __attribute__((always_inline)) inline half4 trunc(half4 x) { return __air_trunc_v4f16(x); }
-__attribute__((always_inline)) inline half4 fract(half4 x) { half4 r; for (int k = 0; k < __elem<half4>::n; k++) r[k] = fract((half)x[k]); return r; }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline half4 fract(half4 x) { return ___metal_fract_v4half(x, __MSL_FRACT_MODE); }
+#else
+extern "C" half4 __air_fract_v4f16(half4) __AIR("air.fract.v4f16");
+__attribute__((always_inline)) inline half4 fract(half4 x) { return __air_fract_v4f16(x); }
+#endif
 extern "C" half4 __air_saturate_v4f16(half4) __AIR("air.saturate.v4f16");
 __attribute__((always_inline)) inline half4 saturate(half4 x) { return __air_saturate_v4f16(x); }
 extern "C" half4 __air_sign_v4f16(half4) __AIR("air.sign.v4f16");
@@ -1784,8 +1830,12 @@ extern "C" float __air_precise_rint_f32(float) __AIR("air.rint.f32");
 __attribute__((always_inline)) inline float rint(float x) { return __air_precise_rint_f32(x); }
 extern "C" float __air_precise_trunc_f32(float) __AIR("air.trunc.f32");
 __attribute__((always_inline)) inline float trunc(float x) { return __air_precise_trunc_f32(x); }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float fract(float x) { return ___metal_fract_float(x, 3); }
+#else
 extern "C" float __air_precise_fract_f32(float) __AIR("air.fract.f32");
 __attribute__((always_inline)) inline float fract(float x) { return __air_precise_fract_f32(x); }
+#endif
 extern "C" float __air_precise_saturate_f32(float) __AIR("air.saturate.f32");
 __attribute__((always_inline)) inline float saturate(float x) { return __air_precise_saturate_f32(x); }
 extern "C" float __air_precise_sign_f32(float) __AIR("air.sign.f32");
@@ -1860,8 +1910,12 @@ extern "C" float2 __air_precise_rint_v2f32(float2) __AIR("air.rint.v2f32");
 __attribute__((always_inline)) inline float2 rint(float2 x) { return __air_precise_rint_v2f32(x); }
 extern "C" float2 __air_precise_trunc_v2f32(float2) __AIR("air.trunc.v2f32");
 __attribute__((always_inline)) inline float2 trunc(float2 x) { return __air_precise_trunc_v2f32(x); }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float2 fract(float2 x) { return ___metal_fract_v2float(x, 3); }
+#else
 extern "C" float2 __air_precise_fract_v2f32(float2) __AIR("air.fract.v2f32");
 __attribute__((always_inline)) inline float2 fract(float2 x) { return __air_precise_fract_v2f32(x); }
+#endif
 extern "C" float2 __air_precise_saturate_v2f32(float2) __AIR("air.saturate.v2f32");
 __attribute__((always_inline)) inline float2 saturate(float2 x) { return __air_precise_saturate_v2f32(x); }
 extern "C" float2 __air_precise_sign_v2f32(float2) __AIR("air.sign.v2f32");
@@ -1936,8 +1990,12 @@ extern "C" float3 __air_precise_rint_v3f32(float3) __AIR("air.rint.v3f32");
 __attribute__((always_inline)) inline float3 rint(float3 x) { return __air_precise_rint_v3f32(x); }
 extern "C" float3 __air_precise_trunc_v3f32(float3) __AIR("air.trunc.v3f32");
 __attribute__((always_inline)) inline float3 trunc(float3 x) { return __air_precise_trunc_v3f32(x); }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float3 fract(float3 x) { return ___metal_fract_v3float(x, 3); }
+#else
 extern "C" float3 __air_precise_fract_v3f32(float3) __AIR("air.fract.v3f32");
 __attribute__((always_inline)) inline float3 fract(float3 x) { return __air_precise_fract_v3f32(x); }
+#endif
 extern "C" float3 __air_precise_saturate_v3f32(float3) __AIR("air.saturate.v3f32");
 __attribute__((always_inline)) inline float3 saturate(float3 x) { return __air_precise_saturate_v3f32(x); }
 extern "C" float3 __air_precise_sign_v3f32(float3) __AIR("air.sign.v3f32");
@@ -2012,8 +2070,12 @@ extern "C" float4 __air_precise_rint_v4f32(float4) __AIR("air.rint.v4f32");
 __attribute__((always_inline)) inline float4 rint(float4 x) { return __air_precise_rint_v4f32(x); }
 extern "C" float4 __air_precise_trunc_v4f32(float4) __AIR("air.trunc.v4f32");
 __attribute__((always_inline)) inline float4 trunc(float4 x) { return __air_precise_trunc_v4f32(x); }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float4 fract(float4 x) { return ___metal_fract_v4float(x, 3); }
+#else
 extern "C" float4 __air_precise_fract_v4f32(float4) __AIR("air.fract.v4f32");
 __attribute__((always_inline)) inline float4 fract(float4 x) { return __air_precise_fract_v4f32(x); }
+#endif
 extern "C" float4 __air_precise_saturate_v4f32(float4) __AIR("air.saturate.v4f32");
 __attribute__((always_inline)) inline float4 saturate(float4 x) { return __air_precise_saturate_v4f32(x); }
 extern "C" float4 __air_precise_sign_v4f32(float4) __AIR("air.sign.v4f32");
@@ -2166,8 +2228,12 @@ extern "C" float2 __air_fast_rint_v2f32(float2) __AIR("air.fast_rint.v2f32");
 __attribute__((always_inline)) inline float2 rint(float2 x) { return __air_fast_rint_v2f32(x); }
 extern "C" float2 __air_fast_trunc_v2f32(float2) __AIR("air.fast_trunc.v2f32");
 __attribute__((always_inline)) inline float2 trunc(float2 x) { return __air_fast_trunc_v2f32(x); }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float2 fract(float2 x) { return ___metal_fract_v2float(x, 0); }
+#else
 extern "C" float2 __air_fast_fract_v2f32(float2) __AIR("air.fast_fract.v2f32");
 __attribute__((always_inline)) inline float2 fract(float2 x) { return __air_fast_fract_v2f32(x); }
+#endif
 extern "C" float2 __air_fast_saturate_v2f32(float2) __AIR("air.fast_saturate.v2f32");
 __attribute__((always_inline)) inline float2 saturate(float2 x) { return __air_fast_saturate_v2f32(x); }
 extern "C" float2 __air_fast_sign_v2f32(float2) __AIR("air.fast_sign.v2f32");
@@ -2242,8 +2308,12 @@ extern "C" float3 __air_fast_rint_v3f32(float3) __AIR("air.fast_rint.v3f32");
 __attribute__((always_inline)) inline float3 rint(float3 x) { return __air_fast_rint_v3f32(x); }
 extern "C" float3 __air_fast_trunc_v3f32(float3) __AIR("air.fast_trunc.v3f32");
 __attribute__((always_inline)) inline float3 trunc(float3 x) { return __air_fast_trunc_v3f32(x); }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float3 fract(float3 x) { return ___metal_fract_v3float(x, 0); }
+#else
 extern "C" float3 __air_fast_fract_v3f32(float3) __AIR("air.fast_fract.v3f32");
 __attribute__((always_inline)) inline float3 fract(float3 x) { return __air_fast_fract_v3f32(x); }
+#endif
 extern "C" float3 __air_fast_saturate_v3f32(float3) __AIR("air.fast_saturate.v3f32");
 __attribute__((always_inline)) inline float3 saturate(float3 x) { return __air_fast_saturate_v3f32(x); }
 extern "C" float3 __air_fast_sign_v3f32(float3) __AIR("air.fast_sign.v3f32");
@@ -2318,8 +2388,12 @@ extern "C" float4 __air_fast_rint_v4f32(float4) __AIR("air.fast_rint.v4f32");
 __attribute__((always_inline)) inline float4 rint(float4 x) { return __air_fast_rint_v4f32(x); }
 extern "C" float4 __air_fast_trunc_v4f32(float4) __AIR("air.fast_trunc.v4f32");
 __attribute__((always_inline)) inline float4 trunc(float4 x) { return __air_fast_trunc_v4f32(x); }
+#if !defined(__MSL_TARGET_MACOS)
+__attribute__((always_inline)) inline float4 fract(float4 x) { return ___metal_fract_v4float(x, 0); }
+#else
 extern "C" float4 __air_fast_fract_v4f32(float4) __AIR("air.fast_fract.v4f32");
 __attribute__((always_inline)) inline float4 fract(float4 x) { return __air_fast_fract_v4f32(x); }
+#endif
 extern "C" float4 __air_fast_saturate_v4f32(float4) __AIR("air.fast_saturate.v4f32");
 __attribute__((always_inline)) inline float4 saturate(float4 x) { return __air_fast_saturate_v4f32(x); }
 extern "C" float4 __air_fast_sign_v4f32(float4) __AIR("air.fast_sign.v4f32");
