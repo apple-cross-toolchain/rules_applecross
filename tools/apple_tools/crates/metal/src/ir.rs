@@ -618,6 +618,18 @@ fn convert(ir: &str, user_scalars: bool) -> String {
             if user_scalars && l.starts_with("define ") {
                 user = !regex!(r"@\x22?(?:_ZN5metal|_ZNK5metal|_ZZN5metal|__msl|_ZN11__air_entry)").is_match(l);
             }
+            // a float the user's code takes as a bool: clang compares it with 0 (%tobool), Xcode converts it
+            if user_scalars && user {
+                if let Some(c) = regex!(r"^(\s+)(%tobool[\w.]*) = fcmp (?:fast )?une (float|half) (%[\w.]+), 0\.000000e\+00$").captures(l) {
+                    let sn = name(&c[3]).unwrap();
+                    let f = format!("air.convert.u.i1.f.{sn}");
+                    let decl = format!("declare i1 @{f}({})", &c[3]);
+                    if !decls.contains(&decl) {
+                        decls.push(decl);
+                    }
+                    return format!("{}{} = tail call i1 @{f}({} {})", &c[1], &c[2], &c[3], &c[4]);
+                }
+            }
             let Some(c) = conv.captures(l) else { return l.to_string() };
             let (op, src, v, dst) = (&c[3], &c[4], &c[5], &c[6]);
             if matches!(op, "fpext" | "fptrunc") && !src.starts_with('<') || !user || user_scalars && (src.starts_with('<') || dst.starts_with('<')) {
@@ -631,15 +643,6 @@ fn convert(ir: &str, user_scalars: bool) -> String {
                 "fptoui" => ("f", "u"),
                 _ => ("f", "f"),
             };
-            // a bool converts as the int it promotes to
-            if op == "uitofp" && src == "i1" {
-                let f = format!("air.convert.{dk}.{dn}.s.i32");
-                let decl = format!("declare {dst} @{f}(i32)");
-                if !decls.contains(&decl) {
-                    decls.push(decl);
-                }
-                return format!("{0}{1}.i = zext i1 {v} to i32\n{0}{1} = tail call fast {dst} @{f}(i32 {1}.i)", &c[1], &c[2]);
-            }
             let f = format!("air.convert.{dk}.{dn}.{sk}.{sn}");
             let decl = format!("declare {dst} @{f}({src})");
             if !decls.contains(&decl) {
@@ -774,6 +777,16 @@ pub fn speculate_and_sink(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bools_convert_as_xcode_converts_them() {
+        let ir = "define spir_func float @_Z1fbf(i1 %b, float %x) {\n  %conv = uitofp i1 %b to float\n  %tobool = fcmp une float %x, 0.000000e+00\n  %cmp = fcmp une float %x, 0.000000e+00\n  ret float %conv\n}\n";
+        let out = user_scalar_conversions(ir);
+        assert!(out.contains("%conv = tail call fast float @air.convert.f.f32.u.i1(i1 %b)"));
+        assert!(out.contains("%tobool = tail call i1 @air.convert.u.i1.f.f32(float %x)"));
+        // a comparison the user wrote stays one
+        assert!(out.contains("%cmp = fcmp une float %x, 0.000000e+00"));
+    }
 
     #[test]
     fn moved_values_are_frozen() {

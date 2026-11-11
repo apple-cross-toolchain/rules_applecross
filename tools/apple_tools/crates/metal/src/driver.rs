@@ -170,7 +170,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let mut c = Command::new(&clang);
     base(&mut c);
     // -fpreserve-vec3-type: store 3-vectors as 3 elements, as Xcode does (the 4th lane is padding)
-    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-Xclang", "-fconvergent-functions", "-S", "-emit-llvm", "-o"])
+    // value names kept: a conversion to bool (%tobool) is told from a comparison by its name
+    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-Xclang", "-fconvergent-functions", "-fno-discard-value-names", "-S", "-emit-llvm", "-o"])
         .arg(&ll0)
         .args(["-Xclang", "-fdump-record-layouts"])
         .arg(&cpp);
