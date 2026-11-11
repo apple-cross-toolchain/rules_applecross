@@ -1025,10 +1025,10 @@ extern "C" char __air_abs_s_i8(char) __AIR("air.abs.s.i8");
 __attribute__((always_inline)) inline char abs(char x) { return __air_abs_s_i8(x); }
 extern "C" char __air_popcount_s_i8(char) __AIR("air.popcount.i8");
 __attribute__((always_inline)) inline char popcount(char x) { return __air_popcount_s_i8(x); }
-extern "C" char __air_clz_s_i8(char) __AIR("air.clz.i8");
-__attribute__((always_inline)) inline char clz(char x) { return __air_clz_s_i8(x); }
-extern "C" char __air_ctz_s_i8(char) __AIR("air.ctz.i8");
-__attribute__((always_inline)) inline char ctz(char x) { return __air_ctz_s_i8(x); }
+extern "C" char __air_clz_s_i8(char, bool) __AIR("air.clz.i8");
+__attribute__((always_inline)) inline char clz(char x) { return __air_clz_s_i8(x, false); }
+extern "C" char __air_ctz_s_i8(char, bool) __AIR("air.ctz.i8");
+__attribute__((always_inline)) inline char ctz(char x) { return __air_ctz_s_i8(x, false); }
 extern "C" char __air_rotate_s_i8(char, char) __AIR("air.rotate.i8");
 __attribute__((always_inline)) inline char rotate(char x, char y) { return __air_rotate_s_i8(x, y); }
 __attribute__((always_inline)) inline char max3(char a, char b, char c) { return max(max(a, b), c); }
@@ -1049,10 +1049,10 @@ extern "C" char2 __air_abs_s_v2i8(char2) __AIR("air.abs.s.v2i8");
 __attribute__((always_inline)) inline char2 abs(char2 x) { return __air_abs_s_v2i8(x); }
 extern "C" char2 __air_popcount_s_v2i8(char2) __AIR("air.popcount.v2i8");
 __attribute__((always_inline)) inline char2 popcount(char2 x) { return __air_popcount_s_v2i8(x); }
-extern "C" char2 __air_clz_s_v2i8(char2) __AIR("air.clz.v2i8");
-__attribute__((always_inline)) inline char2 clz(char2 x) { return __air_clz_s_v2i8(x); }
-extern "C" char2 __air_ctz_s_v2i8(char2) __AIR("air.ctz.v2i8");
-__attribute__((always_inline)) inline char2 ctz(char2 x) { return __air_ctz_s_v2i8(x); }
+extern "C" char2 __air_clz_s_v2i8(char2, bool) __AIR("air.clz.v2i8");
+__attribute__((always_inline)) inline char2 clz(char2 x) { return __air_clz_s_v2i8(x, false); }
+extern "C" char2 __air_ctz_s_v2i8(char2, bool) __AIR("air.ctz.v2i8");
+__attribute__((always_inline)) inline char2 ctz(char2 x) { return __air_ctz_s_v2i8(x, false); }
 extern "C" char2 __air_rotate_s_v2i8(char2, char2) __AIR("air.rotate.v2i8");
 __attribute__((always_inline)) inline char2 rotate(char2 x, char2 y) { return __air_rotate_s_v2i8(x, y); }
 __attribute__((always_inline)) inline char2 max3(char2 a, char2 b, char2 c) { return max(max(a, b), c); }
@@ -1073,10 +1073,10 @@ extern "C" char3 __air_abs_s_v3i8(char3) __AIR("air.abs.s.v3i8");
 __attribute__((always_inline)) inline char3 abs(char3 x) { return __air_abs_s_v3i8(x); }
 extern "C" char3 __air_popcount_s_v3i8(char3) __AIR("air.popcount.v3i8");
 __attribute__((always_inline)) inline char3 popcount(char3 x) { return __air_popcount_s_v3i8(x); }
-extern "C" char3 __air_clz_s_v3i8(char3) __AIR("air.clz.v3i8");
-__attribute__((always_inline)) inline char3 clz(char3 x) { return __air_clz_s_v3i8(x); }
-extern "C" char3 __air_ctz_s_v3i8(char3) __AIR("air.ctz.v3i8");
-__attribute__((always_inline)) inline char3 ctz(char3 x) { return __air_ctz_s_v3i8(x); }
+extern "C" char3 __air_clz_s_v3i8(char3, bool) __AIR("air.clz.v3i8");
+__attribute__((always_inline)) inline char3 clz(char3 x) { return __air_clz_s_v3i8(x, false); }
+extern "C" char3 __air_ctz_s_v3i8(char3, bool) __AIR("air.ctz.v3i8");
+__attribute__((always_inline)) inline char3 ctz(char3 x) { return __air_ctz_s_v3i8(x, false); }
 extern "C" char3 __air_rotate_s_v3i8(char3, char3) __AIR("air.rotate.v3i8");
 __attribute__((always_inline)) inline char3 rotate(char3 x, char3 y) { return __air_rotate_s_v3i8(x, y); }
 __attribute__((always_inline)) inline char3 max3(char3 a, char3 b, char3 c) { return max(max(a, b), c); }
@@ -1097,10 +1097,10 @@ extern "C" char4 __air_abs_s_v4i8(char4) __AIR("air.abs.s.v4i8");
 __attribute__((always_inline)) inline char4 abs(char4 x) { return __air_abs_s_v4i8(x); }
 extern "C" char4 __air_popcount_s_v4i8(char4) __AIR("air.popcount.v4i8");
 __attribute__((always_inline)) inline char4 popcount(char4 x) { return __air_popcount_s_v4i8(x); }
-extern "C" char4 __air_clz_s_v4i8(char4) __AIR("air.clz.v4i8");
-__attribute__((always_inline)) inline char4 clz(char4 x) { return __air_clz_s_v4i8(x); }
-extern "C" char4 __air_ctz_s_v4i8(char4) __AIR("air.ctz.v4i8");
-__attribute__((always_inline)) inline char4 ctz(char4 x) { return __air_ctz_s_v4i8(x); }
+extern "C" char4 __air_clz_s_v4i8(char4, bool) __AIR("air.clz.v4i8");
+__attribute__((always_inline)) inline char4 clz(char4 x) { return __air_clz_s_v4i8(x, false); }
+extern "C" char4 __air_ctz_s_v4i8(char4, bool) __AIR("air.ctz.v4i8");
+__attribute__((always_inline)) inline char4 ctz(char4 x) { return __air_ctz_s_v4i8(x, false); }
 extern "C" char4 __air_rotate_s_v4i8(char4, char4) __AIR("air.rotate.v4i8");
 __attribute__((always_inline)) inline char4 rotate(char4 x, char4 y) { return __air_rotate_s_v4i8(x, y); }
 __attribute__((always_inline)) inline char4 max3(char4 a, char4 b, char4 c) { return max(max(a, b), c); }
@@ -1121,10 +1121,10 @@ extern "C" uchar __air_abs_u_i8(uchar) __AIR("air.abs.u.i8");
 __attribute__((always_inline)) inline uchar abs(uchar x) { return __air_abs_u_i8(x); }
 extern "C" uchar __air_popcount_u_i8(uchar) __AIR("air.popcount.i8");
 __attribute__((always_inline)) inline uchar popcount(uchar x) { return __air_popcount_u_i8(x); }
-extern "C" uchar __air_clz_u_i8(uchar) __AIR("air.clz.i8");
-__attribute__((always_inline)) inline uchar clz(uchar x) { return __air_clz_u_i8(x); }
-extern "C" uchar __air_ctz_u_i8(uchar) __AIR("air.ctz.i8");
-__attribute__((always_inline)) inline uchar ctz(uchar x) { return __air_ctz_u_i8(x); }
+extern "C" uchar __air_clz_u_i8(uchar, bool) __AIR("air.clz.i8");
+__attribute__((always_inline)) inline uchar clz(uchar x) { return __air_clz_u_i8(x, false); }
+extern "C" uchar __air_ctz_u_i8(uchar, bool) __AIR("air.ctz.i8");
+__attribute__((always_inline)) inline uchar ctz(uchar x) { return __air_ctz_u_i8(x, false); }
 extern "C" uchar __air_rotate_u_i8(uchar, uchar) __AIR("air.rotate.i8");
 __attribute__((always_inline)) inline uchar rotate(uchar x, uchar y) { return __air_rotate_u_i8(x, y); }
 __attribute__((always_inline)) inline uchar max3(uchar a, uchar b, uchar c) { return max(max(a, b), c); }
@@ -1145,10 +1145,10 @@ extern "C" uchar2 __air_abs_u_v2i8(uchar2) __AIR("air.abs.u.v2i8");
 __attribute__((always_inline)) inline uchar2 abs(uchar2 x) { return __air_abs_u_v2i8(x); }
 extern "C" uchar2 __air_popcount_u_v2i8(uchar2) __AIR("air.popcount.v2i8");
 __attribute__((always_inline)) inline uchar2 popcount(uchar2 x) { return __air_popcount_u_v2i8(x); }
-extern "C" uchar2 __air_clz_u_v2i8(uchar2) __AIR("air.clz.v2i8");
-__attribute__((always_inline)) inline uchar2 clz(uchar2 x) { return __air_clz_u_v2i8(x); }
-extern "C" uchar2 __air_ctz_u_v2i8(uchar2) __AIR("air.ctz.v2i8");
-__attribute__((always_inline)) inline uchar2 ctz(uchar2 x) { return __air_ctz_u_v2i8(x); }
+extern "C" uchar2 __air_clz_u_v2i8(uchar2, bool) __AIR("air.clz.v2i8");
+__attribute__((always_inline)) inline uchar2 clz(uchar2 x) { return __air_clz_u_v2i8(x, false); }
+extern "C" uchar2 __air_ctz_u_v2i8(uchar2, bool) __AIR("air.ctz.v2i8");
+__attribute__((always_inline)) inline uchar2 ctz(uchar2 x) { return __air_ctz_u_v2i8(x, false); }
 extern "C" uchar2 __air_rotate_u_v2i8(uchar2, uchar2) __AIR("air.rotate.v2i8");
 __attribute__((always_inline)) inline uchar2 rotate(uchar2 x, uchar2 y) { return __air_rotate_u_v2i8(x, y); }
 __attribute__((always_inline)) inline uchar2 max3(uchar2 a, uchar2 b, uchar2 c) { return max(max(a, b), c); }
@@ -1169,10 +1169,10 @@ extern "C" uchar3 __air_abs_u_v3i8(uchar3) __AIR("air.abs.u.v3i8");
 __attribute__((always_inline)) inline uchar3 abs(uchar3 x) { return __air_abs_u_v3i8(x); }
 extern "C" uchar3 __air_popcount_u_v3i8(uchar3) __AIR("air.popcount.v3i8");
 __attribute__((always_inline)) inline uchar3 popcount(uchar3 x) { return __air_popcount_u_v3i8(x); }
-extern "C" uchar3 __air_clz_u_v3i8(uchar3) __AIR("air.clz.v3i8");
-__attribute__((always_inline)) inline uchar3 clz(uchar3 x) { return __air_clz_u_v3i8(x); }
-extern "C" uchar3 __air_ctz_u_v3i8(uchar3) __AIR("air.ctz.v3i8");
-__attribute__((always_inline)) inline uchar3 ctz(uchar3 x) { return __air_ctz_u_v3i8(x); }
+extern "C" uchar3 __air_clz_u_v3i8(uchar3, bool) __AIR("air.clz.v3i8");
+__attribute__((always_inline)) inline uchar3 clz(uchar3 x) { return __air_clz_u_v3i8(x, false); }
+extern "C" uchar3 __air_ctz_u_v3i8(uchar3, bool) __AIR("air.ctz.v3i8");
+__attribute__((always_inline)) inline uchar3 ctz(uchar3 x) { return __air_ctz_u_v3i8(x, false); }
 extern "C" uchar3 __air_rotate_u_v3i8(uchar3, uchar3) __AIR("air.rotate.v3i8");
 __attribute__((always_inline)) inline uchar3 rotate(uchar3 x, uchar3 y) { return __air_rotate_u_v3i8(x, y); }
 __attribute__((always_inline)) inline uchar3 max3(uchar3 a, uchar3 b, uchar3 c) { return max(max(a, b), c); }
@@ -1193,10 +1193,10 @@ extern "C" uchar4 __air_abs_u_v4i8(uchar4) __AIR("air.abs.u.v4i8");
 __attribute__((always_inline)) inline uchar4 abs(uchar4 x) { return __air_abs_u_v4i8(x); }
 extern "C" uchar4 __air_popcount_u_v4i8(uchar4) __AIR("air.popcount.v4i8");
 __attribute__((always_inline)) inline uchar4 popcount(uchar4 x) { return __air_popcount_u_v4i8(x); }
-extern "C" uchar4 __air_clz_u_v4i8(uchar4) __AIR("air.clz.v4i8");
-__attribute__((always_inline)) inline uchar4 clz(uchar4 x) { return __air_clz_u_v4i8(x); }
-extern "C" uchar4 __air_ctz_u_v4i8(uchar4) __AIR("air.ctz.v4i8");
-__attribute__((always_inline)) inline uchar4 ctz(uchar4 x) { return __air_ctz_u_v4i8(x); }
+extern "C" uchar4 __air_clz_u_v4i8(uchar4, bool) __AIR("air.clz.v4i8");
+__attribute__((always_inline)) inline uchar4 clz(uchar4 x) { return __air_clz_u_v4i8(x, false); }
+extern "C" uchar4 __air_ctz_u_v4i8(uchar4, bool) __AIR("air.ctz.v4i8");
+__attribute__((always_inline)) inline uchar4 ctz(uchar4 x) { return __air_ctz_u_v4i8(x, false); }
 extern "C" uchar4 __air_rotate_u_v4i8(uchar4, uchar4) __AIR("air.rotate.v4i8");
 __attribute__((always_inline)) inline uchar4 rotate(uchar4 x, uchar4 y) { return __air_rotate_u_v4i8(x, y); }
 __attribute__((always_inline)) inline uchar4 max3(uchar4 a, uchar4 b, uchar4 c) { return max(max(a, b), c); }
@@ -1217,10 +1217,10 @@ extern "C" short __air_abs_s_i16(short) __AIR("air.abs.s.i16");
 __attribute__((always_inline)) inline short abs(short x) { return __air_abs_s_i16(x); }
 extern "C" short __air_popcount_s_i16(short) __AIR("air.popcount.i16");
 __attribute__((always_inline)) inline short popcount(short x) { return __air_popcount_s_i16(x); }
-extern "C" short __air_clz_s_i16(short) __AIR("air.clz.i16");
-__attribute__((always_inline)) inline short clz(short x) { return __air_clz_s_i16(x); }
-extern "C" short __air_ctz_s_i16(short) __AIR("air.ctz.i16");
-__attribute__((always_inline)) inline short ctz(short x) { return __air_ctz_s_i16(x); }
+extern "C" short __air_clz_s_i16(short, bool) __AIR("air.clz.i16");
+__attribute__((always_inline)) inline short clz(short x) { return __air_clz_s_i16(x, false); }
+extern "C" short __air_ctz_s_i16(short, bool) __AIR("air.ctz.i16");
+__attribute__((always_inline)) inline short ctz(short x) { return __air_ctz_s_i16(x, false); }
 extern "C" short __air_rotate_s_i16(short, short) __AIR("air.rotate.i16");
 __attribute__((always_inline)) inline short rotate(short x, short y) { return __air_rotate_s_i16(x, y); }
 __attribute__((always_inline)) inline short max3(short a, short b, short c) { return max(max(a, b), c); }
@@ -1241,10 +1241,10 @@ extern "C" short2 __air_abs_s_v2i16(short2) __AIR("air.abs.s.v2i16");
 __attribute__((always_inline)) inline short2 abs(short2 x) { return __air_abs_s_v2i16(x); }
 extern "C" short2 __air_popcount_s_v2i16(short2) __AIR("air.popcount.v2i16");
 __attribute__((always_inline)) inline short2 popcount(short2 x) { return __air_popcount_s_v2i16(x); }
-extern "C" short2 __air_clz_s_v2i16(short2) __AIR("air.clz.v2i16");
-__attribute__((always_inline)) inline short2 clz(short2 x) { return __air_clz_s_v2i16(x); }
-extern "C" short2 __air_ctz_s_v2i16(short2) __AIR("air.ctz.v2i16");
-__attribute__((always_inline)) inline short2 ctz(short2 x) { return __air_ctz_s_v2i16(x); }
+extern "C" short2 __air_clz_s_v2i16(short2, bool) __AIR("air.clz.v2i16");
+__attribute__((always_inline)) inline short2 clz(short2 x) { return __air_clz_s_v2i16(x, false); }
+extern "C" short2 __air_ctz_s_v2i16(short2, bool) __AIR("air.ctz.v2i16");
+__attribute__((always_inline)) inline short2 ctz(short2 x) { return __air_ctz_s_v2i16(x, false); }
 extern "C" short2 __air_rotate_s_v2i16(short2, short2) __AIR("air.rotate.v2i16");
 __attribute__((always_inline)) inline short2 rotate(short2 x, short2 y) { return __air_rotate_s_v2i16(x, y); }
 __attribute__((always_inline)) inline short2 max3(short2 a, short2 b, short2 c) { return max(max(a, b), c); }
@@ -1265,10 +1265,10 @@ extern "C" short3 __air_abs_s_v3i16(short3) __AIR("air.abs.s.v3i16");
 __attribute__((always_inline)) inline short3 abs(short3 x) { return __air_abs_s_v3i16(x); }
 extern "C" short3 __air_popcount_s_v3i16(short3) __AIR("air.popcount.v3i16");
 __attribute__((always_inline)) inline short3 popcount(short3 x) { return __air_popcount_s_v3i16(x); }
-extern "C" short3 __air_clz_s_v3i16(short3) __AIR("air.clz.v3i16");
-__attribute__((always_inline)) inline short3 clz(short3 x) { return __air_clz_s_v3i16(x); }
-extern "C" short3 __air_ctz_s_v3i16(short3) __AIR("air.ctz.v3i16");
-__attribute__((always_inline)) inline short3 ctz(short3 x) { return __air_ctz_s_v3i16(x); }
+extern "C" short3 __air_clz_s_v3i16(short3, bool) __AIR("air.clz.v3i16");
+__attribute__((always_inline)) inline short3 clz(short3 x) { return __air_clz_s_v3i16(x, false); }
+extern "C" short3 __air_ctz_s_v3i16(short3, bool) __AIR("air.ctz.v3i16");
+__attribute__((always_inline)) inline short3 ctz(short3 x) { return __air_ctz_s_v3i16(x, false); }
 extern "C" short3 __air_rotate_s_v3i16(short3, short3) __AIR("air.rotate.v3i16");
 __attribute__((always_inline)) inline short3 rotate(short3 x, short3 y) { return __air_rotate_s_v3i16(x, y); }
 __attribute__((always_inline)) inline short3 max3(short3 a, short3 b, short3 c) { return max(max(a, b), c); }
@@ -1289,10 +1289,10 @@ extern "C" short4 __air_abs_s_v4i16(short4) __AIR("air.abs.s.v4i16");
 __attribute__((always_inline)) inline short4 abs(short4 x) { return __air_abs_s_v4i16(x); }
 extern "C" short4 __air_popcount_s_v4i16(short4) __AIR("air.popcount.v4i16");
 __attribute__((always_inline)) inline short4 popcount(short4 x) { return __air_popcount_s_v4i16(x); }
-extern "C" short4 __air_clz_s_v4i16(short4) __AIR("air.clz.v4i16");
-__attribute__((always_inline)) inline short4 clz(short4 x) { return __air_clz_s_v4i16(x); }
-extern "C" short4 __air_ctz_s_v4i16(short4) __AIR("air.ctz.v4i16");
-__attribute__((always_inline)) inline short4 ctz(short4 x) { return __air_ctz_s_v4i16(x); }
+extern "C" short4 __air_clz_s_v4i16(short4, bool) __AIR("air.clz.v4i16");
+__attribute__((always_inline)) inline short4 clz(short4 x) { return __air_clz_s_v4i16(x, false); }
+extern "C" short4 __air_ctz_s_v4i16(short4, bool) __AIR("air.ctz.v4i16");
+__attribute__((always_inline)) inline short4 ctz(short4 x) { return __air_ctz_s_v4i16(x, false); }
 extern "C" short4 __air_rotate_s_v4i16(short4, short4) __AIR("air.rotate.v4i16");
 __attribute__((always_inline)) inline short4 rotate(short4 x, short4 y) { return __air_rotate_s_v4i16(x, y); }
 __attribute__((always_inline)) inline short4 max3(short4 a, short4 b, short4 c) { return max(max(a, b), c); }
@@ -1313,10 +1313,10 @@ extern "C" ushort __air_abs_u_i16(ushort) __AIR("air.abs.u.i16");
 __attribute__((always_inline)) inline ushort abs(ushort x) { return __air_abs_u_i16(x); }
 extern "C" ushort __air_popcount_u_i16(ushort) __AIR("air.popcount.i16");
 __attribute__((always_inline)) inline ushort popcount(ushort x) { return __air_popcount_u_i16(x); }
-extern "C" ushort __air_clz_u_i16(ushort) __AIR("air.clz.i16");
-__attribute__((always_inline)) inline ushort clz(ushort x) { return __air_clz_u_i16(x); }
-extern "C" ushort __air_ctz_u_i16(ushort) __AIR("air.ctz.i16");
-__attribute__((always_inline)) inline ushort ctz(ushort x) { return __air_ctz_u_i16(x); }
+extern "C" ushort __air_clz_u_i16(ushort, bool) __AIR("air.clz.i16");
+__attribute__((always_inline)) inline ushort clz(ushort x) { return __air_clz_u_i16(x, false); }
+extern "C" ushort __air_ctz_u_i16(ushort, bool) __AIR("air.ctz.i16");
+__attribute__((always_inline)) inline ushort ctz(ushort x) { return __air_ctz_u_i16(x, false); }
 extern "C" ushort __air_rotate_u_i16(ushort, ushort) __AIR("air.rotate.i16");
 __attribute__((always_inline)) inline ushort rotate(ushort x, ushort y) { return __air_rotate_u_i16(x, y); }
 __attribute__((always_inline)) inline ushort max3(ushort a, ushort b, ushort c) { return max(max(a, b), c); }
@@ -1337,10 +1337,10 @@ extern "C" ushort2 __air_abs_u_v2i16(ushort2) __AIR("air.abs.u.v2i16");
 __attribute__((always_inline)) inline ushort2 abs(ushort2 x) { return __air_abs_u_v2i16(x); }
 extern "C" ushort2 __air_popcount_u_v2i16(ushort2) __AIR("air.popcount.v2i16");
 __attribute__((always_inline)) inline ushort2 popcount(ushort2 x) { return __air_popcount_u_v2i16(x); }
-extern "C" ushort2 __air_clz_u_v2i16(ushort2) __AIR("air.clz.v2i16");
-__attribute__((always_inline)) inline ushort2 clz(ushort2 x) { return __air_clz_u_v2i16(x); }
-extern "C" ushort2 __air_ctz_u_v2i16(ushort2) __AIR("air.ctz.v2i16");
-__attribute__((always_inline)) inline ushort2 ctz(ushort2 x) { return __air_ctz_u_v2i16(x); }
+extern "C" ushort2 __air_clz_u_v2i16(ushort2, bool) __AIR("air.clz.v2i16");
+__attribute__((always_inline)) inline ushort2 clz(ushort2 x) { return __air_clz_u_v2i16(x, false); }
+extern "C" ushort2 __air_ctz_u_v2i16(ushort2, bool) __AIR("air.ctz.v2i16");
+__attribute__((always_inline)) inline ushort2 ctz(ushort2 x) { return __air_ctz_u_v2i16(x, false); }
 extern "C" ushort2 __air_rotate_u_v2i16(ushort2, ushort2) __AIR("air.rotate.v2i16");
 __attribute__((always_inline)) inline ushort2 rotate(ushort2 x, ushort2 y) { return __air_rotate_u_v2i16(x, y); }
 __attribute__((always_inline)) inline ushort2 max3(ushort2 a, ushort2 b, ushort2 c) { return max(max(a, b), c); }
@@ -1361,10 +1361,10 @@ extern "C" ushort3 __air_abs_u_v3i16(ushort3) __AIR("air.abs.u.v3i16");
 __attribute__((always_inline)) inline ushort3 abs(ushort3 x) { return __air_abs_u_v3i16(x); }
 extern "C" ushort3 __air_popcount_u_v3i16(ushort3) __AIR("air.popcount.v3i16");
 __attribute__((always_inline)) inline ushort3 popcount(ushort3 x) { return __air_popcount_u_v3i16(x); }
-extern "C" ushort3 __air_clz_u_v3i16(ushort3) __AIR("air.clz.v3i16");
-__attribute__((always_inline)) inline ushort3 clz(ushort3 x) { return __air_clz_u_v3i16(x); }
-extern "C" ushort3 __air_ctz_u_v3i16(ushort3) __AIR("air.ctz.v3i16");
-__attribute__((always_inline)) inline ushort3 ctz(ushort3 x) { return __air_ctz_u_v3i16(x); }
+extern "C" ushort3 __air_clz_u_v3i16(ushort3, bool) __AIR("air.clz.v3i16");
+__attribute__((always_inline)) inline ushort3 clz(ushort3 x) { return __air_clz_u_v3i16(x, false); }
+extern "C" ushort3 __air_ctz_u_v3i16(ushort3, bool) __AIR("air.ctz.v3i16");
+__attribute__((always_inline)) inline ushort3 ctz(ushort3 x) { return __air_ctz_u_v3i16(x, false); }
 extern "C" ushort3 __air_rotate_u_v3i16(ushort3, ushort3) __AIR("air.rotate.v3i16");
 __attribute__((always_inline)) inline ushort3 rotate(ushort3 x, ushort3 y) { return __air_rotate_u_v3i16(x, y); }
 __attribute__((always_inline)) inline ushort3 max3(ushort3 a, ushort3 b, ushort3 c) { return max(max(a, b), c); }
@@ -1385,10 +1385,10 @@ extern "C" ushort4 __air_abs_u_v4i16(ushort4) __AIR("air.abs.u.v4i16");
 __attribute__((always_inline)) inline ushort4 abs(ushort4 x) { return __air_abs_u_v4i16(x); }
 extern "C" ushort4 __air_popcount_u_v4i16(ushort4) __AIR("air.popcount.v4i16");
 __attribute__((always_inline)) inline ushort4 popcount(ushort4 x) { return __air_popcount_u_v4i16(x); }
-extern "C" ushort4 __air_clz_u_v4i16(ushort4) __AIR("air.clz.v4i16");
-__attribute__((always_inline)) inline ushort4 clz(ushort4 x) { return __air_clz_u_v4i16(x); }
-extern "C" ushort4 __air_ctz_u_v4i16(ushort4) __AIR("air.ctz.v4i16");
-__attribute__((always_inline)) inline ushort4 ctz(ushort4 x) { return __air_ctz_u_v4i16(x); }
+extern "C" ushort4 __air_clz_u_v4i16(ushort4, bool) __AIR("air.clz.v4i16");
+__attribute__((always_inline)) inline ushort4 clz(ushort4 x) { return __air_clz_u_v4i16(x, false); }
+extern "C" ushort4 __air_ctz_u_v4i16(ushort4, bool) __AIR("air.ctz.v4i16");
+__attribute__((always_inline)) inline ushort4 ctz(ushort4 x) { return __air_ctz_u_v4i16(x, false); }
 extern "C" ushort4 __air_rotate_u_v4i16(ushort4, ushort4) __AIR("air.rotate.v4i16");
 __attribute__((always_inline)) inline ushort4 rotate(ushort4 x, ushort4 y) { return __air_rotate_u_v4i16(x, y); }
 __attribute__((always_inline)) inline ushort4 max3(ushort4 a, ushort4 b, ushort4 c) { return max(max(a, b), c); }
@@ -1409,10 +1409,10 @@ extern "C" int __air_abs_s_i32(int) __AIR("air.abs.s.i32");
 __attribute__((always_inline)) inline int abs(int x) { return __air_abs_s_i32(x); }
 extern "C" int __air_popcount_s_i32(int) __AIR("air.popcount.i32");
 __attribute__((always_inline)) inline int popcount(int x) { return __air_popcount_s_i32(x); }
-extern "C" int __air_clz_s_i32(int) __AIR("air.clz.i32");
-__attribute__((always_inline)) inline int clz(int x) { return __air_clz_s_i32(x); }
-extern "C" int __air_ctz_s_i32(int) __AIR("air.ctz.i32");
-__attribute__((always_inline)) inline int ctz(int x) { return __air_ctz_s_i32(x); }
+extern "C" int __air_clz_s_i32(int, bool) __AIR("air.clz.i32");
+__attribute__((always_inline)) inline int clz(int x) { return __air_clz_s_i32(x, false); }
+extern "C" int __air_ctz_s_i32(int, bool) __AIR("air.ctz.i32");
+__attribute__((always_inline)) inline int ctz(int x) { return __air_ctz_s_i32(x, false); }
 extern "C" int __air_rotate_s_i32(int, int) __AIR("air.rotate.i32");
 __attribute__((always_inline)) inline int rotate(int x, int y) { return __air_rotate_s_i32(x, y); }
 __attribute__((always_inline)) inline int max3(int a, int b, int c) { return max(max(a, b), c); }
@@ -1433,10 +1433,10 @@ extern "C" int2 __air_abs_s_v2i32(int2) __AIR("air.abs.s.v2i32");
 __attribute__((always_inline)) inline int2 abs(int2 x) { return __air_abs_s_v2i32(x); }
 extern "C" int2 __air_popcount_s_v2i32(int2) __AIR("air.popcount.v2i32");
 __attribute__((always_inline)) inline int2 popcount(int2 x) { return __air_popcount_s_v2i32(x); }
-extern "C" int2 __air_clz_s_v2i32(int2) __AIR("air.clz.v2i32");
-__attribute__((always_inline)) inline int2 clz(int2 x) { return __air_clz_s_v2i32(x); }
-extern "C" int2 __air_ctz_s_v2i32(int2) __AIR("air.ctz.v2i32");
-__attribute__((always_inline)) inline int2 ctz(int2 x) { return __air_ctz_s_v2i32(x); }
+extern "C" int2 __air_clz_s_v2i32(int2, bool) __AIR("air.clz.v2i32");
+__attribute__((always_inline)) inline int2 clz(int2 x) { return __air_clz_s_v2i32(x, false); }
+extern "C" int2 __air_ctz_s_v2i32(int2, bool) __AIR("air.ctz.v2i32");
+__attribute__((always_inline)) inline int2 ctz(int2 x) { return __air_ctz_s_v2i32(x, false); }
 extern "C" int2 __air_rotate_s_v2i32(int2, int2) __AIR("air.rotate.v2i32");
 __attribute__((always_inline)) inline int2 rotate(int2 x, int2 y) { return __air_rotate_s_v2i32(x, y); }
 __attribute__((always_inline)) inline int2 max3(int2 a, int2 b, int2 c) { return max(max(a, b), c); }
@@ -1457,10 +1457,10 @@ extern "C" int3 __air_abs_s_v3i32(int3) __AIR("air.abs.s.v3i32");
 __attribute__((always_inline)) inline int3 abs(int3 x) { return __air_abs_s_v3i32(x); }
 extern "C" int3 __air_popcount_s_v3i32(int3) __AIR("air.popcount.v3i32");
 __attribute__((always_inline)) inline int3 popcount(int3 x) { return __air_popcount_s_v3i32(x); }
-extern "C" int3 __air_clz_s_v3i32(int3) __AIR("air.clz.v3i32");
-__attribute__((always_inline)) inline int3 clz(int3 x) { return __air_clz_s_v3i32(x); }
-extern "C" int3 __air_ctz_s_v3i32(int3) __AIR("air.ctz.v3i32");
-__attribute__((always_inline)) inline int3 ctz(int3 x) { return __air_ctz_s_v3i32(x); }
+extern "C" int3 __air_clz_s_v3i32(int3, bool) __AIR("air.clz.v3i32");
+__attribute__((always_inline)) inline int3 clz(int3 x) { return __air_clz_s_v3i32(x, false); }
+extern "C" int3 __air_ctz_s_v3i32(int3, bool) __AIR("air.ctz.v3i32");
+__attribute__((always_inline)) inline int3 ctz(int3 x) { return __air_ctz_s_v3i32(x, false); }
 extern "C" int3 __air_rotate_s_v3i32(int3, int3) __AIR("air.rotate.v3i32");
 __attribute__((always_inline)) inline int3 rotate(int3 x, int3 y) { return __air_rotate_s_v3i32(x, y); }
 __attribute__((always_inline)) inline int3 max3(int3 a, int3 b, int3 c) { return max(max(a, b), c); }
@@ -1481,10 +1481,10 @@ extern "C" int4 __air_abs_s_v4i32(int4) __AIR("air.abs.s.v4i32");
 __attribute__((always_inline)) inline int4 abs(int4 x) { return __air_abs_s_v4i32(x); }
 extern "C" int4 __air_popcount_s_v4i32(int4) __AIR("air.popcount.v4i32");
 __attribute__((always_inline)) inline int4 popcount(int4 x) { return __air_popcount_s_v4i32(x); }
-extern "C" int4 __air_clz_s_v4i32(int4) __AIR("air.clz.v4i32");
-__attribute__((always_inline)) inline int4 clz(int4 x) { return __air_clz_s_v4i32(x); }
-extern "C" int4 __air_ctz_s_v4i32(int4) __AIR("air.ctz.v4i32");
-__attribute__((always_inline)) inline int4 ctz(int4 x) { return __air_ctz_s_v4i32(x); }
+extern "C" int4 __air_clz_s_v4i32(int4, bool) __AIR("air.clz.v4i32");
+__attribute__((always_inline)) inline int4 clz(int4 x) { return __air_clz_s_v4i32(x, false); }
+extern "C" int4 __air_ctz_s_v4i32(int4, bool) __AIR("air.ctz.v4i32");
+__attribute__((always_inline)) inline int4 ctz(int4 x) { return __air_ctz_s_v4i32(x, false); }
 extern "C" int4 __air_rotate_s_v4i32(int4, int4) __AIR("air.rotate.v4i32");
 __attribute__((always_inline)) inline int4 rotate(int4 x, int4 y) { return __air_rotate_s_v4i32(x, y); }
 __attribute__((always_inline)) inline int4 max3(int4 a, int4 b, int4 c) { return max(max(a, b), c); }
@@ -1505,10 +1505,10 @@ extern "C" uint __air_abs_u_i32(uint) __AIR("air.abs.u.i32");
 __attribute__((always_inline)) inline uint abs(uint x) { return __air_abs_u_i32(x); }
 extern "C" uint __air_popcount_u_i32(uint) __AIR("air.popcount.i32");
 __attribute__((always_inline)) inline uint popcount(uint x) { return __air_popcount_u_i32(x); }
-extern "C" uint __air_clz_u_i32(uint) __AIR("air.clz.i32");
-__attribute__((always_inline)) inline uint clz(uint x) { return __air_clz_u_i32(x); }
-extern "C" uint __air_ctz_u_i32(uint) __AIR("air.ctz.i32");
-__attribute__((always_inline)) inline uint ctz(uint x) { return __air_ctz_u_i32(x); }
+extern "C" uint __air_clz_u_i32(uint, bool) __AIR("air.clz.i32");
+__attribute__((always_inline)) inline uint clz(uint x) { return __air_clz_u_i32(x, false); }
+extern "C" uint __air_ctz_u_i32(uint, bool) __AIR("air.ctz.i32");
+__attribute__((always_inline)) inline uint ctz(uint x) { return __air_ctz_u_i32(x, false); }
 extern "C" uint __air_rotate_u_i32(uint, uint) __AIR("air.rotate.i32");
 __attribute__((always_inline)) inline uint rotate(uint x, uint y) { return __air_rotate_u_i32(x, y); }
 __attribute__((always_inline)) inline uint max3(uint a, uint b, uint c) { return max(max(a, b), c); }
@@ -1529,10 +1529,10 @@ extern "C" uint2 __air_abs_u_v2i32(uint2) __AIR("air.abs.u.v2i32");
 __attribute__((always_inline)) inline uint2 abs(uint2 x) { return __air_abs_u_v2i32(x); }
 extern "C" uint2 __air_popcount_u_v2i32(uint2) __AIR("air.popcount.v2i32");
 __attribute__((always_inline)) inline uint2 popcount(uint2 x) { return __air_popcount_u_v2i32(x); }
-extern "C" uint2 __air_clz_u_v2i32(uint2) __AIR("air.clz.v2i32");
-__attribute__((always_inline)) inline uint2 clz(uint2 x) { return __air_clz_u_v2i32(x); }
-extern "C" uint2 __air_ctz_u_v2i32(uint2) __AIR("air.ctz.v2i32");
-__attribute__((always_inline)) inline uint2 ctz(uint2 x) { return __air_ctz_u_v2i32(x); }
+extern "C" uint2 __air_clz_u_v2i32(uint2, bool) __AIR("air.clz.v2i32");
+__attribute__((always_inline)) inline uint2 clz(uint2 x) { return __air_clz_u_v2i32(x, false); }
+extern "C" uint2 __air_ctz_u_v2i32(uint2, bool) __AIR("air.ctz.v2i32");
+__attribute__((always_inline)) inline uint2 ctz(uint2 x) { return __air_ctz_u_v2i32(x, false); }
 extern "C" uint2 __air_rotate_u_v2i32(uint2, uint2) __AIR("air.rotate.v2i32");
 __attribute__((always_inline)) inline uint2 rotate(uint2 x, uint2 y) { return __air_rotate_u_v2i32(x, y); }
 __attribute__((always_inline)) inline uint2 max3(uint2 a, uint2 b, uint2 c) { return max(max(a, b), c); }
@@ -1553,10 +1553,10 @@ extern "C" uint3 __air_abs_u_v3i32(uint3) __AIR("air.abs.u.v3i32");
 __attribute__((always_inline)) inline uint3 abs(uint3 x) { return __air_abs_u_v3i32(x); }
 extern "C" uint3 __air_popcount_u_v3i32(uint3) __AIR("air.popcount.v3i32");
 __attribute__((always_inline)) inline uint3 popcount(uint3 x) { return __air_popcount_u_v3i32(x); }
-extern "C" uint3 __air_clz_u_v3i32(uint3) __AIR("air.clz.v3i32");
-__attribute__((always_inline)) inline uint3 clz(uint3 x) { return __air_clz_u_v3i32(x); }
-extern "C" uint3 __air_ctz_u_v3i32(uint3) __AIR("air.ctz.v3i32");
-__attribute__((always_inline)) inline uint3 ctz(uint3 x) { return __air_ctz_u_v3i32(x); }
+extern "C" uint3 __air_clz_u_v3i32(uint3, bool) __AIR("air.clz.v3i32");
+__attribute__((always_inline)) inline uint3 clz(uint3 x) { return __air_clz_u_v3i32(x, false); }
+extern "C" uint3 __air_ctz_u_v3i32(uint3, bool) __AIR("air.ctz.v3i32");
+__attribute__((always_inline)) inline uint3 ctz(uint3 x) { return __air_ctz_u_v3i32(x, false); }
 extern "C" uint3 __air_rotate_u_v3i32(uint3, uint3) __AIR("air.rotate.v3i32");
 __attribute__((always_inline)) inline uint3 rotate(uint3 x, uint3 y) { return __air_rotate_u_v3i32(x, y); }
 __attribute__((always_inline)) inline uint3 max3(uint3 a, uint3 b, uint3 c) { return max(max(a, b), c); }
@@ -1577,10 +1577,10 @@ extern "C" uint4 __air_abs_u_v4i32(uint4) __AIR("air.abs.u.v4i32");
 __attribute__((always_inline)) inline uint4 abs(uint4 x) { return __air_abs_u_v4i32(x); }
 extern "C" uint4 __air_popcount_u_v4i32(uint4) __AIR("air.popcount.v4i32");
 __attribute__((always_inline)) inline uint4 popcount(uint4 x) { return __air_popcount_u_v4i32(x); }
-extern "C" uint4 __air_clz_u_v4i32(uint4) __AIR("air.clz.v4i32");
-__attribute__((always_inline)) inline uint4 clz(uint4 x) { return __air_clz_u_v4i32(x); }
-extern "C" uint4 __air_ctz_u_v4i32(uint4) __AIR("air.ctz.v4i32");
-__attribute__((always_inline)) inline uint4 ctz(uint4 x) { return __air_ctz_u_v4i32(x); }
+extern "C" uint4 __air_clz_u_v4i32(uint4, bool) __AIR("air.clz.v4i32");
+__attribute__((always_inline)) inline uint4 clz(uint4 x) { return __air_clz_u_v4i32(x, false); }
+extern "C" uint4 __air_ctz_u_v4i32(uint4, bool) __AIR("air.ctz.v4i32");
+__attribute__((always_inline)) inline uint4 ctz(uint4 x) { return __air_ctz_u_v4i32(x, false); }
 extern "C" uint4 __air_rotate_u_v4i32(uint4, uint4) __AIR("air.rotate.v4i32");
 __attribute__((always_inline)) inline uint4 rotate(uint4 x, uint4 y) { return __air_rotate_u_v4i32(x, y); }
 __attribute__((always_inline)) inline uint4 max3(uint4 a, uint4 b, uint4 c) { return max(max(a, b), c); }
@@ -1601,10 +1601,10 @@ extern "C" long __air_abs_s_i64(long) __AIR("air.abs.s.i64");
 __attribute__((always_inline)) inline long abs(long x) { return __air_abs_s_i64(x); }
 extern "C" long __air_popcount_s_i64(long) __AIR("air.popcount.i64");
 __attribute__((always_inline)) inline long popcount(long x) { return __air_popcount_s_i64(x); }
-extern "C" long __air_clz_s_i64(long) __AIR("air.clz.i64");
-__attribute__((always_inline)) inline long clz(long x) { return __air_clz_s_i64(x); }
-extern "C" long __air_ctz_s_i64(long) __AIR("air.ctz.i64");
-__attribute__((always_inline)) inline long ctz(long x) { return __air_ctz_s_i64(x); }
+extern "C" long __air_clz_s_i64(long, bool) __AIR("air.clz.i64");
+__attribute__((always_inline)) inline long clz(long x) { return __air_clz_s_i64(x, false); }
+extern "C" long __air_ctz_s_i64(long, bool) __AIR("air.ctz.i64");
+__attribute__((always_inline)) inline long ctz(long x) { return __air_ctz_s_i64(x, false); }
 extern "C" long __air_rotate_s_i64(long, long) __AIR("air.rotate.i64");
 __attribute__((always_inline)) inline long rotate(long x, long y) { return __air_rotate_s_i64(x, y); }
 __attribute__((always_inline)) inline long max3(long a, long b, long c) { return max(max(a, b), c); }
@@ -1625,10 +1625,10 @@ extern "C" long2 __air_abs_s_v2i64(long2) __AIR("air.abs.s.v2i64");
 __attribute__((always_inline)) inline long2 abs(long2 x) { return __air_abs_s_v2i64(x); }
 extern "C" long2 __air_popcount_s_v2i64(long2) __AIR("air.popcount.v2i64");
 __attribute__((always_inline)) inline long2 popcount(long2 x) { return __air_popcount_s_v2i64(x); }
-extern "C" long2 __air_clz_s_v2i64(long2) __AIR("air.clz.v2i64");
-__attribute__((always_inline)) inline long2 clz(long2 x) { return __air_clz_s_v2i64(x); }
-extern "C" long2 __air_ctz_s_v2i64(long2) __AIR("air.ctz.v2i64");
-__attribute__((always_inline)) inline long2 ctz(long2 x) { return __air_ctz_s_v2i64(x); }
+extern "C" long2 __air_clz_s_v2i64(long2, bool) __AIR("air.clz.v2i64");
+__attribute__((always_inline)) inline long2 clz(long2 x) { return __air_clz_s_v2i64(x, false); }
+extern "C" long2 __air_ctz_s_v2i64(long2, bool) __AIR("air.ctz.v2i64");
+__attribute__((always_inline)) inline long2 ctz(long2 x) { return __air_ctz_s_v2i64(x, false); }
 extern "C" long2 __air_rotate_s_v2i64(long2, long2) __AIR("air.rotate.v2i64");
 __attribute__((always_inline)) inline long2 rotate(long2 x, long2 y) { return __air_rotate_s_v2i64(x, y); }
 __attribute__((always_inline)) inline long2 max3(long2 a, long2 b, long2 c) { return max(max(a, b), c); }
@@ -1649,10 +1649,10 @@ extern "C" long3 __air_abs_s_v3i64(long3) __AIR("air.abs.s.v3i64");
 __attribute__((always_inline)) inline long3 abs(long3 x) { return __air_abs_s_v3i64(x); }
 extern "C" long3 __air_popcount_s_v3i64(long3) __AIR("air.popcount.v3i64");
 __attribute__((always_inline)) inline long3 popcount(long3 x) { return __air_popcount_s_v3i64(x); }
-extern "C" long3 __air_clz_s_v3i64(long3) __AIR("air.clz.v3i64");
-__attribute__((always_inline)) inline long3 clz(long3 x) { return __air_clz_s_v3i64(x); }
-extern "C" long3 __air_ctz_s_v3i64(long3) __AIR("air.ctz.v3i64");
-__attribute__((always_inline)) inline long3 ctz(long3 x) { return __air_ctz_s_v3i64(x); }
+extern "C" long3 __air_clz_s_v3i64(long3, bool) __AIR("air.clz.v3i64");
+__attribute__((always_inline)) inline long3 clz(long3 x) { return __air_clz_s_v3i64(x, false); }
+extern "C" long3 __air_ctz_s_v3i64(long3, bool) __AIR("air.ctz.v3i64");
+__attribute__((always_inline)) inline long3 ctz(long3 x) { return __air_ctz_s_v3i64(x, false); }
 extern "C" long3 __air_rotate_s_v3i64(long3, long3) __AIR("air.rotate.v3i64");
 __attribute__((always_inline)) inline long3 rotate(long3 x, long3 y) { return __air_rotate_s_v3i64(x, y); }
 __attribute__((always_inline)) inline long3 max3(long3 a, long3 b, long3 c) { return max(max(a, b), c); }
@@ -1673,10 +1673,10 @@ extern "C" long4 __air_abs_s_v4i64(long4) __AIR("air.abs.s.v4i64");
 __attribute__((always_inline)) inline long4 abs(long4 x) { return __air_abs_s_v4i64(x); }
 extern "C" long4 __air_popcount_s_v4i64(long4) __AIR("air.popcount.v4i64");
 __attribute__((always_inline)) inline long4 popcount(long4 x) { return __air_popcount_s_v4i64(x); }
-extern "C" long4 __air_clz_s_v4i64(long4) __AIR("air.clz.v4i64");
-__attribute__((always_inline)) inline long4 clz(long4 x) { return __air_clz_s_v4i64(x); }
-extern "C" long4 __air_ctz_s_v4i64(long4) __AIR("air.ctz.v4i64");
-__attribute__((always_inline)) inline long4 ctz(long4 x) { return __air_ctz_s_v4i64(x); }
+extern "C" long4 __air_clz_s_v4i64(long4, bool) __AIR("air.clz.v4i64");
+__attribute__((always_inline)) inline long4 clz(long4 x) { return __air_clz_s_v4i64(x, false); }
+extern "C" long4 __air_ctz_s_v4i64(long4, bool) __AIR("air.ctz.v4i64");
+__attribute__((always_inline)) inline long4 ctz(long4 x) { return __air_ctz_s_v4i64(x, false); }
 extern "C" long4 __air_rotate_s_v4i64(long4, long4) __AIR("air.rotate.v4i64");
 __attribute__((always_inline)) inline long4 rotate(long4 x, long4 y) { return __air_rotate_s_v4i64(x, y); }
 __attribute__((always_inline)) inline long4 max3(long4 a, long4 b, long4 c) { return max(max(a, b), c); }
@@ -1697,10 +1697,10 @@ extern "C" ulong __air_abs_u_i64(ulong) __AIR("air.abs.u.i64");
 __attribute__((always_inline)) inline ulong abs(ulong x) { return __air_abs_u_i64(x); }
 extern "C" ulong __air_popcount_u_i64(ulong) __AIR("air.popcount.i64");
 __attribute__((always_inline)) inline ulong popcount(ulong x) { return __air_popcount_u_i64(x); }
-extern "C" ulong __air_clz_u_i64(ulong) __AIR("air.clz.i64");
-__attribute__((always_inline)) inline ulong clz(ulong x) { return __air_clz_u_i64(x); }
-extern "C" ulong __air_ctz_u_i64(ulong) __AIR("air.ctz.i64");
-__attribute__((always_inline)) inline ulong ctz(ulong x) { return __air_ctz_u_i64(x); }
+extern "C" ulong __air_clz_u_i64(ulong, bool) __AIR("air.clz.i64");
+__attribute__((always_inline)) inline ulong clz(ulong x) { return __air_clz_u_i64(x, false); }
+extern "C" ulong __air_ctz_u_i64(ulong, bool) __AIR("air.ctz.i64");
+__attribute__((always_inline)) inline ulong ctz(ulong x) { return __air_ctz_u_i64(x, false); }
 extern "C" ulong __air_rotate_u_i64(ulong, ulong) __AIR("air.rotate.i64");
 __attribute__((always_inline)) inline ulong rotate(ulong x, ulong y) { return __air_rotate_u_i64(x, y); }
 __attribute__((always_inline)) inline ulong max3(ulong a, ulong b, ulong c) { return max(max(a, b), c); }
@@ -1721,10 +1721,10 @@ extern "C" ulong2 __air_abs_u_v2i64(ulong2) __AIR("air.abs.u.v2i64");
 __attribute__((always_inline)) inline ulong2 abs(ulong2 x) { return __air_abs_u_v2i64(x); }
 extern "C" ulong2 __air_popcount_u_v2i64(ulong2) __AIR("air.popcount.v2i64");
 __attribute__((always_inline)) inline ulong2 popcount(ulong2 x) { return __air_popcount_u_v2i64(x); }
-extern "C" ulong2 __air_clz_u_v2i64(ulong2) __AIR("air.clz.v2i64");
-__attribute__((always_inline)) inline ulong2 clz(ulong2 x) { return __air_clz_u_v2i64(x); }
-extern "C" ulong2 __air_ctz_u_v2i64(ulong2) __AIR("air.ctz.v2i64");
-__attribute__((always_inline)) inline ulong2 ctz(ulong2 x) { return __air_ctz_u_v2i64(x); }
+extern "C" ulong2 __air_clz_u_v2i64(ulong2, bool) __AIR("air.clz.v2i64");
+__attribute__((always_inline)) inline ulong2 clz(ulong2 x) { return __air_clz_u_v2i64(x, false); }
+extern "C" ulong2 __air_ctz_u_v2i64(ulong2, bool) __AIR("air.ctz.v2i64");
+__attribute__((always_inline)) inline ulong2 ctz(ulong2 x) { return __air_ctz_u_v2i64(x, false); }
 extern "C" ulong2 __air_rotate_u_v2i64(ulong2, ulong2) __AIR("air.rotate.v2i64");
 __attribute__((always_inline)) inline ulong2 rotate(ulong2 x, ulong2 y) { return __air_rotate_u_v2i64(x, y); }
 __attribute__((always_inline)) inline ulong2 max3(ulong2 a, ulong2 b, ulong2 c) { return max(max(a, b), c); }
@@ -1745,10 +1745,10 @@ extern "C" ulong3 __air_abs_u_v3i64(ulong3) __AIR("air.abs.u.v3i64");
 __attribute__((always_inline)) inline ulong3 abs(ulong3 x) { return __air_abs_u_v3i64(x); }
 extern "C" ulong3 __air_popcount_u_v3i64(ulong3) __AIR("air.popcount.v3i64");
 __attribute__((always_inline)) inline ulong3 popcount(ulong3 x) { return __air_popcount_u_v3i64(x); }
-extern "C" ulong3 __air_clz_u_v3i64(ulong3) __AIR("air.clz.v3i64");
-__attribute__((always_inline)) inline ulong3 clz(ulong3 x) { return __air_clz_u_v3i64(x); }
-extern "C" ulong3 __air_ctz_u_v3i64(ulong3) __AIR("air.ctz.v3i64");
-__attribute__((always_inline)) inline ulong3 ctz(ulong3 x) { return __air_ctz_u_v3i64(x); }
+extern "C" ulong3 __air_clz_u_v3i64(ulong3, bool) __AIR("air.clz.v3i64");
+__attribute__((always_inline)) inline ulong3 clz(ulong3 x) { return __air_clz_u_v3i64(x, false); }
+extern "C" ulong3 __air_ctz_u_v3i64(ulong3, bool) __AIR("air.ctz.v3i64");
+__attribute__((always_inline)) inline ulong3 ctz(ulong3 x) { return __air_ctz_u_v3i64(x, false); }
 extern "C" ulong3 __air_rotate_u_v3i64(ulong3, ulong3) __AIR("air.rotate.v3i64");
 __attribute__((always_inline)) inline ulong3 rotate(ulong3 x, ulong3 y) { return __air_rotate_u_v3i64(x, y); }
 __attribute__((always_inline)) inline ulong3 max3(ulong3 a, ulong3 b, ulong3 c) { return max(max(a, b), c); }
@@ -1769,10 +1769,10 @@ extern "C" ulong4 __air_abs_u_v4i64(ulong4) __AIR("air.abs.u.v4i64");
 __attribute__((always_inline)) inline ulong4 abs(ulong4 x) { return __air_abs_u_v4i64(x); }
 extern "C" ulong4 __air_popcount_u_v4i64(ulong4) __AIR("air.popcount.v4i64");
 __attribute__((always_inline)) inline ulong4 popcount(ulong4 x) { return __air_popcount_u_v4i64(x); }
-extern "C" ulong4 __air_clz_u_v4i64(ulong4) __AIR("air.clz.v4i64");
-__attribute__((always_inline)) inline ulong4 clz(ulong4 x) { return __air_clz_u_v4i64(x); }
-extern "C" ulong4 __air_ctz_u_v4i64(ulong4) __AIR("air.ctz.v4i64");
-__attribute__((always_inline)) inline ulong4 ctz(ulong4 x) { return __air_ctz_u_v4i64(x); }
+extern "C" ulong4 __air_clz_u_v4i64(ulong4, bool) __AIR("air.clz.v4i64");
+__attribute__((always_inline)) inline ulong4 clz(ulong4 x) { return __air_clz_u_v4i64(x, false); }
+extern "C" ulong4 __air_ctz_u_v4i64(ulong4, bool) __AIR("air.ctz.v4i64");
+__attribute__((always_inline)) inline ulong4 ctz(ulong4 x) { return __air_ctz_u_v4i64(x, false); }
 extern "C" ulong4 __air_rotate_u_v4i64(ulong4, ulong4) __AIR("air.rotate.v4i64");
 __attribute__((always_inline)) inline ulong4 rotate(ulong4 x, ulong4 y) { return __air_rotate_u_v4i64(x, y); }
 __attribute__((always_inline)) inline ulong4 max3(ulong4 a, ulong4 b, ulong4 c) { return max(max(a, b), c); }

@@ -170,7 +170,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let mut c = Command::new(&clang);
     base(&mut c);
     // -fpreserve-vec3-type: store 3-vectors as 3 elements, as Xcode does (the 4th lane is padding)
-    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-Xclang", "-fconvergent-functions", "-S", "-emit-llvm", "-o"])
+    // value names kept: a conversion to bool (%tobool) is told from a comparison by its name
+    c.args(["-O2", "-Xclang", "-disable-llvm-passes", "-Xclang", "-no-opaque-pointers", "-Xclang", "-fpreserve-vec3-type", "-Xclang", "-fconvergent-functions", "-fno-discard-value-names", "-S", "-emit-llvm", "-o"])
         .arg(&ll0)
         .args(["-Xclang", "-fdump-record-layouts"])
         .arg(&cpp);
@@ -196,7 +197,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     };
     // conversions become air.convert calls once constants are folded, before the last attribute inference
     let text = intrinsics::apply(&ir::air_conversions(&step(&text, "o2", &[O2.as_str()])?));
-    let text = ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?;
+    // the stdlib wrappers are inlined by now, so the freeze lands on the caller's value as Xcode's does
+    let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
     let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?))))))));
