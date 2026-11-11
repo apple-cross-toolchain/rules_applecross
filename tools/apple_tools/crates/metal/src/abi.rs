@@ -99,8 +99,8 @@ fn plan(sig: &str, ret_void: bool, xcode: Option<&Xcode>, tys: &HashMap<String, 
         if attrs.contains("byval(") {
             let st = ty.trim_end_matches('*').to_string();
             let fs = tys.get(&st).map(|b| fields(b)).unwrap_or_default();
-            if regex!(r#"^%"struct\.metal::(?:texture\w*|depth\w*|sampler)(?:\.\d+)?"$"#).is_match(&st) && fs.len() == 1 {
-                out.push(Param::Handle(st, fs[0].clone()));
+            if let Some(h) = tys.get(&st).and_then(|b| crate::ir::wrapped_handle(b)) {
+                out.push(Param::Handle(st, h.to_string()));
             } else if !fs.is_empty() && fs.iter().all(|f| scalar_or_vector(f)) {
                 out.push(Param::Expand(st, fs));
             } else {

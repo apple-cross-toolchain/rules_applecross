@@ -26,6 +26,33 @@ fn return_type(cname: &str) -> Option<&'static str> {
     })
 }
 
+/// The handle a record of one opaque `_..._t` pointer wraps: our stdlib's
+/// textures and samplers, which Xcode's frontend has as builtin handle types.
+pub fn wrapped_handle(body: &str) -> Option<&str> {
+    regex!(r"^\{ (%struct\._\w+_t addrspace\(\d\)\*) \}$").captures(body.trim()).map(|c| c.get(1).unwrap().as_str())
+}
+
+/// LLVM numbers a clashing struct name (`struct.metal::matrix.2`) from one
+/// counter for the whole module. Our stdlib's records that Xcode's headers
+/// lack (helpers with a `__` name, wrapped handles) clash too: each user
+/// type's number drops by those clashes numbered before it.
+pub fn renumber_types(ir: &str) -> String {
+    let helpers: Vec<u64> = regex!(r#"(?m)^%"?(?:struct|class|union)\.(.*?)\.(\d+)"? = type (.*)$"#)
+        .captures_iter(ir)
+        .filter(|c| c[1].split("::").any(|p| p.starts_with("__")) || wrapped_handle(&c[3]).is_some())
+        .filter_map(|c| c[2].parse().ok())
+        .collect();
+    if helpers.is_empty() {
+        return ir.to_string();
+    }
+    replace_all(ir, regex!(r#"%("?)((?:struct|class|union)\.[^"\s,*()]*?)\.(\d+)("?)([\s,*()]|$)"#), |c| {
+        let n: u64 = c[3].parse().unwrap();
+        // the counter is the module's, so a helper's number is its own
+        let n = if helpers.contains(&n) || c[1] != c[4] { n } else { n - helpers.iter().filter(|&&h| h < n).count() as u64 };
+        format!("%{}{}.{n}{}{}", &c[1], &c[2], &c[4], &c[5])
+    })
+}
+
 /// Calls to air.* functions through sret become direct calls whose result is stored.
 pub fn direct_returns(ir: &str) -> String {
     let ir = replace_all(ir, regex!(r#"declare (?:dso_local )?(?:spir_func )?void (@"?air\.[\w.]+"?)\((%"?struct\.[\w:.]*__ret_\w+"?\*) sret\([^)]*\)(?: align \d+)?(?:, )?"#), |c| {
@@ -728,6 +755,18 @@ pub fn speculate_and_sink(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn helper_type_clashes_do_not_number_user_types() {
+        let ir = "%\"struct.metal::matrix\" = type { [3 x <3 x float>] }\n%\"struct.metal::__vbuild\" = type { <2 x float>, i32 }\n%\"struct.metal::__vbuild.0\" = type { <4 x float>, i32 }\n%struct.S.1 = type { i32 }\n%\"struct.metal::texture2d.3\" = type { %struct._texture_2d_t addrspace(1)* }\n%\"struct.metal::matrix.4\" = type { [4 x <2 x float>] }\n%\"struct.metal::matrix.2\" = type { [4 x <4 x float>] }\n%struct.S = type { float }\ndefine void @f(%\"struct.metal::matrix.2\"* %m, %struct.S.1* %s) {\n  ret void\n}\n";
+        let out = renumber_types(ir);
+        assert!(out.contains("%\"struct.metal::matrix.1\" = type { [4 x <4 x float>] }"));
+        assert!(out.contains("define void @f(%\"struct.metal::matrix.1\"* %m, %struct.S.0* %s)"));
+        assert!(out.contains("%struct.S = type { float }"));
+        assert!(out.contains("%\"struct.metal::__vbuild.0\" = type"));
+        assert!(out.contains("%\"struct.metal::texture2d.3\" = type"));
+        assert!(out.contains("%\"struct.metal::matrix.2\" = type { [4 x <2 x float>] }"));
+    }
 
     #[test]
     fn conversions_become_air_convert() {
