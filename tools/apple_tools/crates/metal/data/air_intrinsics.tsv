@@ -1,3 +1,10 @@
+___metal_fract_float	float	float, i32	convergent
+___metal_fract_v2float	<2 x float>	<2 x float>, i32	convergent
+___metal_fract_v2half	<2 x half>	<2 x half>, i32	convergent
+___metal_fract_v3float	<3 x float>	<3 x float>, i32	convergent
+___metal_fract_v3half	<3 x half>	<3 x half>, i32	convergent
+___metal_fract_v4float	<4 x float>	<4 x float>, i32	convergent
+___metal_fract_v4half	<4 x half>	<4 x half>, i32	convergent
 air.abs.s.i16	i16	i16	mustprogress nofree nosync nounwind readnone willreturn
 air.abs.s.i32	i32	i32	mustprogress nofree nosync nounwind readnone willreturn
 air.abs.s.i8	i8	i8	mustprogress nofree nosync nounwind readnone willreturn
@@ -244,6 +251,9 @@ air.fast_fmod.v2f32	<2 x float>	<2 x float>, <2 x float>	mustprogress nofree nos
 air.fast_fmod.v3f32	<3 x float>	<3 x float>, <3 x float>	mustprogress nofree nosync nounwind readnone willreturn
 air.fast_fmod.v4f32	<4 x float>	<4 x float>, <4 x float>	mustprogress nofree nosync nounwind readnone willreturn
 air.fast_fract.f32	float	float	mustprogress nofree nosync nounwind readnone willreturn
+air.fast_fract.v2f32	<2 x float>	<2 x float>	mustprogress nofree nosync nounwind readnone willreturn
+air.fast_fract.v3f32	<3 x float>	<3 x float>	mustprogress nofree nosync nounwind readnone willreturn
+air.fast_fract.v4f32	<4 x float>	<4 x float>	mustprogress nofree nosync nounwind readnone willreturn
 air.fast_log.f32	float	float	mustprogress nofree nosync nounwind readnone willreturn
 air.fast_log.v2f32	<2 x float>	<2 x float>	mustprogress nofree nosync nounwind readnone willreturn
 air.fast_log.v3f32	<3 x float>	<3 x float>	mustprogress nofree nosync nounwind readnone willreturn
@@ -350,6 +360,12 @@ air.fmod.v2f16	<2 x half>	<2 x half>, <2 x half>	mustprogress nofree nosync noun
 air.fmod.v3f16	<3 x half>	<3 x half>, <3 x half>	mustprogress nofree nosync nounwind readnone willreturn
 air.fmod.v4f16	<4 x half>	<4 x half>, <4 x half>	mustprogress nofree nosync nounwind readnone willreturn
 air.fract.f16	half	half	mustprogress nofree nosync nounwind readnone willreturn
+air.fract.f32	float	float	mustprogress nofree nosync nounwind readnone willreturn
+air.fract.v2f16	<2 x half>	<2 x half>	mustprogress nofree nosync nounwind readnone willreturn
+air.fract.v2f32	<2 x float>	<2 x float>	mustprogress nofree nosync nounwind readnone willreturn
+air.fract.v3f16	<3 x half>	<3 x half>	mustprogress nofree nosync nounwind readnone willreturn
+air.fract.v3f32	<3 x float>	<3 x float>	mustprogress nofree nosync nounwind readnone willreturn
+air.fract.v4f16	<4 x half>	<4 x half>	mustprogress nofree nosync nounwind readnone willreturn
 air.gather_compare_depth_2d.f32	{ <4 x float>, i8 }	%struct._depth_2d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, i32, <2 x float>, float, i1, <2 x i32>, i32	argmemonly mustprogress nofree nounwind readonly willreturn
 air.gather_depth_2d.v4f32	{ <4 x float>, i8 }	%struct._depth_2d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, i32, <2 x float>, i1, <2 x i32>, i32	argmemonly mustprogress nofree nounwind readonly willreturn
 air.gather_texture_2d.s.v4i32	{ <4 x i32>, i8 }	%struct._texture_2d_t addrspace(1)* nocapture readonly, %struct._sampler_t addrspace(2)* nocapture readonly, <2 x float>, i1, <2 x i32>, i32, i32	argmemonly mustprogress nofree nounwind readonly willreturn

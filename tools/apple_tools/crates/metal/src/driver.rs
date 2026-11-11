@@ -179,7 +179,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let named = tmp.0.join("out.0n.ll");
     run(Command::new(tool(o, "opt")).args(["-passes=instnamer", "-S", "-o"]).arg(&named).arg(&ll0))?;
     let text = std::fs::read_to_string(&named).map_err(|e| e.to_string())?;
-    let text = ir::direct_struct_returns(&text, &types, &program.functions)?;
+    let text = ir::direct_struct_returns(&ir::renumber_types(&text), &types, &program.functions)?;
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);
     let entries: Vec<String> = program.functions.iter().map(|f| f.name.clone()).collect();
