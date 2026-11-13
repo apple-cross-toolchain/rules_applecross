@@ -213,6 +213,77 @@ pub fn prepare_flat(ir: &str, entries: &[String], stages: &[String]) -> String {
     ir
 }
 
+/// The functions a module defines as `convergent`.
+pub fn convergent_functions(ir: &str) -> BTreeSet<String> {
+    let groups: BTreeSet<String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).filter(|c| c[2].split(' ').any(|a| a == "convergent")).map(|c| c[1].to_string()).collect();
+    regex!(r#"(?m)^define [^\n]*?@("?[\w.$]+"?)\([^\n]*\)[^\n]*? #(\d+)"#).captures_iter(ir).filter(|c| groups.contains(&c[2])).map(|c| c[1].to_string()).collect()
+}
+
+/// The convergent functions that call a function the module defines: those
+/// Xcode's single attribute inference leaves convergent (its frontend's calls
+/// all are), whatever a later inference finds.
+pub fn convergent_callers(ir: &str) -> BTreeSet<String> {
+    let defined: BTreeSet<String> = regex!(r#"(?m)^define [^\n]*?@("?[\w.$]+"?)\("#).captures_iter(ir).map(|c| c[1].to_string()).collect();
+    let convergent = convergent_functions(ir);
+    let mut out = BTreeSet::new();
+    map_functions(ir, |f| {
+        let name = regex!(r#"@("?[\w.$]+"?)\("#).captures(f).map(|c| c[1].to_string()).unwrap_or_default();
+        if convergent.contains(&name) && regex!(r#"\bcall [^@\n]*@("?[\w.$]+"?)\("#).captures_iter(f).any(|c| defined.contains(&c[1])) {
+            out.insert(name);
+        }
+        f.to_string()
+    });
+    out
+}
+
+/// Xcode infers function attributes once, while its frontend's call sites are
+/// all still convergent, so a function calling another keeps `convergent`.
+/// Our second O2 infers them again after InstCombine has taken that off the
+/// call sites. So a function convergent after the first O2 keeps it, and so do
+/// the calls to it (InstCombine leaves a call convergent if its callee is).
+pub fn keep_convergent(ir: &str, was: &BTreeSet<String>) -> String {
+    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let lost: BTreeSet<String> = was.difference(&convergent_functions(ir)).cloned().collect();
+    if lost.is_empty() {
+        return ir.to_string();
+    }
+    let mut next = groups.keys().filter_map(|k| k.parse::<usize>().ok()).max().map_or(0, |m| m + 1);
+    let mut added: std::collections::BTreeMap<String, usize> = Default::default();
+    let with_convergent = |g: &str| -> String {
+        if groups.get(g).is_some_and(|a| a.split(' ').any(|x| x == "convergent")) {
+            return g.to_string();
+        }
+        added
+            .entry(g.to_string())
+            .or_insert_with(|| {
+                next += 1;
+                next - 1
+            })
+            .to_string()
+    };
+    let lines: Vec<String> = {
+        let mut with_convergent = with_convergent;
+        ir.lines()
+        .map(|l| {
+            let callee = if l.starts_with("define ") {
+                regex!(r#"@("?[\w.$]+"?)\("#).captures(l).map(|c| c[1].to_string())
+            } else {
+                regex!(r#"^\s+(?:%[\w.]+ = )?(?:tail )?call [^@]*@("?[\w.$]+"?)\("#).captures(l).map(|c| c[1].to_string())
+            };
+            match callee {
+                Some(f) if lost.contains(&f) => regex!(r"#(\d+)( \{|,|$)").replace(l, |c: &Captures| format!("#{}{}", with_convergent(&c[1]), &c[2])).to_string(),
+                _ => l.to_string(),
+            }
+        })
+        .collect()
+    };
+    let mut ir = lines.join("\n");
+    for (old, new) in &added {
+        ir += &format!("\nattributes #{new} = {{ convergent {} }}", groups[old]);
+    }
+    ir + "\n"
+}
+
 /// Follow GEPs, bitcasts and casts back to the address space a flat pointer came from.
 pub fn address_space_of(body: &str, v: &str, depth: u32) -> Option<String> {
     if depth > 32 || !v.starts_with('%') {
@@ -777,6 +848,21 @@ pub fn speculate_and_sink(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn convergent_after_the_first_inference_stays() {
+        let first = "define float @f(float %x) #0 {\n  ret float %x\n}\ndefine float @g(float %x) #0 {\n  %y = call float @f(float %x) #1\n  ret float %y\n}\nattributes #0 = { convergent nounwind }\nattributes #1 = { convergent nobuiltin }\n";
+        assert_eq!(convergent_functions(first).into_iter().collect::<Vec<_>>(), vec!["f".to_string(), "g".to_string()]);
+        // only g calls a function the module defines
+        assert_eq!(convergent_callers(first).into_iter().collect::<Vec<_>>(), vec!["g".to_string()]);
+        let second = "define float @f(float %x) #0 {\n  ret float %x\n}\ndefine float @g(float %x) #2 {\n  %y = call float @f(float %x) #1, !noalias !3\n  ret float %y\n}\nattributes #0 = { nounwind }\nattributes #1 = { nobuiltin }\nattributes #2 = { convergent nounwind }\n";
+        let out = keep_convergent(second, &["f".to_string()].into_iter().collect());
+        assert!(out.contains("define float @f(float %x) #3 {"));
+        assert!(out.contains("call float @f(float %x) #4, !noalias !3"));
+        assert!(out.contains("attributes #3 = { convergent nounwind }"));
+        assert!(out.contains("attributes #4 = { convergent nobuiltin }"));
+        assert!(out.contains("define float @g(float %x) #2 {"));
+    }
 
     #[test]
     fn bools_convert_as_xcode_converts_them() {
