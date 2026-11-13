@@ -92,13 +92,13 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
         let args = d.md.list(&descs);
         let node = d.md.add(format!("!{{{fty} ({})* @{}, {outs}, {args}{extra}}}", argtys.join(", "), f.name));
         stages.iter_mut().find(|(s, _)| *s == f.stage).unwrap().1.push(node);
-        // buffers get "air-buffer-no-alias"; stage_in values and textures and samplers no noundef
+        // buffers and threadgroup memory get "air-buffer-no-alias"; stage_in values and textures and samplers no noundef
         let mut args = split_args(&sig);
         for (k, p) in params.iter().enumerate() {
             if k >= args.len() {
                 break;
             }
-            if p.attrs.first().map(|a| a.starts_with("buffer(")).unwrap_or(false) && !args[k].contains("\"air-buffer-no-alias\"") {
+            if p.attrs.first().map(|a| a.starts_with("buffer(") || a.starts_with("threadgroup(")).unwrap_or(false) && !args[k].contains("\"air-buffer-no-alias\"") {
                 args[k] = regex!(r" (%[\w.]+)$").replace(&args[k], " \"air-buffer-no-alias\" $1").to_string();
             }
             if p.stage_in || regex!(r"%struct\._(?:texture|depth)_\w+ addrspace|%struct\._sampler_t addrspace").is_match(&args[k]) {
