@@ -213,6 +213,68 @@ pub fn prepare_flat(ir: &str, entries: &[String], stages: &[String]) -> String {
     ir
 }
 
+/// Tag each call to a user's function with the function it's written in
+/// (`home` maps our layers around an entry point's body to the entry point),
+/// for `nounwind_inlined_calls`.
+pub fn tag_user_calls(ir: &str, home: &std::collections::HashMap<String, String>) -> String {
+    let defined: BTreeSet<String> = regex!(r#"(?m)^define [^\n]*?@("?[\w.$]+"?)\("#).captures_iter(ir).map(|c| c[1].to_string()).collect();
+    map_functions(ir, |f| {
+        let Some(name) = regex!(r#"@("?[\w.$]+"?)\("#).captures(f).map(|c| c[1].to_string()) else { return f.to_string() };
+        let at = home.get(&name).cloned().unwrap_or(name);
+        replace_all(f, regex!(r#"(?m)^(\s+(?:%[\w.]+ = )?(?:tail )?call [^@\n]*@("?[\w.$]+"?)\(.*)$"#), |c| {
+            if crate::abi::is_user(&c[2]) && defined.contains(&c[2]) {
+                format!("{}, !msl.home !{{!\"{}\"}}", &c[1], at.trim_matches('"'))
+            } else {
+                c[0].to_string()
+            }
+        })
+    })
+}
+
+/// A call inlined from a function that can't unwind can't either: newer
+/// LLVMs' inliner marks such calls nounwind (Xcode's does), LLVM 15's doesn't.
+/// So a tagged call (`tag_user_calls`) now in a function other than the one
+/// it was written in gets nounwind; the tags go.
+pub fn nounwind_inlined_calls(ir: &str) -> String {
+    let tags: BTreeSet<String> = regex!(r"!msl\.home !(\d+)").captures_iter(ir).map(|c| c[1].to_string()).collect();
+    let homes: std::collections::HashMap<String, String> = regex!(r#"(?m)^!(\d+) = !\{!"([^"]*)"\}$"#).captures_iter(ir).filter(|c| tags.contains(&c[1])).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let mut next = groups.keys().filter_map(|k| k.parse::<usize>().ok()).max().map_or(0, |m| m + 1);
+    let mut added: std::collections::BTreeMap<String, usize> = Default::default();
+    let ir = map_functions(ir, |f| {
+        let name = regex!(r#"@("?[\w.$]+"?)\("#).captures(f).map(|c| c[1].trim_matches('"').to_string()).unwrap_or_default();
+        replace_all(f, regex!(r"(?m)^(.*?)(?: #(\d+))?((?:, ![\w.]+ !\d+)*), !msl\.home !(\d+)((?:, ![\w.]+ !\d+)*)$"), |c| {
+            let inlined = homes.get(&c[4]).is_some_and(|h| *h != name);
+            let group = match c.get(2) {
+                Some(g) if inlined && !groups.get(g.as_str()).is_some_and(|a| a.split(' ').any(|x| x == "nounwind")) => {
+                    let n = *added.entry(g.as_str().to_string()).or_insert_with(|| {
+                        next += 1;
+                        next - 1
+                    });
+                    format!(" #{n}")
+                }
+                Some(g) => format!(" #{}", g.as_str()),
+                None if inlined => " nounwind".to_string(),
+                None => String::new(),
+            };
+            format!("{}{group}{}{}", &c[1], &c[3], &c[5])
+        })
+    });
+    let mut ir = ir;
+    for (old, new) in &added {
+        let attrs = &groups[old];
+        // nounwind goes in LLVM's order: after the enum attributes before it, before the strings
+        let words: Vec<&str> = attrs.split(' ').collect();
+        let at = words.iter().position(|w| w.starts_with('"') || *w > "nounwind").unwrap_or(words.len());
+        let mut w = words.clone();
+        w.insert(at, "nounwind");
+        ir += &format!("\nattributes #{new} = {{ {} }}", w.join(" "));
+    }
+    // the tags' nodes go (nothing else refers to them)
+    ir = regex!(r#"(?m)^!(\d+) = !\{!"[^"]*"\}\n"#).replace_all(&ir, |c: &Captures| if tags.contains(&c[1]) { String::new() } else { c[0].to_string() }).to_string();
+    ir + "\n"
+}
+
 /// The functions a module defines as `convergent`.
 pub fn convergent_functions(ir: &str) -> BTreeSet<String> {
     let groups: BTreeSet<String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).filter(|c| c[2].split(' ').any(|a| a == "convergent")).map(|c| c[1].to_string()).collect();
@@ -868,6 +930,24 @@ pub fn speculate_and_sink(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calls_inlined_from_elsewhere_are_nounwind() {
+        let ir = "define float @_Z1gf(float %x) #0 {\n  %y = call float @_Z1hf(float %x) #1\n  ret float %y\n}\ndefine float @_Z1hf(float %x) #0 {\n  ret float %x\n}\ndefine float @_ZL1kf(float %x) #0 {\n  %y = call float @_Z1gf(float %x) #1\n  ret float %y\n}\nattributes #0 = { nounwind }\nattributes #1 = { convergent nobuiltin \"no-builtins\" }\n";
+        let home: std::collections::HashMap<String, String> = [("_ZL1kf".to_string(), "k".to_string())].into_iter().collect();
+        let tagged = tag_user_calls(ir, &home);
+        assert!(tagged.contains("call float @_Z1hf(float %x) #1, !msl.home !{!\"_Z1gf\"}"));
+        assert!(tagged.contains("call float @_Z1gf(float %x) #1, !msl.home !{!\"k\"}"));
+        // after O2: g inlined into the entry point k, its call to h with it; k's own call stays as written
+        let after = "define float @k(float %x) #0 {\n  %y = call float @_Z1hf(float %x) #1, !msl.home !5\n  %z = call float @_Z1gf(float %x) #1, !msl.home !6\n  ret float %y\n}\nattributes #0 = { nounwind }\nattributes #1 = { convergent nobuiltin \"no-builtins\" }\n!5 = !{!\"_Z1gf\"}\n!6 = !{!\"k\"}\n";
+        let out = nounwind_inlined_calls(after);
+        assert!(out.contains("%y = call float @_Z1hf(float %x) #2\n"));
+        assert!(out.contains("%z = call float @_Z1gf(float %x) #1\n"));
+        assert!(out.contains("attributes #2 = { convergent nobuiltin nounwind \"no-builtins\" }"));
+        assert!(!out.contains("msl.home") && !out.contains("!5 ="));
+        // other single-string nodes stay
+        assert!(nounwind_inlined_calls(&format!("{after}!7 = !{{!\"Simple C++ TBAA\"}}\n")).contains("!7 = !{!\"Simple C++ TBAA\"}"));
+    }
 
     #[test]
     fn convergent_after_the_first_inference_stays() {
