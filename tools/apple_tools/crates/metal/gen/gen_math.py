@@ -122,10 +122,15 @@ def emit():
                         out.append('%s %s %s(%s x, %s y) { return %s(x, y); }' % (AI, t, alias, t, scalar, fn))
                 else:
                     out.append('%s %s %s(%s x, %s y, %s z) { return %s(x, y, z); }' % (AI, t, alias, t, t, t, fn))
-            # step: 0 where x < edge, else 1 (MSL specification)
-            out.append('%s %s step(%s e, %s x) { %s r; for (int k = 0; k < __elem<%s>::n; k++) r[k] = x[k] < e[k] ? 0 : 1; return r; }'
-                       % (AI, t, t, t, t, t) if t != scalar else
-                       '%s %s step(%s e, %s x) { return x < e ? (%s)0 : (%s)1; }' % (AI, t, t, t, t, t))
+            # step: x >= edge converted from bool, as Xcode's header computes it (the conversion a call to AIR's)
+            sfx = suffix(t)
+            if t == scalar:
+                out.append('extern "C" %s __msl_step_%s(bool) __AIR("air.convert.f.%s.u.i1");' % (t, sfx, sfx))
+                out.append('%s %s step(%s e, %s x) { return __msl_step_%s(x >= e); }' % (AI, t, t, t, sfx))
+            else:
+                n = t[-1]
+                out.append('extern "C" %s __msl_step_%s(__vector<bool, %s>) __AIR("air.convert.f.%s.u.v%si1");' % (t, sfx, n, sfx, n))
+                out.append('%s %s step(%s e, %s x) { return __msl_step_%s(__builtin_convertvector(x >= e, __vector<bool, %s>)); }' % (AI, t, t, t, sfx, n))
             if t != scalar:
                 out.append('%s %s step(%s e, %s x) { return step((%s)e, x); }' % (AI, t, scalar, t, t))
                 n = t[-1]

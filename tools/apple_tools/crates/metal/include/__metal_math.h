@@ -119,7 +119,8 @@ __attribute__((always_inline)) inline float min(float x, float y) { return fmin(
 __attribute__((always_inline)) inline float max3(float x, float y, float z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline float min3(float x, float y, float z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline float median3(float x, float y, float z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline float step(float e, float x) { return x < e ? (float)0 : (float)1; }
+extern "C" float __msl_step_f32(bool) __AIR("air.convert.f.f32.u.i1");
+__attribute__((always_inline)) inline float step(float e, float x) { return __msl_step_f32(x >= e); }
 __attribute__((always_inline)) inline float smoothstep(float e0, float e1, float x) { float t = clamp((x - e0) / (e1 - e0), (float)0, (float)1); return t * t * ((float)3 - (float)2 * t); }
 extern "C" float2 __air_sin_v2f32(float2) __AIR(__MSL_F(sin) ".v2f32");
 __attribute__((always_inline)) inline float2 sin(float2 x) { return __air_sin_v2f32(x); }
@@ -239,7 +240,8 @@ __attribute__((always_inline)) inline float2 min(float2 x, float y) { return fmi
 __attribute__((always_inline)) inline float2 max3(float2 x, float2 y, float2 z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline float2 min3(float2 x, float2 y, float2 z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline float2 median3(float2 x, float2 y, float2 z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline float2 step(float2 e, float2 x) { float2 r; for (int k = 0; k < __elem<float2>::n; k++) r[k] = x[k] < e[k] ? 0 : 1; return r; }
+extern "C" float2 __msl_step_v2f32(__vector<bool, 2>) __AIR("air.convert.f.v2f32.u.v2i1");
+__attribute__((always_inline)) inline float2 step(float2 e, float2 x) { return __msl_step_v2f32(__builtin_convertvector(x >= e, __vector<bool, 2>)); }
 __attribute__((always_inline)) inline float2 step(float e, float2 x) { return step((float2)e, x); }
 extern "C" float __air_dot_v2f32(float2, float2) __AIR("air.dot.v2f32");
 __attribute__((always_inline)) inline float dot(float2 a, float2 b) { return __air_dot_v2f32(a, b); }
@@ -370,7 +372,8 @@ __attribute__((always_inline)) inline float3 min(float3 x, float y) { return fmi
 __attribute__((always_inline)) inline float3 max3(float3 x, float3 y, float3 z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline float3 min3(float3 x, float3 y, float3 z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline float3 median3(float3 x, float3 y, float3 z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline float3 step(float3 e, float3 x) { float3 r; for (int k = 0; k < __elem<float3>::n; k++) r[k] = x[k] < e[k] ? 0 : 1; return r; }
+extern "C" float3 __msl_step_v3f32(__vector<bool, 3>) __AIR("air.convert.f.v3f32.u.v3i1");
+__attribute__((always_inline)) inline float3 step(float3 e, float3 x) { return __msl_step_v3f32(__builtin_convertvector(x >= e, __vector<bool, 3>)); }
 __attribute__((always_inline)) inline float3 step(float e, float3 x) { return step((float3)e, x); }
 extern "C" float __air_dot_v3f32(float3, float3) __AIR("air.dot.v3f32");
 __attribute__((always_inline)) inline float dot(float3 a, float3 b) { return __air_dot_v3f32(a, b); }
@@ -502,7 +505,8 @@ __attribute__((always_inline)) inline float4 min(float4 x, float y) { return fmi
 __attribute__((always_inline)) inline float4 max3(float4 x, float4 y, float4 z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline float4 min3(float4 x, float4 y, float4 z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline float4 median3(float4 x, float4 y, float4 z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline float4 step(float4 e, float4 x) { float4 r; for (int k = 0; k < __elem<float4>::n; k++) r[k] = x[k] < e[k] ? 0 : 1; return r; }
+extern "C" float4 __msl_step_v4f32(__vector<bool, 4>) __AIR("air.convert.f.v4f32.u.v4i1");
+__attribute__((always_inline)) inline float4 step(float4 e, float4 x) { return __msl_step_v4f32(__builtin_convertvector(x >= e, __vector<bool, 4>)); }
 __attribute__((always_inline)) inline float4 step(float e, float4 x) { return step((float4)e, x); }
 extern "C" float __air_dot_v4f32(float4, float4) __AIR("air.dot.v4f32");
 __attribute__((always_inline)) inline float dot(float4 a, float4 b) { return __air_dot_v4f32(a, b); }
@@ -609,7 +613,8 @@ __attribute__((always_inline)) inline half min(half x, half y) { return fmin(x, 
 __attribute__((always_inline)) inline half max3(half x, half y, half z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline half min3(half x, half y, half z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline half median3(half x, half y, half z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline half step(half e, half x) { return x < e ? (half)0 : (half)1; }
+extern "C" half __msl_step_f16(bool) __AIR("air.convert.f.f16.u.i1");
+__attribute__((always_inline)) inline half step(half e, half x) { return __msl_step_f16(x >= e); }
 __attribute__((always_inline)) inline half smoothstep(half e0, half e1, half x) { half t = clamp((x - e0) / (e1 - e0), (half)0, (half)1); return t * t * ((half)3 - (half)2 * t); }
 extern "C" half2 __air_sin_v2f16(half2) __AIR("air.sin.v2f16");
 __attribute__((always_inline)) inline half2 sin(half2 x) { return __air_sin_v2f16(x); }
@@ -729,7 +734,8 @@ __attribute__((always_inline)) inline half2 min(half2 x, half y) { return fmin(x
 __attribute__((always_inline)) inline half2 max3(half2 x, half2 y, half2 z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline half2 min3(half2 x, half2 y, half2 z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline half2 median3(half2 x, half2 y, half2 z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline half2 step(half2 e, half2 x) { half2 r; for (int k = 0; k < __elem<half2>::n; k++) r[k] = x[k] < e[k] ? 0 : 1; return r; }
+extern "C" half2 __msl_step_v2f16(__vector<bool, 2>) __AIR("air.convert.f.v2f16.u.v2i1");
+__attribute__((always_inline)) inline half2 step(half2 e, half2 x) { return __msl_step_v2f16(__builtin_convertvector(x >= e, __vector<bool, 2>)); }
 __attribute__((always_inline)) inline half2 step(half e, half2 x) { return step((half2)e, x); }
 extern "C" half __air_dot_v2f16(half2, half2) __AIR("air.dot.v2f16");
 __attribute__((always_inline)) inline half dot(half2 a, half2 b) { return __air_dot_v2f16(a, b); }
@@ -860,7 +866,8 @@ __attribute__((always_inline)) inline half3 min(half3 x, half y) { return fmin(x
 __attribute__((always_inline)) inline half3 max3(half3 x, half3 y, half3 z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline half3 min3(half3 x, half3 y, half3 z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline half3 median3(half3 x, half3 y, half3 z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline half3 step(half3 e, half3 x) { half3 r; for (int k = 0; k < __elem<half3>::n; k++) r[k] = x[k] < e[k] ? 0 : 1; return r; }
+extern "C" half3 __msl_step_v3f16(__vector<bool, 3>) __AIR("air.convert.f.v3f16.u.v3i1");
+__attribute__((always_inline)) inline half3 step(half3 e, half3 x) { return __msl_step_v3f16(__builtin_convertvector(x >= e, __vector<bool, 3>)); }
 __attribute__((always_inline)) inline half3 step(half e, half3 x) { return step((half3)e, x); }
 extern "C" half __air_dot_v3f16(half3, half3) __AIR("air.dot.v3f16");
 __attribute__((always_inline)) inline half dot(half3 a, half3 b) { return __air_dot_v3f16(a, b); }
@@ -992,7 +999,8 @@ __attribute__((always_inline)) inline half4 min(half4 x, half y) { return fmin(x
 __attribute__((always_inline)) inline half4 max3(half4 x, half4 y, half4 z) { return fmax3(x, y, z); }
 __attribute__((always_inline)) inline half4 min3(half4 x, half4 y, half4 z) { return fmin3(x, y, z); }
 __attribute__((always_inline)) inline half4 median3(half4 x, half4 y, half4 z) { return fmedian3(x, y, z); }
-__attribute__((always_inline)) inline half4 step(half4 e, half4 x) { half4 r; for (int k = 0; k < __elem<half4>::n; k++) r[k] = x[k] < e[k] ? 0 : 1; return r; }
+extern "C" half4 __msl_step_v4f16(__vector<bool, 4>) __AIR("air.convert.f.v4f16.u.v4i1");
+__attribute__((always_inline)) inline half4 step(half4 e, half4 x) { return __msl_step_v4f16(__builtin_convertvector(x >= e, __vector<bool, 4>)); }
 __attribute__((always_inline)) inline half4 step(half e, half4 x) { return step((half4)e, x); }
 extern "C" half __air_dot_v4f16(half4, half4) __AIR("air.dot.v4f16");
 __attribute__((always_inline)) inline half dot(half4 a, half4 b) { return __air_dot_v4f16(a, b); }
