@@ -793,12 +793,31 @@ pub fn speculate_and_sink(ir: &str) -> String {
             }
             // the leading run of speculatable instructions, in order
             let body: Vec<usize> = (b.1..=b.2).filter(|&i| !lines[i].trim().is_empty() && !lines[i].trim_start().starts_with("br ")).collect();
+            let op_of = |i: usize| regex!(r"^%[\w.]+ = (\w+)").captures(lines[i].trim()).map(|c| c[1].to_string()).unwrap_or_default();
+            let cheap = |i: usize| {
+                matches!(op_of(i).as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fdiv" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector")
+            };
+            // SpeculativeExecution hoists nothing from a block that would leave more than 5 of its
+            // instructions behind (its terminator among them) or whose speculation costs more than 7:
+            // a speculatable instruction counts unless an operand of it from the block stays behind
+            let mut behind: Vec<String> = Vec::new();
+            let (mut cost, mut left) = (0, 1);
+            for &i in &body {
+                let def = regex!(r"^\s+(%[\w.]+) = ").captures(lines[i]).map(|c| c[1].to_string()).unwrap_or_default();
+                let rhs = lines[i].split_once(" = ").map_or(lines[i], |x| x.1);
+                if cheap(i) && !regex!(r"%[\w.]+").find_iter(rhs).any(|o| behind.iter().any(|d| d == o.as_str())) {
+                    cost += if matches!(op_of(i).as_str(), "bitcast" | "addrspacecast") { 0 } else { 1 };
+                } else {
+                    left += 1;
+                    behind.push(def);
+                }
+            }
+            if cost > 7 || left > 5 {
+                continue;
+            }
             let mut hoisted: Vec<usize> = Vec::new();
             for &i in &body {
-                let l = lines[i].trim();
-                let op = regex!(r"^%[\w.]+ = (\w+)").captures(l).map(|c| c[1].to_string()).unwrap_or_default();
-                let cheap = matches!(op.as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fdiv" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector");
-                if !cheap {
+                if !cheap(i) {
                     break;
                 }
                 hoisted.push(i);
@@ -917,10 +936,16 @@ mod tests {
 
     #[test]
     fn a_sunk_instructions_last_operand_sinks_first() {
-        let ir = "define float @f(float %m, float %a, float %b, <3 x float> %v) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  %ins = insertelement <3 x float> poison, float %div, i64 0\n  %spl = shufflevector <3 x float> %ins, <3 x float> poison, <3 x i32> zeroinitializer\n  %mul14 = fmul fast <3 x float> %spl, %v\n  br label %end\n\nend:\n  %p = phi <3 x float> [ %mul14, %then ], [ %v, %entry ]\n  ret float %m\n}\n";
-        let out = speculate_and_sink(ir);
-        let order: Vec<&str> = out.lines().filter(|l| l.contains(" = ") && !l.contains("phi")).map(|l| l.trim().split(' ').next().unwrap()).collect();
-        assert_eq!(order, vec!["%mul9", "%add", "%mul10", "%add11", "%div", "%ins", "%spl", "%mul14"]);
+        let ir = "define float @f(float %m, float %a, float %b) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  br label %end\n\nend:\n  %p = phi float [ %div, %then ], [ %m, %entry ]\n  ret float %p\n}\n";
+        let order = |ir: &str| -> Vec<String> { ir.lines().filter(|l| l.contains(" = ") && !l.contains("phi")).map(|l| l.trim().split(' ').next().unwrap().to_string()).collect() };
+        assert_eq!(order(&speculate_and_sink(ir)), vec!["%mul9", "%add", "%mul10", "%add11", "%div"]);
+    }
+
+    #[test]
+    fn a_block_over_speculations_budget_stays_as_it_is() {
+        // eight speculatable instructions cost more than 7: nothing is hoisted, so nothing moves
+        let ir = "define float @f(float %m, float %a, float %b, <3 x float> %v) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  %ins = insertelement <3 x float> poison, float %div, i64 0\n  %spl = shufflevector <3 x float> %ins, <3 x float> poison, <3 x i32> zeroinitializer\n  %mul14 = fmul fast <3 x float> %spl, %v\n  br label %end\n\nend:\n  %p = phi <3 x float> [ %mul14, %then ], [ %v, %entry ]\n  ret float %m\n}\n";
+        assert_eq!(speculate_and_sink(ir), ir);
     }
 
     #[test]
