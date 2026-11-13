@@ -213,6 +213,68 @@ pub fn prepare_flat(ir: &str, entries: &[String], stages: &[String]) -> String {
     ir
 }
 
+/// Tag each call to a user's function with the function it's written in
+/// (`home` maps our layers around an entry point's body to the entry point),
+/// for `nounwind_inlined_calls`.
+pub fn tag_user_calls(ir: &str, home: &std::collections::HashMap<String, String>) -> String {
+    let defined: BTreeSet<String> = regex!(r#"(?m)^define [^\n]*?@("?[\w.$]+"?)\("#).captures_iter(ir).map(|c| c[1].to_string()).collect();
+    map_functions(ir, |f| {
+        let Some(name) = regex!(r#"@("?[\w.$]+"?)\("#).captures(f).map(|c| c[1].to_string()) else { return f.to_string() };
+        let at = home.get(&name).cloned().unwrap_or(name);
+        replace_all(f, regex!(r#"(?m)^(\s+(?:%[\w.]+ = )?(?:tail )?call [^@\n]*@("?[\w.$]+"?)\(.*)$"#), |c| {
+            if crate::abi::is_user(&c[2]) && defined.contains(&c[2]) {
+                format!("{}, !msl.home !{{!\"{}\"}}", &c[1], at.trim_matches('"'))
+            } else {
+                c[0].to_string()
+            }
+        })
+    })
+}
+
+/// A call inlined from a function that can't unwind can't either: newer
+/// LLVMs' inliner marks such calls nounwind (Xcode's does), LLVM 15's doesn't.
+/// So a tagged call (`tag_user_calls`) now in a function other than the one
+/// it was written in gets nounwind; the tags go.
+pub fn nounwind_inlined_calls(ir: &str) -> String {
+    let tags: BTreeSet<String> = regex!(r"!msl\.home !(\d+)").captures_iter(ir).map(|c| c[1].to_string()).collect();
+    let homes: std::collections::HashMap<String, String> = regex!(r#"(?m)^!(\d+) = !\{!"([^"]*)"\}$"#).captures_iter(ir).filter(|c| tags.contains(&c[1])).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let mut next = groups.keys().filter_map(|k| k.parse::<usize>().ok()).max().map_or(0, |m| m + 1);
+    let mut added: std::collections::BTreeMap<String, usize> = Default::default();
+    let ir = map_functions(ir, |f| {
+        let name = regex!(r#"@("?[\w.$]+"?)\("#).captures(f).map(|c| c[1].trim_matches('"').to_string()).unwrap_or_default();
+        replace_all(f, regex!(r"(?m)^(.*?)(?: #(\d+))?((?:, ![\w.]+ !\d+)*), !msl\.home !(\d+)((?:, ![\w.]+ !\d+)*)$"), |c| {
+            let inlined = homes.get(&c[4]).is_some_and(|h| *h != name);
+            let group = match c.get(2) {
+                Some(g) if inlined && !groups.get(g.as_str()).is_some_and(|a| a.split(' ').any(|x| x == "nounwind")) => {
+                    let n = *added.entry(g.as_str().to_string()).or_insert_with(|| {
+                        next += 1;
+                        next - 1
+                    });
+                    format!(" #{n}")
+                }
+                Some(g) => format!(" #{}", g.as_str()),
+                None if inlined => " nounwind".to_string(),
+                None => String::new(),
+            };
+            format!("{}{group}{}{}", &c[1], &c[3], &c[5])
+        })
+    });
+    let mut ir = ir;
+    for (old, new) in &added {
+        let attrs = &groups[old];
+        // nounwind goes in LLVM's order: after the enum attributes before it, before the strings
+        let words: Vec<&str> = attrs.split(' ').collect();
+        let at = words.iter().position(|w| w.starts_with('"') || *w > "nounwind").unwrap_or(words.len());
+        let mut w = words.clone();
+        w.insert(at, "nounwind");
+        ir += &format!("\nattributes #{new} = {{ {} }}", w.join(" "));
+    }
+    // the tags' nodes go (nothing else refers to them)
+    ir = regex!(r#"(?m)^!(\d+) = !\{!"[^"]*"\}\n"#).replace_all(&ir, |c: &Captures| if tags.contains(&c[1]) { String::new() } else { c[0].to_string() }).to_string();
+    ir + "\n"
+}
+
 /// The functions a module defines as `convergent`.
 pub fn convergent_functions(ir: &str) -> BTreeSet<String> {
     let groups: BTreeSet<String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).filter(|c| c[2].split(' ').any(|a| a == "convergent")).map(|c| c[1].to_string()).collect();
@@ -793,12 +855,31 @@ pub fn speculate_and_sink(ir: &str) -> String {
             }
             // the leading run of speculatable instructions, in order
             let body: Vec<usize> = (b.1..=b.2).filter(|&i| !lines[i].trim().is_empty() && !lines[i].trim_start().starts_with("br ")).collect();
+            let op_of = |i: usize| regex!(r"^%[\w.]+ = (\w+)").captures(lines[i].trim()).map(|c| c[1].to_string()).unwrap_or_default();
+            let cheap = |i: usize| {
+                matches!(op_of(i).as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fdiv" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector")
+            };
+            // SpeculativeExecution hoists nothing from a block that would leave more than 5 of its
+            // instructions behind (its terminator among them) or whose speculation costs more than 7:
+            // a speculatable instruction counts unless an operand of it from the block stays behind
+            let mut behind: Vec<String> = Vec::new();
+            let (mut cost, mut left) = (0, 1);
+            for &i in &body {
+                let def = regex!(r"^\s+(%[\w.]+) = ").captures(lines[i]).map(|c| c[1].to_string()).unwrap_or_default();
+                let rhs = lines[i].split_once(" = ").map_or(lines[i], |x| x.1);
+                if cheap(i) && !regex!(r"%[\w.]+").find_iter(rhs).any(|o| behind.iter().any(|d| d == o.as_str())) {
+                    cost += if matches!(op_of(i).as_str(), "bitcast" | "addrspacecast") { 0 } else { 1 };
+                } else {
+                    left += 1;
+                    behind.push(def);
+                }
+            }
+            if cost > 7 || left > 5 {
+                continue;
+            }
             let mut hoisted: Vec<usize> = Vec::new();
             for &i in &body {
-                let l = lines[i].trim();
-                let op = regex!(r"^%[\w.]+ = (\w+)").captures(l).map(|c| c[1].to_string()).unwrap_or_default();
-                let cheap = matches!(op.as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector");
-                if !cheap {
+                if !cheap(i) {
                     break;
                 }
                 hoisted.push(i);
@@ -821,9 +902,10 @@ pub fn speculate_and_sink(ir: &str) -> String {
                 }
                 pending.retain(|&j| j != i);
                 front.insert(0, i);
-                // its operands among the hoisted come up next
-                for &j in hoisted.iter().rev() {
-                    if pending.contains(&j) {
+                // its operands among the hoisted come up next, the last first (InstCombine's worklist is a stack)
+                let rhs = lines[i].split_once(" = ").map_or(lines[i], |x| x.1);
+                for op in regex!(r"%[\w.]+").find_iter(rhs) {
+                    if let Some(&j) = pending.iter().find(|&&j| regex!(r"^\s+(%[\w.]+) = ").captures(lines[j]).is_some_and(|c| &c[1] == op.as_str())) {
                         work.push(j);
                     }
                 }
@@ -848,6 +930,24 @@ pub fn speculate_and_sink(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calls_inlined_from_elsewhere_are_nounwind() {
+        let ir = "define float @_Z1gf(float %x) #0 {\n  %y = call float @_Z1hf(float %x) #1\n  ret float %y\n}\ndefine float @_Z1hf(float %x) #0 {\n  ret float %x\n}\ndefine float @_ZL1kf(float %x) #0 {\n  %y = call float @_Z1gf(float %x) #1\n  ret float %y\n}\nattributes #0 = { nounwind }\nattributes #1 = { convergent nobuiltin \"no-builtins\" }\n";
+        let home: std::collections::HashMap<String, String> = [("_ZL1kf".to_string(), "k".to_string())].into_iter().collect();
+        let tagged = tag_user_calls(ir, &home);
+        assert!(tagged.contains("call float @_Z1hf(float %x) #1, !msl.home !{!\"_Z1gf\"}"));
+        assert!(tagged.contains("call float @_Z1gf(float %x) #1, !msl.home !{!\"k\"}"));
+        // after O2: g inlined into the entry point k, its call to h with it; k's own call stays as written
+        let after = "define float @k(float %x) #0 {\n  %y = call float @_Z1hf(float %x) #1, !msl.home !5\n  %z = call float @_Z1gf(float %x) #1, !msl.home !6\n  ret float %y\n}\nattributes #0 = { nounwind }\nattributes #1 = { convergent nobuiltin \"no-builtins\" }\n!5 = !{!\"_Z1gf\"}\n!6 = !{!\"k\"}\n";
+        let out = nounwind_inlined_calls(after);
+        assert!(out.contains("%y = call float @_Z1hf(float %x) #2\n"));
+        assert!(out.contains("%z = call float @_Z1gf(float %x) #1\n"));
+        assert!(out.contains("attributes #2 = { convergent nobuiltin nounwind \"no-builtins\" }"));
+        assert!(!out.contains("msl.home") && !out.contains("!5 ="));
+        // other single-string nodes stay
+        assert!(nounwind_inlined_calls(&format!("{after}!7 = !{{!\"Simple C++ TBAA\"}}\n")).contains("!7 = !{!\"Simple C++ TBAA\"}"));
+    }
 
     #[test]
     fn convergent_after_the_first_inference_stays() {
@@ -912,6 +1012,20 @@ mod tests {
         let out = speculate_and_sink(ir);
         let order: Vec<&str> = out.lines().filter(|l| l.contains(" = ") || l.trim_start().starts_with("store")).map(|l| l.trim().split(' ').next().unwrap()).collect();
         assert_eq!(order, vec!["%i", "%po", "%pa", "%v", "store"]);
+    }
+
+    #[test]
+    fn a_sunk_instructions_last_operand_sinks_first() {
+        let ir = "define float @f(float %m, float %a, float %b) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  br label %end\n\nend:\n  %p = phi float [ %div, %then ], [ %m, %entry ]\n  ret float %p\n}\n";
+        let order = |ir: &str| -> Vec<String> { ir.lines().filter(|l| l.contains(" = ") && !l.contains("phi")).map(|l| l.trim().split(' ').next().unwrap().to_string()).collect() };
+        assert_eq!(order(&speculate_and_sink(ir)), vec!["%mul9", "%add", "%mul10", "%add11", "%div"]);
+    }
+
+    #[test]
+    fn a_block_over_speculations_budget_stays_as_it_is() {
+        // eight speculatable instructions cost more than 7: nothing is hoisted, so nothing moves
+        let ir = "define float @f(float %m, float %a, float %b, <3 x float> %v) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  %ins = insertelement <3 x float> poison, float %div, i64 0\n  %spl = shufflevector <3 x float> %ins, <3 x float> poison, <3 x i32> zeroinitializer\n  %mul14 = fmul fast <3 x float> %spl, %v\n  br label %end\n\nend:\n  %p = phi <3 x float> [ %mul14, %then ], [ %v, %entry ]\n  ret float %m\n}\n";
+        assert_eq!(speculate_and_sink(ir), ir);
     }
 
     #[test]
