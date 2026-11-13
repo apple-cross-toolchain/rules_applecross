@@ -797,7 +797,7 @@ pub fn speculate_and_sink(ir: &str) -> String {
             for &i in &body {
                 let l = lines[i].trim();
                 let op = regex!(r"^%[\w.]+ = (\w+)").captures(l).map(|c| c[1].to_string()).unwrap_or_default();
-                let cheap = matches!(op.as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector");
+                let cheap = matches!(op.as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fdiv" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector");
                 if !cheap {
                     break;
                 }
@@ -821,9 +821,10 @@ pub fn speculate_and_sink(ir: &str) -> String {
                 }
                 pending.retain(|&j| j != i);
                 front.insert(0, i);
-                // its operands among the hoisted come up next
-                for &j in hoisted.iter().rev() {
-                    if pending.contains(&j) {
+                // its operands among the hoisted come up next, the last first (InstCombine's worklist is a stack)
+                let rhs = lines[i].split_once(" = ").map_or(lines[i], |x| x.1);
+                for op in regex!(r"%[\w.]+").find_iter(rhs) {
+                    if let Some(&j) = pending.iter().find(|&&j| regex!(r"^\s+(%[\w.]+) = ").captures(lines[j]).is_some_and(|c| &c[1] == op.as_str())) {
                         work.push(j);
                     }
                 }
@@ -912,6 +913,14 @@ mod tests {
         let out = speculate_and_sink(ir);
         let order: Vec<&str> = out.lines().filter(|l| l.contains(" = ") || l.trim_start().starts_with("store")).map(|l| l.trim().split(' ').next().unwrap()).collect();
         assert_eq!(order, vec!["%i", "%po", "%pa", "%v", "store"]);
+    }
+
+    #[test]
+    fn a_sunk_instructions_last_operand_sinks_first() {
+        let ir = "define float @f(float %m, float %a, float %b, <3 x float> %v) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  %ins = insertelement <3 x float> poison, float %div, i64 0\n  %spl = shufflevector <3 x float> %ins, <3 x float> poison, <3 x i32> zeroinitializer\n  %mul14 = fmul fast <3 x float> %spl, %v\n  br label %end\n\nend:\n  %p = phi <3 x float> [ %mul14, %then ], [ %v, %entry ]\n  ret float %m\n}\n";
+        let out = speculate_and_sink(ir);
+        let order: Vec<&str> = out.lines().filter(|l| l.contains(" = ") && !l.contains("phi")).map(|l| l.trim().split(' ').next().unwrap()).collect();
+        assert_eq!(order, vec!["%mul9", "%add", "%mul10", "%add11", "%div", "%ins", "%spl", "%mul14"]);
     }
 
     #[test]
