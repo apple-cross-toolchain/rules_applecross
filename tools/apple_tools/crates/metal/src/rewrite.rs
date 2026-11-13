@@ -378,8 +378,17 @@ fn lazy_vector_args(src: &str) -> String {
         if args.len() < 2 || !scope[m.start()] || src[stmt_start..m.start()].contains("constexpr") {
             continue;
         }
-        let puts: String = args.iter().map(|a| format!(" __vb.put({});", lazy_vector_args(a.trim()))).collect();
         out.push_str(&src[pos..m.start()]);
+        // one number literal per element: a constant vector, as Xcode's frontend makes it
+        let n: usize = c[1].chars().last().and_then(|d| d.to_digit(10)).unwrap_or(0) as usize;
+        if args.len() == n && args.iter().all(|a| regex!(r"^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?[fFhHuUlL]*$").is_match(a.trim())) {
+            let elem = &c[1][..c[1].len() - 1];
+            let elems: Vec<String> = args.iter().map(|a| format!("({elem}){}", a.trim())).collect();
+            out.push_str(&format!("{}{{{}}}", &c[1], elems.join(", ")));
+            pos = close;
+            continue;
+        }
+        let puts: String = args.iter().map(|a| format!(" __vb.put({});", lazy_vector_args(a.trim()))).collect();
         out.push_str(&format!("({{ metal::__vbuild<{}> __vb; __vb.i = 0;{puts} __vb.v; }})", &c[1]));
         pos = close;
     }
@@ -555,6 +564,8 @@ mod tests {
         let src = "void f(float a) { float4 v = metal::__vec<float4>(g(a), a, 0, 1); }\nfloat4 c = metal::__vec<float4>(1, 2, 3, 4);";
         let out = lazy_vector_args(src);
         assert!(out.contains("({ metal::__vbuild<float4> __vb; __vb.i = 0; __vb.put(g(a)); __vb.put(a); __vb.put(0); __vb.put(1); __vb.v; })"));
+        // number literals alone: a constant
+        assert!(lazy_vector_args("void f() { x = metal::__vec<float3>(1.0, 0.0, -1.5f); }").contains("x = float3{(float)1.0, (float)0.0, (float)-1.5f};"));
         assert!(out.contains("float4 c = metal::__vec<float4>(1, 2, 3, 4);"));
     }
 }
