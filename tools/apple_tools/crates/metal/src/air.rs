@@ -305,24 +305,44 @@ fn after_constant_reads(ir: &str) -> String {
 /// only reads it reads no memory.
 fn constant_reads(ir: &str, entries: &[&str]) -> String {
     let mut ir = ir.to_string();
-    let readnone: Vec<String> = regex!(r"(?m)^declare .*? @([\w.]+)\(.*\).*\breadnone\b").captures_iter(&ir).map(|c| c[1].to_string()).collect();
-    for e in entries {
-        let Some((_, body)) = find_define(&ir, e) else { continue };
-        let reads_other = body.lines().any(|l| {
-            let l = l.trim();
-            l.starts_with("store ")
-                || regex!(r"= load ").is_match(l) && !regex!(r"= load [^,]*, [^,]* addrspace\(2\)\*").is_match(l)
-                || regex!(r"\bcall [^@]*@([\w.]+)\(").captures(l).map(|c| !readnone.iter().any(|r| *r == c[1])).unwrap_or(false)
-        });
-        if reads_other {
-            continue;
-        }
-        ir = edit_attrs(&ir, e, |a| {
-            if !regex!(r"\breadonly\b").is_match(a) {
-                return a.to_string();
+    let mut readnone: Vec<String> = regex!(r"(?m)^declare .*? @([\w.]+)\(.*\).*\breadnone\b").captures_iter(&ir).map(|c| c[1].to_string()).collect();
+    // a function calling the module's own functions counts once those do (so until nothing changes)
+    loop {
+        let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(&ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+        for c in regex!(r"(?m)^define [^@\n]*@([\w.]+)\(.*\)[^#\n]*#(\d+)").captures_iter(&ir) {
+            if groups.get(&c[2]).is_some_and(|g| g.split(' ').any(|a| a == "readnone")) && !readnone.contains(&c[1].to_string()) {
+                readnone.push(c[1].to_string());
             }
-            a.replace("argmemonly ", "").replace("readonly", "readnone")
-        });
+        }
+        let mut changed = false;
+        for e in entries {
+            if readnone.iter().any(|r| r == e) {
+                continue;
+            }
+            let Some((_, body)) = find_define(&ir, e) else { continue };
+            let reads_other = body.lines().any(|l| {
+                let l = l.trim();
+                l.starts_with("store ")
+                    || regex!(r"= load ").is_match(l) && !regex!(r"= load [^,]*, [^,]* addrspace\(2\)\*").is_match(l)
+                    || regex!(r"\bcall [^@]*@([\w.]+)\(").captures(l).map(|c| !readnone.iter().any(|r| *r == c[1])).unwrap_or(false)
+            });
+            if reads_other {
+                continue;
+            }
+            let before = ir.clone();
+            ir = edit_attrs(&ir, e, |a| {
+                if !regex!(r"\breadonly\b").is_match(a) {
+                    return a.to_string();
+                }
+                a.replace("argmemonly ", "").replace("readonly", "readnone")
+            });
+            if ir != before {
+                readnone.push(e.to_string());
+                changed = true;
+            }
+        }
+        if !changed {
+            return ir;
+        }
     }
-    ir
 }
