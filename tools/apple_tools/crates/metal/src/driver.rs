@@ -6,8 +6,11 @@
 //! 3. Read signatures, structs and typedefs from clang's AST dump.
 //! 4. Append extern "C" entry points with AIR's signatures (crate::entry).
 //! 5. Compile flat (no address spaces) to IR; fix calling conventions, function
-//!    constants and samplers; inline everything; opt -O2; resolve
-//!    address-space-dependent calls; infer address spaces; opt -O2.
+//!    constants and samplers; inline what Xcode's frontend has no call for;
+//!    one opt -O2 in Xcode's order, split before its inliner's walk: the module
+//!    simplification (the stdlib always-inlined, address spaces inferred), then
+//!    AIR's conversions and address-space-dependent calls resolved, then the
+//!    rest, after which the alias scopes are written as Xcode's.
 //! 6. Add the AIR metadata (crate::air) and write bitcode with llvm-as.
 
 use crate::air::{to_air, Inputs};
@@ -208,13 +211,13 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         run(Command::new(tool(o, "opt")).args(passes).args(["-S", "-o"]).arg(&out).arg(&i))?;
         std::fs::read_to_string(&out).map_err(|e| e.to_string())
     };
-    // the module simplification first: the stdlib is inlined and constants folded by its end, so
-    // conversions become air.convert calls, the markers resolve and moved values are frozen there,
-    // before the inliner's walk and the one attribute inference (as Xcode's frontend has them)
     // first what Xcode's frontend has no call for (`only_frontend_inlines`), with no scopes for
     // the inlined parameters (Xcode's entry point is the user's function: nothing to inline)
     let keep: std::collections::BTreeSet<String> = home.keys().cloned().collect();
     let text = ir::restore_always_inline(&step(&ir::only_frontend_inlines(&ir::tag_user_calls(&text, &home), &keep), "fe", &["-passes=always-inline", "-enable-noalias-to-md-conversion=false"])?);
+    // the module simplification: the stdlib is inlined and constants folded by its end, so
+    // conversions become air.convert calls, the markers resolve and moved values are frozen there,
+    // before the inliner's walk and the one attribute inference (as Xcode's frontend has them)
     let text = step(&text, "o2a", &[O2.0.as_str(), "-assume-default-is-flat-addrspace"])?;
     let text = intrinsics::apply(&ir::air_conversions(&text));
     let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);

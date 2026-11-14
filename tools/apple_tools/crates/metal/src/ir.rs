@@ -275,77 +275,6 @@ pub fn nounwind_inlined_calls(ir: &str) -> String {
     ir + "\n"
 }
 
-/// The functions a module defines as `convergent`.
-pub fn convergent_functions(ir: &str) -> BTreeSet<String> {
-    let groups: BTreeSet<String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).filter(|c| c[2].split(' ').any(|a| a == "convergent")).map(|c| c[1].to_string()).collect();
-    regex!(r#"(?m)^define [^\n]*?@("?[\w.$]+"?)\([^\n]*\)[^\n]*? #(\d+)"#).captures_iter(ir).filter(|c| groups.contains(&c[2])).map(|c| c[1].to_string()).collect()
-}
-
-/// The convergent functions that call a function the module defines: those
-/// Xcode's single attribute inference leaves convergent (its frontend's calls
-/// all are), whatever a later inference finds.
-pub fn convergent_callers(ir: &str) -> BTreeSet<String> {
-    let defined: BTreeSet<String> = regex!(r#"(?m)^define [^\n]*?@("?[\w.$]+"?)\("#).captures_iter(ir).map(|c| c[1].to_string()).collect();
-    let convergent = convergent_functions(ir);
-    let mut out = BTreeSet::new();
-    map_functions(ir, |f| {
-        let name = regex!(r#"@("?[\w.$]+"?)\("#).captures(f).map(|c| c[1].to_string()).unwrap_or_default();
-        if convergent.contains(&name) && regex!(r#"\bcall [^@\n]*@("?[\w.$]+"?)\("#).captures_iter(f).any(|c| defined.contains(&c[1])) {
-            out.insert(name);
-        }
-        f.to_string()
-    });
-    out
-}
-
-/// Xcode infers function attributes once, while its frontend's call sites are
-/// all still convergent, so a function calling another keeps `convergent`.
-/// Our second O2 infers them again after InstCombine has taken that off the
-/// call sites. So a function convergent after the first O2 keeps it, and so do
-/// the calls to it (InstCombine leaves a call convergent if its callee is).
-pub fn keep_convergent(ir: &str, was: &BTreeSet<String>) -> String {
-    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
-    let lost: BTreeSet<String> = was.difference(&convergent_functions(ir)).cloned().collect();
-    if lost.is_empty() {
-        return ir.to_string();
-    }
-    let mut next = groups.keys().filter_map(|k| k.parse::<usize>().ok()).max().map_or(0, |m| m + 1);
-    let mut added: std::collections::BTreeMap<String, usize> = Default::default();
-    let with_convergent = |g: &str| -> String {
-        if groups.get(g).is_some_and(|a| a.split(' ').any(|x| x == "convergent")) {
-            return g.to_string();
-        }
-        added
-            .entry(g.to_string())
-            .or_insert_with(|| {
-                next += 1;
-                next - 1
-            })
-            .to_string()
-    };
-    let lines: Vec<String> = {
-        let mut with_convergent = with_convergent;
-        ir.lines()
-        .map(|l| {
-            let callee = if l.starts_with("define ") {
-                regex!(r#"@("?[\w.$]+"?)\("#).captures(l).map(|c| c[1].to_string())
-            } else {
-                regex!(r#"^\s+(?:%[\w.]+ = )?(?:tail )?call [^@]*@("?[\w.$]+"?)\("#).captures(l).map(|c| c[1].to_string())
-            };
-            match callee {
-                Some(f) if lost.contains(&f) => regex!(r"#(\d+)( \{|,|$)").replace(l, |c: &Captures| format!("#{}{}", with_convergent(&c[1]), &c[2])).to_string(),
-                _ => l.to_string(),
-            }
-        })
-        .collect()
-    };
-    let mut ir = lines.join("\n");
-    for (old, new) in &added {
-        ir += &format!("\nattributes #{new} = {{ convergent {} }}", groups[old]);
-    }
-    ir + "\n"
-}
-
 /// Follow GEPs, bitcasts and casts back to the address space a flat pointer came from.
 pub fn address_space_of(body: &str, v: &str, depth: u32) -> Option<String> {
     if depth > 32 || !v.starts_with('%') {
@@ -477,57 +406,6 @@ pub fn resolve_as_markers(ir: &str) -> Result<String, String> {
         out += &format!("\n{head}@\"{real}\"({})\n", params.join(", "));
     }
     Ok(out)
-}
-
-/// Xcode's scoped-alias metadata comes from inlining an entry point whose
-/// resource parameters are noalias. So each entry point becomes a call to an
-/// internal copy with noalias pointer parameters (named for their kind and
-/// index, which `alias_scopes` reads back), and opt's inliner adds the scopes.
-pub fn noalias_entries(ir: &str, entries: &[String]) -> String {
-    let mut ir = ir.to_string();
-    for e in entries {
-        let needle = format!("@{e}(");
-        let Some(at) = ir.match_indices(&needle).map(|(i, _)| i).find(|&i| ir[..i].rfind('\n').map_or(0, |x| x + 1) == ir[..i].rfind("define ").unwrap_or(usize::MAX)) else { continue };
-        let line = ir[..at].rfind('\n').map_or(0, |x| x + 1);
-        let open = at + needle.len() - 1;
-        let close = balanced(ir.as_bytes(), open, b'(', b')');
-        let brace = close + ir[close..].find('{').unwrap();
-        let end = brace + ir[brace..].find("\n}\n").unwrap() + 3;
-        let (prefix, sig, tail, body) = (&ir[line..at], &ir[open + 1..close - 1], &ir[close..brace], &ir[brace..end]);
-        let ret = regex!(r"\b(?:define|dso_local|internal|spir_func|spir_kernel|noundef|zeroext|signext|local_unnamed_addr) ").replace_all(prefix, "").trim().to_string();
-        let mut inner_params = Vec::new();
-        let mut call_args = Vec::new();
-        let mut body = body.to_string();
-        for (k, p) in split_args(sig).iter().enumerate() {
-            let p = p.trim();
-            let (head, name) = p.rsplit_once(' ').unwrap();
-            let ty = regex!(r#"\s+(?:noalias|nocapture|noundef|readonly|writeonly|readnone|nonnull|zeroext|signext|"[^"]*"|align \d+|dereferenceable(?:_or_null)?\(\d+\))"#).replace_all(head, "").to_string();
-            call_args.push(format!("{ty} {name}"));
-            if !ty.ends_with('*') {
-                inner_params.push(p.to_string());
-                continue;
-            }
-            let kind = if ty.contains("_sampler_t") {
-                "smp"
-            } else if regex!(r"%struct\._(?:texture|depth)_").is_match(&ty) {
-                "tex"
-            } else {
-                "arg"
-            };
-            let new = format!("%__air_{kind}_{k}");
-            body = Regex::new(&format!(r"{}\b", regex::escape(name))).unwrap().replace_all(&body, new.as_str()).to_string();
-            inner_params.push(format!("{head} noalias {new}"));
-        }
-        let cc = if prefix.contains("spir_func ") { "spir_func " } else { "" };
-        let call = format!("call {cc}{ret} @__msl_entry.{e}({})", call_args.join(", "));
-        let outer_body = if ret == "void" { format!("{{\nentry:\n  {call}\n  ret void\n}}\n") } else { format!("{{\nentry:\n  %r = {call}\n  ret {ret} %r\n}}\n") };
-        let inner_prefix = prefix.replacen("define ", "define internal ", 1).replace("dso_local ", "");
-        let inner_tail = regex!(r"(#\d+)\s*$").replace(tail, "alwaysinline $1 ");
-        let inner = format!("{inner_prefix}@__msl_entry.{e}({}){inner_tail}{body}", inner_params.join(", "));
-        let outer = format!("{prefix}@{e}({sig}){tail}{outer_body}");
-        ir = format!("{}{outer}\n{inner}{}", &ir[..line], &ir[end..]);
-    }
-    ir
 }
 
 /// Only `keep` (and our vector types' members) stay `alwaysinline`, for a
@@ -774,97 +652,6 @@ pub fn drop_scope_decls(ir: &str) -> String {
     regex!(r"(?m)^(?:; Function Attrs: .*\n)?declare void @llvm\.experimental\.noalias\.scope\.decl\(metadata\).*\n").replace_all(&ir, "").to_string()
 }
 
-/// After inlining: name the scopes as Xcode does (air-alias-scopes(<fn>),
-/// air-alias-scope-arg(<k>)), one scope for all textures and one for all
-/// samplers, and an access's noalias list without its own scopes.
-pub fn alias_scopes(ir: &str) -> String {
-    let dom = regex!(r#"(?m)^!(\d+) = distinct !\{!\d+, !"__msl_entry\.([\w.$]+)"\}$"#);
-    let scope = regex!(r#"(?m)^!(\d+) = distinct !\{!\d+, !(\d+), !"__msl_entry\.([\w.$]+): %__air_(tex|smp|arg)_(\d+)"\}$"#);
-    let mut ir = replace_all(ir, dom, |c| format!("!{} = distinct !{{!{}, !\"air-alias-scopes({})\"}}", &c[1], &c[1], &c[2]));
-    // each scope node -> the node standing for its group
-    let mut rep: std::collections::HashMap<String, String> = Default::default();
-    let mut group_node: std::collections::HashMap<(String, String), String> = Default::default();
-    for c in scope.captures_iter(&ir.clone()) {
-        let label = match &c[4] {
-            "tex" => "textures".to_string(),
-            "smp" => "samplers".to_string(),
-            _ => format!("arg({})", &c[5]),
-        };
-        let key = (c[2].to_string(), label.clone());
-        match group_node.get(&key) {
-            Some(n) => {
-                rep.insert(c[1].to_string(), n.clone());
-            }
-            None => {
-                group_node.insert(key, c[1].to_string());
-                rep.insert(c[1].to_string(), c[1].to_string());
-                ir = ir.replace(&c[0], &format!("!{} = distinct !{{!{}, !{}, !\"air-alias-scope-{label}\"}}", &c[1], &c[1], &c[2]));
-            }
-        }
-    }
-    if rep.is_empty() {
-        return ir;
-    }
-    let lists: std::collections::HashMap<String, Vec<String>> = regex!(r"(?m)^!(\d+) = !\{(!\d+(?:, !\d+)*)\}$")
-        .captures_iter(&ir)
-        .map(|c| (c[1].to_string(), c[2].split(", ").map(|x| x[1..].to_string()).collect()))
-        .collect();
-    let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(&ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
-    let mut made: std::collections::HashMap<Vec<String>, usize> = Default::default();
-    let mut new_nodes = String::new();
-    let mut node = |ids: Vec<String>| -> usize {
-        *made.entry(ids.clone()).or_insert_with(|| {
-            let n = next;
-            next += 1;
-            new_nodes += &format!("!{n} = !{{{}}}\n", ids.iter().map(|i| format!("!{i}")).collect::<Vec<_>>().join(", "));
-            n
-        })
-    };
-    let map = |l: &str| -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        // scopes of other inlined functions' noalias parameters go
-        for i in lists.get(l).into_iter().flatten() {
-            let Some(r) = rep.get(i).cloned() else { continue };
-            if !out.contains(&r) {
-                out.push(r);
-            }
-        }
-        out
-    };
-    let sc = regex!(r", !alias\.scope !(\d+)");
-    let na = regex!(r", !noalias !(\d+)");
-    let lines: Vec<String> = ir
-        .lines()
-        .map(|line| {
-            let (a, n) = (sc.captures(line), na.captures(line));
-            if a.is_none() && n.is_none() {
-                return line.to_string();
-            }
-            let mut out = na.replace(&sc.replace(line, ""), "").to_string();
-            // Xcode leaves an access through a global (a constexpr sampler, a function constant), a call
-            // without pointers, or one to thread memory (no address space), unannotated
-            let thread_only = |t: &str| t.contains('*') && !t.contains("addrspace(");
-            match regex!(r"\bcall [^@]*@[\w.$\x22%]+\((.*)\)").captures(line) {
-                Some(args) if args[1].contains('@') || !args[1].contains('*') || thread_only(&args[1]) => return out,
-                None if line.contains('@') => return out,
-                None if thread_only(line.split(", !").next().unwrap_or("")) => return out,
-                _ => {}
-            }
-            let s = a.map(|c| map(&c[1])).unwrap_or_default();
-            let n: Vec<String> = n.map(|c| map(&c[1])).unwrap_or_default().into_iter().filter(|x| !s.contains(x)).collect();
-            if !s.is_empty() {
-                out += &format!(", !alias.scope !{}", node(s));
-            }
-            if !n.is_empty() {
-                out += &format!(", !noalias !{}", node(n));
-            }
-            out
-        })
-        .collect();
-    let ir = lines.join("\n");
-    ir.trim_end().to_string() + "\n" + &new_nodes
-}
-
 /// clang 15's TBAA gives a vector access the type `omnipotent char`; Xcode's
 /// gives it the element's scalar type (float4 -> "float"), for a vector field of
 /// a struct copy's !tbaa.struct too. `structs`: each record's struct-copy fields
@@ -1083,133 +870,6 @@ fn convert(ir: &str, user_scalars: bool) -> String {
 }
 
 
-/// Xcode's GPU target runs LLVM's SpeculativeExecution (branches diverge), as
-/// our pipeline now does: an if-then block's cheap instructions go up to the
-/// branch, and InstCombine sinks those used only there back to the top of the
-/// block. LLVM 15 sinks them back in their order; Xcode's InstCombine moves
-/// each to the front once all its users are in the block. So the then-block's
-/// leading run of such instructions is put in Xcode's order.
-pub fn speculate_and_sink(ir: &str) -> String {
-    map_functions(ir, |f| {
-        let lines: Vec<&str> = f.lines().collect();
-        // blocks: (label, first line, last line inclusive)
-        let mut blocks: Vec<(String, usize, usize)> = Vec::new();
-        for (i, l) in lines.iter().enumerate() {
-            if i == 0 {
-                continue;
-            }
-            if let Some(c) = regex!(r"^([-\w.$]+):").captures(l) {
-                if let Some(b) = blocks.last_mut() {
-                    b.2 = i - 1;
-                }
-                blocks.push((c[1].to_string(), i + 1, i));
-            } else if blocks.is_empty() && !l.trim().is_empty() && *l != "}" {
-                blocks.push((String::new(), i, i));
-            }
-            if *l == "}" {
-                if let Some(b) = blocks.last_mut() {
-                    b.2 = i - 1;
-                }
-            }
-        }
-        let term = |b: &(String, usize, usize)| -> &str {
-            (b.1..=b.2).rev().map(|i| lines[i].trim()).find(|l| !l.is_empty()).unwrap_or("")
-        };
-        let preds = |label: &str| -> Vec<usize> {
-            let re = Regex::new(&format!(r"label %{}\b", regex::escape(label))).unwrap();
-            blocks.iter().enumerate().filter(|(_, b)| re.is_match(term(b))).map(|(k, _)| k).collect()
-        };
-        let mut new_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
-        for (bi, b) in blocks.iter().enumerate() {
-            if b.0.is_empty() {
-                continue;
-            }
-            // a triangle's then-block: one predecessor ending in a conditional branch to it and to our successor
-            let p = preds(&b.0);
-            if p.len() != 1 {
-                continue;
-            }
-            let pt = term(&blocks[p[0]]);
-            let Some(pc) = regex!(r"^br i1 [^,]+, label %([-\w.$]+), label %([-\w.$]+)(?:, !.*)?$").captures(pt) else { continue };
-            let Some(succ) = regex!(r"^br label %([-\w.$]+)(?:, !.*)?$").captures(term(b)).map(|c| c[1].to_string()) else { continue };
-            let other = if pc[1] == b.0 { pc[2].to_string() } else { pc[1].to_string() };
-            if other != succ || blocks.iter().position(|x| x.0 == b.0) != Some(bi) {
-                continue;
-            }
-            // the leading run of speculatable instructions, in order
-            let body: Vec<usize> = (b.1..=b.2).filter(|&i| !lines[i].trim().is_empty() && !lines[i].trim_start().starts_with("br ")).collect();
-            let op_of = |i: usize| regex!(r"^%[\w.]+ = (\w+)").captures(lines[i].trim()).map(|c| c[1].to_string()).unwrap_or_default();
-            let cheap = |i: usize| {
-                matches!(op_of(i).as_str(), "getelementptr" | "zext" | "sext" | "trunc" | "bitcast" | "addrspacecast" | "add" | "sub" | "mul" | "shl" | "lshr" | "ashr" | "and" | "or" | "xor" | "icmp" | "select" | "fadd" | "fsub" | "fmul" | "fdiv" | "fneg" | "fcmp" | "extractelement" | "insertelement" | "shufflevector")
-            };
-            // SpeculativeExecution hoists nothing from a block that would leave more than 5 of its
-            // instructions behind (its terminator among them) or whose speculation costs more than 7:
-            // a speculatable instruction counts unless an operand of it from the block stays behind
-            let mut behind: Vec<String> = Vec::new();
-            let (mut cost, mut left) = (0, 1);
-            for &i in &body {
-                let def = regex!(r"^\s+(%[\w.]+) = ").captures(lines[i]).map(|c| c[1].to_string()).unwrap_or_default();
-                let rhs = lines[i].split_once(" = ").map_or(lines[i], |x| x.1);
-                if cheap(i) && !regex!(r"%[\w.]+").find_iter(rhs).any(|o| behind.iter().any(|d| d == o.as_str())) {
-                    cost += if matches!(op_of(i).as_str(), "bitcast" | "addrspacecast") { 0 } else { 1 };
-                } else {
-                    left += 1;
-                    behind.push(def);
-                }
-            }
-            if cost > 7 || left > 5 {
-                continue;
-            }
-            let mut hoisted: Vec<usize> = Vec::new();
-            for &i in &body {
-                if !cheap(i) {
-                    break;
-                }
-                hoisted.push(i);
-            }
-            if hoisted.len() < 2 {
-                continue;
-            }
-            // sink back: forward, each to the front once its users are all in the block
-            let mut front: Vec<usize> = Vec::new();
-            let mut pending: Vec<usize> = hoisted.clone();
-            let users_back = |i: usize, pending: &Vec<usize>| -> bool {
-                let Some(d) = regex!(r"^\s+(%[\w.]+) = ").captures(lines[i]).map(|c| c[1].to_string()) else { return true };
-                let re = Regex::new(&format!(r"{}\b", regex::escape(&d))).unwrap();
-                !pending.iter().any(|&j| j != i && re.is_match(lines[j].split_once(" = ").map_or(lines[j], |x| x.1)))
-            };
-            let mut work: Vec<usize> = hoisted.iter().rev().cloned().collect();
-            while let Some(i) = work.pop() {
-                if !pending.contains(&i) || !users_back(i, &pending) {
-                    continue;
-                }
-                pending.retain(|&j| j != i);
-                front.insert(0, i);
-                // its operands among the hoisted come up next, the last first (InstCombine's worklist is a stack)
-                let rhs = lines[i].split_once(" = ").map_or(lines[i], |x| x.1);
-                for op in regex!(r"%[\w.]+").find_iter(rhs) {
-                    if let Some(&j) = pending.iter().find(|&&j| regex!(r"^\s+(%[\w.]+) = ").captures(lines[j]).is_some_and(|c| &c[1] == op.as_str())) {
-                        work.push(j);
-                    }
-                }
-            }
-            if !pending.is_empty() {
-                continue;
-            }
-            let rest: Vec<usize> = body.iter().filter(|i| !hoisted.contains(i)).cloned().collect();
-            let order: Vec<usize> = front.into_iter().chain(rest).collect();
-            for (slot, src) in body.iter().zip(order) {
-                new_lines[*slot] = lines[src].to_string();
-            }
-        }
-        let mut out = new_lines.join("\n");
-        if f.ends_with('\n') {
-            out.push('\n');
-        }
-        out
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1270,21 +930,6 @@ mod tests {
     }
 
     #[test]
-    fn convergent_after_the_first_inference_stays() {
-        let first = "define float @f(float %x) #0 {\n  ret float %x\n}\ndefine float @g(float %x) #0 {\n  %y = call float @f(float %x) #1\n  ret float %y\n}\nattributes #0 = { convergent nounwind }\nattributes #1 = { convergent nobuiltin }\n";
-        assert_eq!(convergent_functions(first).into_iter().collect::<Vec<_>>(), vec!["f".to_string(), "g".to_string()]);
-        // only g calls a function the module defines
-        assert_eq!(convergent_callers(first).into_iter().collect::<Vec<_>>(), vec!["g".to_string()]);
-        let second = "define float @f(float %x) #0 {\n  ret float %x\n}\ndefine float @g(float %x) #2 {\n  %y = call float @f(float %x) #1, !noalias !3\n  ret float %y\n}\nattributes #0 = { nounwind }\nattributes #1 = { nobuiltin }\nattributes #2 = { convergent nounwind }\n";
-        let out = keep_convergent(second, &["f".to_string()].into_iter().collect());
-        assert!(out.contains("define float @f(float %x) #3 {"));
-        assert!(out.contains("call float @f(float %x) #4, !noalias !3"));
-        assert!(out.contains("attributes #3 = { convergent nounwind }"));
-        assert!(out.contains("attributes #4 = { convergent nobuiltin }"));
-        assert!(out.contains("define float @g(float %x) #2 {"));
-    }
-
-    #[test]
     fn bools_convert_as_xcode_converts_them() {
         let ir = "define spir_func float @_Z1fbf(i1 %b, float %x) {\n  %conv = uitofp i1 %b to float\n  %tobool = fcmp une float %x, 0.000000e+00\n  %cmp = fcmp une float %x, 0.000000e+00\n  ret float %conv\n}\n";
         let out = user_scalar_conversions(ir);
@@ -1327,28 +972,6 @@ mod tests {
     }
 
     #[test]
-    fn then_block_sinks_in_xcode_order() {
-        let ir = "define void @k(float* %o, float* %a) {\n  br i1 %c, label %then, label %end\n\nthen:\n  %i = zext i32 %n to i64\n  %pa = getelementptr inbounds float, float* %a, i64 %i\n  %po = getelementptr inbounds float, float* %o, i64 %i\n  %v = load float, float* %pa, align 4\n  store float %v, float* %po, align 4\n  br label %end\n\nend:\n  ret void\n}\n";
-        let out = speculate_and_sink(ir);
-        let order: Vec<&str> = out.lines().filter(|l| l.contains(" = ") || l.trim_start().starts_with("store")).map(|l| l.trim().split(' ').next().unwrap()).collect();
-        assert_eq!(order, vec!["%i", "%po", "%pa", "%v", "store"]);
-    }
-
-    #[test]
-    fn a_sunk_instructions_last_operand_sinks_first() {
-        let ir = "define float @f(float %m, float %a, float %b) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  br label %end\n\nend:\n  %p = phi float [ %div, %then ], [ %m, %entry ]\n  ret float %p\n}\n";
-        let order = |ir: &str| -> Vec<String> { ir.lines().filter(|l| l.contains(" = ") && !l.contains("phi")).map(|l| l.trim().split(' ').next().unwrap().to_string()).collect() };
-        assert_eq!(order(&speculate_and_sink(ir)), vec!["%mul9", "%add", "%mul10", "%add11", "%div"]);
-    }
-
-    #[test]
-    fn a_block_over_speculations_budget_stays_as_it_is() {
-        // eight speculatable instructions cost more than 7: nothing is hoisted, so nothing moves
-        let ir = "define float @f(float %m, float %a, float %b, <3 x float> %v) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  %ins = insertelement <3 x float> poison, float %div, i64 0\n  %spl = shufflevector <3 x float> %ins, <3 x float> poison, <3 x i32> zeroinitializer\n  %mul14 = fmul fast <3 x float> %spl, %v\n  br label %end\n\nend:\n  %p = phi <3 x float> [ %mul14, %then ], [ %v, %entry ]\n  ret float %m\n}\n";
-        assert_eq!(speculate_and_sink(ir), ir);
-    }
-
-    #[test]
     fn struct_type_vector_fields_get_element_types() {
         let ir = "!3 = !{!\"omnipotent char\", !4, i64 0}\n!4 = !{!\"Simple C++ TBAA\"}\n!5 = !{!3, !3, i64 0}\n!6 = !{!\"float\", !3, i64 0}\n!7 = !{!\"_ZTS1S\", !6, i64 0, !3, i64 16}\n!8 = !{!\"_ZTS1T\", !3, i64 0}\n";
         // S { float a; float4 b; } has a vector at 16; T { char c; } has none
@@ -1376,14 +999,6 @@ mod tests {
         assert!(!out.contains("__packed"));
     }
 
-    #[test]
-    fn alias_scopes_named_as_xcode() {
-        let ir = "  %v = load float, float addrspace(1)* %p, align 4, !alias.scope !3, !noalias !5\n!1 = distinct !{!1, !\"__msl_entry.k\"}\n!2 = distinct !{!2, !1, !\"__msl_entry.k: %__air_arg_1\"}\n!3 = !{!2}\n!4 = distinct !{!4, !1, !\"__msl_entry.k: %__air_tex_0\"}\n!5 = !{!4}\n";
-        let out = alias_scopes(ir);
-        assert!(out.contains("!\"air-alias-scopes(k)\""));
-        assert!(out.contains("!\"air-alias-scope-arg(1)\""));
-        assert!(out.contains("!\"air-alias-scope-textures\""));
-    }
 }
 
 /// Xcode's front end declares a scalar conversion as it emits the function that
