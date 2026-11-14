@@ -530,6 +530,46 @@ pub fn noalias_entries(ir: &str, entries: &[String]) -> String {
     ir
 }
 
+/// Only `keep` (and our vector builder's helpers) stay `alwaysinline`, for a
+/// step inlining what Xcode's frontend has no call for: the entry points'
+/// stage functions (Xcode's entry point is the user's function) and the puts
+/// building a vector (Xcode's builds it in place). The others' `alwaysinline`
+/// becomes `"msl.ai"` until `restore_always_inline`.
+pub fn only_frontend_inlines(ir: &str, keep: &BTreeSet<String>) -> String {
+    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let mut next = groups.keys().filter_map(|k| k.parse::<usize>().ok()).max().map_or(0, |m| m + 1);
+    let mut added: std::collections::BTreeMap<String, usize> = Default::default();
+    let held = |a: &str| a.split(' ').map(|w| if w == "alwaysinline" { "\"msl.ai\"" } else { w }).collect::<Vec<_>>().join(" ");
+    let out = replace_all(ir, regex!(r#"(?m)^(define [^\n]*?@("?[\w.$]+"?)\([^\n]*\))([^\n]*?)(?: #(\d+))? \{$"#), |c| {
+        let name = &c[2];
+        if keep.contains(name) || regex!(r"__vbuild|__widen").is_match(name) {
+            return c[0].to_string();
+        }
+        let group = match c.get(4) {
+            Some(g) if groups.get(g.as_str()).is_some_and(|a| a.split(' ').any(|w| w == "alwaysinline")) => {
+                let n = *added.entry(g.as_str().to_string()).or_insert_with(|| {
+                    next += 1;
+                    next - 1
+                });
+                format!(" #{n}")
+            }
+            Some(g) => format!(" #{}", g.as_str()),
+            None => String::new(),
+        };
+        format!("{}{}{group} {{", &c[1], held(&c[3]))
+    });
+    let mut out = out;
+    for (old, new) in &added {
+        out += &format!("\nattributes #{new} = {{ {} }}", held(&groups[old]));
+    }
+    out + "\n"
+}
+
+/// `alwaysinline` back where `only_frontend_inlines` held it.
+pub fn restore_always_inline(ir: &str) -> String {
+    ir.replace("\"msl.ai\"", "alwaysinline")
+}
+
 /// An entry point's pointer parameters (its buffers, textures, samplers and
 /// threadgroup memory) are `noalias` during O2: the alias information Xcode's
 /// scopes give its optimiser (`xcode_alias_scopes` writes those after O2).
@@ -1178,6 +1218,18 @@ mod tests {
         let ir = "define void @k(float addrspace(1)* noundef %a, %struct._texture_2d_t addrspace(1)* %t, float addrspace(2)* noundef %c, i32 noundef %i) #0 {\nentry:\n  ret void\n}\n";
         let out = noalias_params(ir, &["k".to_string()]);
         assert!(out.contains("define void @k(float addrspace(1)* noalias noundef %a, %struct._texture_2d_t addrspace(1)* noalias %t, float addrspace(2)* noalias noundef %c, i32 noundef %i) #0 {"));
+    }
+
+    #[test]
+    fn only_the_frontends_layers_inline_first() {
+        let ir = "define internal void @_ZL1kv() alwaysinline #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZN5metal8__vbuildIDv4_fS_Li4EE3putEf() #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZN5metal5fractEf() #0 {\nentry:\n  ret void\n}\ndefine internal void @_ZL1hv() alwaysinline #1 {\nentry:\n  ret void\n}\nattributes #0 = { alwaysinline nounwind }\nattributes #1 = { nounwind }\n";
+        let out = only_frontend_inlines(ir, &["_ZL1kv".to_string()].into());
+        assert!(out.contains("@_ZL1kv() alwaysinline #0 {"));
+        assert!(out.contains("3putEf() #0 {"));
+        assert!(out.contains("5fractEf() #2 {"));
+        assert!(out.contains("@_ZL1hv() \"msl.ai\" #1 {"));
+        assert!(out.contains("attributes #2 = { \"msl.ai\" nounwind }"));
+        assert_eq!(restore_always_inline(&out).matches("alwaysinline").count(), 4);
     }
 
     #[test]
