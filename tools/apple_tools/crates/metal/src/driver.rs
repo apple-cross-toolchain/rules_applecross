@@ -213,7 +213,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // before the inliner's walk and the one attribute inference (as Xcode's frontend has them)
     let keep: std::collections::BTreeSet<String> = home.keys().cloned().collect();
     let text = ir::restore_always_inline(&step(&ir::only_frontend_inlines(&ir::tag_user_calls(&text, &home), &keep), "fe", &["-passes=always-inline"])?);
-    let text = step(&text, "o2a", &[O2.0.as_str()])?;
+    let text = step(&text, "o2a", &[O2.0.as_str(), "-assume-default-is-flat-addrspace"])?;
     let text = intrinsics::apply(&ir::air_conversions(&text));
     let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;

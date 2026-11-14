@@ -388,7 +388,7 @@ fn lazy_vector_args(src: &str) -> String {
             pos = close;
             continue;
         }
-        let puts: String = args.iter().map(|a| format!(" __vb.put({});", lazy_vector_args(a.trim()))).collect();
+        let puts: String = args.iter().enumerate().map(|(i, a)| format!(" __vb.{}({});", if i == 0 { "first" } else { "put" }, lazy_vector_args(a.trim()))).collect();
         out.push_str(&format!("({{ metal::__vbuild<{}> __vb; __vb.i = 0;{puts} __vb.v; }})", &c[1]));
         pos = close;
     }
@@ -563,7 +563,7 @@ mod tests {
     fn vectors_built_in_functions_put_each_argument() {
         let src = "void f(float a) { float4 v = metal::__vec<float4>(g(a), a, 0, 1); }\nfloat4 c = metal::__vec<float4>(1, 2, 3, 4);";
         let out = lazy_vector_args(src);
-        assert!(out.contains("({ metal::__vbuild<float4> __vb; __vb.i = 0; __vb.put(g(a)); __vb.put(a); __vb.put(0); __vb.put(1); __vb.v; })"));
+        assert!(out.contains("({ metal::__vbuild<float4> __vb; __vb.i = 0; __vb.first(g(a)); __vb.put(a); __vb.put(0); __vb.put(1); __vb.v; })"));
         // number literals alone: a constant
         assert!(lazy_vector_args("void f() { x = metal::__vec<float3>(1.0, 0.0, -1.5f); }").contains("x = float3{(float)1.0, (float)0.0, (float)-1.5f};"));
         assert!(out.contains("float4 c = metal::__vec<float4>(1, 2, 3, 4);"));
