@@ -246,19 +246,52 @@ pub fn extract(ir: &str, name: &str) -> String {
         init_text.contains(&call) && !other_text.contains(&call)
     };
     let (init_decls, decls): (Vec<_>, Vec<_>) = decls.into_iter().partition(only_init);
-    for t in &functions {
-        let is_init = t.contains("section \"air.static_init\"");
+    for t in functions.iter().filter(|t| t.contains("section \"air.static_init\"")) {
         out += t;
         out += "\n";
-        if is_init && functions.iter().all(|f| !f.contains("section \"air.static_init\"") || std::ptr::eq(*f, *t) || functions.iter().position(|x| std::ptr::eq(*x, *f)) < functions.iter().position(|x| std::ptr::eq(*x, *t))) {
-            for (_, d) in &init_decls {
-                out += d;
-                out += "\n";
+    }
+    for (_, d) in &init_decls {
+        out += d;
+        out += "\n";
+    }
+    // the rest as metallib walks them from the function: each, then what it refers to, the last
+    // first use first (a stack), each before what it refers to in turn
+    let items: Vec<(&str, &str)> = functions
+        .iter()
+        .filter(|t| !t.contains("section \"air.static_init\""))
+        .filter_map(|t| regex!(r"(?m)^define [^@\n]*@([-\w.$]+|\x22[^\x22]*\x22)\(").captures(t).map(|c| (c.get(1).unwrap().as_str(), t.as_str())))
+        .chain(decls.iter().map(|d| (d.0.as_deref().unwrap_or(""), d.1.as_str())))
+        .collect();
+    let mut order: Vec<usize> = Vec::new();
+    let mut stack: Vec<usize> = items.iter().position(|(n, _)| unquote(n) == unquote(name)).into_iter().collect();
+    while let Some(i) = stack.pop() {
+        if order.contains(&i) {
+            continue;
+        }
+        order.push(i);
+        let mut refs: Vec<usize> = Vec::new();
+        for m in regex!(r"@([-\w.$]+|\x22[^\x22]*\x22)\(").captures_iter(items[i].1) {
+            if let Some(j) = items.iter().position(|(n, _)| *n == &m[1]) {
+                if j != i && !refs.contains(&j) {
+                    refs.push(j);
+                }
             }
         }
+        stack.extend(refs);
     }
-    for (_, t) in decls {
-        out += t;
+    order.extend((0..items.len()).filter(|i| !order.contains(i)).collect::<Vec<_>>());
+    // metallib internalises the functions it calls (fastcc, unnamed_addr), and so the calls
+    let callees: Vec<&str> = items.iter().filter(|(n, t)| t.lines().any(|l| l.starts_with("define ")) && unquote(n) != unquote(name)).map(|(n, _)| *n).collect();
+    let internal = |t: &str| -> String {
+        let t = regex!(r"(?m)^define (?:(?:dso_local|linkonce_odr|weak_odr|hidden) )*(.*?@([-\w.$]+|\x22[^\x22]*\x22)\(.*)$").replace(t, |c: &regex::Captures| {
+            if callees.contains(&&c[2]) { format!("define internal fastcc {}", c[1].replacen(" local_unnamed_addr ", " unnamed_addr ", 1)) } else { c[0].to_string() }
+        });
+        regex!(r"(\bcall (?:(?:fast|nnan|ninf|nsz|arcp|contract|afn|reassoc) )*)([^@\n]*@([-\w.$]+|\x22[^\x22]*\x22)\()")
+            .replace_all(&t, |c: &regex::Captures| if callees.contains(&&c[3]) { format!("{}fastcc {}", &c[1], &c[2]) } else { c[0].to_string() })
+            .to_string()
+    };
+    for i in order {
+        out += &internal(items[i].1);
         out += "\n";
     }
     out += &rest.iter().filter(|l| l.starts_with("attributes ")).cloned().collect::<Vec<_>>().join("\n");
