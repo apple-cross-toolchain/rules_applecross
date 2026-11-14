@@ -708,6 +708,52 @@ pub fn vector_tbaa(ir: &str, structs: &[Vec<(u32, u32, Option<String>)>]) -> Str
             edits.push((c[0].to_string(), format!("!{} = !{{{}}}", &c[1], parts.join(", "))));
         }
     }
+    // struct type nodes: a vector field's type is its element's (a char field stays char, so only
+    // where one record's layout has a vector at each such offset)
+    let desc = regex!(r#"(?m)^!(\d+) = !\{!"(_ZTS[^"]*)", ((?:!\d+, i64 \d+(?:, )?)+)\}$"#);
+    for c in desc.captures_iter(&ir) {
+        let fields: Vec<(String, u32)> = regex!(r"!(\d+), i64 (\d+)").captures_iter(&c[3]).map(|f| (f[1].to_string(), f[2].parse().unwrap())).collect();
+        if !fields.iter().any(|(t, _)| *t == char_id) {
+            continue;
+        }
+        let elems = |r: &Vec<(u32, u32, Option<String>)>| -> Option<Vec<Option<String>>> {
+            fields.iter().map(|(t, off)| {
+                let f = r.iter().find(|x| x.0 == *off)?;
+                Some(if *t == char_id { Some(f.2.clone()?) } else { None })
+            }).collect()
+        };
+        let found: Vec<Vec<Option<String>>> = structs.iter().filter_map(elems).collect();
+        let Some(first) = found.first() else { continue };
+        if found.iter().any(|f| f != first) {
+            continue;
+        }
+        let mut parts = Vec::new();
+        for ((t, off), elem) in fields.iter().zip(first) {
+            let name = match elem.as_deref() {
+                Some("float") => "float",
+                Some("half") => "half",
+                Some("int") | Some("uint") => "int",
+                Some("short") | Some("ushort") => "short",
+                Some("long") | Some("ulong") => "long",
+                _ => "",
+            };
+            let ty = if name.is_empty() {
+                t.clone()
+            } else if let Some(n) = Regex::new(&format!(r#"(?m)^!(\d+) = !\{{!"{name}", !{char_id}, i64 0\}}$"#)).unwrap().captures(&ir) {
+                n[1].to_string()
+            } else {
+                let g = *tags.entry(name).or_insert_with(|| {
+                    let (t, g) = (next, next + 1);
+                    next += 2;
+                    nodes += &format!("!{t} = !{{!\"{name}\", !{char_id}, i64 0}}\n!{g} = !{{!{t}, !{t}, i64 0}}\n");
+                    g
+                });
+                (g - 1).to_string()
+            };
+            parts.push(format!("!{ty}, i64 {off}"));
+        }
+        edits.push((c[0].to_string(), format!("!{} = !{{!\"{}\", {}}}", &c[1], &c[2], parts.join(", "))));
+    }
     for (a, b) in edits {
         ir = ir.replacen(&a, &b, 1);
     }
@@ -1026,6 +1072,15 @@ mod tests {
         // eight speculatable instructions cost more than 7: nothing is hoisted, so nothing moves
         let ir = "define float @f(float %m, float %a, float %b, <3 x float> %v) {\nentry:\n  br i1 %c, label %then, label %end\n\nthen:\n  %mul10 = fmul fast float %m, %b\n  %add11 = fadd fast float %mul10, 1.000000e+00\n  %mul9 = fmul fast float %m, %a\n  %add = fadd fast float %mul9, 1.000000e+00\n  %div = fdiv fast float %add, %add11\n  %ins = insertelement <3 x float> poison, float %div, i64 0\n  %spl = shufflevector <3 x float> %ins, <3 x float> poison, <3 x i32> zeroinitializer\n  %mul14 = fmul fast <3 x float> %spl, %v\n  br label %end\n\nend:\n  %p = phi <3 x float> [ %mul14, %then ], [ %v, %entry ]\n  ret float %m\n}\n";
         assert_eq!(speculate_and_sink(ir), ir);
+    }
+
+    #[test]
+    fn struct_type_vector_fields_get_element_types() {
+        let ir = "!3 = !{!\"omnipotent char\", !4, i64 0}\n!4 = !{!\"Simple C++ TBAA\"}\n!5 = !{!3, !3, i64 0}\n!6 = !{!\"float\", !3, i64 0}\n!7 = !{!\"_ZTS1S\", !6, i64 0, !3, i64 16}\n!8 = !{!\"_ZTS1T\", !3, i64 0}\n";
+        // S { float a; float4 b; } has a vector at 16; T { char c; } has none
+        let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
+        assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
+        assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
     }
 
     #[test]
