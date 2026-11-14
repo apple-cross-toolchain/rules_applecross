@@ -211,8 +211,10 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // the module simplification first: the stdlib is inlined and constants folded by its end, so
     // conversions become air.convert calls, the markers resolve and moved values are frozen there,
     // before the inliner's walk and the one attribute inference (as Xcode's frontend has them)
+    // first what Xcode's frontend has no call for (`only_frontend_inlines`), with no scopes for
+    // the inlined parameters (Xcode's entry point is the user's function: nothing to inline)
     let keep: std::collections::BTreeSet<String> = home.keys().cloned().collect();
-    let text = ir::restore_always_inline(&step(&ir::only_frontend_inlines(&ir::tag_user_calls(&text, &home), &keep), "fe", &["-passes=always-inline"])?);
+    let text = ir::restore_always_inline(&step(&ir::only_frontend_inlines(&ir::tag_user_calls(&text, &home), &keep), "fe", &["-passes=always-inline", "-enable-noalias-to-md-conversion=false"])?);
     let text = step(&text, "o2a", &[O2.0.as_str(), "-assume-default-is-flat-addrspace"])?;
     let text = intrinsics::apply(&ir::air_conversions(&text));
     let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);

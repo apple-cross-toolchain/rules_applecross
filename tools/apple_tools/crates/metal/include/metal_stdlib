@@ -103,6 +103,7 @@ template <class V, class A, class = typename enable_if<(__elem<A>::n > 1)>::type
   typedef typename __elem<V>::type E;
   if constexpr (__is_same(A, V)) return a;
   else if constexpr (__is_same(A, __vector<typename __elem<A>::type, __elem<A>::n>)) return __builtin_convertvector(a, V);
+  else if constexpr (__is_same(typename __elem<A>::type, bool)) return (V)a;   // a bool vector converts as a whole
   else return __convert_each<V>(a, (typename __mkseq<__elem<V>::n>::type *)0);
 }
 template <class V, class A, int... I, int... U> __attribute__((always_inline)) V __widen(A a, __seq<I...> *, __seq<U...> *) {
@@ -183,12 +184,14 @@ template <int N> struct __boolvec;
   __boolvec() = default; \
   template <int... K> __attribute__((always_inline)) void fill(bool b, __seq<K...> *) { (((*this)[K] = b), ...); } \
   template <class V, int... K> __attribute__((always_inline)) void mask(V m, __seq<K...> *) { (((*this)[K] = m[K] != 0), ...); } \
-  template <class V, int... K> __attribute__((always_inline)) V number(__seq<K...> *) const { V r; ((r[K] = (typename __elem<V>::type)(*this)[K]), ...); return r; } \
+  template <class B, int... K> __attribute__((always_inline)) void from_bits(B b, __seq<K...> *) { (((*this)[K] = b[K]), ...); } \
+  template <int... K> __attribute__((always_inline)) __vector<bool, N> bits(__seq<K...> *) const { return __vector<bool, N>{(*this)[K]...}; } \
+  __attribute__((always_inline)) explicit __boolvec(__vector<bool, N> b) { from_bits(b, (typename __mkseq<N>::type *)0); } \
   __attribute__((always_inline)) __boolvec(bool b) { fill(b, (typename __mkseq<N>::type *)0); } \
   template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
   __attribute__((always_inline)) __boolvec(V m) { mask(m, (typename __mkseq<N>::type *)0); } \
   template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
-  __attribute__((always_inline)) explicit operator V() const { return number<V>((typename __mkseq<N>::type *)0); } \
+  __attribute__((always_inline)) explicit operator V() const { return __builtin_convertvector(bits((typename __mkseq<N>::type *)0), V); } \
   __attribute__((always_inline)) bool &operator[](int k) { return (&x)[k]; } \
   __attribute__((always_inline)) bool operator[](int k) const { return (&x)[k]; }
 template <> struct __boolvec<2> { bool x, y; __MSL_BOOLVEC_OPS(2) };

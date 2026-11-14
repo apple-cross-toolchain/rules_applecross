@@ -2426,14 +2426,12 @@ __attribute__((always_inline)) inline bool isnan(float x) { return (__builtin_bi
 __attribute__((always_inline)) inline bool isinf(float x) { return (__builtin_bit_cast(uint, x) & 0x7fffffffu) == 0x7f800000u; }
 __attribute__((always_inline)) inline bool isfinite(float x) { return (__builtin_bit_cast(uint, x) & 0x7fffffffu) < 0x7f800000u; }
 __attribute__((always_inline)) inline bool signbit(float x) { return (__builtin_bit_cast(uint, x) >> (sizeof(float) * 8 - 1)) != 0; }
-template <class V, int... K> __attribute__((always_inline)) inline __boolvec<sizeof...(K)> __isnan_float(V x, __seq<K...> *) { __boolvec<sizeof...(K)> r; ((r[K] = isnan((float)x[K])), ...); return r; }
-template <class V, int... K> __attribute__((always_inline)) inline __boolvec<sizeof...(K)> __isinf_float(V x, __seq<K...> *) { __boolvec<sizeof...(K)> r; ((r[K] = isinf((float)x[K])), ...); return r; }
-__attribute__((always_inline)) inline __boolvec<2> isnan(float2 x) { return __isnan_float(x, (__mkseq<2>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<2> isinf(float2 x) { return __isinf_float(x, (__mkseq<2>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<3> isnan(float3 x) { return __isnan_float(x, (__mkseq<3>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<3> isinf(float3 x) { return __isinf_float(x, (__mkseq<3>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<4> isnan(float4 x) { return __isnan_float(x, (__mkseq<4>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<4> isinf(float4 x) { return __isinf_float(x, (__mkseq<4>::type *)0); }
+__attribute__((always_inline)) inline __boolvec<2> isnan(float2 x) { return __boolvec<2>(__builtin_convertvector((__builtin_bit_cast(uint2, x) & 0x7fffffffu) > 0x7f800000u, __vector<bool, 2>)); }
+__attribute__((always_inline)) inline __boolvec<2> isinf(float2 x) { return __boolvec<2>(__builtin_convertvector((__builtin_bit_cast(uint2, x) & 0x7fffffffu) == 0x7f800000u, __vector<bool, 2>)); }
+__attribute__((always_inline)) inline __boolvec<3> isnan(float3 x) { return __boolvec<3>(__builtin_convertvector((__builtin_bit_cast(uint3, x) & 0x7fffffffu) > 0x7f800000u, __vector<bool, 3>)); }
+__attribute__((always_inline)) inline __boolvec<3> isinf(float3 x) { return __boolvec<3>(__builtin_convertvector((__builtin_bit_cast(uint3, x) & 0x7fffffffu) == 0x7f800000u, __vector<bool, 3>)); }
+__attribute__((always_inline)) inline __boolvec<4> isnan(float4 x) { return __boolvec<4>(__builtin_convertvector((__builtin_bit_cast(uint4, x) & 0x7fffffffu) > 0x7f800000u, __vector<bool, 4>)); }
+__attribute__((always_inline)) inline __boolvec<4> isinf(float4 x) { return __boolvec<4>(__builtin_convertvector((__builtin_bit_cast(uint4, x) & 0x7fffffffu) == 0x7f800000u, __vector<bool, 4>)); }
 __attribute__((always_inline)) inline float copysign(float x, float y) { uint s = __builtin_bit_cast(uint, y) & 0x80000000u; uint r = (__builtin_bit_cast(uint, x) & 0x7fffffff) | s; return __builtin_bit_cast(float, r); }
 __attribute__((always_inline)) inline float fdim(float x, float y) { return __msl_fdim(x, y); }
 __attribute__((always_inline)) inline float2 copysign(float2 x, float2 y) { uint2 s = __builtin_bit_cast(uint2, y) & 0x80000000u; uint2 r = (__builtin_bit_cast(uint2, x) & 0x7fffffff) | s; return __builtin_bit_cast(float2, r); }
@@ -2446,14 +2444,12 @@ __attribute__((always_inline)) inline bool isnan(half x) { return (__builtin_bit
 __attribute__((always_inline)) inline bool isinf(half x) { return (__builtin_bit_cast(ushort, x) & (ushort)0x7fff) == (ushort)0x7c00; }
 __attribute__((always_inline)) inline bool isfinite(half x) { return (__builtin_bit_cast(ushort, x) & (ushort)0x7fff) < (ushort)0x7c00; }
 __attribute__((always_inline)) inline bool signbit(half x) { return (__builtin_bit_cast(ushort, x) >> (sizeof(half) * 8 - 1)) != 0; }
-template <class V, int... K> __attribute__((always_inline)) inline __boolvec<sizeof...(K)> __isnan_half(V x, __seq<K...> *) { __boolvec<sizeof...(K)> r; ((r[K] = isnan((half)x[K])), ...); return r; }
-template <class V, int... K> __attribute__((always_inline)) inline __boolvec<sizeof...(K)> __isinf_half(V x, __seq<K...> *) { __boolvec<sizeof...(K)> r; ((r[K] = isinf((half)x[K])), ...); return r; }
-__attribute__((always_inline)) inline __boolvec<2> isnan(half2 x) { return __isnan_half(x, (__mkseq<2>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<2> isinf(half2 x) { return __isinf_half(x, (__mkseq<2>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<3> isnan(half3 x) { return __isnan_half(x, (__mkseq<3>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<3> isinf(half3 x) { return __isinf_half(x, (__mkseq<3>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<4> isnan(half4 x) { return __isnan_half(x, (__mkseq<4>::type *)0); }
-__attribute__((always_inline)) inline __boolvec<4> isinf(half4 x) { return __isinf_half(x, (__mkseq<4>::type *)0); }
+__attribute__((always_inline)) inline __boolvec<2> isnan(half2 x) { return __boolvec<2>(__builtin_convertvector((__builtin_bit_cast(ushort2, x) & (ushort)0x7fff) > (ushort)0x7c00, __vector<bool, 2>)); }
+__attribute__((always_inline)) inline __boolvec<2> isinf(half2 x) { return __boolvec<2>(__builtin_convertvector((__builtin_bit_cast(ushort2, x) & (ushort)0x7fff) == (ushort)0x7c00, __vector<bool, 2>)); }
+__attribute__((always_inline)) inline __boolvec<3> isnan(half3 x) { return __boolvec<3>(__builtin_convertvector((__builtin_bit_cast(ushort3, x) & (ushort)0x7fff) > (ushort)0x7c00, __vector<bool, 3>)); }
+__attribute__((always_inline)) inline __boolvec<3> isinf(half3 x) { return __boolvec<3>(__builtin_convertvector((__builtin_bit_cast(ushort3, x) & (ushort)0x7fff) == (ushort)0x7c00, __vector<bool, 3>)); }
+__attribute__((always_inline)) inline __boolvec<4> isnan(half4 x) { return __boolvec<4>(__builtin_convertvector((__builtin_bit_cast(ushort4, x) & (ushort)0x7fff) > (ushort)0x7c00, __vector<bool, 4>)); }
+__attribute__((always_inline)) inline __boolvec<4> isinf(half4 x) { return __boolvec<4>(__builtin_convertvector((__builtin_bit_cast(ushort4, x) & (ushort)0x7fff) == (ushort)0x7c00, __vector<bool, 4>)); }
 __attribute__((always_inline)) inline half copysign(half x, half y) { ushort s = __builtin_bit_cast(ushort, y) & 0x8000; ushort r = (__builtin_bit_cast(ushort, x) & ~0x8000) | s; return __builtin_bit_cast(half, r); }
 __attribute__((always_inline)) inline half fdim(half x, half y) { return __msl_fdim(x, y); }
 __attribute__((always_inline)) inline half2 copysign(half2 x, half2 y) { ushort2 s = __builtin_bit_cast(ushort2, y) & 0x8000; ushort2 r = (__builtin_bit_cast(ushort2, x) & 0x7fff) | s; return __builtin_bit_cast(half2, r); }

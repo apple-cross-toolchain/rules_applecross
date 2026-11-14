@@ -194,12 +194,11 @@ def emit():
         out.append('%s bool isinf(%s x) { return (__builtin_bit_cast(%s, x) & %s) == %s; }' % (AI, scalar, bits, mant, expo))
         out.append('%s bool isfinite(%s x) { return (__builtin_bit_cast(%s, x) & %s) < %s; }' % (AI, scalar, bits, mant, expo))
         out.append('%s bool signbit(%s x) { return (__builtin_bit_cast(%s, x) >> (sizeof(%s) * 8 - 1)) != 0; }' % (AI, scalar, bits, scalar))
-        for fn in ('isnan', 'isinf'):
-            out.append('template <class V, int... K> %s __boolvec<sizeof...(K)> __%s_%s(V x, __seq<K...> *) { __boolvec<sizeof...(K)> r; ((r[K] = %s((%s)x[K])), ...); return r; }' % (AI, fn, scalar, fn, scalar))
+        # vectors as a whole, as Xcode's header tests them (a vector of i1)
         for n in ('2', '3', '4'):
             t = scalar + n
-            out.append('%s __boolvec<%s> isnan(%s x) { return __isnan_%s(x, (__mkseq<%s>::type *)0); }' % (AI, n, t, scalar, n))
-            out.append('%s __boolvec<%s> isinf(%s x) { return __isinf_%s(x, (__mkseq<%s>::type *)0); }' % (AI, n, t, scalar, n))
+            out.append('%s __boolvec<%s> isnan(%s x) { return __boolvec<%s>(__builtin_convertvector((__builtin_bit_cast(%s%s, x) & %s) > %s, __vector<bool, %s>)); }' % (AI, n, t, n, bits, n, mant, expo, n))
+            out.append('%s __boolvec<%s> isinf(%s x) { return __boolvec<%s>(__builtin_convertvector((__builtin_bit_cast(%s%s, x) & %s) == %s, __vector<bool, %s>)); }' % (AI, n, t, n, bits, n, mant, expo, n))
         for t in ([scalar] + [scalar + n for n in '234']):
             # copysign in bits, as Xcode's header computes it (a scalar half through int promotion)
             bt = ubits + t[len(scalar):]
