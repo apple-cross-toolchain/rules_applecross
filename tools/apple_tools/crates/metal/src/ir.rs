@@ -530,6 +530,202 @@ pub fn noalias_entries(ir: &str, entries: &[String]) -> String {
     ir
 }
 
+/// An entry point's pointer parameters (its buffers, textures, samplers and
+/// threadgroup memory) are `noalias` during O2: the alias information Xcode's
+/// scopes give its optimiser (`xcode_alias_scopes` writes those after O2).
+pub fn noalias_params(ir: &str, entries: &[String]) -> String {
+    let lines: Vec<String> = ir
+        .lines()
+        .map(|l| {
+            if !l.starts_with("define ") {
+                return l.to_string();
+            }
+            let Some(name) = regex!(r#"@("?[\w.$]+"?)\("#).captures(l).map(|c| c[1].trim_matches('"').to_string()) else { return l.to_string() };
+            if !entries.contains(&name) {
+                return l.to_string();
+            }
+            let open = l.find(&format!("{name}(")).unwrap() + name.len();
+            let close = balanced(l.as_bytes(), open, b'(', b')');
+            let params: Vec<String> = split_args(&l[open + 1..close - 1])
+                .iter()
+                .map(|p| match regex!(r"^(.*\*)((?: [^*]*)?)$").captures(p) {
+                    Some(c) if !p.contains(" noalias") => format!("{} noalias{}", &c[1], &c[2]),
+                    _ => p.to_string(),
+                })
+                .collect();
+            format!("{}{}){}", &l[..open + 1], params.join(", "), &l[close..])
+        })
+        .collect();
+    lines.join("\n") + if ir.ends_with('\n') { "\n" } else { "" }
+}
+
+/// Xcode's AIR alias scopes, after O2: each entry point gets a domain
+/// (air-alias-scopes(<fn>)), a scope for each pointer parameter
+/// (air-alias-scope-arg(<index>)), one for all its textures and one for all its
+/// samplers. A load, a store or an argmemonly call whose every pointer comes from
+/// those parameters (through GEPs, casts, phis and selects) gets the scopes of
+/// those it uses (!alias.scope) and of all the others (!noalias); an access
+/// through anything else (a global, a local, a loaded pointer) gets none. The
+/// parameters lose the `noalias` that `noalias_params` gave them for O2.
+pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
+    let groups_of: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let attrs_of = |tail: &str| -> String {
+        let mut a = tail.to_string();
+        for g in regex!(r"#(\d+)").captures_iter(tail) {
+            a += " ";
+            a += groups_of.get(&g[1].to_string()).map(String::as_str).unwrap_or("");
+        }
+        a.split('"').next().unwrap_or("").to_string()
+    };
+    // each function's own attributes, by name
+    let mut fn_attrs: std::collections::HashMap<String, String> = Default::default();
+    for l in ir.lines().filter(|l| l.starts_with("declare ") || l.starts_with("define ")) {
+        let Some(c) = regex!(r#"@("?[\w.$]+"?)\("#).captures(l) else { continue };
+        let name = c[1].to_string();
+        let open = c.get(0).unwrap().end() - 1;
+        let close = balanced(l.as_bytes(), open, b'(', b')');
+        fn_attrs.insert(name, attrs_of(&l[close..]));
+    }
+    let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
+    let mut nodes = String::new();
+    let ir = map_functions(ir, |f| {
+        let head = f.lines().next().unwrap_or("");
+        let Some(name) = regex!(r#"@("?[\w.$]+"?)\("#).captures(head).map(|c| c[1].trim_matches('"').to_string()) else { return f.to_string() };
+        if !entries.contains(&name) {
+            return f.to_string();
+        }
+        let open = head.find(&format!("{name}(")).unwrap() + name.len();
+        let close = balanced(head.as_bytes(), open, b'(', b')');
+        // the groups in parameter order, and each pointer parameter's group
+        let mut groups: Vec<String> = Vec::new();
+        let mut param_group: std::collections::HashMap<String, usize> = Default::default();
+        for (k, p) in split_args(&head[open + 1..close - 1]).iter().enumerate() {
+            let Some((ty, value)) = p.rsplit_once(' ') else { continue };
+            if !ty.contains('*') {
+                continue;
+            }
+            let label = if regex!(r"%struct\._(?:texture|depth)_").is_match(ty) {
+                "textures".to_string()
+            } else if ty.contains("%struct._sampler_t") {
+                "samplers".to_string()
+            } else {
+                format!("arg({k})")
+            };
+            let g = groups.iter().position(|x| *x == label).unwrap_or_else(|| {
+                groups.push(label);
+                groups.len() - 1
+            });
+            param_group.insert(value.to_string(), g);
+        }
+        if groups.is_empty() {
+            return f.to_string();
+        }
+        let domain = next;
+        next += 1;
+        nodes += &format!("!{domain} = distinct !{{!{domain}, !\"air-alias-scopes({name})\"}}\n");
+        let scopes: Vec<usize> = groups
+            .iter()
+            .map(|g| {
+                let n = next;
+                next += 1;
+                nodes += &format!("!{n} = distinct !{{!{n}, !{domain}, !\"air-alias-scope-{g}\"}}\n");
+                n
+            })
+            .collect();
+        let mut lists: std::collections::HashMap<Vec<usize>, usize> = Default::default();
+        let mut list = |ids: Vec<usize>, nodes: &mut String, next: &mut usize| -> usize {
+            *lists.entry(ids.clone()).or_insert_with(|| {
+                let n = *next;
+                *next += 1;
+                *nodes += &format!("!{n} = !{{{}}}\n", ids.iter().map(|i| format!("!{}", scopes[*i])).collect::<Vec<_>>().join(", "));
+                n
+            })
+        };
+        let defs: std::collections::HashMap<String, String> = f.lines().filter_map(|l| regex!(r"^\s+(%[\w.]+) = (.*)$").captures(l).map(|c| (c[1].to_string(), c[2].to_string()))).collect();
+        // the parameters' groups a pointer comes from, or None (anything else)
+        fn trace(v: &str, defs: &std::collections::HashMap<String, String>, param_group: &std::collections::HashMap<String, usize>, out: &mut BTreeSet<usize>, depth: u32) -> bool {
+            if depth > 64 {
+                return false;
+            }
+            if let Some(g) = param_group.get(v) {
+                out.insert(*g);
+                return true;
+            }
+            let Some(d) = defs.get(v) else { return false };
+            if let Some(c) = regex!(r"^getelementptr (?:inbounds )?[^,]+, [^,]*?\*\s+(%[\w.]+)").captures(d) {
+                return trace(&c[1], defs, param_group, out, depth + 1);
+            }
+            if let Some(c) = regex!(r"^(?:bitcast|addrspacecast) .*?\*\s+(%[\w.]+) to ").captures(d) {
+                return trace(&c[1], defs, param_group, out, depth + 1);
+            }
+            if d.starts_with("phi ") {
+                let incoming: Vec<String> = regex!(r"\[ ([^,\]]+), %[\w.]+ \]").captures_iter(d).map(|c| c[1].trim().to_string()).collect();
+                return !incoming.is_empty() && incoming.iter().all(|x| trace(x, defs, param_group, out, depth + 1));
+            }
+            if d.starts_with("select ") {
+                let ops = split_args(d.strip_prefix("select ").unwrap_or(""));
+                return ops.len() == 3 && ops[1..].iter().all(|o| o.rsplit_once(' ').is_some_and(|(_, x)| trace(x, defs, param_group, out, depth + 1)));
+            }
+            false
+        }
+        let pointer_operand = |p: &str| -> Option<String> { p.rsplit_once(' ').filter(|(t, _)| t.contains('*')).map(|(_, v)| v.to_string()) };
+        let lines: Vec<String> = f
+            .lines()
+            .map(|l| {
+                // the parameters' noalias (`noalias_params`) has done its work: Xcode's have none
+                if l.starts_with("define ") {
+                    let open = l.find(&format!("{name}(")).unwrap() + name.len();
+                    let close = balanced(l.as_bytes(), open, b'(', b')');
+                    return format!("{}{}{}", &l[..open], l[open..close].replace(" noalias", ""), &l[close..]);
+                }
+                let t = l.trim();
+                let mut ptrs: Vec<String> = Vec::new();
+                if let Some(c) = regex!(r"^(?:%[\w.]+ = )?load (?:volatile )?(.*)$").captures(t) {
+                    let args = split_args(c[1].split(", align").next().unwrap_or(""));
+                    if args.len() >= 2 {
+                        ptrs.push(args[1].clone());
+                    }
+                } else if let Some(c) = regex!(r"^store (?:volatile )?(.*)$").captures(t) {
+                    let args = split_args(c[1].split(", align").next().unwrap_or(""));
+                    if args.len() >= 2 {
+                        ptrs.push(args[1].clone());
+                    }
+                } else if let Some(c) = regex!(r#"^(?:%[\w.]+ = )?(?:tail )?call [^@]*@("?[\w.$]+"?)\("#).captures(t) {
+                    let open = c.get(0).unwrap().end() - 1;
+                    let close = balanced(t.as_bytes(), open, b'(', b')');
+                    let attrs = format!("{} {}", fn_attrs.get(&c[1].to_string()).map(String::as_str).unwrap_or(""), attrs_of(t[close..].split(", !").next().unwrap_or("")));
+                    if attrs.split(' ').any(|a| a == "readnone") || !attrs.split(' ').any(|a| a == "argmemonly") {
+                        return l.to_string();
+                    }
+                    ptrs = split_args(&t[open + 1..close - 1]).into_iter().filter(|p| p.rsplit_once(' ').is_some_and(|(ty, _)| ty.contains('*'))).collect();
+                } else {
+                    return l.to_string();
+                }
+                if ptrs.is_empty() {
+                    return l.to_string();
+                }
+                let mut used = BTreeSet::new();
+                for p in &ptrs {
+                    let Some(v) = pointer_operand(p) else { return l.to_string() };
+                    if p.contains('@') || !trace(&v, &defs, &param_group, &mut used, 0) {
+                        return l.to_string();
+                    }
+                }
+                let scope: Vec<usize> = (0..groups.len()).filter(|g| used.contains(g)).collect();
+                let noalias: Vec<usize> = (0..groups.len()).filter(|g| !used.contains(g)).collect();
+                let mut out = l.to_string();
+                out += &format!(", !alias.scope !{}", list(scope, &mut nodes, &mut next));
+                if !noalias.is_empty() {
+                    out += &format!(", !noalias !{}", list(noalias, &mut nodes, &mut next));
+                }
+                out
+            })
+            .collect();
+        lines.join("\n") + if f.ends_with('\n') { "\n" } else { "" }
+    });
+    ir.trim_end().to_string() + "\n" + &nodes
+}
+
 /// The inliner's scope declarations: Xcode's modules have none (and they would
 /// keep opt from inferring argmemonly).
 pub fn drop_scope_decls(ir: &str) -> String {
@@ -976,6 +1172,31 @@ pub fn speculate_and_sink(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entry_pointers_are_noalias_until_scopes_replace_them() {
+        let ir = "define void @k(float addrspace(1)* noundef %a, %struct._texture_2d_t addrspace(1)* %t, float addrspace(2)* noundef %c, i32 noundef %i) #0 {\nentry:\n  ret void\n}\n";
+        let out = noalias_params(ir, &["k".to_string()]);
+        assert!(out.contains("define void @k(float addrspace(1)* noalias noundef %a, %struct._texture_2d_t addrspace(1)* noalias %t, float addrspace(2)* noalias noundef %c, i32 noundef %i) #0 {"));
+    }
+
+    #[test]
+    fn xcode_scopes_follow_each_access_to_its_parameters() {
+        let ir = "define void @k(float addrspace(1)* noalias %a, %struct._texture_2d_t addrspace(1)* noalias %t, float addrspace(2)* noalias %c, i32 %i) #0 {\nentry:\n  %p = getelementptr inbounds float, float addrspace(2)* %c, i64 1\n  %v = load float, float addrspace(2)* %p, align 4, !tbaa !1\n  %w = tail call i32 @air.get_width_texture_2d(%struct._texture_2d_t addrspace(1)* nocapture readonly %t, i32 0) #1\n  %g = load float, float addrspace(2)* @g, align 4\n  store float %v, float addrspace(1)* %a, align 4\n  ret void\n}\ndeclare i32 @air.get_width_texture_2d(%struct._texture_2d_t addrspace(1)* nocapture readonly, i32) argmemonly nounwind readonly\nattributes #0 = { nounwind }\nattributes #1 = { argmemonly nounwind readonly }\n!1 = !{!\"x\"}\n";
+        let out = xcode_alias_scopes(ir, &["k".to_string()]);
+        assert!(out.contains("define void @k(float addrspace(1)* %a, %struct._texture_2d_t addrspace(1)* %t, float addrspace(2)* %c, i32 %i) #0 {"));
+        assert!(out.contains("!2 = distinct !{!2, !\"air-alias-scopes(k)\"}"));
+        assert!(out.contains("!3 = distinct !{!3, !2, !\"air-alias-scope-arg(0)\"}"));
+        assert!(out.contains("!4 = distinct !{!4, !2, !\"air-alias-scope-textures\"}"));
+        assert!(out.contains("!5 = distinct !{!5, !2, !\"air-alias-scope-arg(2)\"}"));
+        // the constant buffer's load: its own scope, the others' noalias
+        assert!(out.contains("%v = load float, float addrspace(2)* %p, align 4, !tbaa !1, !alias.scope !6, !noalias !7"));
+        assert!(out.contains("!6 = !{!5}") && out.contains("!7 = !{!3, !4}"));
+        assert!(out.contains("i32 0) #1, !alias.scope !8, !noalias !9"));
+        // a global: nothing
+        assert!(out.contains("%g = load float, float addrspace(2)* @g, align 4\n"));
+        assert!(out.contains("store float %v, float addrspace(1)* %a, align 4, !alias.scope !10, !noalias !11"));
+    }
 
     #[test]
     fn calls_inlined_from_elsewhere_are_nounwind() {

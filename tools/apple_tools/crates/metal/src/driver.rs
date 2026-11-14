@@ -189,13 +189,12 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // each entry point's own layers (our noalias copy, the user's stage function), for telling inlined calls
     let mut home: std::collections::HashMap<String, String> = Default::default();
     for e in &entries {
-        home.insert(format!("__msl_entry.{e}"), e.clone());
         for s in crate::abi::stage_functions(&text, std::slice::from_ref(e)) {
             home.entry(s).or_insert_with(|| e.clone());
         }
     }
     let text = crate::abi::lower(&text, &user, &stages);
-    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()), &entries)));
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_params(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()), &entries)));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
@@ -211,7 +210,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
-    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?)))))))));
+    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::speculate_and_sink(&ir::xcode_alias_scopes(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?))), &entries))))));
     let text = crate::abi::strip_comdats(&crate::mangle::apply(&ir::keep_convergent(&text, &convergent), &renames));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
