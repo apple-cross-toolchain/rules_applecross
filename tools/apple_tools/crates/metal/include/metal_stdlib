@@ -68,6 +68,11 @@ __MSL_ELEM(long) __MSL_ELEM(ulong) __MSL_ELEM(half) __MSL_ELEM(float)
 
 // Vector constructors: T4(a, b, ...) takes scalars and vectors in order;
 // T4(s) splats a scalar; T4(v) converts a vector of the same width.
+// Fixed-count loops are written as pack expansions over __seq: straight-line
+// code, as Xcode's builtins give it, before LLVM's first attribute inference.
+template <int... I> struct __seq {};
+template <int N, int... I> struct __mkseq : __mkseq<N - 1, N - 1, I...> {};
+template <int... I> struct __mkseq<0, I...> { typedef __seq<I...> type; };
 template <bool B, class T = void> struct enable_if {};
 template <class T> struct enable_if<true, T> { typedef T type; };
 template <class V, class E = typename __elem<V>::type, int N = __elem<V>::n>
@@ -77,49 +82,51 @@ struct __vbuild {
   V v; int i;
   // a scalar converts at the call, in the user's code, as Xcode converts it
   __attribute__((always_inline)) void put(E e) { v[i++] = e; }
-  template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) void put(A a);
+  template <class A, int... K> __attribute__((always_inline)) void put_each(A a, __seq<K...> *) { ((v[i++] = E(a[K])), ...); }
+  template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) void put(A a) { put_each(a, (typename __mkseq<__elem<A>::n>::type *)0); }
+  // the first argument: a vector of the element type widens by a shuffle
+  __attribute__((always_inline)) void first(E e) { put(e); }
+  template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) void first(A a);
 };
 template <class T, int N> struct __packed;
 template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
-template <int... I> struct __seq {};
-template <int N, int... I> struct __mkseq : __mkseq<N - 1, N - 1, I...> {};
-template <int... I> struct __mkseq<0, I...> { typedef __seq<I...> type; };
-template <class V> constexpr V __vec() { return V{}; }
+template <class V, class A, int... K> __attribute__((always_inline)) constexpr V __convert_each(A a, __seq<K...> *) { V r; ((r[K] = (typename __elem<V>::type)a[K]), ...); return r; }
+template <class V> __attribute__((always_inline)) constexpr V __vec() { return V{}; }
 // Scalars only: brace construction, which clang can constant-evaluate (program-scope constants).
-template <class V, int... I, class S> constexpr V __splat(__seq<I...>, S s) { return V{((void)I, (typename __elem<V>::type)s)...}; }
+template <class V, int... I, class S> constexpr V __splat(__seq<I...> *, S s) { return V{((void)I, (typename __elem<V>::type)s)...}; }
 // As Xcode builds vectors: a scalar splats (insert and shuffle), a vector of the
 // same width converts as a whole, and a leading vector widens by a shuffle
 // before the rest is inserted.
 // A scalar converts at the call (in the user's code, as Xcode converts it), then splats.
-template <class V> constexpr V __vec(typename __elem<V>::type e) { return (V)e; }
-template <class V, class A, class = typename enable_if<(__elem<A>::n > 1)>::type> constexpr V __vec(A a) {
+template <class V> __attribute__((always_inline)) constexpr V __vec(typename __elem<V>::type e) { return (V)e; }
+template <class V, class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) constexpr V __vec(A a) {
   typedef typename __elem<V>::type E;
   if constexpr (__is_same(A, V)) return a;
   else if constexpr (__is_same(A, __vector<typename __elem<A>::type, __elem<A>::n>)) return __builtin_convertvector(a, V);
-  else { V r; for (int k = 0; k < __elem<V>::n; k++) r[k] = (E)a[k]; return r; }
+  else if constexpr (__is_same(typename __elem<A>::type, bool)) return (V)a;   // a bool vector converts as a whole
+  else return __convert_each<V>(a, (typename __mkseq<__elem<V>::n>::type *)0);
 }
-template <class V, class A, int... I, int... U> __attribute__((always_inline)) V __widen(A a, __seq<I...>, __seq<U...>) {
+template <class V, class A, int... I, int... U> __attribute__((always_inline)) V __widen(A a, __seq<I...> *, __seq<U...> *) {
   return __builtin_shufflevector(a, a, I..., ((void)U, -1)...);
 }
 // Each element as its argument comes (the driver writes T4(a, b, ...) in a
-// function as a statement expression of puts): a leading vector of the same
-// element type widens by a shuffle.
-template <class V, class E, int N> template <class A, class> __attribute__((always_inline)) void __vbuild<V, E, N>::put(A a) {
+// function as a statement expression of puts, the first by first()): a leading
+// vector of the same element type widens by a shuffle.
+template <class V, class E, int N> template <class A, class> __attribute__((always_inline)) void __vbuild<V, E, N>::first(A a) {
   if constexpr (__elem<A>::n < N && __is_same(A, __vector<E, __elem<A>::n>)) {
-    if (i == 0) { v = __widen<V>(a, typename __mkseq<__elem<A>::n>::type(), typename __mkseq<N - __elem<A>::n>::type()); i = __elem<A>::n; }
-    else for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
+    v = __widen<V>(a, (typename __mkseq<__elem<A>::n>::type *)0, (typename __mkseq<N - __elem<A>::n>::type *)0); i = __elem<A>::n;
   } else {
-    for (int k = 0; k < __elem<A>::n; k++) v[i++] = E(a[k]);
+    put(a);
   }
 }
-template <class V, class A, class B, class... R> constexpr V __vec(A a, B b, R... r) {
+template <class V, class A, class B, class... R> __attribute__((always_inline)) constexpr V __vec(A a, B b, R... r) {
   if constexpr (__elem<A>::n == 1 && __elem<B>::n == 1 && (... && (__elem<R>::n == 1)) && 2 + sizeof...(R) == __elem<V>::n) {
     typedef typename __elem<V>::type E; return V{(E)a, (E)b, (E)r...};
   } else if constexpr (__elem<A>::n > 1 && __is_same(A, __vector<typename __elem<V>::type, __elem<A>::n>)) {
-    __vbuild<V> v; v.v = __widen<V>(a, typename __mkseq<__elem<A>::n>::type(), typename __mkseq<__elem<V>::n - __elem<A>::n>::type()); v.i = __elem<A>::n;
+    __vbuild<V> v; v.v = __widen<V>(a, (typename __mkseq<__elem<A>::n>::type *)0, (typename __mkseq<__elem<V>::n - __elem<A>::n>::type *)0); v.i = __elem<A>::n;
     v.put(b); (v.put(r), ...); return v.v;
   } else {
-    __vbuild<V> v; v.i = 0; v.put(a); v.put(b); (v.put(r), ...); return v.v;
+    __vbuild<V> v; v.i = 0; v.first(a); v.put(b); (v.put(r), ...); return v.v;
   }
 }
 
@@ -175,20 +182,28 @@ __MSL_ATOMIC(add) __MSL_ATOMIC(sub) __MSL_ATOMIC(min) __MSL_ATOMIC(max) __MSL_AT
 template <int N> struct __boolvec;
 #define __MSL_BOOLVEC_OPS(N) \
   __boolvec() = default; \
-  __attribute__((always_inline)) __boolvec(bool b) { for (int k = 0; k < N; k++) (*this)[k] = b; } \
+  template <int... K> __attribute__((always_inline)) void fill(bool b, __seq<K...> *) { (((*this)[K] = b), ...); } \
+  template <class V, int... K> __attribute__((always_inline)) void mask(V m, __seq<K...> *) { (((*this)[K] = m[K] != 0), ...); } \
+  template <class B, int... K> __attribute__((always_inline)) void from_bits(B b, __seq<K...> *) { (((*this)[K] = b[K]), ...); } \
+  template <int... K> __attribute__((always_inline)) __vector<bool, N> bits(__seq<K...> *) const { return __vector<bool, N>{(*this)[K]...}; } \
+  __attribute__((always_inline)) explicit __boolvec(__vector<bool, N> b) { from_bits(b, (typename __mkseq<N>::type *)0); } \
+  __attribute__((always_inline)) __boolvec(bool b) { fill(b, (typename __mkseq<N>::type *)0); } \
   template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
-  __attribute__((always_inline)) __boolvec(V m) { for (int k = 0; k < N; k++) (*this)[k] = m[k] != 0; } \
+  __attribute__((always_inline)) __boolvec(V m) { mask(m, (typename __mkseq<N>::type *)0); } \
   template <class V, class = typename enable_if<__elem<V>::n == N>::type> \
-  __attribute__((always_inline)) explicit operator V() const { V r; for (int k = 0; k < N; k++) r[k] = (typename __elem<V>::type)(*this)[k]; return r; } \
+  __attribute__((always_inline)) explicit operator V() const { return __builtin_convertvector(bits((typename __mkseq<N>::type *)0), V); } \
   __attribute__((always_inline)) bool &operator[](int k) { return (&x)[k]; } \
   __attribute__((always_inline)) bool operator[](int k) const { return (&x)[k]; }
 template <> struct __boolvec<2> { bool x, y; __MSL_BOOLVEC_OPS(2) };
 template <> struct __boolvec<3> { bool x, y, z; __MSL_BOOLVEC_OPS(3) };
 template <> struct __boolvec<4> { bool x, y, z, w; __MSL_BOOLVEC_OPS(4) };
 template <int N> struct __elem<__boolvec<N>> { typedef bool type; static constexpr int n = N; };
-template <int N> __attribute__((always_inline)) inline bool any(__boolvec<N> b) { bool r = false; for (int k = 0; k < N; k++) r = r || b[k]; return r; }
-template <int N> __attribute__((always_inline)) inline bool all(__boolvec<N> b) { bool r = true; for (int k = 0; k < N; k++) r = r && b[k]; return r; }
-template <class V, int N> __attribute__((always_inline)) inline V select(V a, V b, __boolvec<N> c) { V r = a; for (int k = 0; k < N; k++) if (c[k]) r[k] = b[k]; return r; }
+template <int N, int... K> __attribute__((always_inline)) inline bool __any(__boolvec<N> b, __seq<K...> *) { bool r = false; ((r = r || b[K]), ...); return r; }
+template <int N, int... K> __attribute__((always_inline)) inline bool __all(__boolvec<N> b, __seq<K...> *) { bool r = true; ((r = r && b[K]), ...); return r; }
+template <class V, int N, int... K> __attribute__((always_inline)) inline V __select(V a, V b, __boolvec<N> c, __seq<K...> *) { V r = a; ((c[K] ? (void)(r[K] = b[K]) : (void)0), ...); return r; }
+template <int N> __attribute__((always_inline)) inline bool any(__boolvec<N> b) { return __any(b, (typename __mkseq<N>::type *)0); }
+template <int N> __attribute__((always_inline)) inline bool all(__boolvec<N> b) { return __all(b, (typename __mkseq<N>::type *)0); }
+template <class V, int N> __attribute__((always_inline)) inline V select(V a, V b, __boolvec<N> c) { return __select(a, b, c, (typename __mkseq<N>::type *)0); }
 template <class V> __attribute__((always_inline)) inline V select(V a, V b, bool c) { return c ? b : a; }
 
 // pack/unpack (observed names)
@@ -309,32 +324,42 @@ __MSL_MATRIX(2, __column<T __MSL_COMMA R> c0 __MSL_COMMA __column<T __MSL_COMMA 
 __MSL_MATRIX(3, __column<T __MSL_COMMA R> c0 __MSL_COMMA __column<T __MSL_COMMA R> c1 __MSL_COMMA __column<T __MSL_COMMA R> c2, c0.v __MSL_COMMA c1.v __MSL_COMMA c2.v)
 __MSL_MATRIX(4, __column<T __MSL_COMMA R> c0 __MSL_COMMA __column<T __MSL_COMMA R> c1 __MSL_COMMA __column<T __MSL_COMMA R> c2 __MSL_COMMA __column<T __MSL_COMMA R> c3, c0.v __MSL_COMMA c1.v __MSL_COMMA c2.v __MSL_COMMA c3.v)
 template <class T, int C, int R> struct __elem<matrix<T, C, R>> { typedef T type; static constexpr int n = -1; };
-template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(const matrix<T, C, R> &m, __vector<T, C> v) {
-  __vector<T, R> r = m[0] * v[0];
-  for (int c = 1; c < C; c++) r += m[c] * v[c];
-  return r;
+// M * v as Xcode's header builds it: from a zero vector, one level per column
+// adding that column's product before going on to the next
+template <class T, int C, int R, int I0, int... I> __attribute__((always_inline)) inline __vector<T, R> __mul(__vector<T, R> acc, const matrix<T, C, R> &m, __vector<T, C> v, __seq<I0, I...> *) {
+  constexpr int k = C - 1 - int(sizeof...(I));
+  if constexpr (sizeof...(I) == 0) return acc + m[k] * v[k];
+  else return __mul(acc + m[k] * v[k], m, v, (typename __mkseq<int(sizeof...(I))>::type *)0);
 }
-template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) {
+template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(const matrix<T, C, R> &m, __vector<T, C> v) { return __mul(__vector<T, R>(0), m, v, (typename __mkseq<C>::type *)0); }
+template <class T, int C, int R, int... I> __attribute__((always_inline)) inline __vector<T, C> __mul(__vector<T, R> v, const matrix<T, C, R> &m, __seq<I...> *) {
   __vector<T, C> r;
   // each column's dot product (air.dot), as Xcode computes v * M
-  for (int c = 0; c < C; c++) r[c] = dot(v, m[c]);
+  ((r[I] = dot(v, m[I])), ...);
   return r;
 }
-template <class T, int K, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, K, R> &a, const matrix<T, C, K> &b) {
+template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) { return __mul(v, m, (typename __mkseq<C>::type *)0); }
+template <class T, int K, int C, int R, int... I> __attribute__((always_inline)) inline matrix<T, C, R> __mul(const matrix<T, K, R> &a, const matrix<T, C, K> &b, __seq<I...> *) {
   matrix<T, C, R> m;
-  for (int c = 0; c < C; c++) m[c] = a * b[c];
+  ((m[I] = a * b[I]), ...);
   return m;
 }
+template <class T, int K, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, K, R> &a, const matrix<T, C, K> &b) { return __mul(a, b, (typename __mkseq<C>::type *)0); }
 // T CxR(...) constructors, rewritten by the driver to __mat: C columns, one
 // scalar for the diagonal, or C*R scalars in column order.
 template <class X, class... R> __attribute__((always_inline)) inline X __first(X x, R...) { return x; }
 template <class M> struct __mat_traits;
 template <class T, int C, int R> struct __mat_traits<matrix<T, C, R>> { typedef T E; static constexpr int c = C, r = R; };
-template <class C, int... J, class E> constexpr C __col(const E *v, int base, __seq<J...>) { return C{v[base + J]...}; }
-template <class M, int... I, class... A> constexpr M __mat_scalars(__seq<I...>, A... a) {
+template <class C, int... J, class E> constexpr C __col(const E *v, int base, __seq<J...> *) { return C{v[base + J]...}; }
+template <class M, int... I, class... A> constexpr M __mat_scalars(__seq<I...> *, A... a) {
   typedef __mat_traits<M> tr; typedef typename tr::E E; typedef __vector<E, tr::r> C;
   E v[] = {(E)a...};
-  return M{__col<C>(v, I * tr::r, typename __mkseq<tr::r>::type())...};
+  return M{__col<C>(v, I * tr::r, (typename __mkseq<tr::r>::type *)0)...};
+}
+template <int I, class M, class E> constexpr void __mat_diagonal_column(M &m, E d) { m[I] = (E)0; if constexpr (I < __mat_traits<M>::r) m[I][I] = d; }
+template <class M, class E, int... I> constexpr void __mat_diagonal(M &m, E d, __seq<I...> *) { (__mat_diagonal_column<I>(m, d), ...); }
+template <class M, class S, int... I> constexpr void __mat_convert(M &m, const S &s, __seq<I...> *) {
+  typedef __mat_traits<M> tr; ((m[I] = __convert_each<__vector<typename tr::E, tr::r>>(s[I], (typename __mkseq<tr::r>::type *)0)), ...);
 }
 template <class M, class... A> constexpr M __mat(A... a) {
   typedef __mat_traits<M> tr; typedef __vector<typename tr::E, tr::r> C;
@@ -342,14 +367,14 @@ template <class M, class... A> constexpr M __mat(A... a) {
     return M{C(a)...};
   } else if constexpr (sizeof...(A) == 1 && (... && (__elem<A>::n == 1))) {
     M m{}; typename tr::E d = (typename tr::E)__first(a...);
-    for (int c = 0; c < tr::c; c++) { m[c] = (typename tr::E)0; if (c < tr::r) m[c][c] = d; }
+    __mat_diagonal(m, d, (typename __mkseq<tr::c>::type *)0);
     return m;
   } else if constexpr (sizeof...(A) == 1) {
     M m{}; auto s = __first(a...);   // another matrix: convert column by column
-    for (int c = 0; c < tr::c; c++) for (int r = 0; r < tr::r; r++) m[c][r] = (typename tr::E)s[c][r];
+    __mat_convert(m, s, (typename __mkseq<tr::c>::type *)0);
     return m;
   } else {
-    return __mat_scalars<M>(typename __mkseq<tr::c>::type(), a...);
+    return __mat_scalars<M>((typename __mkseq<tr::c>::type *)0, a...);
   }
 }
 #define __MSL_MAT(T) typedef matrix<T, 2, 2> T##2x2; typedef matrix<T, 2, 3> T##2x3; typedef matrix<T, 2, 4> T##2x4; \
@@ -373,7 +398,8 @@ template <class T, int N> struct __packed {
   T __e[N];
   __attribute__((always_inline)) T &operator[](int i) { return __e[i]; }
   __attribute__((always_inline)) T operator[](int i) const { return __e[i]; }
-  __attribute__((always_inline)) operator __vector<T, N>() const { __vector<T, N> v; for (int i = 0; i < N; i++) v[i] = __e[i]; return v; }
+  template <int... I> __attribute__((always_inline)) __vector<T, N> unpack(__seq<I...> *) const { __vector<T, N> v; ((v[I] = __e[I]), ...); return v; }
+  __attribute__((always_inline)) operator __vector<T, N>() const { return unpack((typename __mkseq<N>::type *)0); }
 };
 }  // namespace metal
 #define __MSL_PACKED(T) typedef metal::__packed<T, 2> packed_##T##2; typedef metal::__packed<T, 3> packed_##T##3; typedef metal::__packed<T, 4> packed_##T##4;

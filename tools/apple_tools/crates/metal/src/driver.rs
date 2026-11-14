@@ -6,8 +6,11 @@
 //! 3. Read signatures, structs and typedefs from clang's AST dump.
 //! 4. Append extern "C" entry points with AIR's signatures (crate::entry).
 //! 5. Compile flat (no address spaces) to IR; fix calling conventions, function
-//!    constants and samplers; inline everything; opt -O2; resolve
-//!    address-space-dependent calls; infer address spaces; opt -O2.
+//!    constants and samplers; inline what Xcode's frontend has no call for;
+//!    one opt -O2 in Xcode's order, split before its inliner's walk: the module
+//!    simplification (the stdlib always-inlined, address spaces inferred), then
+//!    AIR's conversions and address-space-dependent calls resolved, then the
+//!    rest, after which the alias scopes are written as Xcode's.
 //! 6. Add the AIR metadata (crate::air) and write bitcode with llvm-as.
 
 use crate::air::{to_air, Inputs};
@@ -87,7 +90,13 @@ fn tool(o: &Options, name: &str) -> PathBuf {
 /// LLVM 15's -O2, spelled out: named so, speculative-execution runs on every
 /// target, as on Xcode's (whose GPU target has divergent branches); without
 /// vector-combine, whose scalar-to-vector folds Xcode's LLVM doesn't make.
-static O2: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("-passes={}", include_str!("../data/o2_pipeline.txt").trim()));
+/// O2 in two at the module boundary before its CGSCC part: the module simplification (with the
+/// early always-inline), then the inliner's walk, the one attribute inference, and the rest.
+static O2: std::sync::LazyLock<(String, String)> = std::sync::LazyLock::new(|| {
+    let p = include_str!("../data/o2_pipeline.txt").trim();
+    let at = p.find(",require<globals-aa>,").expect("O2's CGSCC part");
+    (format!("-passes={}", &p[..at]), format!("-passes={}", &p[at + 1..]))
+});
 
 pub fn compile(o: &Options) -> Result<Output, String> {
     let tmp = scratch()?;
@@ -189,13 +198,12 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // each entry point's own layers (our noalias copy, the user's stage function), for telling inlined calls
     let mut home: std::collections::HashMap<String, String> = Default::default();
     for e in &entries {
-        home.insert(format!("__msl_entry.{e}"), e.clone());
         for s in crate::abi::stage_functions(&text, std::slice::from_ref(e)) {
             home.entry(s).or_insert_with(|| e.clone());
         }
     }
     let text = crate::abi::lower(&text, &user, &stages);
-    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_entries(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()), &entries)));
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_params(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()), &entries)));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
@@ -203,16 +211,20 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         run(Command::new(tool(o, "opt")).args(passes).args(["-S", "-o"]).arg(&out).arg(&i))?;
         std::fs::read_to_string(&out).map_err(|e| e.to_string())
     };
-    // conversions become air.convert calls once constants are folded, before the last attribute inference
-    let o2 = step(&ir::tag_user_calls(&text, &home), "o2", &[O2.as_str()])?;
-    let convergent = ir::convergent_callers(&o2);
-    let text = intrinsics::apply(&ir::air_conversions(&o2));
-    // the stdlib wrappers are inlined by now, so the freeze lands on the caller's value as Xcode's does
+    // first what Xcode's frontend has no call for (`only_frontend_inlines`), with no scopes for
+    // the inlined parameters (Xcode's entry point is the user's function: nothing to inline)
+    let keep: std::collections::BTreeSet<String> = home.keys().cloned().collect();
+    let text = ir::restore_always_inline(&step(&ir::only_frontend_inlines(&ir::tag_user_calls(&text, &home), &keep), "fe", &["-passes=always-inline", "-enable-noalias-to-md-conversion=false"])?);
+    // the module simplification: the stdlib is inlined and constants folded by its end, so
+    // conversions become air.convert calls, the markers resolve and moved values are frozen there,
+    // before the inliner's walk and the one attribute inference (as Xcode's frontend has them)
+    let text = step(&text, "o2a", &[O2.0.as_str(), "-assume-default-is-flat-addrspace"])?;
+    let text = intrinsics::apply(&ir::air_conversions(&text));
     let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
-    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::speculate_and_sink(&ir::alias_scopes(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&step(&intrinsics::apply(&text), "o2b", &[O2.as_str()])?)))))))));
-    let text = crate::abi::strip_comdats(&crate::mangle::apply(&ir::keep_convergent(&text, &convergent), &renames));
+    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::xcode_alias_scopes(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&step(&intrinsics::apply(&text), "o2b", &[O2.1.as_str()])?))), &entries)))));
+    let text = crate::abi::strip_comdats(&crate::mangle::apply(&text, &renames));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
     let air_ir = to_air(
@@ -237,7 +249,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     run(Command::new(tool(o, "llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
     if let Some(keep) = &o.keep {
         let _ = std::fs::create_dir_all(keep);
-        for f in [cpp_name.as_str(), "out.0.ll", "o2.in.ll", "o2.ll", "infer.ll", "o2b.in.ll", "o2b.ll", "air.ll"] {
+        for f in [cpp_name.as_str(), "out.0.ll", "o2a.in.ll", "o2a.ll", "infer.ll", "o2b.in.ll", "o2b.ll", "air.ll"] {
             let _ = std::fs::copy(tmp.0.join(f), keep.join(f));
         }
     }
