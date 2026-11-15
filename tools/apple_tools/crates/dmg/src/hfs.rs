@@ -15,7 +15,7 @@ const ROOT: u32 = 2;
 const FIRST_USER_ID: u32 = 16;
 
 /// Seconds between the HFS+ epoch (1904-01-01) and the Unix one.
-const EPOCH_OFFSET: u64 = 2_082_844_800;
+pub const EPOCH_OFFSET: u64 = 2_082_844_800;
 
 /// A Finder flag on a folder or file (`kIsInvisible`).
 pub const INVISIBLE: u16 = 0x4000;
@@ -252,8 +252,9 @@ fn blocks_for(bytes: u64) -> u32 {
     bytes.div_ceil(BLOCK as u64) as u32
 }
 
-/// The volume as a raw image (whole-disk HFS+, no partition map).
-pub fn write(v: &Volume) -> Result<Vec<u8>, String> {
+/// The volume as a raw image (whole-disk HFS+, no partition map), and each folder's and
+/// file's catalog node ID by its path from the root ("" for the root).
+pub fn write(v: &Volume) -> Result<(Vec<u8>, BTreeMap<String, u32>), String> {
     let date = (v.time + EPOCH_OFFSET) as u32;
     // walk the tree: catalog IDs in key order (parent first, then children by name)
     let mut entries: Vec<Entry> = Vec::new();
@@ -291,6 +292,7 @@ pub fn write(v: &Volume) -> Result<Vec<u8>, String> {
                 }
                 Node::File { data, mode, finder_flags, type_creator } => {
                     files += 1;
+                    paths.insert(p.clone(), id);
                     let mut tc = [0u8; 8];
                     if let Some((t, c)) = type_creator {
                         tc[..4].copy_from_slice(t);
@@ -301,6 +303,7 @@ pub fn write(v: &Volume) -> Result<Vec<u8>, String> {
                 }
                 Node::Symlink { target } => {
                     files += 1;
+                    paths.insert(p.clone(), id);
                     entries.push(Entry::File { id, parent, name: hname, mode: 0o120755, finder_flags: 0, type_creator: *b"slnkrhap", data: contents.len() });
                     contents.push(target.as_bytes().to_vec());
                 }
@@ -414,7 +417,7 @@ pub fn write(v: &Volume) -> Result<Vec<u8>, String> {
     image[1024..1536].copy_from_slice(&h);
     let alt = image.len() - 1024;
     image[alt..alt + 512].copy_from_slice(&h);
-    Ok(image)
+    Ok((image, paths))
 }
 
 /// The catalog's records, sorted by key.
@@ -544,7 +547,11 @@ mod tests {
 
     #[test]
     fn a_volume_has_its_headers_and_files() {
-        let img = write(&Volume { name: "Demo".into(), root: tree(), time: 1_700_000_000, uid: 501, gid: 20, open_folder: Some(String::new()), free: 0 }).unwrap();
+        let (img, ids) = write(&Volume { name: "Demo".into(), root: tree(), time: 1_700_000_000, uid: 501, gid: 20, open_folder: Some(String::new()), free: 0 }).unwrap();
+        // IDs in key order: the root's children by name without case, then depth first
+        assert_eq!(ids[".background"], 16);
+        assert_eq!(ids["Applications"], 17);
+        assert_eq!(ids["Demo.app/Info.plist"], 19);
         assert_eq!(img.len() % BLOCK as usize, 0);
         assert_eq!(&img[1024..1026], b"H+");
         assert_eq!(&img[img.len() - 1024..img.len() - 1022], b"H+");
@@ -568,6 +575,6 @@ mod tests {
     #[test]
     fn same_inputs_same_bytes() {
         let v = || Volume { name: "Demo".into(), root: tree(), time: 1_700_000_000, uid: 501, gid: 20, open_folder: None, free: 1 << 20 };
-        assert_eq!(write(&v()).unwrap(), write(&v()).unwrap());
+        assert_eq!(write(&v()).unwrap().0, write(&v()).unwrap().0);
     }
 }

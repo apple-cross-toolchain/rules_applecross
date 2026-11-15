@@ -9,6 +9,7 @@ rust_binary(
         "//crates/lzfse",
         "@crates//:crc32fast",
         "@crates//:flate2",
+        "@crates//:plist",
     ],
 )
 
