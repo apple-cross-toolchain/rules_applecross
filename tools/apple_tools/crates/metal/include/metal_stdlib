@@ -310,6 +310,7 @@ template <> struct __enable_cols<true> { typedef void type; };
 // The columns as one array (as Xcode lays a matrix out: { [C x <R x T>] }),
 // constructed from C columns, so { {..}, {..}, {..} } initialises columns as MSL does.
 template <class T, int C, int R> struct matrix;
+template <class V> struct __column_list { const V *p; long n; };
 // A column argument: a vector, or a braced list of elements converted as MSL does.
 template <class T, int R> struct __column {
   __vector<T, R> v;
@@ -321,6 +322,7 @@ template <class T, int R> struct __column {
     __vector<T, R> columns[C]; \
     matrix() = default; \
     constexpr matrix(PARAMS) : columns{ARGS} {} \
+    template <int... I> matrix(const __column_list<__vector<T, R>> &l, __seq<I...> *) { ((columns[I] = I < l.n ? l.p[I] : __vector<T, R>(0)), ...); } \
     __attribute__((always_inline)) __vector<T, R> &operator[](int c) { return columns[c]; } \
     __attribute__((always_inline)) const __vector<T, R> &operator[](int c) const { return columns[c]; } \
   };
@@ -344,10 +346,13 @@ template <class T, int C, int R, int... I> __attribute__((always_inline)) inline
   return r;
 }
 template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) { return __mul(v, m, (typename __mkseq<C>::type *)0); }
+// A * B as Xcode's IR before its attribute inference shows it built: the columns into a
+// list, read back through the list's pointer by a constructor the inliner takes in its
+// walk, so that the inference (run before the walk's simplification) counts a product
+// as reading memory: A * B is readonly where A * v is readnone
 template <class T, int K, int C, int R, int... I> __attribute__((always_inline)) inline matrix<T, C, R> __mul(const matrix<T, K, R> &a, const matrix<T, C, K> &b, __seq<I...> *) {
-  matrix<T, C, R> m;
-  ((m[I] = a * b[I]), ...);
-  return m;
+  __vector<T, R> c[C] = {a * b[I]...};
+  return matrix<T, C, R>(__column_list<__vector<T, R>>{c, C}, (__seq<I...> *)0);
 }
 template <class T, int K, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, K, R> &a, const matrix<T, C, K> &b) { return __mul(a, b, (typename __mkseq<C>::type *)0); }
 // T CxR(...) constructors, rewritten by the driver to __mat: C columns, one

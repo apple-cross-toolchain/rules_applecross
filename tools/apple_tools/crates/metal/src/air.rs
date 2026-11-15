@@ -172,9 +172,7 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
     named.push(format!("!air.source_file_name = !{{{srcn}}}"));
     // Xcode's front end builds a stage function's packed return on undef
     ir = regex!(r"(insertvalue <\{[^}]*\}>) poison,").replace_all(&ir, "$1 undef,").to_string();
-    let defined: Vec<String> = regex!(r#"(?m)^define [^@\n]*@("?[\w.$]+"?)\("#).captures_iter(&ir).map(|c| c[1].to_string()).collect();
-    ir = constant_reads(&ir, &defined.iter().map(String::as_str).collect::<Vec<_>>());
-    ir = after_constant_reads(&ir);
+    ir = readnone_calls(&ir);
     // the static initialiser of function constants: Xcode's front end gives it no vector width
     let inits: Vec<String> = regex!(r#"(?m)^define [^@]*@([\w.$]+)\(.*section "air\.static_init""#).captures_iter(&ir).map(|c| c[1].to_string()).collect();
     for f in inits {
@@ -285,7 +283,7 @@ pub fn vector_widths(ir: &str) -> String {
 
 /// A call to a function that reads no memory carries no alias scopes (the
 /// inliner adds none), and Xcode's LLVM gives lifetime markers mustprogress.
-fn after_constant_reads(ir: &str) -> String {
+fn readnone_calls(ir: &str) -> String {
     let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
     let readnone: Vec<String> = regex!(r#"(?m)^define [^@\n]*@("?[\w.$]+"?)\(.*\)[^#\n]*#(\d+)"#)
         .captures_iter(ir)
@@ -301,71 +299,3 @@ fn after_constant_reads(ir: &str) -> String {
         .to_string()
 }
 
-/// Whether `name` is declared (or defined) writeonly.
-fn writeonly_decl(ir: &str, name: &str) -> bool {
-    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
-    let re = Regex::new(&format!(r"(?m)^(?:declare|define) [^\n]*@{}\([^\n]*\)([^\n]*)$", regex::escape(name))).unwrap();
-    re.captures(ir).is_some_and(|c| {
-        let tail = &c[1];
-        tail.split(' ').any(|w| w == "writeonly") || regex!(r"#(\d+)").captures(tail).is_some_and(|g| groups.get(&g[1]).is_some_and(|a| a.split(' ').any(|w| w == "writeonly")))
-    })
-}
-
-/// Xcode's alias analysis knows address space 2 is constant: a function that
-/// only reads it reads no memory.
-fn constant_reads(ir: &str, entries: &[&str]) -> String {
-    let mut ir = ir.to_string();
-    let mut readnone: Vec<String> = regex!(r"(?m)^declare .*? @([\w.]+)\(.*\).*\breadnone\b").captures_iter(&ir).map(|c| c[1].to_string()).collect();
-    // a function calling the module's own functions counts once those do (so until nothing changes)
-    loop {
-        let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(&ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
-        for c in regex!(r"(?m)^define [^@\n]*@([\w.]+)\(.*\)[^#\n]*#(\d+)").captures_iter(&ir) {
-            if groups.get(&c[2]).is_some_and(|g| g.split(' ').any(|a| a == "readnone")) && !readnone.contains(&c[1].to_string()) {
-                readnone.push(c[1].to_string());
-            }
-        }
-        let mut changed = false;
-        for e in entries {
-            if readnone.iter().any(|r| r == e) {
-                continue;
-            }
-            let Some(body) = find_define(&ir, e).map(|(_, b)| b.to_string()) else { continue };
-            // a function that stores, reads only constant memory and calls nothing that reads
-            // memory, writes only: Xcode's inference has it writeonly
-            let constant_only = !body.lines().any(|l| regex!(r"= load ").is_match(l) && !regex!(r"= load [^,]*, [^,]* addrspace\(2\)\*").is_match(l));
-            let calls_only_writing = regex!(r"\bcall [^@]*@([\w.]+)\(").captures_iter(&body).all(|c| readnone.iter().any(|r| *r == c[1]) || writeonly_decl(&ir, &c[1]));
-            if constant_only && calls_only_writing && body.lines().any(|l| l.trim().starts_with("store ")) {
-                ir = edit_attrs(&ir, e, |a| {
-                    if a.split(' ').any(|w| matches!(w, "readonly" | "readnone" | "writeonly")) {
-                        return a.to_string();
-                    }
-                    let at = a.find(" \"").unwrap_or(a.len());
-                    format!("{} writeonly{}", &a[..at], &a[at..])
-                });
-            }
-            let reads_other = body.lines().any(|l| {
-                let l = l.trim();
-                l.starts_with("store ")
-                    || regex!(r"= load ").is_match(l) && !regex!(r"= load [^,]*, [^,]* addrspace\(2\)\*").is_match(l)
-                    || regex!(r"\bcall [^@]*@([\w.]+)\(").captures(l).map(|c| !readnone.iter().any(|r| *r == c[1])).unwrap_or(false)
-            });
-            if reads_other {
-                continue;
-            }
-            let before = ir.clone();
-            ir = edit_attrs(&ir, e, |a| {
-                if !regex!(r"\breadonly\b").is_match(a) {
-                    return a.to_string();
-                }
-                a.replace("argmemonly ", "").replace("readonly", "readnone")
-            });
-            if ir != before {
-                readnone.push(e.to_string());
-                changed = true;
-            }
-        }
-        if !changed {
-            return ir;
-        }
-    }
-}

@@ -730,6 +730,94 @@ pub fn constant_loads_invariant(ir: &str) -> String {
     format!("{}\n!{next} = !{{}}\n", out.trim_end())
 }
 
+/// Constant buffers are immutable to Xcode's alias analysis, so its attribute inference
+/// ignores loads from them (not from program-scope constants, which count as reads): for
+/// O2 each such load's TBAA tag is a copy marked immutable (TBAA's fourth operand), which
+/// LLVM's own analysis honours, and an untagged one gets an immutable tag of a type of its
+/// own. `restore_constant_tbaa` puts the original tags back.
+pub fn constant_tbaa(ir: &str) -> String {
+    let nodes: std::collections::HashMap<String, String> = regex!(r"(?m)^!(\d+) = !\{(![0-9]+, ![0-9]+, i64 \d+)\}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
+    let mut made: std::collections::BTreeMap<String, usize> = Default::default();
+    let untagged = next;
+    let mut any_untagged = false;
+    next += 3;
+    let out = crate::text::map_functions(ir, |f| {
+        let defs: std::collections::HashMap<&str, &str> = regex!(r"(?m)^\s+(%[\w.]+) = (?:getelementptr|bitcast|addrspacecast) (.*)$").captures_iter(f).map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str())).collect();
+        // a program-scope constant's address, through GEPs and casts
+        let global = |p: &str| {
+            let mut p = p.to_string();
+            for _ in 0..64 {
+                if p.starts_with('@') || p.contains('@') {
+                    return true;
+                }
+                let Some(d) = defs.get(p.as_str()) else { return false };
+                let Some(c) = regex!(r"\* ([%@][\w.$]+)").captures(d) else { return d.contains('@') };
+                p = c[1].to_string();
+            }
+            false
+        };
+        regex!(r"(?m)^(\s+%[\w.]+ = load [^,]+, [^,]* addrspace\(2\)\* ([^,]+)[^\n]*?)$").replace_all(f, |c: &Captures| {
+            let line = &c[1];
+            if global(c[2].trim()) {
+                return line.to_string();
+            }
+            if let Some(t) = regex!(r", !tbaa !(\d+)").captures(line) {
+                let Some(_) = nodes.get(&t[1]) else { return line.to_string() };
+                let n = *made.entry(t[1].to_string()).or_insert_with(|| {
+                    next += 1;
+                    next - 1
+                });
+                return line.replacen(&t[0], &format!(", !tbaa !{n}"), 1);
+            }
+            any_untagged = true;
+            format!("{line}, !tbaa !{untagged}")
+        })
+        .to_string()
+    });
+    let mut out = out.trim_end().to_string() + "\n";
+    for (old, new) in &made {
+        out += &format!("!{new} = !{{{}, i64 1}}\n", nodes[old]);
+    }
+    if any_untagged {
+        let root = regex!(r#"(?m)^!(\d+) = !\{!"Simple C\+\+ TBAA"\}$"#).captures(&out).map(|c| c[1].to_string());
+        let root = root.unwrap_or_else(|| {
+            out += &format!("!{} = !{{!\"Simple C++ TBAA\"}}\n", untagged + 2);
+            (untagged + 2).to_string()
+        });
+        out += &format!("!{untagged} = !{{!{t}, !{t}, i64 0, i64 1}}\n!{t} = !{{!\"msl.untagged\", !{root}, i64 0}}\n", t = untagged + 1);
+    }
+    out
+}
+
+/// `constant_tbaa`'s tags back to mutable ones, by content (opt renumbers metadata): a
+/// load tagged with an immutable copy gets the original tag where it is still there, and
+/// a copy whose original is gone becomes it; the untagged lose their tag.
+pub fn restore_constant_tbaa(ir: &str) -> String {
+    let untagged_type = regex!(r#"(?m)^!(\d+) = !\{!"msl\.untagged", ![0-9]+, i64 0\}\n"#).captures(ir).map(|c| (c[0].to_string(), c[1].to_string()));
+    let mut ir = ir.to_string();
+    if let Some((line, t)) = &untagged_type {
+        let tags: Vec<String> = regex!(r"(?m)^!(\d+) = !\{!(\d+), !(\d+), i64 0, i64 1\}$").captures_iter(&ir).filter(|c| c[2] == *t && c[3] == *t).map(|c| c[1].to_string()).collect();
+        for tag in &tags {
+            ir = regex!(r", !tbaa !(\d+)").replace_all(&ir, |c: &Captures| if c[1] == *tag { String::new() } else { c[0].to_string() }).to_string();
+            ir = ir.replace(&format!("!{tag} = !{{!{t}, !{t}, i64 0, i64 1}}\n"), "");
+        }
+        ir = ir.replace(line.as_str(), "");
+    }
+    let plain: std::collections::HashMap<String, String> = regex!(r"(?m)^!(\d+) = !\{(![0-9]+, ![0-9]+, i64 \d+)\}$").captures_iter(&ir).map(|c| (c[2].to_string(), c[1].to_string())).collect();
+    let mut map = std::collections::HashMap::new();
+    for c in regex!(r"(?m)^!(\d+) = !\{(![0-9]+, ![0-9]+, i64 \d+), i64 1\}$").captures_iter(&ir) {
+        if let Some(p) = plain.get(&c[2]) {
+            map.insert(c[1].to_string(), p.clone());
+        }
+    }
+    let ir = regex!(r"!tbaa !(\d+)").replace_all(&ir, |c: &Captures| match map.get(&c[1]) {
+        Some(o) => format!("!tbaa !{o}"),
+        None => c[0].to_string(),
+    });
+    regex!(r"(?m)^!(\d+) = !\{(![0-9]+, ![0-9]+, i64 \d+), i64 1\}\n").replace_all(&ir, |c: &Captures| if map.contains_key(&c[1]) { String::new() } else { format!("!{} = !{{{}}}\n", &c[1], &c[2]) }).to_string()
+}
+
 /// `constant_loads_invariant`'s marks go (Xcode's modules have none).
 pub fn strip_invariant_loads(ir: &str) -> String {
     regex!(r", !invariant\.load !\d+").replace_all(ir, "").to_string()
