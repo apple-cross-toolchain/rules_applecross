@@ -421,7 +421,7 @@ pub fn only_frontend_inlines(ir: &str, keep: &BTreeSet<String>) -> String {
     let held = |a: &str| a.split(' ').map(|w| if w == "alwaysinline" { "\"msl.ai\"" } else { w }).collect::<Vec<_>>().join(" ");
     let out = replace_all(ir, regex!(r#"(?m)^(define [^\n]*?@("?[\w.$]+"?)\([^\n]*\))([^\n]*?)(?: #(\d+))?((?: comdat(?:\([^)\n]*\))?)?(?: align \d+)?)? \{$"#), |c| {
         let name = &c[2];
-        if keep.contains(name) || regex!(r"^_ZNK?5metal(?:8__vbuild|7__widen|9__boolvec|5__vec|14__convert_each)").is_match(name) {
+        if keep.contains(name) || regex!(r"^_ZNK?5metal(?:8__vbuild|7__widen|9__boolvec|5__vec|14__convert_each|8__unpack)").is_match(name) {
             return c[0].to_string();
         }
         let group = match c.get(4) {

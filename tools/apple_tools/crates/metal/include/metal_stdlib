@@ -119,6 +119,9 @@ template <class V, class E, int N> template <class A, class> __attribute__((alwa
     put(a);
   }
 }
+// A packed vector converts element by element where it is (no copy), as Xcode's frontend reads one
+template <class V, class T, int N, int... K> __attribute__((always_inline)) constexpr V __unpack(const __packed<T, N> &a, __seq<K...> *) { V r; ((r[K] = (typename __elem<V>::type)a.__e[K]), ...); return r; }
+template <class V, class T, int N> __attribute__((always_inline)) constexpr V __vec(const __packed<T, N> &a) { return __unpack<V>(a, (typename __mkseq<N>::type *)0); }
 template <class V, class A, class B, class... R> __attribute__((always_inline)) constexpr V __vec(A a, B b, R... r) {
   if constexpr (__elem<A>::n == 1 && __elem<B>::n == 1 && (... && (__elem<R>::n == 1)) && 2 + sizeof...(R) == __elem<V>::n) {
     typedef typename __elem<V>::type E; return V{(E)a, (E)b, (E)r...};
