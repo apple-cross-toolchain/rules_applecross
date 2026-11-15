@@ -1000,6 +1000,15 @@ mod tests {
         assert!(!out.contains("__packed"));
     }
 
+    #[test]
+    fn a_packed_element_is_read_with_no_tbaa() {
+        let ir = "%\"struct.metal::__packed\" = type { [3 x float] }\n%struct.V = type { %\"struct.metal::__packed\", float }\ndefine void @f(%struct.V addrspace(1)* %p) {\n  %a = getelementptr inbounds %struct.V, %struct.V addrspace(1)* %p, i64 %i, i32 0, i32 0, i64 2\n  %x = load float, float addrspace(1)* %a, align 4, !tbaa !3, !alias.scope !5\n  %b = getelementptr inbounds %struct.V, %struct.V addrspace(1)* %p, i64 %i, i32 1\n  %y = load float, float addrspace(1)* %b, align 4, !tbaa !3\n  ret void\n}\ndefine void @g(float addrspace(1)* %a) {\n  %x = load float, float addrspace(1)* %a, align 4, !tbaa !3\n  ret void\n}\n";
+        let out = unwrap_packed(ir);
+        assert!(out.contains("%x = load float, float addrspace(1)* %a, align 4, !alias.scope !5\n"));
+        assert!(out.contains("%y = load float, float addrspace(1)* %b, align 4, !tbaa !3\n"));
+        assert!(out.contains("define void @g(float addrspace(1)* %a) {\n  %x = load float, float addrspace(1)* %a, align 4, !tbaa !3\n"));
+    }
+
 }
 
 /// Xcode's front end declares a scalar conversion as it emits the function that
@@ -1093,10 +1102,38 @@ pub fn unwrap_packed(ir: &str) -> String {
         }
         out
     };
+    // whether the indices step past a packed struct into its array's element
+    let into_element = |ty: &str, idx: &[String]| -> bool {
+        let mut cur = ty.trim().to_string();
+        for (n, i) in idx.iter().enumerate() {
+            if let Some(a) = packed.get(&cur) {
+                return n + 1 < idx.len() && !a.is_empty();
+            }
+            let k = i.trim().rsplit(' ').next().and_then(|x| x.parse::<usize>().ok());
+            cur = if cur.starts_with('[') || cur.starts_with('<') && !cur.starts_with("<{") {
+                element(&cur).unwrap_or_default()
+            } else {
+                k.and_then(|k| fields(&cur).get(k).cloned()).unwrap_or_default()
+            };
+        }
+        false
+    };
+    // (function, pointer) of each packed element: Xcode reads one with no TBAA
+    let mut elements: BTreeSet<(usize, String)> = BTreeSet::new();
+    let mut function = 0;
     let gep = regex!(r"getelementptr (inbounds )?(\(?)");
     let mut out = String::with_capacity(ir.len());
     for line in ir.lines() {
         let mut l = line.to_string();
+        if l.starts_with("define ") {
+            function += 1;
+        }
+        if let Some(c) = regex!(r"^\s+(%[\w.]+) = getelementptr (?:inbounds )?(.*)$").captures(&l) {
+            let args = split_args(c[2].split(", !").next().unwrap());
+            if args.len() >= 3 && into_element(args[0].trim(), &args[3..]) {
+                elements.insert((function, c[1].to_string()));
+            }
+        }
         // instruction and constant-expression GEPs
         let mut from = 0;
         while let Some(m) = gep.find_at(&l.clone(), from) {
@@ -1138,6 +1175,21 @@ pub fn unwrap_packed(ir: &str) -> String {
         }
         out.push_str(&l);
         out.push('\n');
+    }
+    if !elements.is_empty() {
+        let mut function = 0;
+        out = out
+            .lines()
+            .map(|l| {
+                if l.starts_with("define ") {
+                    function += 1;
+                }
+                match regex!(r"^(\s+%[\w.]+ = load [^,]+, [^,]*\* (%[\w.]+), align \d+), !tbaa !\d+(.*)$").captures(l) {
+                    Some(c) if elements.contains(&(function, c[2].to_string())) => format!("{}{}\n", &c[1], &c[3]),
+                    _ => format!("{l}\n"),
+                }
+            })
+            .collect();
     }
     // constants: `%"...__packed" { [N x T] [...] }` -> `[N x T] [...]`
     let mut names: Vec<&String> = packed.keys().collect();
