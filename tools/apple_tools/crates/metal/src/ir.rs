@@ -344,7 +344,9 @@ pub fn resolve_atomics(ir: &str) -> Result<String, String> {
                 if op == "load" {
                     format!("call {lt} @{name}({lt} addrspace({space})* {p}, i32 {}, i32 {scope}, i32 0, i1 false)", args[0])
                 } else {
-                    format!("call {} @{name}({lt} addrspace({space})* {p}, {lt} {}, i32 {}, i32 {scope}, i32 0, i1 false)", if op == "store" { "void" } else { lt }, args[0], args[1])
+                    // a float result keeps the call's fast-math flag, as Xcode's call has it
+                    let fast = if lt == "float" && op != "store" && regex!(r"\bcall (?:\w+ )*?fast ").is_match(&c[0]) { "fast " } else { "" };
+                    format!("call {fast}{} @{name}({lt} addrspace({space})* {p}, {lt} {}, i32 {}, i32 {scope}, i32 0, i1 false)", if op == "store" { "void" } else { lt }, args[0], args[1])
                 }
             };
             format!("{pre}{indent}{res}{call}")
@@ -454,6 +456,96 @@ pub fn only_frontend_inlines(ir: &str, keep: &BTreeSet<String>) -> String {
         out += &format!("\nattributes #{new} = {{ {} }}", held(&groups[old]));
     }
     out + "\n"
+}
+
+/// Each stage function's entry point, its name and the label of the block before its
+/// return block (None: it returns from its first block).
+pub fn return_places(ir: &str, home: &std::collections::HashMap<String, String>) -> Vec<(String, String, Option<String>)> {
+    let mut out = Vec::new();
+    for (stage, entry) in home {
+        let Some((_, body)) = crate::text::find_define(ir, stage) else { continue };
+        let mut labels: Vec<String> = vec!["entry".into()];
+        let mut ret_block = None;
+        for l in body.lines() {
+            if let Some(c) = regex!(r"^([\w.$-]+):").captures(l) {
+                labels.push(c[1].to_string());
+            } else if l.trim_start().starts_with("ret ") {
+                ret_block = Some(labels.len() - 1);
+            }
+        }
+        if let Some(r) = ret_block {
+            out.push((entry.clone(), stage.trim_matches('"').to_string(), if r == 0 { None } else { Some(labels[r - 1].clone()) }));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The inliner moves an inlined function's return block to after all its blocks
+/// (`<function>.exit`); Xcode inlines no entry point, so the return stays where the
+/// user's function had it: after the block that came before it (`return_places`).
+pub fn place_inlined_returns(ir: &str, returns: &[(String, String, Option<String>)]) -> String {
+    let mut ir = ir.to_string();
+    for (entry, stage, before) in returns {
+        let Some(before) = before else { continue };
+        let Some(start) = ir.find(&format!("@{entry}(")).map(|i| ir[..i].rfind('\n').map_or(0, |n| n + 1)).filter(|&l| ir[l..].starts_with("define ")) else { continue };
+        let end = start + ir[start..].find("\n}\n").map(|e| e + 1).unwrap_or(ir.len() - start);
+        let f = ir[start..end].to_string();
+        // the blocks: (label, text)
+        let mut blocks: Vec<(String, String)> = Vec::new();
+        let (head, rest) = f.split_once('\n').unwrap_or((&f, ""));
+        for line in rest.split_inclusive('\n') {
+            match regex!(r"^([\w.$-]+):").captures(line) {
+                Some(c) => blocks.push((c[1].to_string(), line.to_string())),
+                None if blocks.is_empty() => blocks.push(("entry".into(), line.to_string())),
+                None => blocks.last_mut().unwrap().1.push_str(line),
+            }
+        }
+        let exit = format!("{stage}.exit");
+        let after = if before == "entry" { blocks.first().map(|b| b.0.clone()) } else { Some(format!("{before}.i")) };
+        let (Some(from), Some(after)) = (blocks.iter().position(|b| b.0 == exit), after) else { continue };
+        let Some(to) = blocks.iter().position(|b| b.0 == after) else { continue };
+        if from == to + 1 {
+            continue;
+        }
+        let b = blocks.remove(from);
+        let to = blocks.iter().position(|x| x.0 == after).unwrap();
+        blocks.insert(to + 1, b);
+        let body: String = blocks.into_iter().map(|b| b.1).collect();
+        ir.replace_range(start..end, &format!("{head}\n{body}"));
+    }
+    ir
+}
+
+/// The inliner puts an inlined function's allocas first in the entry block, before the
+/// entry point's own (its parameters' spills, which Xcode's entry point doesn't have):
+/// the entry point's go first, so SROA promotes the user's variables in their order.
+pub fn own_allocas_first(ir: &str, entries: &[String]) -> String {
+    map_functions(ir, |f| {
+        let head = f.lines().next().unwrap_or("");
+        let Some(name) = regex!(r#"@("?[\w.$]+"?)\("#).captures(head).map(|c| c[1].trim_matches('"').to_string()) else { return f.to_string() };
+        if !entries.contains(&name) {
+            return f.to_string();
+        }
+        let lines: Vec<&str> = f.split_inclusive('\n').collect();
+        // the entry block's leading allocas
+        let first = lines.iter().position(|l| regex!(r"^\s+%[\w.]+ = alloca ").is_match(l));
+        let Some(first) = first else { return f.to_string() };
+        let end = lines[first..].iter().position(|l| !regex!(r"^\s+%[\w.]+ = alloca ").is_match(l)).map_or(lines.len(), |n| first + n);
+        let (theirs, ours): (Vec<&str>, Vec<&str>) = lines[first..end].iter().copied().partition(|l| regex!(r"^\s+%[\w.]+\.i\d* = alloca ").is_match(l));
+        let mut out: String = lines[..first].concat();
+        out += &ours.concat();
+        out += &theirs.concat();
+        out += &lines[end..].concat();
+        out
+    })
+}
+
+/// The lifetime markers the inliner adds for an inlined function's locals (clang's
+/// own carry an attribute group): Xcode's entry point is the user's function, inlined
+/// nowhere, so it has none of them, and they'd keep its return block apart.
+pub fn drop_inliner_lifetimes(ir: &str) -> String {
+    regex!(r"(?m)^\s+call void @llvm\.lifetime\.(?:start|end)\.p0i8\(i64 -?\d+, i8\* (?:nonnull )?%[\w.]+\)\n").replace_all(ir, "").to_string()
 }
 
 /// `alwaysinline` back where `only_frontend_inlines` held it.
@@ -1004,6 +1096,17 @@ mod tests {
         assert!(out.contains("%b = load float, float addrspace(1)* %d, align 4, !tbaa !1\n"));
         assert!(out.ends_with("!2 = !{}\n"));
         assert!(strip_invariant_loads(&out).contains("%a = load float, float addrspace(2)* %c, align 4, !tbaa !1\n"));
+    }
+
+    #[test]
+    fn an_inlined_return_goes_back_to_its_place() {
+        let stage = "define internal void @_ZL1fv() {\nentry:\n  br label %for.cond\nfor.cond:\n  br i1 %c, label %for.body, label %for.cond.cleanup\nfor.cond.cleanup:\n  ret void\nfor.body:\n  br label %for.cond\n}\n";
+        let home: std::collections::HashMap<String, String> = [("_ZL1fv".to_string(), "k".to_string())].into();
+        let places = return_places(stage, &home);
+        assert_eq!(places, vec![("k".to_string(), "_ZL1fv".to_string(), Some("for.cond".to_string()))]);
+        let inlined = "define void @k() {\nentry:\n  %x.i = alloca i32, align 4\n  %y = alloca i32, align 4\n  call void @llvm.lifetime.start.p0i8(i64 4, i8* %0)\n  br label %for.cond.i\nfor.cond.i:\n  br i1 %c, label %for.body.i, label %_ZL1fv.exit\nfor.body.i:\n  br label %for.cond.i\n_ZL1fv.exit:\n  ret void\n}\n";
+        let out = own_allocas_first(&place_inlined_returns(&drop_inliner_lifetimes(inlined), &places), &["k".to_string()]);
+        assert_eq!(out, "define void @k() {\nentry:\n  %y = alloca i32, align 4\n  %x.i = alloca i32, align 4\n  br label %for.cond.i\nfor.cond.i:\n  br i1 %c, label %for.body.i, label %_ZL1fv.exit\n_ZL1fv.exit:\n  ret void\nfor.body.i:\n  br label %for.cond.i\n}\n");
     }
 
     #[test]

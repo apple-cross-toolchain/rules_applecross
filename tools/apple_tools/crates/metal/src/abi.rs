@@ -279,9 +279,114 @@ pub fn strip_comdats(ir: &str) -> String {
     regex!(r"(?m)^(define .*?) comdat(?:\(\$[^)]*\))?(.*)$").replace_all(&ir, "$1$2").to_string()
 }
 
+/// Xcode's SpecializeAddressSpaces, for a user function with generic parameters
+/// (pointers and references with no address space, `generic`'s indices): the
+/// function keeps address space 8 (Metal's generic one) there, and each call
+/// goes to an internal copy for its argument's address space,
+/// `<name>.specialized.p<space>`. A generic parameter isn't `nonnull`. The bodies
+/// of the generic function and of any copy for a space other than 0 reach their
+/// parameter through a cast for InferAddressSpaces to fold.
+pub fn specialize_generic(ir: &str, generic: &HashMap<String, Vec<usize>>) -> String {
+    let mut ir = ir.to_string();
+    let mut clones = String::new();
+    let mut names: Vec<&String> = generic.keys().collect();
+    names.sort();
+    for name in names {
+        let indices = &generic[name];
+        let Some((sig, _)) = crate::text::find_define(&ir, name) else { continue };
+        let params = split_args(sig);
+        if indices.iter().any(|&i| i >= params.len()) {
+            continue;
+        }
+        // each call's space for the generic parameters (one each), the call rewritten to its copy
+        let mut spaces: Vec<u32> = Vec::new();
+        let call = Regex::new(&format!(r#"(?m)^(\s+(?:%[\w.]+ = )?(?:tail )?call [^@\n]*@){}\((.*)$"#, regex::escape(name))).unwrap();
+        ir = call
+            .replace_all(&ir, |c: &regex::Captures| {
+                let open = c.get(2).unwrap().start() - 1;
+                let line = &c[0];
+                let rel = open - c.get(0).unwrap().start();
+                let close = balanced(line.as_bytes(), rel, b'(', b')');
+                let args = split_args(&line[rel + 1..close - 1]);
+                let space = indices.iter().filter_map(|&i| args.get(i)).map(|a| regex!(r"addrspace\((\d+)\)").captures(a.rsplit_once(' ').map(|x| x.0).unwrap_or(a)).and_then(|m| m[1].parse::<u32>().ok()).unwrap_or(0)).max().unwrap_or(0);
+                if !spaces.contains(&space) {
+                    spaces.push(space);
+                }
+                format!("{}{name}.specialized.p{space}({}", &c[1], &c[2])
+            })
+            .to_string();
+        spaces.sort();
+        let Some(start) = ir.find(&format!("@{name}(")).map(|i| ir[..i].rfind('\n').map_or(0, |n| n + 1)).filter(|&l| ir[l..].starts_with("define ")) else { continue };
+        let end = start + ir[start..].find("\n}\n").map(|e| e + 3).unwrap_or(ir.len() - start);
+        let original = ir[start..end].to_string();
+        // the function with its generic parameters in `space`, through casts to the flat ones
+        let retyped = |text: &str, space: u32, rename: Option<&str>| -> String {
+            let head_end = text.find('\n').unwrap_or(text.len());
+            let (head, body) = text.split_at(head_end);
+            let open = head.find(&format!("@{name}(")).unwrap() + name.len() + 1;
+            let close = balanced(head.as_bytes(), open, b'(', b')');
+            let ps = split_args(&head[open + 1..close - 1]);
+            let mut casts = String::new();
+            let new: Vec<String> = ps
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let p = p.trim();
+                    if !indices.contains(&i) {
+                        return p.to_string();
+                    }
+                    let p = p.replace(" nonnull", "");
+                    let Some((ty_attrs, v)) = p.rsplit_once(' ') else { return p };
+                    let ty = ty_attrs.split(' ').next().unwrap_or("");
+                    if space == 0 || !ty.ends_with('*') {
+                        return p.to_string();
+                    }
+                    let pointee = &ty[..ty.len() - 1];
+                    casts += &format!("\n  {v} = addrspacecast {pointee} addrspace({space})* {v}.generic to {ty}");
+                    format!("{pointee} addrspace({space})*{} {v}.generic", &ty_attrs[ty.len()..])
+                })
+                .collect();
+            let mut h = format!("{}{}{}", &head[..open + 1], new.join(", "), &head[close - 1..]);
+            if let Some(r) = rename {
+                h = h.replacen(&format!("@{name}("), &format!("@{r}("), 1);
+                h = regex!(r"^define (?:(?:dso_local|linkonce_odr|weak_odr|hidden) )*").replace(&h, "define internal ").to_string();
+            }
+            // the casts go first in the entry block
+            let body = match body.strip_prefix("\n").and_then(|b| b.split_once('\n')) {
+                Some((first, rest)) if regex!(r"^[\w.$-]+:").is_match(first) => format!("\n{first}{casts}\n{rest}"),
+                _ => format!("{casts}{body}"),
+            };
+            format!("{h}{body}")
+        };
+        for space in &spaces {
+            clones += "\n";
+            clones += &retyped(&original, *space, Some(&format!("{name}.specialized.p{space}")));
+        }
+        ir.replace_range(start..end, &retyped(&original, 8, None));
+    }
+    if clones.is_empty() {
+        return ir;
+    }
+    // the copies after the module's functions and declarations
+    let at = regex!(r"(?m)^(?:attributes #|!)").find(&ir).map(|m| m.start()).unwrap_or(ir.len());
+    ir.insert_str(at, &format!("{}\n", clones.trim_start()));
+    ir
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generic_parameters_specialize_by_space() {
+        let ir = "define dso_local spir_func void @_Z2g2Rf(float* nocapture noundef nonnull align 4 dereferenceable(4) %x) local_unnamed_addr #0 {\nentry:\n  %v = load float, float* %x, align 4\n  store float %v, float* %x, align 4\n  ret void\n}\n\ndefine void @tk(float* %p) #1 {\nentry:\n  call spir_func void @_Z2g2Rf(float* noundef nonnull align 4 dereferenceable(4) %p) #5\n  ret void\n}\nattributes #0 = { nounwind }\n";
+        let g: HashMap<String, Vec<usize>> = [("_Z2g2Rf".to_string(), vec![0])].into();
+        let out = specialize_generic(ir, &g);
+        assert!(out.contains("define dso_local spir_func void @_Z2g2Rf(float addrspace(8)* nocapture noundef align 4 dereferenceable(4) %x.generic) local_unnamed_addr #0 {\nentry:\n  %x = addrspacecast float addrspace(8)* %x.generic to float*\n"), "{out}");
+        assert!(out.contains("call spir_func void @_Z2g2Rf.specialized.p0(float* noundef nonnull align 4 dereferenceable(4) %p) #5"));
+        assert!(out.contains("define internal spir_func void @_Z2g2Rf.specialized.p0(float* nocapture noundef align 4 dereferenceable(4) %x) local_unnamed_addr #0 {\nentry:\n  %v = load float, float* %x"));
+        assert!(out.find("@_Z2g2Rf.specialized.p0(float* nocapture").unwrap() < out.find("attributes #0").unwrap());
+    }
 
     #[test]
     fn pointers_and_textures_lowered_with_their_calls() {

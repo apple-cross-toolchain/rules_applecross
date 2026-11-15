@@ -284,7 +284,7 @@ pub fn extract(ir: &str, name: &str) -> String {
     // metallib internalises the functions it calls (fastcc, unnamed_addr), and so the calls
     let callees: Vec<&str> = items.iter().filter(|(n, t)| t.lines().any(|l| l.starts_with("define ")) && unquote(n) != unquote(name)).map(|(n, _)| *n).collect();
     let internal = |t: &str| -> String {
-        let t = regex!(r"(?m)^define (?:(?:dso_local|linkonce_odr|weak_odr|hidden) )*(.*?@([-\w.$]+|\x22[^\x22]*\x22)\(.*)$").replace(t, |c: &regex::Captures| {
+        let t = regex!(r"(?m)^define (?:(?:dso_local|linkonce_odr|weak_odr|hidden|internal) )*(.*?@([-\w.$]+|\x22[^\x22]*\x22)\(.*)$").replace(t, |c: &regex::Captures| {
             if callees.contains(&&c[2]) { format!("define internal fastcc {}", c[1].replacen(" local_unnamed_addr ", " unnamed_addr ", 1)) } else { c[0].to_string() }
         });
         regex!(r"(\bcall (?:(?:fast|nnan|ninf|nsz|arcp|contract|afn|reassoc) )*)([^@\n]*@([-\w.$]+|\x22[^\x22]*\x22)\()")

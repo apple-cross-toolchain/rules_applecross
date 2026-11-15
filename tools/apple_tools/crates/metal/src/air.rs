@@ -301,6 +301,16 @@ fn after_constant_reads(ir: &str) -> String {
         .to_string()
 }
 
+/// Whether `name` is declared (or defined) writeonly.
+fn writeonly_decl(ir: &str, name: &str) -> bool {
+    let groups: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let re = Regex::new(&format!(r"(?m)^(?:declare|define) [^\n]*@{}\([^\n]*\)([^\n]*)$", regex::escape(name))).unwrap();
+    re.captures(ir).is_some_and(|c| {
+        let tail = &c[1];
+        tail.split(' ').any(|w| w == "writeonly") || regex!(r"#(\d+)").captures(tail).is_some_and(|g| groups.get(&g[1]).is_some_and(|a| a.split(' ').any(|w| w == "writeonly")))
+    })
+}
+
 /// Xcode's alias analysis knows address space 2 is constant: a function that
 /// only reads it reads no memory.
 fn constant_reads(ir: &str, entries: &[&str]) -> String {
@@ -319,7 +329,20 @@ fn constant_reads(ir: &str, entries: &[&str]) -> String {
             if readnone.iter().any(|r| r == e) {
                 continue;
             }
-            let Some((_, body)) = find_define(&ir, e) else { continue };
+            let Some(body) = find_define(&ir, e).map(|(_, b)| b.to_string()) else { continue };
+            // a function that stores, reads only constant memory and calls nothing that reads
+            // memory, writes only: Xcode's inference has it writeonly
+            let constant_only = !body.lines().any(|l| regex!(r"= load ").is_match(l) && !regex!(r"= load [^,]*, [^,]* addrspace\(2\)\*").is_match(l));
+            let calls_only_writing = regex!(r"\bcall [^@]*@([\w.]+)\(").captures_iter(&body).all(|c| readnone.iter().any(|r| *r == c[1]) || writeonly_decl(&ir, &c[1]));
+            if constant_only && calls_only_writing && body.lines().any(|l| l.trim().starts_with("store ")) {
+                ir = edit_attrs(&ir, e, |a| {
+                    if a.split(' ').any(|w| matches!(w, "readonly" | "readnone" | "writeonly")) {
+                        return a.to_string();
+                    }
+                    let at = a.find(" \"").unwrap_or(a.len());
+                    format!("{} writeonly{}", &a[..at], &a[at..])
+                });
+            }
             let reads_other = body.lines().any(|l| {
                 let l = l.trim();
                 l.starts_with("store ")
