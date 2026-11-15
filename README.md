@@ -333,7 +333,7 @@ them.
 `tools/build-ported-tools.sh` builds, for the host's CPU, the Linux tools the
 toolchain stages that LLVM doesn't provide:
 
-- `tools/apple_tools`: `actool`, `ibtool`, `pngcrush`, `codesign`,
+- `tools/apple_tools`: `actool`, `ibtool`, `pngcrush`, `codesign`, `dmg`,
   `swift-stdlib-tool`, `PlistBuddy`, `plutil`, `sw_vers`, and `xcrun`
 - `tools/apple_tools/swiftui_macros`: `SwiftUIMacros`
 - `tools/system_tools`: `zip`, `unzip`, and `python3`

@@ -1,0 +1,19 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+rust_binary(
+    name = "dmg",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//crates/lzfse",
+        "@crates//:crc32fast",
+        "@crates//:flate2",
+        "@crates//:plist",
+    ],
+)
+
+rust_test(
+    name = "test",
+    crate = ":dmg",
+)

@@ -1,0 +1,16 @@
+[package]
+name = "dmg"
+description = "Mac disk images (HFS+ in UDIF, as hdiutil makes them) on any platform."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "dmg"
+path = "src/main.rs"
+
+[dependencies]
+crc32fast = "1"
+flate2.workspace = true
+plist.workspace = true
+lzfse.workspace = true

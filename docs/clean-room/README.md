@@ -134,6 +134,7 @@ fails on.)
 | [actool.md](actool.md) | `actool`: app icons, CgBI PNGs, Assets.car |
 | [pngcrush.md](pngcrush.md) | `pngcrush -iphone`: an iOS bundle's PNGs as Apple-optimized (CgBI) PNGs |
 | [codesign.md](codesign.md) | `codesign`: ad hoc signatures and resource seals |
+| [dmg.md](dmg.md) | `dmg`: Mac disk images (HFS+ in UDIF) without hdiutil |
 | [ibtool.md](ibtool.md) | `ibtool`: launch storyboards, NIB archives |
 | [coremlc.md](coremlc.md) | `coremlc`: ML Programs and the other Core ML model types but neural networks, Create ML's included, compiled to `.mlmodelc`, and their Swift and Objective-C classes |
 | [appintentsmetadataprocessor.md](appintentsmetadataprocessor.md) | `appintentsmetadataprocessor`: App Intents metadata from Swift constant values |
