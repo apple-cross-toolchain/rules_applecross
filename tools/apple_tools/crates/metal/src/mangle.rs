@@ -83,6 +83,39 @@ pub fn user_functions(with_spaces: &[(String, String, String)], flat: &[(String,
     out
 }
 
+/// Xcode's name -> the indices of a free function's generic parameters: pointers and
+/// references with no address space (MSL's generic one, which Xcode specializes).
+pub fn generic_params(with_spaces: &[(String, String, String)]) -> HashMap<String, Vec<usize>> {
+    let mut out = HashMap::new();
+    for (_, m, t) in with_spaces {
+        // free functions only (a method's object is another matter)
+        if !regex!(r"^_Z\d").is_match(m) {
+            continue;
+        }
+        let params = generic_indices(t);
+        if !params.is_empty() {
+            out.insert(xcode_spelling(m), params);
+        }
+    }
+    out
+}
+
+fn generic_indices(fn_type: &str) -> Vec<usize> {
+    let spaces = param_spaces(fn_type);
+    let Some(open) = fn_type.find('(') else { return vec![] };
+    let close = fn_type.rfind(')').unwrap_or(fn_type.len());
+    let params = &fn_type[open + 1..close];
+    if params.trim().is_empty() || params.trim() == "void" {
+        return vec![];
+    }
+    crate::text::split_args(params)
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| (p.contains('*') || p.contains('&')) && !p.contains('(') && spaces.get(*i).copied().flatten().is_none())
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// clang's address-space qualifiers as Xcode spells them (constant implies const).
 pub fn xcode_spelling(mangled: &str) -> String {
     let s = regex!(r"U3AS2(K?)").replace_all(mangled, "U11MTLconstantK");
@@ -111,6 +144,13 @@ mod tests {
     fn spells_address_spaces_as_xcode() {
         assert_eq!(xcode_spelling("_Z1fPU3AS1fRU3AS2K1SPU3AS3fPU3AS2f"), "_Z1fPU9MTLdevicefRU11MTLconstantK1SPU14MTLthreadgroupfPU11MTLconstantKf");
         assert_eq!(xcode_spelling("_Z2g5RU3AS9K1S"), "_Z2g5RU9MTLthreadK1S");
+    }
+
+    #[test]
+    fn generic_parameters_are_those_with_no_space() {
+        assert_eq!(generic_indices("void (float &)"), vec![0]);
+        assert_eq!(generic_indices("float (__attribute__((address_space(9))) float &, const S &, float)"), vec![1]);
+        assert!(generic_indices("void (__attribute__((address_space(1))) float *)").is_empty());
     }
 
     #[test]
