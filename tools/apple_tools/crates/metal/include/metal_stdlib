@@ -355,6 +355,51 @@ template <class T, int K, int C, int R, int... I> __attribute__((always_inline))
   return matrix<T, C, R>(__column_list<__vector<T, R>>{c, C}, (__seq<I...> *)0);
 }
 template <class T, int K, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, K, R> &a, const matrix<T, C, K> &b) { return __mul(a, b, (typename __mkseq<C>::type *)0); }
+template <class T> struct __nondeduced { typedef T type; };
+// m * s, s * m, m / s and transpose are built through a column list as A * B is (Xcode's
+// are readonly); m + n and m - n column by column (readnone)
+template <class T, int C, int R, int... I> __attribute__((always_inline)) inline matrix<T, C, R> __scale(const matrix<T, C, R> &a, T s, __seq<I...> *) {
+  __vector<T, R> c[C] = {s * a[I]...};
+  return matrix<T, C, R>(__column_list<__vector<T, R>>{c, C}, (__seq<I...> *)0);
+}
+template <class T, int C, int R, int... I> __attribute__((always_inline)) inline matrix<T, C, R> __divide(const matrix<T, C, R> &a, T s, __seq<I...> *) {
+  __vector<T, R> c[C] = {a[I] / s...};
+  return matrix<T, C, R>(__column_list<__vector<T, R>>{c, C}, (__seq<I...> *)0);
+}
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(const matrix<T, C, R> &a, typename __nondeduced<T>::type s) { return __scale(a, s, (typename __mkseq<C>::type *)0); }
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator*(typename __nondeduced<T>::type s, const matrix<T, C, R> &a) { return __scale(a, s, (typename __mkseq<C>::type *)0); }
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator/(const matrix<T, C, R> &a, typename __nondeduced<T>::type s) { return __divide(a, s, (typename __mkseq<C>::type *)0); }
+template <class T, int C, int R, int... I> __attribute__((always_inline)) inline matrix<T, C, R> __add(const matrix<T, C, R> &a, const matrix<T, C, R> &b, __seq<I...> *) {
+  matrix<T, C, R> m;
+  ((m[I] = a[I] + b[I]), ...);
+  return m;
+}
+template <class T, int C, int R, int... I> __attribute__((always_inline)) inline matrix<T, C, R> __subtract(const matrix<T, C, R> &a, const matrix<T, C, R> &b, __seq<I...> *) {
+  matrix<T, C, R> m;
+  ((m[I] = a[I] - b[I]), ...);
+  return m;
+}
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator+(const matrix<T, C, R> &a, const matrix<T, C, R> &b) { return __add(a, b, (typename __mkseq<C>::type *)0); }
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator-(const matrix<T, C, R> &a, const matrix<T, C, R> &b) { return __subtract(a, b, (typename __mkseq<C>::type *)0); }
+// row J of a C-column matrix, as a column of its transpose
+template <int J, class T, int C, int R, int... I> __attribute__((always_inline)) inline __vector<T, C> __row(const matrix<T, C, R> &m, __seq<I...> *) { return __vector<T, C>{m[I][J]...}; }
+template <class T, int C, int R, int... J> __attribute__((always_inline)) inline matrix<T, R, C> __transpose(const matrix<T, C, R> &m, __seq<J...> *) {
+  __vector<T, C> c[R] = {__row<J>(m, (typename __mkseq<C>::type *)0)...};
+  return matrix<T, R, C>(__column_list<__vector<T, C>>{c, R}, (__seq<J...> *)0);
+}
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, R, C> transpose(const matrix<T, C, R> &m) { return __transpose(m, (typename __mkseq<R>::type *)0); }
+// determinants by cofactors along the first column
+template <class T> __attribute__((always_inline)) inline T __det2(T a, T b, T c, T d) { return a * d - c * b; }
+template <class T> __attribute__((always_inline)) inline T __det3(T a0, T a1, T a2, T b0, T b1, T b2, T c0, T c1, T c2) {
+  return a0 * __det2(b1, b2, c1, c2) - a1 * __det2(b0, b2, c0, c2) + a2 * __det2(b0, b1, c0, c1);
+}
+template <class T> __attribute__((always_inline)) inline T determinant(const matrix<T, 2, 2> &m) { return __det2(m[0][0], m[0][1], m[1][0], m[1][1]); }
+template <class T> __attribute__((always_inline)) inline T determinant(const matrix<T, 3, 3> &m) { return __det3(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]); }
+template <class T> __attribute__((always_inline)) inline T determinant(const matrix<T, 4, 4> &m) {
+  const __vector<T, 4> a = m[0], b = m[1], c = m[2], d = m[3];
+  return a[0] * __det3(b[1], b[2], b[3], c[1], c[2], c[3], d[1], d[2], d[3]) - a[1] * __det3(b[0], b[2], b[3], c[0], c[2], c[3], d[0], d[2], d[3])
+       + a[2] * __det3(b[0], b[1], b[3], c[0], c[1], c[3], d[0], d[1], d[3]) - a[3] * __det3(b[0], b[1], b[2], c[0], c[1], c[2], d[0], d[1], d[2]);
+}
 // T CxR(...) constructors, rewritten by the driver to __mat: C columns, one
 // scalar for the diagonal, or C*R scalars in column order.
 template <class X, class... R> __attribute__((always_inline)) inline X __first(X x, R...) { return x; }
