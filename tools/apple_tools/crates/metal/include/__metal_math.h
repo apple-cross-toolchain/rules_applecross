@@ -385,7 +385,7 @@ __attribute__((always_inline)) inline float distance_squared(float3 a, float3 b)
 __attribute__((always_inline)) inline float3 normalize(float3 v) { return v * rsqrt(dot(v, v)); }
 __attribute__((always_inline)) inline float3 reflect(float3 i, float3 n) { return i - (float)2 * dot(n, i) * n; }
 __attribute__((always_inline)) inline float3 faceforward(float3 n, float3 i, float3 r) { return dot(r, i) < 0 ? n : -n; }
-__attribute__((always_inline)) inline float3 cross(float3 a, float3 b) { return float3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+__attribute__((always_inline)) inline float3 cross(float3 a, float3 b) { return float3{a.y * b.z - b.y * a.z, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
 __attribute__((always_inline)) inline float3 smoothstep(float3 e0, float3 e1, float3 x) { float3 t = clamp((x - e0) / (e1 - e0), (float)0, (float)1); return t * t * ((float)3 - (float)2 * t); }
 __attribute__((always_inline)) inline float3 smoothstep(float e0, float e1, float3 x) { return smoothstep((float3)e0, (float3)e1, x); }
 extern "C" float4 __air_sin_v4f32(float4) __AIR(__MSL_F(sin) ".v4f32");
@@ -879,7 +879,7 @@ __attribute__((always_inline)) inline half distance_squared(half3 a, half3 b) { 
 __attribute__((always_inline)) inline half3 normalize(half3 v) { return v * rsqrt(dot(v, v)); }
 __attribute__((always_inline)) inline half3 reflect(half3 i, half3 n) { return i - (half)2 * dot(n, i) * n; }
 __attribute__((always_inline)) inline half3 faceforward(half3 n, half3 i, half3 r) { return dot(r, i) < 0 ? n : -n; }
-__attribute__((always_inline)) inline half3 cross(half3 a, half3 b) { return half3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+__attribute__((always_inline)) inline half3 cross(half3 a, half3 b) { return half3{a.y * b.z - b.y * a.z, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
 __attribute__((always_inline)) inline half3 smoothstep(half3 e0, half3 e1, half3 x) { half3 t = clamp((x - e0) / (e1 - e0), (half)0, (half)1); return t * t * ((half)3 - (half)2 * t); }
 __attribute__((always_inline)) inline half3 smoothstep(half e0, half e1, half3 x) { return smoothstep((half3)e0, (half3)e1, x); }
 extern "C" half4 __air_sin_v4f16(half4) __AIR("air.sin.v4f16");
