@@ -203,7 +203,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         }
     }
     let text = crate::abi::lower(&text, &user, &stages);
-    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::noalias_params(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()), &entries)));
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields())));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
@@ -222,8 +222,11 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let text = intrinsics::apply(&ir::air_conversions(&text));
     let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
+    // from here the entry points' accesses have Xcode's alias scopes (its AIRAliasScopePropagation
+    // runs in the inliner's walk, after the module simplification; written again on what O2 left),
+    // and constant memory is invariant to O2 as Xcode's alias analysis has it
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
-    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::xcode_alias_scopes(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&step(&intrinsics::apply(&text), "o2b", &[O2.1.as_str(), "-assume-default-is-flat-addrspace"])?))), &entries)))));
+    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::xcode_alias_scopes(&ir::strip_alias_scopes(&ir::strip_invariant_loads(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&step(&intrinsics::apply(&ir::constant_loads_invariant(&ir::xcode_alias_scopes(&text, &entries))), "o2b", &[O2.1.as_str(), "-assume-default-is-flat-addrspace"])?))))), &entries)))));
     let text = crate::abi::strip_comdats(&crate::mangle::apply(&text, &renames));
     let order: Vec<String> = code.constants.iter().map(|c| c.name.clone()).collect();
     let source_path = std::fs::canonicalize(&o.source).unwrap_or(o.source.clone());
