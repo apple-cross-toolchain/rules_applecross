@@ -75,19 +75,6 @@ template <int N, int... I> struct __mkseq : __mkseq<N - 1, N - 1, I...> {};
 template <int... I> struct __mkseq<0, I...> { typedef __seq<I...> type; };
 template <bool B, class T = void> struct enable_if {};
 template <class T> struct enable_if<true, T> { typedef T type; };
-template <class V, class E = typename __elem<V>::type, int N = __elem<V>::n>
-struct __vbuild {
-  // no initialiser (a constructor call): the user sets i, as an implicit
-  // constructor's lack of mustprogress would cost the function it inlines into its own
-  V v; int i;
-  // a scalar converts at the call, in the user's code, as Xcode converts it
-  __attribute__((always_inline)) void put(E e) { v[i++] = e; }
-  template <class A, int... K> __attribute__((always_inline)) void put_each(A a, __seq<K...> *) { ((v[i++] = E(a[K])), ...); }
-  template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) void put(A a) { put_each(a, (typename __mkseq<__elem<A>::n>::type *)0); }
-  // the first argument: a vector of the element type widens by a shuffle
-  __attribute__((always_inline)) void first(E e) { put(e); }
-  template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) void first(A a);
-};
 template <class T, int N> struct __packed;
 template <class T, int N> struct __elem<__packed<T, N>> { typedef T type; static constexpr int n = N; };
 template <class V, class A, int... K> __attribute__((always_inline)) constexpr V __convert_each(A a, __seq<K...> *) { V r; ((r[K] = (typename __elem<V>::type)a[K]), ...); return r; }
@@ -109,27 +96,42 @@ template <class V, class A, class = typename enable_if<(__elem<A>::n > 1)>::type
 template <class V, class A, int... I, int... U> __attribute__((always_inline)) V __widen(A a, __seq<I...> *, __seq<U...> *) {
   return __builtin_shufflevector(a, a, I..., ((void)U, -1)...);
 }
-// Each element as its argument comes (the driver writes T4(a, b, ...) in a
-// function as a statement expression of puts, the first by first()): a leading
-// vector of the same element type widens by a shuffle.
-template <class V, class E, int N> template <class A, class> __attribute__((always_inline)) void __vbuild<V, E, N>::first(A a) {
-  if constexpr (__elem<A>::n < N && __is_same(A, __vector<E, __elem<A>::n>)) {
-    v = __widen<V>(a, (typename __mkseq<__elem<A>::n>::type *)0, (typename __mkseq<N - __elem<A>::n>::type *)0); i = __elem<A>::n;
-  } else {
-    put(a);
-  }
+// A vector built in a function (the driver writes T4(a, b, ...) as a statement expression of
+// puts, each argument as it comes): each put returns the vector so far, its position in its type.
+// A scalar goes in by insertelement (converted at the call, in the user's code, as Xcode converts
+// it); a vector of the element type widens and shuffles in, as Xcode's frontend builds it.
+template <class V, int I, int n, int... K> __attribute__((always_inline)) V __place(V v, V w, __seq<K...> *) {
+  return __builtin_shufflevector(v, w, (K < I ? K : K < I + n ? __elem<V>::n + K - I : -1)...);
 }
+template <class V, int I, class E = typename __elem<V>::type, int N = __elem<V>::n>
+struct __vpart {
+  V v;
+  __attribute__((always_inline)) __vpart<V, I + 1> put(E e) const { __vpart<V, I + 1> r; r.v = v; r.v[I] = e; return r; }
+  template <class A, int... K> __attribute__((always_inline)) void put_each(A a, __seq<K...> *) { ((v[I - __elem<A>::n + K] = E(a[K])), ...); }
+  template <class A, class = typename enable_if<(__elem<A>::n > 1)>::type> __attribute__((always_inline)) __vpart<V, I + __elem<A>::n> put(A a) const {
+    constexpr int n = __elem<A>::n;
+    __vpart<V, I + n> r;
+    if constexpr (n < N && __is_same(A, __vector<E, n>)) {
+      V w = __widen<V>(a, (typename __mkseq<n>::type *)0, (typename __mkseq<N - n>::type *)0);
+      if constexpr (I == 0) r.v = w;
+      else r.v = __place<V, I, n>(v, w, (typename __mkseq<N>::type *)0);
+    } else {
+      r.v = v;
+      r.put_each(a, (typename __mkseq<n>::type *)0);
+    }
+    return r;
+  }
+};
 // A packed vector converts element by element where it is (no copy), as Xcode's frontend reads one
 template <class V, class T, int N, int... K> __attribute__((always_inline)) constexpr V __unpack(const __packed<T, N> &a, __seq<K...> *) { V r; ((r[K] = (typename __elem<V>::type)a.__e[K]), ...); return r; }
 template <class V, class T, int N> __attribute__((always_inline)) constexpr V __vec(const __packed<T, N> &a) { return __unpack<V>(a, (typename __mkseq<N>::type *)0); }
+template <class P> __attribute__((always_inline)) auto __vchain(P p) { return p.v; }
+template <class P, class A, class... R> __attribute__((always_inline)) auto __vchain(P p, A a, R... r) { return __vchain(p.put(a), r...); }
 template <class V, class A, class B, class... R> __attribute__((always_inline)) constexpr V __vec(A a, B b, R... r) {
   if constexpr (__elem<A>::n == 1 && __elem<B>::n == 1 && (... && (__elem<R>::n == 1)) && 2 + sizeof...(R) == __elem<V>::n) {
     typedef typename __elem<V>::type E; return V{(E)a, (E)b, (E)r...};
-  } else if constexpr (__elem<A>::n > 1 && __is_same(A, __vector<typename __elem<V>::type, __elem<A>::n>)) {
-    __vbuild<V> v; v.v = __widen<V>(a, (typename __mkseq<__elem<A>::n>::type *)0, (typename __mkseq<__elem<V>::n - __elem<A>::n>::type *)0); v.i = __elem<A>::n;
-    v.put(b); (v.put(r), ...); return v.v;
   } else {
-    __vbuild<V> v; v.i = 0; v.first(a); v.put(b); (v.put(r), ...); return v.v;
+    __vpart<V, 0> v; return __vchain(v, a, b, r...);
   }
 }
 

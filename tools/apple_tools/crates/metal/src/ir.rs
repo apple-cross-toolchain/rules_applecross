@@ -433,7 +433,7 @@ pub fn only_frontend_inlines(ir: &str, keep: &BTreeSet<String>) -> String {
     let held = |a: &str| a.split(' ').map(|w| if w == "alwaysinline" { "\"msl.ai\"" } else { w }).collect::<Vec<_>>().join(" ");
     let out = replace_all(ir, regex!(r#"(?m)^(define [^\n]*?@("?[\w.$]+"?)\([^\n]*\))([^\n]*?)(?: #(\d+))?((?: comdat(?:\([^)\n]*\))?)?(?: align \d+)?)? \{$"#), |c| {
         let name = &c[2];
-        if keep.contains(name) || regex!(r"^_ZNK?5metal(?:8__vbuild|7__widen|9__boolvec|5__vec|14__convert_each|8__unpack)").is_match(name) {
+        if keep.contains(name) || regex!(r"^_ZNK?5metal(?:7__vpart|7__place|8__vchain|7__widen|9__boolvec|5__vec|14__convert_each|8__unpack)").is_match(name) {
             return c[0].to_string();
         }
         let group = match c.get(4) {
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn only_the_frontends_layers_inline_first() {
-        let ir = "define internal void @_ZL1kv() alwaysinline #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZN5metal8__vbuildIDv4_fS_Li4EE3putEf() #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZN5metal5fractEf() #0 comdat {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZNK5metal9texture2dIfE5widthEv() #0 comdat align 2 {\nentry:\n  ret void\n}\ndefine internal void @_ZL1hv() alwaysinline #1 {\nentry:\n  ret void\n}\nattributes #0 = { alwaysinline nounwind }\nattributes #1 = { nounwind }\n";
+        let ir = "define internal void @_ZL1kv() alwaysinline #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZNK5metal7__vpartIDv4_fLi0EfLi4EE3putEf() #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZN5metal5fractEf() #0 comdat {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZNK5metal9texture2dIfE5widthEv() #0 comdat align 2 {\nentry:\n  ret void\n}\ndefine internal void @_ZL1hv() alwaysinline #1 {\nentry:\n  ret void\n}\nattributes #0 = { alwaysinline nounwind }\nattributes #1 = { nounwind }\n";
         let out = only_frontend_inlines(ir, &["_ZL1kv".to_string()].into());
         assert!(out.contains("@_ZL1kv() alwaysinline #0 {"));
         assert!(out.contains("3putEf() #0 {"));
