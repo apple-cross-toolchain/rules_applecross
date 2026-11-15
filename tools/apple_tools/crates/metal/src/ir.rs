@@ -734,8 +734,9 @@ pub fn constant_loads_invariant(ir: &str) -> String {
 /// ignores loads from them (not from program-scope constants, which count as reads): for
 /// O2 each such load's TBAA tag is a copy marked immutable (TBAA's fourth operand), which
 /// LLVM's own analysis honours, and an untagged one gets an immutable tag of a type of its
-/// own, as does a copy of one into a local (so that InstCombine reads the buffer in its
-/// place, as Xcode's does). `restore_constant_tbaa` puts the original tags back.
+/// own. A copy of a buffer (a memcpy) keeps its tags: one tag covers both its ends, and
+/// InstCombine deletes a copy into what it takes for constant memory.
+/// `restore_constant_tbaa` puts the original tags back.
 pub fn constant_tbaa(ir: &str) -> String {
     let nodes: std::collections::HashMap<String, String> = regex!(r"(?m)^!(\d+) = !\{(![0-9]+, ![0-9]+, i64 \d+)\}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
     let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
@@ -745,7 +746,6 @@ pub fn constant_tbaa(ir: &str) -> String {
     next += 3;
     let out = crate::text::map_functions(ir, |f| {
         let defs: std::collections::HashMap<&str, &str> = regex!(r"(?m)^\s+(%[\w.]+) = (?:getelementptr|bitcast|addrspacecast) (.*)$").captures_iter(f).map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str())).collect();
-        let allocas: std::collections::HashSet<&str> = regex!(r"(?m)^\s+(%[\w.]+) = alloca ").captures_iter(f).map(|c| c.get(1).unwrap().as_str()).collect();
         // what a pointer is based on, through GEPs and casts (a global's name, or with one in it)
         let base = |p: &str| {
             let mut p = p.to_string();
@@ -759,7 +759,7 @@ pub fn constant_tbaa(ir: &str) -> String {
             }
             p
         };
-        let f = regex!(r"(?m)^(\s+%[\w.]+ = load [^,]+, [^,]* addrspace\(2\)\* ([^,]+)[^\n]*?)$").replace_all(f, |c: &Captures| {
+        regex!(r"(?m)^(\s+%[\w.]+ = load [^,]+, [^,]* addrspace\(2\)\* ([^,]+)[^\n]*?)$").replace_all(f, |c: &Captures| {
             let line = &c[1];
             if base(c[2].trim()).contains('@') {
                 return line.to_string();
@@ -771,15 +771,6 @@ pub fn constant_tbaa(ir: &str) -> String {
                     next - 1
                 });
                 return line.replacen(&t[0], &format!(", !tbaa !{n}"), 1);
-            }
-            any_untagged = true;
-            format!("{line}, !tbaa !{untagged}")
-        });
-        // a local copy of a constant buffer: its source (and its destination, which is local)
-        regex!(r"(?m)^(\s+(?:tail )?call void @llvm\.mem(?:cpy|move)\.p0i8\.p2i8\.i(?:32|64)\(i8\* [^%\n]*(%[\w.]+), i8 addrspace\(2\)\* [^%@\n]*(%[\w.]+)[^\n]*?)$").replace_all(&f, |c: &Captures| {
-            let line = &c[1];
-            if line.contains("!tbaa !") || !allocas.contains(base(&c[2]).as_str()) || base(&c[3]).contains('@') {
-                return line.to_string();
             }
             any_untagged = true;
             format!("{line}, !tbaa !{untagged}")
