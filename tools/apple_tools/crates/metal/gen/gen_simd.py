@@ -67,8 +67,9 @@ def emit():
         out.append('%s void simdgroup_multiply_accumulate(thread simdgroup_matrix<%s, 8, 8> &r, simdgroup_matrix<%s, 8, 8> a, simdgroup_matrix<%s, 8, 8> b, simdgroup_matrix<%s, 8, 8> c) { r.__m = %s(a.__m, b.__m, c.__m); }'
                    % (AI, d, a, a, c, fn))
         if a == c:
-            out.append('%s void simdgroup_multiply(thread simdgroup_matrix<%s, 8, 8> &r, simdgroup_matrix<%s, 8, 8> a, simdgroup_matrix<%s, 8, 8> b) { r.__m = %s(a.__m, b.__m, __air_sgm_fill_%s((%s)0)); }'
-                       % (AI, d, a, a, fn, 'f32' if c == 'float' else 'f16', c))
+            # the accumulator a zero matrix, as Xcode's header passes it (a constant, not a fill)
+            out.append('%s void simdgroup_multiply(thread simdgroup_matrix<%s, 8, 8> &r, simdgroup_matrix<%s, 8, 8> a, simdgroup_matrix<%s, 8, 8> b) { r.__m = %s(a.__m, b.__m, (__vector<%s, 64>)0); }'
+                       % (AI, d, a, a, fn, c))
     return '\n'.join(out) + '\n'
 
 

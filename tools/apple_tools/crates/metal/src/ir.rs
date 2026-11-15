@@ -344,7 +344,9 @@ pub fn resolve_atomics(ir: &str) -> Result<String, String> {
                 if op == "load" {
                     format!("call {lt} @{name}({lt} addrspace({space})* {p}, i32 {}, i32 {scope}, i32 0, i1 false)", args[0])
                 } else {
-                    format!("call {} @{name}({lt} addrspace({space})* {p}, {lt} {}, i32 {}, i32 {scope}, i32 0, i1 false)", if op == "store" { "void" } else { lt }, args[0], args[1])
+                    // a float result keeps the call's fast-math flag, as Xcode's call has it
+                    let fast = if lt == "float" && op != "store" && regex!(r"\bcall (?:\w+ )*?fast ").is_match(&c[0]) { "fast " } else { "" };
+                    format!("call {fast}{} @{name}({lt} addrspace({space})* {p}, {lt} {}, i32 {}, i32 {scope}, i32 0, i1 false)", if op == "store" { "void" } else { lt }, args[0], args[1])
                 }
             };
             format!("{pre}{indent}{res}{call}")
