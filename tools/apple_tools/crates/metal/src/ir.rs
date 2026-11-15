@@ -155,10 +155,22 @@ pub fn function_constants(ir: &str) -> (String, Vec<ConstantEntry>) {
     (ir, entries)
 }
 
-/// Define the constexpr samplers' state words.
+/// Define the constexpr samplers' state words: one global per distinct state, as
+/// Xcode defines them (the first sampler with a state stands for the others).
 pub fn samplers(ir: &str, words: &[u64], air: (u32, u32)) -> String {
-    let mut ir = ir.to_string();
+    let first: Vec<usize> = words.iter().enumerate().map(|(k, w)| words.iter().position(|x| x == w).unwrap_or(k)).collect();
+    let ir = regex!(r"(?m)^@__msl_sampler_(\d+) = external [^\n]*\n").replace_all(ir, |c: &Captures| match c[1].parse::<usize>() {
+        Ok(k) if first.get(k).is_some_and(|f| *f != k) => String::new(),
+        _ => c[0].to_string(),
+    });
+    let mut ir = regex!(r"@__msl_sampler_(\d+)\b").replace_all(&ir, |c: &Captures| match c[1].parse::<usize>() {
+        Ok(k) => format!("@__msl_sampler_{}", first.get(k).copied().unwrap_or(k)),
+        _ => c[0].to_string(),
+    }).to_string();
     for (k, w) in words.iter().enumerate() {
+        if first[k] != k {
+            continue;
+        }
         let init = if air >= (2, 7) { format!("[2 x i64] [i64 {}, i64 0]", *w as i64) } else { format!("i64 {}", (*w | 1 << 63) as i64) };
         let re = Regex::new(&format!(r"(?m)^@__msl_sampler_{k} = external (?:dso_local )?addrspace\(2\) global .*$")).unwrap();
         ir = replace_all(&ir, &re, |_| format!("@__msl_sampler_{k} = internal addrspace(2) constant {init}, align 8"));
@@ -998,6 +1010,14 @@ mod tests {
         assert!(out.contains("%a = getelementptr inbounds %struct.V, %struct.V addrspace(1)* %p, i64 %i, i32 0, i64 2"));
         assert!(out.contains("%b = getelementptr inbounds [3 x float], [3 x float] addrspace(1)* %q, i64 1, i64 0"));
         assert!(!out.contains("__packed"));
+    }
+
+    #[test]
+    fn samplers_of_one_state_share_a_global() {
+        let ir = "@__msl_sampler_0 = external addrspace(2) global [2 x i64], align 8\n@__msl_sampler_1 = external addrspace(2) global [2 x i64], align 8\n@__msl_sampler_2 = external addrspace(2) global [2 x i64], align 8\ndefine void @f() {\n  %a = load i64, i64 addrspace(2)* getelementptr ([2 x i64], [2 x i64] addrspace(2)* @__msl_sampler_1, i64 0, i64 0)\n  %b = load i64, i64 addrspace(2)* getelementptr ([2 x i64], [2 x i64] addrspace(2)* @__msl_sampler_2, i64 0, i64 0)\n  ret void\n}\n";
+        let out = samplers(ir, &[5, 7, 5], (2, 8));
+        assert!(out.contains("@__msl_sampler_0 = internal addrspace(2) constant [2 x i64] [i64 5, i64 0], align 8\n@__msl_sampler_1 = internal addrspace(2) constant [2 x i64] [i64 7, i64 0], align 8\ndefine"));
+        assert!(out.contains("@__msl_sampler_1, i64 0, i64 0)\n  %b = load i64, i64 addrspace(2)* getelementptr ([2 x i64], [2 x i64] addrspace(2)* @__msl_sampler_0,"));
     }
 
     #[test]
