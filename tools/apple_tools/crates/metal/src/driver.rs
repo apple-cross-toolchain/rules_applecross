@@ -188,7 +188,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     types.layouts = record_layouts(&String::from_utf8_lossy(&out.stdout));
     let named = tmp.0.join("out.0n.ll");
     run(Command::new(tool(o, "opt")).args(["-passes=instnamer", "-S", "-o"]).arg(&named).arg(&ll0))?;
-    let text = std::fs::read_to_string(&named).map_err(|e| e.to_string())?;
+    // AIR's data layout from the start: Xcode's optimiser works with its native integer widths
+    let text = regex::Regex::new(r#"target datalayout = ".*""#).unwrap().replace(&std::fs::read_to_string(&named).map_err(|e| e.to_string())?, format!("target datalayout = \"{}\"", crate::air::DATALAYOUT).as_str()).to_string();
     let text = ir::direct_struct_returns(&ir::renumber_types(&text), &types, &program.functions)?;
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);
@@ -214,7 +215,12 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // first what Xcode's frontend has no call for (`only_frontend_inlines`), with no scopes for
     // the inlined parameters (Xcode's entry point is the user's function: nothing to inline)
     let keep: std::collections::BTreeSet<String> = home.keys().cloned().collect();
-    let text = ir::restore_always_inline(&step(&ir::only_frontend_inlines(&ir::tag_user_calls(&text, &home), &keep), "fe", &["-passes=always-inline", "-enable-noalias-to-md-conversion=false"])?);
+    // the stage functions' blocks simplified first, as Xcode's early passes simplify its entry
+    // point (the user's function); where each returns, for its place once inlined
+    let text = step(&ir::only_frontend_inlines(&ir::tag_user_calls(&text, &home), &keep), "fecfg", &["-passes=function(simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;no-switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts>)"])?;
+    let returns = ir::return_places(&text, &home);
+    let text = ir::restore_always_inline(&step(&text, "fe", &["-passes=always-inline", "-enable-noalias-to-md-conversion=false"])?);
+    let text = ir::own_allocas_first(&ir::place_inlined_returns(&ir::drop_inliner_lifetimes(&text), &returns), &entries);
     // the module simplification: the stdlib is inlined and constants folded by its end, so
     // conversions become air.convert calls, the markers resolve and moved values are frozen there,
     // before the inliner's walk and the one attribute inference (as Xcode's frontend has them)
@@ -255,7 +261,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     run(Command::new(tool(o, "llvm-as")).args(["-preserve-bc-uselistorder=false", "-o"]).arg(&bc).arg(&ll))?;
     if let Some(keep) = &o.keep {
         let _ = std::fs::create_dir_all(keep);
-        for f in [cpp_name.as_str(), "out.0.ll", "o2a.in.ll", "o2a.ll", "infer.ll", "o2b.in.ll", "o2b.ll", "air.ll"] {
+        for f in [cpp_name.as_str(), "out.0.ll", "fe.in.ll", "fe.ll", "o2a.in.ll", "o2a.ll", "infer.ll", "o2b.in.ll", "o2b.ll", "generic.ll", "air.ll"] {
             let _ = std::fs::copy(tmp.0.join(f), keep.join(f));
         }
     }
