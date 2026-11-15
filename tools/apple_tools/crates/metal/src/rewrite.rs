@@ -54,6 +54,7 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
     });
     s = function_constants(&s, &mut r);
     s = program_scope_constants(&s);
+    s = direct_init(&s);
     s = replace_all(&s, regex!(r"\b((?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234])\s*\("), |c| {
         format!("metal::__vec<{}>(", &c[1])
     });
@@ -528,6 +529,41 @@ fn samplers(src: &str, air: (u32, u32), out: &mut Vec<u64>) -> Result<String, St
     }
 }
 
+/// A vector or matrix declared with its constructor's arguments (`float4x4 m(s);`) is
+/// initialised from the constructor as written (`float4x4 m = float4x4(s);`); a function
+/// declaration (parameters a type and a name each, or none) is left alone.
+fn direct_init(src: &str) -> String {
+    let b = src.as_bytes();
+    let (mut out, mut pos) = (String::new(), 0);
+    for c in regex!(r"\b((?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234](?:x[234])?)\s+([A-Za-z_]\w*)\s*\(").captures_iter(src) {
+        let m = c.get(0).unwrap();
+        if m.start() < pos || b"<,:".contains(&before(src, m.start())) || is_word(before(src, m.start())) || c[2].starts_with("__") {
+            continue;
+        }
+        // nor a typedef
+        let stmt = src[..m.start()].rfind([';', '{', '}']).map_or(0, |i| i + 1);
+        if regex!(r"\btypedef\b").is_match(&src[stmt..m.start()]) {
+            continue;
+        }
+        let open = m.end() - 1;
+        let close = balanced(b, open, b'(', b')');
+        let args = split_args(&src[open + 1..close - 1]);
+        let declaration = args.iter().all(|a| a.trim().is_empty())
+            || args.iter().any(|a| a.contains("[[") || regex!(r"^\s*(?:(?:const|constant|device|thread|threadgroup|volatile)\s+)*[\w:]+(?:<[^()]*>)?\s*[&*]*\s*[A-Za-z_]\w*\s*(?:=.*)?$").is_match(a) && !regex!(r"^\s*[A-Za-z_]\w*\s*$").is_match(a));
+        let after = src[close..].trim_start();
+        if declaration || !(after.starts_with(';') || after.starts_with(',')) {
+            continue;
+        }
+        let t = &c[1];
+        let f = if t.contains('x') && t.len() > 3 && t.as_bytes()[t.len() - 2] == b'x' { format!("metal::__mat<metal::{t}>") } else { format!("metal::__vec<{t}>") };
+        out.push_str(&src[pos..m.start()]);
+        out.push_str(&format!("{t} {} = {f}({})", &c[2], &src[open + 1..close - 1]));
+        pos = close;
+    }
+    out.push_str(&src[pos..]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,5 +603,16 @@ mod tests {
         // number literals alone: a constant
         assert!(lazy_vector_args("void f() { x = metal::__vec<float3>(1.0, 0.0, -1.5f); }").contains("x = float3{(float)1.0, (float)0.0, (float)-1.5f};"));
         assert!(out.contains("float4 c = metal::__vec<float4>(1, 2, 3, 4);"));
+    }
+
+    #[test]
+    fn declarations_with_constructor_arguments() {
+        let out = direct_init("float4x4 m(s);\nfloat2x2 n(s, 1, 2, s), k;\nfloat4 v(1.0f);\nfloat4x4 helper(float4x4 a, float4x4 b);\nfloat4 f();\ntypedef float float2 __attribute__((ext_vector_type(2)));");
+        assert!(out.contains("float4x4 m = metal::__mat<metal::float4x4>(s);"), "{out}");
+        assert!(out.contains("float2x2 n = metal::__mat<metal::float2x2>(s, 1, 2, s), k;"), "{out}");
+        assert!(out.contains("float4 v = metal::__vec<float4>(1.0f);"), "{out}");
+        assert!(out.contains("float4x4 helper(float4x4 a, float4x4 b);"), "{out}");
+        assert!(out.contains("float4 f();"), "{out}");
+        assert!(out.contains("typedef float float2 __attribute__((ext_vector_type(2)));"), "{out}");
     }
 }
