@@ -255,7 +255,7 @@ pub fn extract(ir: &str, name: &str) -> String {
         out += "\n";
     }
     // the rest as metallib walks them from the function: each, then what it refers to, the last
-    // first use first (a stack), each before what it refers to in turn
+    // used first (a stack, in order of last use), each before what it refers to in turn
     let items: Vec<(&str, &str)> = functions
         .iter()
         .filter(|t| !t.contains("section \"air.static_init\""))
@@ -272,7 +272,8 @@ pub fn extract(ir: &str, name: &str) -> String {
         let mut refs: Vec<usize> = Vec::new();
         for m in regex!(r"@([-\w.$]+|\x22[^\x22]*\x22)\(").captures_iter(items[i].1) {
             if let Some(j) = items.iter().position(|(n, _)| *n == &m[1]) {
-                if j != i && !refs.contains(&j) {
+                if j != i {
+                    refs.retain(|r| *r != j);
                     refs.push(j);
                 }
             }
