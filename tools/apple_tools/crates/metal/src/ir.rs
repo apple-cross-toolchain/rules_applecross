@@ -461,43 +461,15 @@ pub fn restore_always_inline(ir: &str) -> String {
     ir.replace("\"msl.ai\"", "alwaysinline")
 }
 
-/// An entry point's pointer parameters (its buffers, textures, samplers and
-/// threadgroup memory) are `noalias` during O2: the alias information Xcode's
-/// scopes give its optimiser (`xcode_alias_scopes` writes those after O2).
-pub fn noalias_params(ir: &str, entries: &[String]) -> String {
-    let lines: Vec<String> = ir
-        .lines()
-        .map(|l| {
-            if !l.starts_with("define ") {
-                return l.to_string();
-            }
-            let Some(name) = regex!(r#"@("?[\w.$]+"?)\("#).captures(l).map(|c| c[1].trim_matches('"').to_string()) else { return l.to_string() };
-            if !entries.contains(&name) {
-                return l.to_string();
-            }
-            let open = l.find(&format!("{name}(")).unwrap() + name.len();
-            let close = balanced(l.as_bytes(), open, b'(', b')');
-            let params: Vec<String> = split_args(&l[open + 1..close - 1])
-                .iter()
-                .map(|p| match regex!(r"^(.*\*)((?: [^*]*)?)$").captures(p) {
-                    Some(c) if !p.contains(" noalias") => format!("{} noalias{}", &c[1], &c[2]),
-                    _ => p.to_string(),
-                })
-                .collect();
-            format!("{}{}){}", &l[..open + 1], params.join(", "), &l[close..])
-        })
-        .collect();
-    lines.join("\n") + if ir.ends_with('\n') { "\n" } else { "" }
-}
-
-/// Xcode's AIR alias scopes, after O2: each entry point gets a domain
+/// Xcode's AIR alias scopes: each entry point gets a domain
 /// (air-alias-scopes(<fn>)), a scope for each pointer parameter
 /// (air-alias-scope-arg(<index>)), one for all its textures and one for all its
 /// samplers. A load, a store or an argmemonly call whose every pointer comes from
 /// those parameters (through GEPs, casts, phis and selects) gets the scopes of
 /// those it uses (!alias.scope) and of all the others (!noalias); an access
-/// through anything else (a global, a local, a loaded pointer) gets none. The
-/// parameters lose the `noalias` that `noalias_params` gave them for O2.
+/// through anything else (a global, a local, a loaded pointer) gets none. Run
+/// before O2's inliner walk (as Xcode's AIRAliasScopePropagation) and again on
+/// what O2 left; the parameters have no `noalias`.
 pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
     let groups_of: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
     let attrs_of = |tail: &str| -> String {
@@ -603,7 +575,7 @@ pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
         let lines: Vec<String> = f
             .lines()
             .map(|l| {
-                // the parameters' noalias (`noalias_params`) has done its work: Xcode's have none
+                // Xcode's parameters have no noalias
                 if l.starts_with("define ") {
                     let open = l.find(&format!("{name}(")).unwrap() + name.len();
                     let close = balanced(l.as_bytes(), open, b'(', b')');
@@ -655,6 +627,25 @@ pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
         lines.join("\n") + if f.ends_with('\n') { "\n" } else { "" }
     });
     ir.trim_end().to_string() + "\n" + &nodes
+}
+
+/// Xcode's alias analysis knows address space 2 is constant: nothing writes it, so its
+/// loads are as invariant to its optimiser as `!invariant.load` makes them to ours. For O2
+/// only (`strip_invariant_loads` after).
+pub fn constant_loads_invariant(ir: &str) -> String {
+    let next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
+    let out = regex!(r"(?m)^(\s+%[\w.]+ = load [^,]+, [^,]* addrspace\(2\)\* [^,]+, align \d+)(.*)$").replace_all(ir, |c: &Captures| format!("{}, !invariant.load !{next}{}", &c[1], &c[2]));
+    format!("{}\n!{next} = !{{}}\n", out.trim_end())
+}
+
+/// `constant_loads_invariant`'s marks go (Xcode's modules have none).
+pub fn strip_invariant_loads(ir: &str) -> String {
+    regex!(r", !invariant\.load !\d+").replace_all(ir, "").to_string()
+}
+
+/// The scopes O2 carried (`xcode_alias_scopes` writes them again from what O2 left).
+pub fn strip_alias_scopes(ir: &str) -> String {
+    regex!(r", !(?:alias\.scope|noalias) !\d+").replace_all(ir, "").to_string()
 }
 
 /// The inliner's scope declarations: Xcode's modules have none (and they would
@@ -887,13 +878,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn entry_pointers_are_noalias_until_scopes_replace_them() {
-        let ir = "define void @k(float addrspace(1)* noundef %a, %struct._texture_2d_t addrspace(1)* %t, float addrspace(2)* noundef %c, i32 noundef %i) #0 {\nentry:\n  ret void\n}\n";
-        let out = noalias_params(ir, &["k".to_string()]);
-        assert!(out.contains("define void @k(float addrspace(1)* noalias noundef %a, %struct._texture_2d_t addrspace(1)* noalias %t, float addrspace(2)* noalias noundef %c, i32 noundef %i) #0 {"));
-    }
-
-    #[test]
     fn only_the_frontends_layers_inline_first() {
         let ir = "define internal void @_ZL1kv() alwaysinline #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZNK5metal7__vpartIDv4_fLi0EfLi4EE3putEf() #0 {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZN5metal5fractEf() #0 comdat {\nentry:\n  ret void\n}\ndefine linkonce_odr void @_ZNK5metal9texture2dIfE5widthEv() #0 comdat align 2 {\nentry:\n  ret void\n}\ndefine internal void @_ZL1hv() alwaysinline #1 {\nentry:\n  ret void\n}\nattributes #0 = { alwaysinline nounwind }\nattributes #1 = { nounwind }\n";
         let out = only_frontend_inlines(ir, &["_ZL1kv".to_string()].into());
@@ -1010,6 +994,16 @@ mod tests {
         assert!(out.contains("%a = getelementptr inbounds %struct.V, %struct.V addrspace(1)* %p, i64 %i, i32 0, i64 2"));
         assert!(out.contains("%b = getelementptr inbounds [3 x float], [3 x float] addrspace(1)* %q, i64 1, i64 0"));
         assert!(!out.contains("__packed"));
+    }
+
+    #[test]
+    fn constant_loads_are_invariant_during_o2_only() {
+        let ir = "define void @f(float addrspace(2)* %c, float addrspace(1)* %d) {\n  %a = load float, float addrspace(2)* %c, align 4, !tbaa !1\n  %b = load float, float addrspace(1)* %d, align 4, !tbaa !1\n  ret void\n}\n!1 = !{!\"x\"}\n";
+        let out = constant_loads_invariant(ir);
+        assert!(out.contains("%a = load float, float addrspace(2)* %c, align 4, !invariant.load !2, !tbaa !1\n"));
+        assert!(out.contains("%b = load float, float addrspace(1)* %d, align 4, !tbaa !1\n"));
+        assert!(out.ends_with("!2 = !{}\n"));
+        assert!(strip_invariant_loads(&out).contains("%a = load float, float addrspace(2)* %c, align 4, !tbaa !1\n"));
     }
 
     #[test]
