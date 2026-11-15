@@ -145,7 +145,7 @@ def emit():
                 out.append('%s %s reflect(%s i, %s n) { return i - (%s)2 * dot(n, i) * n; }' % (AI, t, t, t, scalar))
                 out.append('%s %s faceforward(%s n, %s i, %s r) { return dot(r, i) < 0 ? n : -n; }' % (AI, t, t, t, t))
                 if n == '3':
-                    out.append('%s %s cross(%s a, %s b) { return %s{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }'
+                    out.append('%s %s cross(%s a, %s b) { return %s{a.y * b.z - b.y * a.z, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }'
                                % (AI, t, t, t, t))
             # smoothstep (MSL specification)
             out.append('%s %s smoothstep(%s e0, %s e1, %s x) { %s t = clamp((x - e0) / (e1 - e0), (%s)0, (%s)1); return t * t * ((%s)3 - (%s)2 * t); }'
