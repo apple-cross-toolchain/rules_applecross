@@ -4,6 +4,7 @@ members = [
     "crates/actool",
     "crates/cf",
     "crates/codesign",
+    "crates/dmg",
     "crates/ibtool",
     "crates/lzfse",
     "crates/macho",

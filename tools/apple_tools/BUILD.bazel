@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "//crates/actool",
         "//crates/codesign",
+        "//crates/dmg",
         "//crates/ibtool",
         "//crates/metal",
         "//crates/metal:metallib",
