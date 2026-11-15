@@ -2,11 +2,14 @@
 //! HFS+ volume (hfs) in a UDIF image (udif), with the Finder window's layout
 //! (dsstore) if one is asked for.
 //!
-//!     dmg -o Out.dmg --volname Name --srcfolder DIR [--format UDZO|ULFO|UDRO]
+//!     dmg create --volname Name --srcfolder DIR [--format UDZO|ULFO|UDRO] [--fs hfsplus]
 //!         [--symlink NAME:TARGET]... [--background PICTURE]
 //!         [--window X,Y,W,H] [--icon-size N] [--text-size N] [--icon NAME:X,Y]...
 //!         [--hide NAME]... [--open-folder PATH] [--free BYTES]
-//!         [--time UNIX_SECONDS] [--uid N] [--gid N]
+//!         [--time UNIX_SECONDS] [--uid N] [--gid N] Out.dmg
+//!
+//! (`-o Out.dmg` names the output too.) Files keep their modes and symlinks and are
+//! owned by --uid and --gid (0 by default), as `hdiutil create -anyowners` leaves them.
 //!
 //! --symlink adds a symbolic link at the top of the volume (Applications:/Applications);
 //! --background puts the picture in a hidden .background folder and makes it the
@@ -47,7 +50,10 @@ fn run() -> Result<(), String> {
     let mut window = None;
     let (mut icon_size, mut text_size) = (128.0, 16.0);
     let mut icons = Vec::new();
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args().skip(1).peekable();
+    if args.peek().map(String::as_str) == Some("create") {
+        args.next();
+    }
     while let Some(a) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{a} takes a value"));
         match a.as_str() {
@@ -55,6 +61,10 @@ fn run() -> Result<(), String> {
             "--volname" => name = Some(value()?),
             "--srcfolder" => src = Some(PathBuf::from(value()?)),
             "--format" => format = udif::Format::parse(&value()?)?,
+            "--fs" => match value()?.to_ascii_lowercase().as_str() {
+                "hfsplus" | "hfs+" => {}
+                f => return Err(format!("--fs {f}: only hfsplus (HFS+) is supported")),
+            },
             "--time" => time = value()?.parse().map_err(|e| format!("--time: {e}"))?,
             "--hide" => hide.push(value()?),
             "--open-folder" => open = Some(value()?),
@@ -71,10 +81,11 @@ fn run() -> Result<(), String> {
                 let p = numbers(&xy, 2, "--icon")?;
                 icons.push((n, p[0], p[1]));
             }
+            _ if !a.starts_with('-') && out.is_none() => out = Some(PathBuf::from(&a)),
             _ => return Err(format!("{a}: unknown argument")),
         }
     }
-    let out = out.ok_or("-o is required")?;
+    let out = out.ok_or("the output image is required")?;
     let name = name.ok_or("--volname is required")?;
     let src = src.ok_or("--srcfolder is required")?;
     let mut root = hfs::read_dir(&src)?;
