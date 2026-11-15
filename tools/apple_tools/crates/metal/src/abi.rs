@@ -127,13 +127,11 @@ pub fn lower(ir: &str, xcode: &HashMap<String, Xcode>, keep_flat: &[String]) -> 
     let mut plans: HashMap<String, Lowering> = HashMap::new();
     for c in regex!(r#"(?m)^define [^@\n]*?(void|\S+) @("?[\w.$]+"?)\((.*)\)[^\n]*\{$"#).captures_iter(ir) {
         let name = c[2].to_string();
-        if !is_user(&name) {
-            continue;
-        }
         let mut l = plan(&c[3], &c[1] == "void", xcode.get(name.trim_matches('"')), &tys);
         // a stage function stays flat but takes its textures and samplers as handles, stored in
-        // their objects first thing, as Xcode's entry point (the user's function) has them
-        if keep_flat.contains(&name) {
+        // their objects first thing, as Xcode's entry point (the user's function) has them; and so
+        // does the stdlib (Xcode's passes a sampler or texture object as its handle)
+        if keep_flat.contains(&name) || !is_user(&name) {
             l.sret = None;
             for p in l.params.iter_mut() {
                 if !matches!(p, Param::Handle(..)) {
