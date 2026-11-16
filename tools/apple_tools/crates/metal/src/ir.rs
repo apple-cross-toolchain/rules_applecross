@@ -730,6 +730,131 @@ pub fn constant_loads_invariant(ir: &str) -> String {
     format!("{}\n!{next} = !{{}}\n", out.trim_end())
 }
 
+/// Xcode's front end initialises a local aggregate from constants in place, where clang
+/// 15 copies it from a private constant (`@__const.f.v`): element by element (vectors
+/// whole, zeros too) or, when at most a quarter of more than 16 bytes isn't zero, a
+/// memset and the non-zero scalars. Done here for arrays of scalars or vectors and for
+/// a struct holding one (a matrix); other copies stay.
+pub fn constant_inits(ir: &str) -> String {
+    let consts: std::collections::HashMap<String, String> = regex!(r#"(?m)^@(__const\.[\w.$"]+) = private unnamed_addr constant (.*), align \d+$"#).captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    if consts.is_empty() {
+        return ir.to_string();
+    }
+    let mut n = 0;
+    crate::text::map_functions(ir, |f| {
+        let casts: std::collections::HashMap<&str, (&str, &str)> = regex!(r"(?m)^\s+(%[\w.]+) = bitcast (.+?)\* (%[\w.]+) to i8\*$").captures_iter(f).map(|c| (c.get(1).unwrap().as_str(), (c.get(2).unwrap().as_str(), c.get(3).unwrap().as_str()))).collect();
+        regex!(r"(?m)^(\s+)call void @llvm\.memcpy\.p0i8\.p0i8\.i64\(i8\* align (\d+) (%[\w.]+), i8\* align \d+ bitcast \((.+?)\* @(__const\.[\w.$]+) to i8\*\), i64 (\d+), i1 false\)$").replace_all(f, |c: &Captures| {
+            let keep = c[0].to_string();
+            let (ind, align, dest, ty, name, size) = (&c[1], c[2].parse::<u64>().unwrap(), &c[3], &c[4], &c[5], c[6].parse::<u64>().unwrap());
+            let (Some(init), Some((cty, var))) = (consts.get(name), casts.get(dest)) else { return keep };
+            if *cty != ty {
+                return keep;
+            }
+            n += 1;
+            constant_init_stores(ind, align, dest, ty, var, size, init, n).unwrap_or(keep)
+        })
+        .to_string()
+    })
+}
+
+/// (byte size, alignment) of a scalar or vector type, as AIR lays them out.
+fn scalar_layout(t: &str) -> Option<(u64, u64)> {
+    let s = |e: &str| match e {
+        "i1" | "i8" => Some(1),
+        "half" | "i16" => Some(2),
+        "float" | "i32" => Some(4),
+        "double" | "i64" => Some(8),
+        _ => None,
+    };
+    if let Some(c) = regex!(r"^<(\d+) x (\w+)>$").captures(t) {
+        let bytes = c[1].parse::<u64>().ok()? * s(&c[2])?;
+        let size = bytes.next_power_of_two();
+        return Some((size, size));
+    }
+    s(t).map(|b| (b, b))
+}
+
+/// The stores for `constant_inits`: None when the initialiser isn't one of its shapes.
+#[allow(clippy::too_many_arguments)]
+fn constant_init_stores(ind: &str, align: u64, dest: &str, ty: &str, var: &str, size: u64, init: &str, n: usize) -> Option<String> {
+    // the array: the struct's one field, or the object itself
+    let (array_ty, array_val, field) = match regex!(r"^(\[\d+ x [^\]]+\]) (.*)$").captures(init) {
+        Some(c) if init.starts_with('[') => (c[1].to_string(), c[2].to_string(), false),
+        _ => {
+            let c = regex!(r"^\S+ \{ (\[\d+ x [^\]]+\]) (.*) \}$").captures(init)?;
+            (c[1].to_string(), c[2].to_string(), true)
+        }
+    };
+    let a = regex!(r"^\[(\d+) x (.+)\]$").captures(&array_ty)?;
+    let (count, elem) = (a[1].parse::<usize>().ok()?, a[2].to_string());
+    let (esize, ealign) = scalar_layout(&elem)?;
+    let lane_ty = regex!(r"^<\d+ x (\w+)>$").captures(&elem).map(|c| c[1].to_string());
+    let (lane_size, _) = scalar_layout(lane_ty.as_deref().unwrap_or(&elem))?;
+    // each element's value, and its lanes' values
+    let values: Vec<String> = if array_val == "zeroinitializer" {
+        vec!["zeroinitializer".into(); count]
+    } else {
+        let inner = array_val.strip_prefix('[')?.strip_suffix(']')?;
+        crate::text::split_args(inner).into_iter().map(|v| v.strip_prefix(&format!("{elem} ")).map(str::to_string)).collect::<Option<Vec<_>>>()?
+    };
+    if values.len() != count {
+        return None;
+    }
+    let lanes = |v: &str| -> Option<Vec<String>> {
+        match &lane_ty {
+            None => Some(vec![v.to_string()]),
+            Some(l) => {
+                let k: usize = regex!(r"^<(\d+) x").captures(&elem)?[1].parse().ok()?;
+                if v == "zeroinitializer" || v == "undef" || v == "poison" {
+                    return Some(vec![v.to_string(); k]);
+                }
+                crate::text::split_args(v.strip_prefix('<')?.strip_suffix('>')?).into_iter().map(|x| x.strip_prefix(&format!("{l} ")).map(str::to_string)).collect()
+            }
+        }
+    };
+    let zero = |x: &str| matches!(x, "zeroinitializer" | "0" | "false" | "0.000000e+00" | "0xH0000" | "undef" | "poison");
+    let mut all: Vec<Vec<String>> = Vec::new();
+    for v in &values {
+        all.push(lanes(v)?);
+    }
+    let nonzero: u64 = all.iter().flatten().filter(|x| !zero(x)).count() as u64 * lane_size;
+    let p = format!("%__ci{n}");
+    let mut out = String::new();
+    let base = if field {
+        out += &format!("{ind}{p}.f = getelementptr inbounds {ty}, {ty}* {var}, i32 0, i32 0\n");
+        format!("{p}.f")
+    } else {
+        var.to_string()
+    };
+    if size > 16 && nonzero * 4 <= size {
+        out += &format!("{ind}call void @llvm.memset.p0i8.i64(i8* align {align} {dest}, i8 0, i64 {size}, i1 false)\n");
+        for (i, ls) in all.iter().enumerate() {
+            for (j, x) in ls.iter().enumerate() {
+                if zero(x) {
+                    continue;
+                }
+                let off = i as u64 * esize + j as u64 * lane_size;
+                let a = if off == 0 { align } else { align.min(1 << off.trailing_zeros()) };
+                let scalar = lane_ty.clone().unwrap_or(elem.clone());
+                out += &format!("{ind}{p}.e{i} = getelementptr inbounds {array_ty}, {array_ty}* {base}, i32 0, i32 {i}\n");
+                let target = if lane_ty.is_some() {
+                    out += &format!("{ind}{p}.e{i}.{j} = getelementptr inbounds {elem}, {elem}* {p}.e{i}, i32 0, i32 {j}\n");
+                    format!("{p}.e{i}.{j}")
+                } else {
+                    format!("{p}.e{i}")
+                };
+                out += &format!("{ind}store {scalar} {x}, {scalar}* {target}, align {a}\n");
+            }
+        }
+    } else {
+        out += &format!("{ind}{p}.b = bitcast {array_ty}* {base} to {elem}*\n");
+        for (i, v) in values.iter().enumerate() {
+            out += &format!("{ind}{p}.e{i} = getelementptr {elem}, {elem}* {p}.b, i64 {i}\n{ind}store {elem} {v}, {elem}* {p}.e{i}, align {ealign}\n");
+        }
+    }
+    Some(out.trim_end_matches('\n').to_string())
+}
+
 /// Codegen is flat, and the entry points' parameters give the address spaces back, but a
 /// pointer loaded from memory has none to infer: a struct's pointer and reference fields
 /// (an argument buffer's `device float *data`, `constant uint &n`) get their declared space
@@ -1321,6 +1446,16 @@ mod tests {
         let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
         assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
         assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
+    }
+
+    #[test]
+    fn constant_locals_are_initialised_in_place() {
+        let ir = "@__const.f.m = private unnamed_addr constant %M { [4 x <2 x float>] [<2 x float> <float 0.000000e+00, float 1.000000e+00>, <2 x float> <float 1.000000e+00, float 1.000000e+00>, <2 x float> zeroinitializer, <2 x float> <float 1.000000e+00, float 0.000000e+00>] }, align 8\n@__const.g.w = private unnamed_addr constant [12 x float] [float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 3.000000e+00, float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 0.000000e+00], align 4\ndefine void @f() {\n  %m = alloca %M, align 8\n  %0 = bitcast %M* %m to i8*\n  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 8 %0, i8* align 8 bitcast (%M* @__const.f.m to i8*), i64 32, i1 false)\n  ret void\n}\ndefine void @g() {\n  %w = alloca [12 x float], align 4\n  %0 = bitcast [12 x float]* %w to i8*\n  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 4 %0, i8* align 4 bitcast ([12 x float]* @__const.g.w to i8*), i64 48, i1 false)\n  ret void\n}\n";
+        let out = constant_inits(ir);
+        assert!(!out.contains("call void @llvm.memcpy"), "{out}");
+        assert!(out.contains("  %__ci1.f = getelementptr inbounds %M, %M* %m, i32 0, i32 0\n  %__ci1.b = bitcast [4 x <2 x float>]* %__ci1.f to <2 x float>*\n  %__ci1.e0 = getelementptr <2 x float>, <2 x float>* %__ci1.b, i64 0\n  store <2 x float> <float 0.000000e+00, float 1.000000e+00>, <2 x float>* %__ci1.e0, align 8\n"), "{out}");
+        assert!(out.contains("store <2 x float> zeroinitializer, <2 x float>* %__ci1.e2, align 8"), "{out}");
+        assert!(out.contains("  call void @llvm.memset.p0i8.i64(i8* align 4 %0, i8 0, i64 48, i1 false)\n  %__ci2.e5 = getelementptr inbounds [12 x float], [12 x float]* %w, i32 0, i32 5\n  store float 3.000000e+00, float* %__ci2.e5, align 4\n"), "{out}");
     }
 
     #[test]
