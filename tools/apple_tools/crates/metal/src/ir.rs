@@ -643,6 +643,17 @@ pub fn restore_always_inline(ir: &str) -> String {
 /// before O2's inliner walk (as Xcode's AIRAliasScopePropagation) and again on
 /// what O2 left; the parameters have no `noalias`.
 pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
+    alias_scopes(ir, entries, false)
+}
+
+/// `xcode_alias_scopes` again on what O2 left: a load or store O2 left without scopes
+/// keeps none (Xcode's scopes come before its O2, which drops them where it merges two
+/// accesses: SimplifyCFG's hoisting), and the others get theirs afresh.
+pub fn xcode_alias_scopes_kept(ir: &str, entries: &[String]) -> String {
+    alias_scopes(ir, entries, true)
+}
+
+fn alias_scopes(ir: &str, entries: &[String], retag_only: bool) -> String {
     let groups_of: std::collections::HashMap<String, String> = regex!(r"(?m)^attributes #(\d+) = \{ (.*) \}$").captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
     let attrs_of = |tail: &str| -> String {
         let mut a = tail.to_string();
@@ -663,11 +674,29 @@ pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
     }
     let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
     let mut nodes = String::new();
+    // before O2 an access that gets no scope gets a placeholder (a scope no !noalias
+    // names, so of no account to the alias analysis), which O2 carries through inlining,
+    // SROA and CSE and drops where it drops scopes (hoisting); after O2 what has a scope
+    // gets its own, and what has none keeps none, as in Xcode's
+    // (numbered once the real scopes are)
+    let pending = "__msl_pending__";
+    // (an entry point's own accesses, and its calls the inliner takes: it gives what it
+    // brings in the call's scopes, when Xcode's would come; a function inlined later was
+    // simplified before, as Xcode's are before their scopes)
+    let access = regex!(r#"^\s+(?:(?:%[\w.]+ = )?(?:load|store) |(?:%[\w.]+ = )?(?:tail )?call [^@]*@(?:llvm\.mem(?:cpy|move|set)\.|"?[_a-zA-Z][\w.$]*"?\())"#);
+    let pend = |l: &str| -> String {
+        let intrinsic = regex!(r#"call [^@]*@"?(?:air\.|llvm\.(?:lifetime|experimental|dbg|assume))"#).is_match(l);
+        if access.is_match(l) && !intrinsic && !l.contains("!alias.scope") { format!("{l}, !alias.scope !{pending}") } else { l.to_string() }
+    };
     let ir = map_functions(ir, |f| {
         let head = f.lines().next().unwrap_or("");
         let Some(name) = regex!(r#"@("?[\w.$]+"?)\("#).captures(head).map(|c| c[1].trim_matches('"').to_string()) else { return f.to_string() };
         if !entries.contains(&name) {
-            return f.to_string();
+            if !retag_only {
+                return f.to_string();
+            }
+            let lines: Vec<String> = f.lines().map(|l| regex!(r", !(?:alias\.scope|noalias) !\d+").replace_all(l, "").to_string()).collect();
+            return lines.join("\n") + if f.ends_with('\n') { "\n" } else { "" };
         }
         let open = head.find(&format!("{name}(")).unwrap() + name.len();
         let close = balanced(head.as_bytes(), open, b'(', b')');
@@ -693,7 +722,8 @@ pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
             param_group.insert(value.to_string(), g);
         }
         if groups.is_empty() {
-            return f.to_string();
+            let lines: Vec<String> = if retag_only { f.lines().map(|l| regex!(r", !(?:alias\.scope|noalias) !\d+").replace_all(l, "").to_string()).collect() } else { f.lines().map(pend).collect() };
+            return lines.join("\n") + if f.ends_with('\n') { "\n" } else { "" };
         }
         let domain = next;
         next += 1;
@@ -753,6 +783,13 @@ pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
                     let close = balanced(l.as_bytes(), open, b'(', b')');
                     return format!("{}{}{}", &l[..open], l[open..close].replace(" noalias", ""), &l[close..]);
                 }
+                let scoped = regex!(r", !(?:alias\.scope|noalias) !\d+");
+                // (calls our lowering made after O2 never had scopes to lose)
+                if retag_only && !scoped.is_match(l) && regex!(r"^\s+(?:%[\w.]+ = )?(?:load|store) ").is_match(l) {
+                    return l.to_string();
+                }
+                let unscoped = scoped.replace_all(l, "").to_string();
+                let l = unscoped.as_str();
                 let t = l.trim();
                 let mut ptrs: Vec<String> = Vec::new();
                 if let Some(c) = regex!(r"^(?:%[\w.]+ = )?load (?:volatile )?(.*)$").captures(t) {
@@ -796,8 +833,14 @@ pub fn xcode_alias_scopes(ir: &str, entries: &[String]) -> String {
                 out
             })
             .collect();
+        let lines: Vec<String> = if retag_only { lines } else { lines.iter().map(|l| pend(l)).collect() };
         lines.join("\n") + if f.ends_with('\n') { "\n" } else { "" }
     });
+    let mut ir = ir;
+    if ir.contains(pending) {
+        nodes += &format!("!{} = distinct !{{!{}, !\"msl-pending\"}}\n!{} = distinct !{{!{}, !{}, !\"msl-pending\"}}\n!{} = !{{!{}}}\n", next, next, next + 1, next + 1, next, next + 2, next + 1);
+        ir = ir.replace(pending, &(next + 2).to_string());
+    }
     ir.trim_end().to_string() + "\n" + &nodes
 }
 
@@ -1485,8 +1528,8 @@ mod tests {
         assert!(out.contains("%v = load float, float addrspace(2)* %p, align 4, !tbaa !1, !alias.scope !6, !noalias !7"));
         assert!(out.contains("!6 = !{!5}") && out.contains("!7 = !{!3, !4}"));
         assert!(out.contains("i32 0) #1, !alias.scope !8, !noalias !9"));
-        // a global: nothing
-        assert!(out.contains("%g = load float, float addrspace(2)* @g, align 4\n"));
+        // a global: before O2 the placeholder only (after it, nothing)
+        assert!(out.contains("%g = load float, float addrspace(2)* @g, align 4, !alias.scope !14\n") && out.contains("!14 = !{!13}"), "{out}");
         assert!(out.contains("store float %v, float addrspace(1)* %a, align 4, !alias.scope !10, !noalias !11"));
     }
 
@@ -1557,6 +1600,23 @@ mod tests {
         let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
         assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
         assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
+    }
+
+    #[test]
+    fn scopes_o2_dropped_stay_dropped() {
+        let ir = "define void @k(float addrspace(1)* %a, float addrspace(1)* %b) {\n  %x = load float, float addrspace(1)* %a, align 4\n  %y = load float, float addrspace(1)* %b, align 4\n  call void @h(float addrspace(1)* %a)\n  ret void\n}\ndefine void @h(float addrspace(1)* %p) {\n  %z = load float, float addrspace(1)* %p, align 4\n  ret void\n}\n";
+        let entries = ["k".to_string()];
+        let pre = xcode_alias_scopes(ir, &entries);
+        // the entry's accesses are scoped, its call has the placeholder, the helper has none
+        assert!(pre.contains("%x = load float, float addrspace(1)* %a, align 4, !alias.scope"), "{pre}");
+        assert!(regex!(r"call void @h\(float addrspace\(1\)\* %a\), !alias\.scope !\d+").is_match(&pre), "{pre}");
+        assert!(pre.contains("%z = load float, float addrspace(1)* %p, align 4\n"), "{pre}");
+        // after O2: %y lost its scope (a hoist), %x kept one, the helper's goes
+        let post_in = regex!(r"(%y = load float, float addrspace\(1\)\* %b, align 4), !alias\.scope !\d+(, !noalias !\d+)?").replace(&pre, "$1").to_string();
+        let post = xcode_alias_scopes_kept(&post_in, &entries);
+        assert!(post.contains("%y = load float, float addrspace(1)* %b, align 4\n"), "{post}");
+        assert!(regex!(r"%x = load float, float addrspace\(1\)\* %a, align 4, !alias\.scope !\d+, !noalias !\d+").is_match(&post), "{post}");
+        assert!(!post.contains("msl-pending") || !regex!(r"(?m)^\s+.*!alias\.scope !\d+").find_iter(&post).any(|m| m.as_str().contains("@h(")), "{post}");
     }
 
     #[test]
