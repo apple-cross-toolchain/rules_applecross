@@ -730,6 +730,86 @@ pub fn constant_loads_invariant(ir: &str) -> String {
     format!("{}\n!{next} = !{{}}\n", out.trim_end())
 }
 
+/// Codegen is flat, and the entry points' parameters give the address spaces back, but a
+/// pointer loaded from memory has none to infer: a struct's pointer and reference fields
+/// (an argument buffer's `device float *data`, `constant uint &n`) get their declared space
+/// in the struct's type, and each read of one through its field's address is read in that
+/// space and cast to flat, for infer-address-spaces to carry on (as Xcode's types have it).
+pub fn field_address_spaces(ir: &str, records: &std::collections::HashMap<String, Vec<crate::ast::Param>>) -> String {
+    // struct name -> (field index -> space)
+    let mut spaced: std::collections::HashMap<String, Vec<(usize, u32)>> = Default::default();
+    let mut out = ir.to_string();
+    for c in regex!(r#"(?m)^%("?struct\.([^"\s]+)"?) = type \{ (.*) \}$"#).captures_iter(ir) {
+        let Some(fields) = records.get(&c[2]) else { continue };
+        let elems = crate::text::split_args(&c[3]);
+        if elems.len() != fields.len() {
+            continue;
+        }
+        let mut spaces = Vec::new();
+        for (i, (f, e)) in fields.iter().zip(&elems).enumerate() {
+            let Some(a) = regex!(r"address_space\((\d)\)\)\)[^*&]*[*&]\s*$").captures(&f.ty) else { continue };
+            let n: u32 = a[1].parse().unwrap();
+            if matches!(n, 1..=3) && e.ends_with('*') && !e.contains("addrspace") && e.matches('*').count() == 1 {
+                spaces.push((i, n));
+            }
+        }
+        if spaces.is_empty() {
+            continue;
+        }
+        let new_elems: Vec<String> = elems.iter().enumerate().map(|(i, e)| match spaces.iter().find(|s| s.0 == i) {
+            Some((_, n)) => format!("{} addrspace({n})*", &e[..e.len() - 1]),
+            None => e.clone(),
+        }).collect();
+        out = out.replace(&c[0], &format!("%{} = type {{ {} }}", &c[1], new_elems.join(", ")));
+        spaced.insert(c[1].to_string(), spaces);
+    }
+    if spaced.is_empty() {
+        return out;
+    }
+    crate::text::map_functions(&out, |f| {
+        let mut fields: std::collections::HashMap<String, u32> = Default::default();
+        let mut lines = Vec::new();
+        for line in f.lines() {
+            // the field's address: kept under a name of its own, the old name a flat view of it
+            if let Some(g) = regex!(r#"^(\s+)(%[\w.]+) = getelementptr inbounds (%"?struct\.[^"\s,]+"?), [^,]+, i32 0, i32 (\d+)$"#).captures(line) {
+                let st = g[3].trim_start_matches('%').to_string();
+                if let Some((_, n)) = spaced.get(&st).and_then(|v| v.iter().find(|s| s.0 == g[4].parse::<usize>().unwrap())) {
+                    fields.insert(g[2].to_string(), *n);
+                    lines.push(line.replacen(&format!("{} = ", &g[2]), &format!("{}.as = ", &g[2]), 1));
+                    continue;
+                }
+            }
+            if let Some(l) = regex!(r"^(\s+)(%[\w.]+) = load ([^,]+)\*, [^,]+\*\* (%[\w.]+)(, .*)$").captures(line) {
+                if let Some(n) = fields.get(&l[4]) {
+                    let t = &l[3];
+                    lines.push(format!("{}{}.as = load {t} addrspace({n})*, {t} addrspace({n})** {}.as{}", &l[1], &l[2], &l[4], &l[5]));
+                    lines.push(format!("{}{} = addrspacecast {t} addrspace({n})* {}.as to {t}*", &l[1], &l[2], &l[2]));
+                    continue;
+                }
+            }
+            lines.push(line.to_string());
+        }
+        // a flat view of each field address, right after it, for its other uses
+        let mut res = Vec::new();
+        for line in lines {
+            let view = regex!(r#"^(\s+)(%[\w.]+)\.as = getelementptr inbounds (%"?struct\.[^"\s,]+"?), [^,]+, i32 0, i32 (\d+)$"#).captures(&line).and_then(|g| {
+                let n = fields.get(&g[2])?;
+                let st = g[3].trim_start_matches('%');
+                let i: usize = g[4].parse().ok()?;
+                let ty = regex!(r#"(?m)^%"?struct\.[^"\s]+"? = type \{ (.*) \}$"#).captures_iter(&out).find(|c| c[0].starts_with(&format!("%{st} ")))
+                    .map(|c| crate::text::split_args(&c[1]))?.get(i)?.clone();
+                let flat = ty.replace(&format!(" addrspace({n})*"), "*");
+                Some(format!("{}{} = bitcast {ty}* {}.as to {flat}*", &g[1], &g[2], &g[2]))
+            });
+            res.push(line);
+            if let Some(v) = view {
+                res.push(v);
+            }
+        }
+        res.join("\n") + if f.ends_with('\n') { "\n" } else { "" }
+    })
+}
+
 /// Constant buffers are immutable to Xcode's alias analysis, so its attribute inference
 /// ignores loads from them (not from program-scope constants, which count as reads): for
 /// O2 each such load's TBAA tag is a copy marked immutable (TBAA's fourth operand), which
@@ -1170,6 +1250,17 @@ mod tests {
         let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
         assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
         assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
+    }
+
+    #[test]
+    fn struct_pointer_fields_get_their_address_spaces() {
+        let ir = "%struct.Args = type { float*, i32*, float }\ndefine void @f(%struct.Args* %a) {\n  %d = getelementptr inbounds %struct.Args, %struct.Args* %a, i32 0, i32 0\n  %p = load float*, float** %d, align 8, !tbaa !1\n  %v = load float, float* %p, align 4\n  ret void\n}\n";
+        let field = |ty: &str| crate::ast::Param { name: String::new(), ty: ty.into(), desugared: ty.into(), attrs: vec![], stage_in: false };
+        let records = [("Args".to_string(), vec![field("__attribute__((address_space(1))) float *"), field("__attribute__((address_space(2))) uint &"), field("float")])].into_iter().collect();
+        let out = field_address_spaces(ir, &records);
+        assert!(out.contains("%struct.Args = type { float addrspace(1)*, i32 addrspace(2)*, float }"), "{out}");
+        assert!(out.contains("  %d.as = getelementptr inbounds %struct.Args, %struct.Args* %a, i32 0, i32 0\n  %d = bitcast float addrspace(1)** %d.as to float**\n"), "{out}");
+        assert!(out.contains("  %p.as = load float addrspace(1)*, float addrspace(1)** %d.as, align 8, !tbaa !1\n  %p = addrspacecast float addrspace(1)* %p.as to float*\n"), "{out}");
     }
 
     #[test]
