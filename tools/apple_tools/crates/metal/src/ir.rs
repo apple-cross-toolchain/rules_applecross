@@ -838,8 +838,10 @@ pub fn drop_scope_decls(ir: &str) -> String {
 }
 
 /// clang 15's TBAA gives a vector access the type `omnipotent char`; Xcode's
-/// gives it the element's scalar type (float4 -> "float"), for a vector field of
-/// a struct copy's !tbaa.struct too. `structs`: each record's struct-copy fields
+/// gives it the element's scalar type (float4 -> "float") through a pointer or an
+/// array element (a matrix's column), but keeps `omnipotent char` for a struct's
+/// vector field read as such (`c.texel_size`); a vector field of a struct copy's
+/// !tbaa.struct has the element type too. `structs`: each record's struct-copy fields
 /// (offset, size, the element type of a vector field).
 pub fn vector_tbaa(ir: &str, structs: &[Vec<(u32, u32, Option<String>)>]) -> String {
     let node = regex!(r#"(?m)^!(\d+) = !\{!"omnipotent char", !(\d+), i64 0\}$"#);
@@ -853,10 +855,21 @@ pub fn vector_tbaa(ir: &str, structs: &[Vec<(u32, u32, Option<String>)>]) -> Str
     let mut tags: std::collections::HashMap<&str, usize> = Default::default();
     let mut nodes = String::new();
     let access = regex!(r"^\s+(?:(?:%[\w.]+ = )?load (?:volatile )?<\d+ x (\w+)>, |store (?:volatile )?<\d+ x (\w+)> ).*, !tbaa !(\d+)");
+    // the function's struct field addresses (a GEP into a struct by field numbers alone)
+    let mut fields: BTreeSet<String> = BTreeSet::new();
     let lines: Vec<String> = ir
         .lines()
         .map(|line| {
+            if line.starts_with("define ") {
+                fields.clear();
+            }
+            if let Some(g) = regex!(r#"^\s+(%[\w.]+) = getelementptr inbounds (?:%struct\.[\w.]+|%"struct\.[^"]+"), [^,]+, (?:i32 \d+(?:, )?)+$"#).captures(line) {
+                fields.insert(g[1].to_string());
+            }
             let Some(c) = access.captures(line) else { return line.to_string() };
+            if regex!(r"<\d+ x \w+>(?: addrspace\(\d+\))?\* (%[\w.]+), align").captures(line).is_some_and(|p| fields.contains(&p[1])) {
+                return line.to_string();
+            }
             let elem = c.get(1).or(c.get(2)).unwrap().as_str();
             let name = match elem {
                 "float" => "float",
@@ -1157,6 +1170,15 @@ mod tests {
         let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
         assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
         assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
+    }
+
+    #[test]
+    fn a_struct_vector_field_keeps_the_char_tag() {
+        let ir = "define void @f(%struct.S* %s, <4 x float>* %p) {\n  %f = getelementptr inbounds %struct.S, %struct.S* %s, i32 0, i32 1\n  %a = load <4 x float>, <4 x float>* %f, align 16, !tbaa !5\n  %b = load <4 x float>, <4 x float>* %p, align 16, !tbaa !5\n  ret void\n}\n!3 = !{!\"omnipotent char\", !4, i64 0}\n!4 = !{!\"Simple C++ TBAA\"}\n!5 = !{!3, !3, i64 0}\n";
+        let out = vector_tbaa(ir, &[]);
+        assert!(out.contains("%a = load <4 x float>, <4 x float>* %f, align 16, !tbaa !5"), "{out}");
+        assert!(out.contains("%b = load <4 x float>, <4 x float>* %p, align 16, !tbaa !7"), "{out}");
+        assert!(out.contains("!6 = !{!\"float\", !3, i64 0}"), "{out}");
     }
 
     #[test]
