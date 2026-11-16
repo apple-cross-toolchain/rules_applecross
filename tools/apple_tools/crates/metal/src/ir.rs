@@ -917,6 +917,77 @@ pub fn drop_scope_decls(ir: &str) -> String {
     regex!(r"(?m)^(?:; Function Attrs: .*\n)?declare void @llvm\.experimental\.noalias\.scope\.decl\(metadata\).*\n").replace_all(&ir, "").to_string()
 }
 
+/// Xcode's handles are types of their own to TBAA: the handle a texture or sampler
+/// holds is `__metal_texture_2d_t`, `__metal_sampler_t` (the AIR type's name), where ours,
+/// a pointer, is `any pointer`; a copy of the object (a sampler passed by value) has
+/// the handle's type in its !tbaa.struct too.
+pub fn handle_tbaa(ir: &str) -> String {
+    // the C++ class -> the handle it holds
+    let handles: std::collections::HashMap<String, String> = regex!(r#"(?m)^%"struct\.metal::(\w+?)(?:\.\d+)?" = type \{ %struct\.(_\w+_t) addrspace\(\d\)\* \}$"#).captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    let (Some(any), Some(char_id)) = (
+        regex!(r#"(?m)^!(\d+) = !\{!"any pointer", !\d+, i64 0\}$"#).captures(ir).map(|c| c[1].to_string()),
+        regex!(r#"(?m)^!(\d+) = !\{!"omnipotent char", !\d+, i64 0\}$"#).captures(ir).map(|c| c[1].to_string()),
+    ) else {
+        return ir.to_string();
+    };
+    if handles.is_empty() {
+        return ir.to_string();
+    }
+    let mut next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
+    let mut nodes = String::new();
+    // handle -> (scalar type node, access tag node), for each handle the module's classes hold
+    let mut made: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+    for h in handles.values() {
+        made.entry(h.clone()).or_insert_with(|| {
+            let (t, g) = (next, next + 1);
+            next += 2;
+            nodes += &format!("!{t} = !{{!\"__metal{h}\", !{char_id}, i64 0}}\n!{g} = !{{!{t}, !{t}, i64 0}}\n");
+            (t, g)
+        });
+    }
+    // the classes' struct-path nodes: their one field becomes the handle's type
+    let mut classes: std::collections::HashMap<String, String> = Default::default();
+    let mut out = String::with_capacity(ir.len());
+    for line in ir.lines() {
+        if let Some(c) = Regex::new(&format!(r#"^!(\d+) = !\{{!"_ZTSN5metal(\d+)(\w+)", !{any}, i64 0\}}$"#)).unwrap().captures(line) {
+            let len: usize = c[2].parse().unwrap_or(0);
+            if let Some(h) = c[3].get(..len).and_then(|class| handles.get(class)) {
+                let t = made[h].0;
+                classes.insert(c[1].to_string(), h.clone());
+                out += &line.replacen(&format!("!{any}, i64 0}}"), &format!("!{t}, i64 0}}"), 1);
+                out.push('\n');
+                continue;
+            }
+        }
+        out += line;
+        out.push('\n');
+    }
+    // access tags through them
+    let out = Regex::new(&format!(r"(?m)^!(\d+) = !\{{!(\d+), !{any}, i64 0\}}$")).unwrap().replace_all(&out, |c: &Captures| match classes.get(&c[2]) {
+        Some(h) => format!("!{} = !{{!{}, !{}, i64 0}}", &c[1], &c[2], made[h].0),
+        None => c[0].to_string(),
+    });
+    // copies of the objects: a !tbaa.struct of the handle's type
+    let out = crate::text::map_functions(&out, |f| {
+        let casts: std::collections::HashMap<&str, &str> = regex!(r#"(?m)^\s+(%[\w.]+) = bitcast %"struct\.metal::(\w+?)(?:\.\d+)?"\* "#).captures_iter(f).map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str())).collect();
+        regex!(r"(?m)^(\s+(?:tail )?call void @llvm\.memcpy\.p0i8\.p0i8\.i64\(i8\* [^%\n]*(%[\w.]+), i8\* [^%\n]*(%[\w.]+), i64 8, [^)]*\)), !tbaa\.struct !\d+$").replace_all(f, |c: &Captures| {
+            let class = casts.get(&c[2]).or(casts.get(&c[3]));
+            match class.and_then(|k| handles.get(*k)) {
+                Some(h) => {
+                    let g = made[h].1;
+                    let n = next;
+                    next += 1;
+                    nodes += &format!("!{n} = !{{i64 0, i64 8, !{g}}}\n");
+                    format!("{}, !tbaa.struct !{n}", &c[1])
+                }
+                None => c[0].to_string(),
+            }
+        })
+        .to_string()
+    });
+    out.trim_end().to_string() + "\n" + &nodes
+}
+
 /// clang 15's TBAA gives a vector access the type `omnipotent char`; Xcode's
 /// gives it the element's scalar type (float4 -> "float") through a pointer or an
 /// array element (a matrix's column), but keeps `omnipotent char` for a struct's
@@ -1250,6 +1321,16 @@ mod tests {
         let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
         assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
         assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
+    }
+
+    #[test]
+    fn handles_are_tbaa_types_of_their_own() {
+        let ir = "%\"struct.metal::sampler\" = type { %struct._sampler_t addrspace(2)* }\ndefine void @f(%\"struct.metal::sampler\"* %a, %\"struct.metal::sampler\"* %b) {\n  %x = bitcast %\"struct.metal::sampler\"* %a to i8*\n  %y = bitcast %\"struct.metal::sampler\"* %b to i8*\n  call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 8 %x, i8* align 8 %y, i64 8, i1 false), !tbaa.struct !9\n  ret void\n}\n!3 = !{!4, !4, i64 0}\n!4 = !{!\"any pointer\", !5, i64 0}\n!5 = !{!\"omnipotent char\", !6, i64 0}\n!6 = !{!\"Simple C++ TBAA\"}\n!9 = !{i64 0, i64 8, !3}\n!13 = !{!\"_ZTSN5metal7samplerE\", !4, i64 0}\n!21 = !{!13, !4, i64 0}\n";
+        let out = handle_tbaa(ir);
+        assert!(out.contains("!22 = !{!\"__metal_sampler_t\", !5, i64 0}\n!23 = !{!22, !22, i64 0}"), "{out}");
+        assert!(out.contains("!13 = !{!\"_ZTSN5metal7samplerE\", !22, i64 0}"), "{out}");
+        assert!(out.contains("!21 = !{!13, !22, i64 0}"), "{out}");
+        assert!(out.contains("i64 8, i1 false), !tbaa.struct !24") && out.contains("!24 = !{i64 0, i64 8, !23}"), "{out}");
     }
 
     #[test]

@@ -208,7 +208,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         }
     }
     let text = crate::abi::lower(&text, &user, &stages);
-    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields())));
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::handle_tbaa(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()))));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));
