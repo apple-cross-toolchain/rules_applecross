@@ -190,6 +190,10 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     run(Command::new(tool(o, "opt")).args(["-passes=instnamer", "-S", "-o"]).arg(&named).arg(&ll0))?;
     // AIR's data layout from the start: Xcode's optimiser works with its native integer widths
     let text = regex::Regex::new(r#"target datalayout = ".*""#).unwrap().replace(&std::fs::read_to_string(&named).map_err(|e| e.to_string())?, format!("target datalayout = \"{}\"", crate::air::DATALAYOUT).as_str()).to_string();
+    // the stage functions are `used` so that the front end emits them where they stand (as
+    // Xcode's emits the entry points), not after the file: what they call is declared in
+    // Xcode's order; the list itself goes
+    let text = regex::Regex::new(r"(?m)^@llvm\.(?:compiler\.)?used = .*\n").unwrap().replace_all(&text, "").to_string();
     let text = ir::direct_struct_returns(&ir::renumber_types(&text), &types, &program.functions)?;
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::samplers(&text, &code.samplers, air);

@@ -50,7 +50,7 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
     let mut s = attributes(src);
     s = host_names(&s, &mut r.instances);
     s = replace_all(&s, regex!(r"\b__msl_stage_(kernel|vertex|fragment)\b"), |c| {
-        format!("static __MSL_ATTR(\"msl.stage:{}\") __attribute__((always_inline))", &c[1])
+        format!("static __MSL_ATTR(\"msl.stage:{}\") __attribute__((always_inline, used))", &c[1])
     });
     s = function_constants(&s, &mut r);
     s = program_scope_constants(&s);
