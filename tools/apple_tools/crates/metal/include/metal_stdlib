@@ -339,13 +339,13 @@ template <class T, int C, int R, int I0, int... I> __attribute__((always_inline)
   else return __mul(acc + m[k] * v[k], m, v, (typename __mkseq<int(sizeof...(I))>::type *)0);
 }
 template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, R> operator*(const matrix<T, C, R> &m, __vector<T, C> v) { return __mul(__vector<T, R>(0), m, v, (typename __mkseq<C>::type *)0); }
-template <class T, int C, int R, int... I> __attribute__((always_inline)) inline __vector<T, C> __mul(__vector<T, R> v, const matrix<T, C, R> &m, __seq<I...> *) {
+template <class T, int C, int R, int... I> __attribute__((always_inline)) constexpr __vector<T, C> __mul(__vector<T, R> v, const matrix<T, C, R> &m, __seq<I...> *) {
   __vector<T, C> r;
   // each column's dot product (air.dot), as Xcode computes v * M
   ((r[I] = dot(v, m[I])), ...);
   return r;
 }
-template <class T, int C, int R> __attribute__((always_inline)) inline __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) { return __mul(v, m, (typename __mkseq<C>::type *)0); }
+template <class T, int C, int R> __attribute__((always_inline)) constexpr __vector<T, C> operator*(__vector<T, R> v, const matrix<T, C, R> &m) { return __mul(v, m, (typename __mkseq<C>::type *)0); }
 // A * B as Xcode's IR before its attribute inference shows it built: the columns into a
 // list, read back through the list's pointer by a constructor the inliner takes in its
 // walk, so that the inference (run before the walk's simplification) counts a product
