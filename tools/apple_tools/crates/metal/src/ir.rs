@@ -155,6 +155,86 @@ pub fn function_constants(ir: &str) -> (String, Vec<ConstantEntry>) {
     (ir, entries)
 }
 
+/// The function constants' globals in Xcode's order: each constant (in the source's order)
+/// with its initializer right after it, and after them the program-scope constants the
+/// static initializer sets (`has_opt = is_function_constant_defined(...)`).
+pub fn order_constants(ir: &str, order: &[String]) -> String {
+    let lines: Vec<&str> = ir.lines().collect();
+    let global = |l: &str| regex!(r#"^@("?[\w.$]+"?) = "#).captures(l).map(|c| c[1].to_string());
+    let set_by_init: BTreeSet<String> = regex!(r#"(?ms)^define [^\n]*@(?:_GLOBAL__sub_I_|__cxx_global_var_init)[^\n]*\{\n(.*?)\n\}"#)
+        .captures_iter(ir)
+        .flat_map(|c| regex!(r"\bstore [^,]+, [^,]*\* @([\w.$]+)").captures_iter(&c[1]).map(|s| s[1].to_string()).collect::<Vec<_>>())
+        .collect();
+    let mut block = Vec::new();
+    for name in order {
+        let own = format!("_ZL{}{}", name.len(), name);
+        for l in &lines {
+            if global(l).as_deref() == Some(own.as_str()) {
+                block.push(*l);
+            }
+        }
+        for l in &lines {
+            if global(l).is_some_and(|g| regex!(r"^__msl_fcinit_\d+_(\w+)$").captures(&g).is_some_and(|c| &c[1] == name)) {
+                block.push(*l);
+            }
+        }
+    }
+    let late: Vec<&str> = lines.iter().copied().filter(|l| global(l).is_some_and(|g| set_by_init.contains(&g) && !block.contains(l))).collect();
+    if block.is_empty() {
+        return ir.to_string();
+    }
+    let Some(first) = lines.iter().position(|l| block.contains(l) || late.contains(l)) else { return ir.to_string() };
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    for (i, l) in lines.iter().enumerate() {
+        if i == first {
+            out.extend(&block);
+            out.extend(&late);
+        }
+        if !block.contains(l) && !late.contains(l) {
+            out.push(l);
+        }
+    }
+    let ir = out.join("\n") + if ir.ends_with('\n') { "\n" } else { "" };
+    static_inits_last(&ir)
+}
+
+/// The program-scope constants' initialisers (`__cxx_global_var_init`), and what only they
+/// call, just before the static initializer that runs them: Xcode's front end emits them
+/// after the file, so what they call (`air.is_function_constant_defined`) is declared last.
+fn static_inits_last(ir: &str) -> String {
+    let fns = crate::text::functions(ir);
+    let name_of = |s: usize| regex!(r#"^define [^@\n]*@("?[\w.$]+"?)\("#).captures(&ir[s..]).map(|c| c[1].to_string()).unwrap_or_default();
+    let Some(&(ss, _)) = fns.iter().find(|(s, _)| name_of(*s).starts_with("_GLOBAL__sub_I_")) else { return ir.to_string() };
+    let inits: Vec<(usize, usize)> = fns.iter().copied().filter(|(s, _)| name_of(*s).starts_with("__cxx_global_var_init")).collect();
+    if inits.is_empty() || inits.iter().any(|(s, _)| *s > ss) {
+        return ir.to_string();
+    }
+    let init_text: String = inits.iter().map(|(s, e)| &ir[*s..*e]).collect();
+    // declarations only the initialisers call
+    let mut rest = ir.to_string();
+    for (s, e) in inits.iter().rev() {
+        rest.replace_range(*s..*e, "");
+    }
+    let mut decls = Vec::new();
+    for c in regex!(r#"(?m)^(?:; Function Attrs: [^\n]*\n)?declare [^@\n]*@("?[\w.$]+"?)\([^\n]*\n"#).captures_iter(ir) {
+        let used = Regex::new(&format!(r"@{}\(", regex::escape(&c[1]))).unwrap();
+        if used.is_match(&init_text) && used.find_iter(&rest).count() == 1 {
+            decls.push(c[0].to_string());
+        }
+    }
+    for d in &decls {
+        rest = rest.replacen(d.as_str(), "", 1);
+    }
+    let at = rest.find("define").and_then(|_| {
+        let s = crate::text::functions(&rest).into_iter().find(|(s, _)| regex!(r#"^define [^@\n]*@_GLOBAL__sub_I_"#).is_match(&rest[*s..]))?.0;
+        Some(rest[..s].rfind("\n; Function Attrs:").filter(|p| !rest[p + 1..s].contains("\n\n")).map_or(s, |p| p + 1))
+    });
+    let Some(at) = at else { return ir.to_string() };
+    let moved: String = inits.iter().map(|(s, e)| format!("{}\n\n", &ir[*s..*e])).collect::<String>() + &decls.iter().map(|d| format!("{d}\n")).collect::<String>();
+    rest.insert_str(at, &moved);
+    rest
+}
+
 /// Define the constexpr samplers' state words: one global per distinct state, as
 /// Xcode defines them (the first sampler with a state stands for the others).
 pub fn samplers(ir: &str, words: &[u64], air: (u32, u32)) -> String {
@@ -1477,6 +1557,15 @@ mod tests {
         let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
         assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
         assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
+    }
+
+    #[test]
+    fn function_constants_each_with_its_initializer() {
+        let ir = "@_ZL7has_opt = internal addrspace(2) global i8 0, align 1\n@__msl_fcinit_8_c_opt = linkonce_odr hidden addrspace(2) externally_initialized constant i8 undef, align 1\n@_ZL1a = internal addrspace(2) global i32 undef, align 4\n@_ZL5c_opt = internal addrspace(2) global i8 undef, align 1\n@__msl_fcinit_0_a = linkonce_odr hidden addrspace(2) externally_initialized constant i32 undef, align 4\n\ndefine internal void @__cxx_global_var_init() {\n  %d = call i1 @air.is_function_constant_defined(i8 addrspace(2)* @__msl_fcinit_8_c_opt)\n  store i8 0, i8* @_ZL7has_opt, align 1\n  ret void\n}\n\ndeclare i1 @air.is_function_constant_defined(i8 addrspace(2)*)\n\ndefine void @k() {\n  ret void\n}\n\ndefine internal void @_GLOBAL__sub_I_x() {\n  call void @__cxx_global_var_init()\n  ret void\n}\n";
+        let out = order_constants(ir, &["a".to_string(), "c_opt".to_string()]);
+        assert!(out.starts_with("@_ZL1a = internal addrspace(2) global i32 undef, align 4\n@__msl_fcinit_0_a = linkonce_odr hidden addrspace(2) externally_initialized constant i32 undef, align 4\n@_ZL5c_opt = internal addrspace(2) global i8 undef, align 1\n@__msl_fcinit_8_c_opt = linkonce_odr hidden addrspace(2) externally_initialized constant i8 undef, align 1\n@_ZL7has_opt = internal addrspace(2) global i8 0, align 1\n"), "{out}");
+        let (k, init, decl, ctor) = (out.find("@k(").unwrap(), out.find("@__cxx_global_var_init() {").unwrap(), out.find("declare i1 @air.is_function_constant_defined").unwrap(), out.find("@_GLOBAL__sub_I_x").unwrap());
+        assert!(k < init && init < decl && decl < ctor, "{out}");
     }
 
     #[test]

@@ -196,6 +196,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let text = regex::Regex::new(r"(?m)^@llvm\.(?:compiler\.)?used = .*\n").unwrap().replace_all(&text, "").to_string();
     let text = ir::direct_struct_returns(&ir::field_address_spaces(&ir::renumber_types(&ir::constant_inits(&text)), &program.records), &types, &program.functions)?;
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
+    let text = ir::order_constants(&text, &code.constants.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
     let text = ir::samplers(&text, &code.samplers, air);
     let entries: Vec<String> = program.functions.iter().map(|f| f.name.clone()).collect();
     // the user's functions as Xcode calls them (their stage functions are inlined into the entry points)
