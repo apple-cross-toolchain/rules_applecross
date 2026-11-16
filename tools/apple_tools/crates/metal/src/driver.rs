@@ -207,7 +207,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
             home.entry(s).or_insert_with(|| e.clone());
         }
     }
-    let text = crate::abi::lower(&text, &user, &stages);
+    let text = crate::abi::lower(&ir::entries_at_stages(&text, &home), &user, &stages);
     let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::handle_tbaa(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()))));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));

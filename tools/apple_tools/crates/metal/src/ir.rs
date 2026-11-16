@@ -730,6 +730,37 @@ pub fn constant_loads_invariant(ir: &str) -> String {
     format!("{}\n!{next} = !{{}}\n", out.trim_end())
 }
 
+/// Each entry point where its layers are (the first of them defined): Xcode's front end
+/// emits the entry point where the user wrote it, so what its body first refers to (the
+/// lifetime markers, say) is declared after it, where ours, a wrapper after the file,
+/// came after its stage function's.
+pub fn entries_at_stages(ir: &str, home: &std::collections::HashMap<String, String>) -> String {
+    let mut ir = ir.to_string();
+    let entries: std::collections::BTreeSet<&String> = home.values().collect();
+    for e in entries {
+        let fns = crate::text::functions(&ir);
+        let name_of = |(s, _): &(usize, usize)| regex!(r#"^define [^@\n]*@("?[\w.$]+"?)\("#).captures(&ir[*s..]).map(|c| c[1].to_string());
+        let Some(&(es, ee)) = fns.iter().find(|f| name_of(f).as_deref() == Some(e.as_str())) else { continue };
+        let Some(&(as_, _)) = fns.iter().find(|f| name_of(f).is_some_and(|n| home.get(&n) == Some(e))) else { continue };
+        if as_ > es {
+            continue;
+        }
+        // with the attributes comment above each, if any
+        let with_comment = |s: usize| -> usize {
+            let prev = ir[..s.saturating_sub(1)].rfind('\n').map_or(0, |i| i + 1);
+            if s > 0 && ir[prev..s].starts_with("; Function Attrs:") { prev } else { s }
+        };
+        let (es, as_) = (with_comment(es), with_comment(as_));
+        let block = format!("{}\n\n", &ir[es..ee]);
+        let mut rest = String::with_capacity(ir.len());
+        rest.push_str(&ir[..es]);
+        rest.push_str(ir[ee..].trim_start_matches('\n'));
+        rest.insert_str(as_, &block);
+        ir = rest;
+    }
+    ir
+}
+
 /// Xcode's front end initialises a local aggregate from constants in place, where clang
 /// 15 copies it from a private constant (`@__const.f.v`): element by element (vectors
 /// whole, zeros too) or, when at most a quarter of more than 16 bytes isn't zero, a
@@ -1446,6 +1477,14 @@ mod tests {
         let out = vector_tbaa(ir, &[vec![(0, 4, None), (16, 16, Some("float".into()))]]);
         assert!(out.contains("!7 = !{!\"_ZTS1S\", !6, i64 0, !6, i64 16}"));
         assert!(out.contains("!8 = !{!\"_ZTS1T\", !3, i64 0}"));
+    }
+
+    #[test]
+    fn an_entry_point_stands_where_its_stage_function_does() {
+        let ir = "define void @a() {\n  ret void\n}\n\n; Function Attrs: x\ndefine internal void @s() {\n  call void @llvm.lifetime.start.p0i8(i64 4, i8* null)\n  ret void\n}\n\ndeclare void @llvm.lifetime.start.p0i8(i64, i8*)\n\n; Function Attrs: y\ndefine void @e() {\n  call void @s()\n  ret void\n}\n";
+        let home = [("s".to_string(), "e".to_string())].into_iter().collect();
+        let out = entries_at_stages(ir, &home);
+        assert_eq!(out, "define void @a() {\n  ret void\n}\n\n; Function Attrs: y\ndefine void @e() {\n  call void @s()\n  ret void\n}\n\n; Function Attrs: x\ndefine internal void @s() {\n  call void @llvm.lifetime.start.p0i8(i64 4, i8* null)\n  ret void\n}\n\ndeclare void @llvm.lifetime.start.p0i8(i64, i8*)\n\n");
     }
 
     #[test]
