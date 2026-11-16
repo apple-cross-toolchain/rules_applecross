@@ -175,7 +175,9 @@ pub fn extract(ir: &str, name: &str) -> String {
         for (i, (sym, t)) in entities.iter().enumerate() {
             let Some(sym) = sym else { continue };
             // llvm.global_ctors runs the function constants' initialisers: nothing refers to it
-            if !kept[i] || sym == name || sym.starts_with("llvm.") {
+            // (an intrinsic's declaration, though, goes when nothing calls it)
+            let declaration = t.starts_with("declare ") || t.contains("\ndeclare ");
+            if !kept[i] || sym == name || (sym.starts_with("llvm.") && !declaration) {
                 continue;
             }
             let re = Regex::new(&format!(r"@{}(?:[^-\w.$]|$)", regex::escape(sym))).unwrap();

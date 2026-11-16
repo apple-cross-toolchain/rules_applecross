@@ -416,6 +416,30 @@ template <class M, class E, int... I> constexpr void __mat_diagonal(M &m, E d, _
 template <class M, class S, int... I> constexpr void __mat_convert(M &m, const S &s, __seq<I...> *) {
   typedef __mat_traits<M> tr; ((m[I] = __convert_each<__vector<typename tr::E, tr::r>>(s[I], (typename __mkseq<tr::r>::type *)0)), ...);
 }
+// columns that are packed vectors are read where they are (a copy of one, a buffer's
+// element say, would count as a write to the attribute inference): every element first,
+// then the columns built, in the order Xcode's copies of the arguments leave them
+// a column given its place first, then its value; not one of our __ helpers, so that
+// its vector counts to "min-legal-vector-width" as Xcode's constructor's does
+template <class V> __attribute__((always_inline)) constexpr void _set_column(V &d, V v) { d = v; }
+template <class T, int N, int... J> constexpr void __put_elems(T *e, const __packed<T, N> &q, __seq<J...> *) { ((e[J] = q.__e[J]), ...); }
+template <class T, int N, int... J> constexpr void __put_elems(T *e, __vector<T, N> q, __seq<J...> *) { ((e[J] = q[J]), ...); }
+template <class M, int... I, class T, int N, class... P> constexpr M __mat_packed(__seq<I...> *, const __packed<T, N> &a, const P &... p) {
+  typedef __mat_traits<M> tr; typedef __vector<typename tr::E, tr::r> C;
+  T e[(1 + sizeof...(P)) * N];
+  int k = 0;
+  __put_elems(e, a, (typename __mkseq<N>::type *)0);
+  ((__put_elems(e + N * ++k, p, (typename __mkseq<N>::type *)0)), ...);
+  // each column where it goes, then its value (the arguments in order)
+  M m;
+  (_set_column(m.columns[I], __col<C>(e, I * N, (typename __mkseq<N>::type *)0)), ...);
+  return m;
+}
+template <class M, class T, int N, class... P> constexpr M __mat(const __packed<T, N> &a, const P &... p) {
+  typedef __mat_traits<M> tr;
+  static_assert(1 + sizeof...(P) == tr::c && N == tr::r, "a matrix's columns");
+  return __mat_packed<M>((typename __mkseq<tr::c>::type *)0, a, p...);
+}
 template <class M, class... A> constexpr M __mat(A... a) {
   typedef __mat_traits<M> tr; typedef __vector<typename tr::E, tr::r> C;
   if constexpr (sizeof...(A) == tr::c && (... && (__elem<A>::n == tr::r))) {
