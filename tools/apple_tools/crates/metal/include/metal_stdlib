@@ -142,6 +142,9 @@ template <class V, class A, class B, class... R> __attribute__((always_inline)) 
 }
 
 enum class mem_flags { mem_none = 0, mem_device = 1, mem_threadgroup = 2, mem_texture = 4, mem_threadgroup_imageblock = 8, mem_object_data = 16 };
+// flags combined (`mem_flags::mem_device | mem_flags::mem_threadgroup`)
+__attribute__((always_inline)) constexpr mem_flags operator|(mem_flags a, mem_flags b) { return mem_flags(int(a) | int(b)); }
+__attribute__((always_inline)) constexpr mem_flags operator&(mem_flags a, mem_flags b) { return mem_flags(int(a) & int(b)); }
 // Barriers: (memory flags, 5, execution scope: 1 threadgroup, 4 simdgroup).
 extern "C" __attribute__((convergent)) void __air_wg_barrier(int, int, int) __AIR("air.wg.barrier");
 extern "C" __attribute__((convergent)) void __air_simdgroup_barrier(int, int, int) __AIR("air.simdgroup.barrier");

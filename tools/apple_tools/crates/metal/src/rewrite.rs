@@ -52,7 +52,7 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
     s = replace_all(&s, regex!(r"\b__msl_stage_(kernel|vertex|fragment)\b"), |c| {
         format!("static __MSL_ATTR(\"msl.stage:{}\") __attribute__((always_inline, used))", &c[1])
     });
-    s = function_constants(&s, &mut r);
+    s = function_constants(&s, &mut r)?;
     s = program_scope_constants(&s);
     s = direct_init(&s);
     // (not a declarator's parentheses: `thread float2 (*b)[2]`)
@@ -74,6 +74,12 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
         },
         |c| format!("metal::__mat<metal::{}>(", &c[1]),
     );
+    // The AST pass sees address spaces, and an automatic variable may have none:
+    // its threadgroup locals (`threadgroup float shmem[N];`) static there, or a template
+    // declaring one has no valid specialization for host_names' static_assert to name
+    if ast_mode {
+        s = regex!(r"([;{}]\s*)(__attribute__\(\(address_space\(3\)\)\)\s+[A-Za-z_][\w:]*(?:\s*<[^;{}()]*>)?\s+[A-Za-z_]\w*\s*[\[;=])").replace_all(&s, "${1}static ${2}").to_string();
+    }
     // The AST pass sees attributes as annotations; codegen doesn't see them.
     s = replace_all(&s, regex!(r#"__MSL_ATTR\(("(?:[^"\\]|\\.)*")\)"#), |c| {
         if ast_mode {
@@ -142,12 +148,47 @@ fn attributes(src: &str) -> String {
         let attrs = parts
             .iter()
             .filter(|p| !p.is_empty())
-            .map(|p| format!("__MSL_ATTR(\"msl:{}\")", p.replace('"', "\\\"")))
+            .map(|p| format!("__MSL_ATTR(\"msl:{}\")", joined_literals(p).replace('"', "\\\"")))
             .collect::<Vec<_>>()
             .join(" ");
         // set apart from the name it follows (`uint3 tgpig[[threadgroup_position_in_grid]]`)
         format!(" {attrs}")
     })
+}
+
+/// Adjacent string literals as one (`host_name("k_" "q4_0")`, built by a macro,
+/// reaches us preprocessed): the compiler's own concatenation, which an attribute
+/// read as text doesn't get.
+fn joined_literals(p: &str) -> String {
+    let b = p.as_bytes();
+    let (mut out, mut i, mut open) = (String::new(), 0, false);
+    while i < b.len() {
+        let c = b[i];
+        if open && c == b'\\' {
+            // the escaped character, whatever its width
+            out.push('\\');
+            i += 1;
+            if let Some(ch) = p[i..].chars().next() {
+                out.push(ch);
+                i += ch.len_utf8();
+            }
+            continue;
+        }
+        if c == b'"' && open {
+            let next = i + 1 + p[i + 1..].len() - p[i + 1..].trim_start().len();
+            if b.get(next) == Some(&b'"') {
+                i = next + 1;
+                continue;
+            }
+        }
+        if c == b'"' {
+            open = !open;
+        }
+        let ch = p[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// `template [[host_name("n")]] kernel F_t f<args>;` -> an explicit instantiation;
@@ -191,7 +232,9 @@ fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
         let args = src[m.end()..j - 1].to_string();
         out.push(Instance { host_name: c[1].to_string(), template: c[3].to_string(), args: args.clone() });
         res.push_str(&src[pos..m.start()]);
-        res.push_str(&format!("template {} {}<{}>{params};", &c[2], &c[3], args));
+        // the static_assert names the specialization for ast::program, which
+        // clang resolves (typedefs, enumerators, expressions); it makes no code
+        res.push_str(&format!("template {} {}<{}>{params}; static_assert(sizeof(&{}<{}>) > 0, \"msl.instance:{}\");", &c[2], &c[3], args, &c[3], args, &c[1]));
         pos = j + semi + 1;
     }
     res.push_str(&src[pos..]);
@@ -248,16 +291,19 @@ fn program_scope_constants(src: &str) -> String {
 
 /// `constant T x [[function_constant(i)]];` becomes an internal global copied at
 /// static-init time from an external initializer the IR pass turns into AIR's.
-fn function_constants(src: &str, r: &mut Rewritten) -> String {
-    let fc = regex!(r#"(?m)^[ \t]*(?:(?:__attribute__\(\(address_space\(2\)\)\)|__msl_constant)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\((\d+)\)"\)\s*;"#);
+/// The index may be an expression, its macros expanded (`[[function_constant(FC_FLASH_ATTN_EXT + 22)]]`
+/// arrives as `300 + 22`).
+fn function_constants(src: &str, r: &mut Rewritten) -> Result<String, String> {
+    let fc = regex!(r#"(?m)^[ \t]*(?:(?:__attribute__\(\(address_space\(2\)\)\)|__msl_constant)\s*)?([A-Za-z_][\w:<>, ]*?)\s+(\w+)\s*__MSL_ATTR\("msl:function_constant\(((?:[^"\\]|\\.)*)\)"\)\s*;"#);
+    let index = |e: &str| integer_expr(e).and_then(|i| u32::try_from(i).ok()).ok_or_else(|| format!("function_constant({e}): an index we can't evaluate"));
     for c in fc.captures_iter(src) {
-        r.constants.push(FunctionConstant { index: c[3].parse().unwrap(), name: c[2].to_string() });
+        r.constants.push(FunctionConstant { index: index(&c[3])?, name: c[2].to_string() });
     }
     let s = replace_all(src, fc, |c| {
         format!(
             "extern \"C\" {AS2} {t} __msl_fcinit_{i}_{n}; static {AS2} {t} {n} = __msl_fcinit_{i}_{n};",
             t = &c[1],
-            i = &c[3],
+            i = index(&c[3]).unwrap_or_default(),
             n = &c[2]
         )
     });
@@ -266,10 +312,66 @@ fn function_constants(src: &str, r: &mut Rewritten) -> String {
         r.checked.insert(c[1].to_string());
     }
     let consts = r.constants.clone();
-    replace_all(&s, defined, |c| match consts.iter().find(|k| k.name == c[1]) {
+    Ok(replace_all(&s, defined, |c| match consts.iter().find(|k| k.name == c[1]) {
         Some(k) => format!("metal::__air_is_function_constant_defined(&__msl_fcinit_{}_{})", k.index, k.name),
         None => c[0].to_string(),
-    })
+    }))
+}
+
+/// An integer constant expression of literals (`300 + 22`, `(1 << 4) | 2`), or None.
+fn integer_expr(e: &str) -> Option<i64> {
+    let toks: Vec<String> = regex!(r"0[xX][0-9a-fA-F]+[uUlL]*|\d+[uUlL]*|<<|>>|[-+*/%&|^~()]|\S").find_iter(e).map(|m| m.as_str().to_string()).collect();
+    // precedence climbing: | ^ & (<< >>) (+ -) (* / %)
+    fn bin(t: &[String], i: &mut usize, level: usize) -> Option<i64> {
+        const LEVELS: [&[&str]; 6] = [&["|"], &["^"], &["&"], &["<<", ">>"], &["+", "-"], &["*", "/", "%"]];
+        if level == LEVELS.len() {
+            return unary(t, i);
+        }
+        let mut v = bin(t, i, level + 1)?;
+        while let Some(op) = t.get(*i).filter(|o| LEVELS[level].contains(&o.as_str())) {
+            let op = op.clone();
+            *i += 1;
+            let r = bin(t, i, level + 1)?;
+            v = match op.as_str() {
+                "|" => v | r,
+                "^" => v ^ r,
+                "&" => v & r,
+                "<<" => v.checked_shl(u32::try_from(r).ok()?)?,
+                ">>" => v.checked_shr(u32::try_from(r).ok()?)?,
+                "+" => v.checked_add(r)?,
+                "-" => v.checked_sub(r)?,
+                "*" => v.checked_mul(r)?,
+                "/" => v.checked_div(r)?,
+                _ => v.checked_rem(r)?,
+            };
+        }
+        Some(v)
+    }
+    fn unary(t: &[String], i: &mut usize) -> Option<i64> {
+        let tok = t.get(*i)?.clone();
+        *i += 1;
+        match tok.as_str() {
+            "-" => unary(t, i)?.checked_neg(),
+            "+" => unary(t, i),
+            "~" => Some(!unary(t, i)?),
+            "(" => {
+                let v = bin(t, i, 0)?;
+                (t.get(*i)? == ")").then(|| *i += 1)?;
+                Some(v)
+            }
+            lit => {
+                let digits = lit.trim_end_matches(['u', 'U', 'l', 'L']);
+                match digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")) {
+                    Some(h) => i64::from_str_radix(h, 16).ok(),
+                    None if digits.len() > 1 && digits.starts_with('0') => i64::from_str_radix(&digits[1..], 8).ok(),
+                    None => digits.parse().ok(),
+                }
+            }
+        }
+    }
+    let mut i = 0;
+    let v = bin(&toks, &mut i, 0)?;
+    (i == toks.len()).then_some(v)
 }
 
 /// End of the unary expression starting at `i`: unary operators, a primary
@@ -746,6 +848,37 @@ mod tests {
         let out = attributes("kernel void k(uint3 tgpig[[threadgroup_position_in_grid]], ushort3 t [[thread_position_in_threadgroup]])");
         assert!(out.contains("uint3 tgpig __MSL_ATTR(\"msl:threadgroup_position_in_grid\"),"), "{out}");
         assert!(!direct_init(&out).contains("__vec"), "{out}");
+    }
+
+    #[test]
+    fn function_constant_indices_are_evaluated() {
+        assert_eq!(integer_expr("300 + 22"), Some(322));
+        assert_eq!(integer_expr("(1 << 4) | 0x2u"), Some(18));
+        assert_eq!(integer_expr("2 * (3 + 4) - 010"), Some(6));
+        assert_eq!(integer_expr("kIndex + 1"), None);
+        assert_eq!(integer_expr("1 +"), None);
+        let mut r = Rewritten::default();
+        let out = function_constants("constant int nsg __MSL_ATTR(\"msl:function_constant(300 + 22)\");\n", &mut r).unwrap();
+        assert_eq!(r.constants[0].index, 322);
+        assert!(out.contains("__msl_fcinit_322_nsg"), "{out}");
+        assert!(function_constants("constant int n __MSL_ATTR(\"msl:function_constant(kIndex)\");\n", &mut Rewritten::default()).is_err());
+    }
+
+    #[test]
+    fn threadgroup_locals_are_static_to_the_ast_pass() {
+        let src = "kernel void k(threadgroup float *p [[threadgroup(0)]]) {\n    threadgroup float shmem[N];\n    threadgroup float *q = p;\n}\n";
+        let tg = "__attribute__((address_space(3)))";
+        let src = src.replace("threadgroup float", &format!("{tg} float"));
+        let ast = rewrite(&src, true, (2, 8)).unwrap().code;
+        assert!(ast.contains(&format!("{{\n    static {tg} float shmem[N];\n    {tg} float *q = p;")), "{ast}");
+        assert!(!rewrite(&src, false, (2, 8)).unwrap().code.contains("static"));
+    }
+
+    #[test]
+    fn a_host_name_built_from_adjacent_literals_is_one_name() {
+        let out = attributes("template [[host_name(\"k_\" \"q4_0\"  \"_f32\")]] kernel f_t f<1>;");
+        assert!(out.contains(r#"__MSL_ATTR("msl:host_name(\"k_q4_0_f32\")")"#), "{out}");
+        assert_eq!(joined_literals(r#"a("x\"" "y", "z")"#), r#"a("x\"y", "z")"#);
     }
 
     #[test]

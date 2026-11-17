@@ -60,7 +60,7 @@ pub struct Xcode {
 }
 
 /// Flat name -> Xcode's name and parameter address spaces, for functions with
-/// pointers or references into an address space.
+/// pointers or references into an address space, or a half in their name.
 pub fn user_functions(with_spaces: &[(String, String, String)], flat: &[(String, String)]) -> HashMap<String, Xcode> {
     let mut seen: HashMap<&str, usize> = HashMap::new();
     let mut by_key: HashMap<(String, usize), (&str, &str)> = HashMap::new();
@@ -74,7 +74,7 @@ pub fn user_functions(with_spaces: &[(String, String, String)], flat: &[(String,
     for (n, m) in flat {
         let k = seen.entry(n).or_insert(0);
         if let Some((a, t)) = by_key.get(&(n.clone(), *k)) {
-            if a.contains("U3AS") {
+            if a.contains("U3AS") || a.contains("DF16_") {
                 out.insert(m.clone(), Xcode { name: xcode_spelling(a), spaces: param_spaces(t) });
             }
         }
@@ -116,10 +116,12 @@ fn generic_indices(fn_type: &str) -> Vec<usize> {
         .collect()
 }
 
-/// clang's address-space qualifiers as Xcode spells them (constant implies const).
+/// clang's address-space qualifiers as Xcode spells them (constant implies const),
+/// and half: our `_Float16` is `DF16_`, Xcode's half `Dh` (builtin types both, never
+/// substitution candidates, so nothing else renumbers).
 pub fn xcode_spelling(mangled: &str) -> String {
     let s = regex!(r"U3AS2(K?)").replace_all(mangled, "U11MTLconstantK");
-    s.replace("U3AS1", "U9MTLdevice").replace("U3AS3", "U14MTLthreadgroup").replace("U3AS9", "U9MTLthread")
+    s.replace("U3AS1", "U9MTLdevice").replace("U3AS3", "U14MTLthreadgroup").replace("U3AS9", "U9MTLthread").replace("DF16_", "Dh")
 }
 
 /// The functions of `ir` renamed.
@@ -144,6 +146,7 @@ mod tests {
     fn spells_address_spaces_as_xcode() {
         assert_eq!(xcode_spelling("_Z1fPU3AS1fRU3AS2K1SPU3AS3fPU3AS2f"), "_Z1fPU9MTLdevicefRU11MTLconstantK1SPU14MTLthreadgroupfPU11MTLconstantKf");
         assert_eq!(xcode_spelling("_Z2g5RU3AS9K1S"), "_Z2g5RU9MTLthreadK1S");
+        assert_eq!(xcode_spelling("_Z3lumDv3_DF16_"), "_Z3lumDv3_Dh");
     }
 
     #[test]

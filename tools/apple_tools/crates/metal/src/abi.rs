@@ -69,13 +69,43 @@ fn fields(body: &str) -> Vec<String> {
     body.trim().strip_prefix('{').and_then(|x| x.strip_suffix('}')).map(|x| split_args(x).iter().map(|f| f.trim().to_string()).collect()).unwrap_or_default()
 }
 
-/// A parameter's type, attributes and name.
+/// A parameter's type, attributes and name (or an argument's value, which may be
+/// a constant expression: `getelementptr inbounds ([16 x float], ...)`).
 fn parts(p: &str) -> (String, String, String) {
     let p = p.trim();
-    let (head, name) = p.rsplit_once(' ').unwrap_or((p, ""));
-    // the type ends where its attributes begin
-    let attrs_at = regex!(r#" (?:noundef|nonnull|nocapture|readonly|writeonly|readnone|noalias|byval\(|sret\(|align \d|dereferenceable|zeroext|signext|"[^"]*")"#).find(head).map(|m| m.start()).unwrap_or(head.len());
-    (head[..attrs_at].to_string(), head[attrs_at..].trim().to_string(), name.to_string())
+    let ty_end = type_end(p);
+    let mut rest = &p[ty_end..];
+    let mut attrs_end = 0;
+    while let Some(m) = regex!(r#"^\s+(?:noundef|nonnull|nocapture|readonly|writeonly|readnone|noalias|zeroext|signext|inreg|immarg|returned|align \d+|dereferenceable(?:_or_null)?\(\d+\)|(?:byval|sret|elementtype)\([^()]*\)|"[^"]*")"#).find(rest) {
+        attrs_end += m.end();
+        rest = &rest[m.end()..];
+    }
+    let after = &p[ty_end..];
+    (p[..ty_end].to_string(), after[..attrs_end].trim().to_string(), after[attrs_end..].trim().to_string())
+}
+
+/// Where the LLVM type at the start of `s` ends: a primitive, a named, vector, array
+/// or struct type, then any `addrspace(n)` and `*`s (and a function type's parameters).
+fn type_end(s: &str) -> usize {
+    let b = s.as_bytes();
+    let mut i = match b.first() {
+        Some(b'<') => balanced(b, 0, b'<', b'>'),
+        Some(b'[') => balanced(b, 0, b'[', b']'),
+        Some(b'{') => balanced(b, 0, b'{', b'}'),
+        Some(b'%') if b.get(1) == Some(&b'"') => s[2..].find('"').map(|q| q + 3).unwrap_or(s.len()),
+        _ => regex!(r"^%?[\w.:$-]+").find(s).map(|m| m.end()).unwrap_or(0),
+    };
+    loop {
+        if let Some(m) = regex!(r"^ addrspace\(\d+\)").find(&s[i..]) {
+            i += m.end();
+        } else if b.get(i) == Some(&b'*') {
+            i += 1;
+        } else if s[i..].starts_with(" (") && s[balanced(b, i + 1, b'(', b')')..].starts_with('*') {
+            i = balanced(b, i + 1, b'(', b')');
+        } else {
+            return i;
+        }
+    }
 }
 
 fn plan(sig: &str, ret_void: bool, xcode: Option<&Xcode>, tys: &HashMap<String, String>) -> Lowering {
@@ -376,6 +406,17 @@ pub fn specialize_generic(ir: &str, generic: &HashMap<String, Vec<usize>>) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_argument_is_its_type_attributes_and_value() {
+        assert_eq!(parts("float* noundef %src"), ("float*".into(), "noundef".into(), "%src".into()));
+        assert_eq!(parts(r#"%"struct.metal::S"* noundef nonnull align 4 dereferenceable(8) %s"#), (r#"%"struct.metal::S"*"#.into(), "noundef nonnull align 4 dereferenceable(8)".into(), "%s".into()));
+        assert_eq!(parts("%struct.R* sret(%struct.R) align 4 %agg"), ("%struct.R*".into(), "sret(%struct.R) align 4".into(), "%agg".into()));
+        assert_eq!(parts("<4 x float> addrspace(1)* %v"), ("<4 x float> addrspace(1)*".into(), String::new(), "%v".into()));
+        // a constant expression, spaces and parentheses included
+        let gep = "getelementptr inbounds ([16 x float], [16 x float]* addrspacecast ([16 x float] addrspace(2)* @k to [16 x float]*), i64 0, i64 0)";
+        assert_eq!(parts(&format!("float* noundef {gep}")), ("float*".into(), "noundef".into(), gep.into()));
+    }
 
     #[test]
     fn generic_parameters_specialize_by_space() {

@@ -210,8 +210,10 @@ impl<'a, 'b> Descriptors<'a, 'b> {
             let reference = t.trim_end().ends_with('&');
             let aspace = if kind == "threadgroup" { 3 } else { aspace_of(&t) };
             let pt = pointee(&t);
-            let readonly = aspace == 2 || regex!(r"\bconst\b").is_match(&pt);
             let mut tname = self.types.msl_name(&pt);
+            // a `device const void *` has no size, and Xcode has it read_write all the same (llama.cpp's ssm.metal)
+            let untyped = tname == "void";
+            let readonly = aspace == 2 || (!untyped && regex!(r"\bconst\b").is_match(&pt));
             let mut layouts = self.types.layouts.clone();
             let atomic = regex!(r"^_atomic<(\w[\w ]*)>").captures(&strip_qual(&pointee(&self.types.resolve(&p.desugared)))).map(|c| c[1].to_string());
             let (size, align) = if let Some(elem) = atomic {
@@ -220,6 +222,8 @@ impl<'a, 'b> Descriptors<'a, 'b> {
                 tname = "metal::_atomic".into();
                 layouts.insert(tname.clone(), Layout { size: sz, align: al, fields: vec![(0, elem, "__s".into())] });
                 (sz, al)
+            } else if untyped {
+                (0, 0)
             } else {
                 self.types.size(&tname)?
             };
@@ -235,7 +239,10 @@ impl<'a, 'b> Descriptors<'a, 'b> {
                 let info = self.struct_info(&tname, &layouts)?;
                 f.extend(["!\"air.struct_type_info\"".into(), info]);
             }
-            f.extend(["!\"air.arg_type_size\"".into(), format!("i32 {size}"), "!\"air.arg_type_align_size\"".into(), format!("i32 {align}"), "!\"air.arg_type_name\"".into(), s(&tname), "!\"air.arg_name\"".into(), s(&p.name)]);
+            if !untyped {
+                f.extend(["!\"air.arg_type_size\"".into(), format!("i32 {size}"), "!\"air.arg_type_align_size\"".into(), format!("i32 {align}")]);
+            }
+            f.extend(["!\"air.arg_type_name\"".into(), s(&tname), "!\"air.arg_name\"".into(), s(&p.name)]);
         } else if kind == "texture" {
             let (tname, acc) = self.texture_name(&self.types.resolve(&p.desugared))?;
             f = vec![format!("i32 {i}"), s("air.texture"), "!\"air.location_index\"".into(), format!("i32 {}", slot(&a0)), "i32 1".into(), s(&format!("air.{acc}")), "!\"air.arg_type_name\"".into(), s(&tname), "!\"air.arg_name\"".into(), s(&p.name)];

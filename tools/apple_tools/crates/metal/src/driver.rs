@@ -113,7 +113,10 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let clang = tool(o, "clang");
     let preprocess = |ast_mode: bool, mangle: bool| -> Result<crate::rewrite::Rewritten, String> {
         let mut c = Command::new(&clang);
-        c.args(["-E", "-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-nostdinc++", "-I"]).arg(&inc).args(["-include", "metal_stdlib", "-I"]).arg(&src_dir);
+        // Macros in pragma arguments (`#pragma unroll (MIN(DK8/2, 4*NSG))`) expanded,
+        // as the one compile Xcode does expands them: -E leaves them as written
+        // unless -fms-extensions, whose only other predefines are the two undone here
+        c.args(["-E", "-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-nostdinc++", "-fms-extensions", "-U_WCHAR_T_DEFINED", "-U_NATIVE_WCHAR_T_DEFINED", "-I"]).arg(&inc).args(["-include", "metal_stdlib", "-I"]).arg(&src_dir);
         c.arg(format!("-D__METAL_VERSION__={}", lang.0 * 100 + lang.1 * 10));
         match o.target.os.as_str() {
             "macosx" => {
@@ -156,7 +159,8 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     base(&mut c);
     c.args(["-fsyntax-only", "-Xclang", "-ast-dump", "-fno-color-diagnostics"]).arg(&cpp);
     let dump = c.output().map_err(|e| e.to_string())?;
-    let program = ast::program(&String::from_utf8_lossy(&dump.stdout), &ast_src.instances);
+    let mut program = ast::program(&String::from_utf8_lossy(&dump.stdout), &ast_src.instances);
+    ast::implicit_resources(&mut program);
     // functions' names with their parameters' address spaces (for Xcode's mangled names)
     let json_decls = |path: &Path| -> Result<Vec<(String, String, String)>, String> {
         let mut c = Command::new(&clang);
