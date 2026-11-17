@@ -46,7 +46,11 @@ static TABLE: LazyLock<HashMap<&'static str, Vec<Decl>>> = LazyLock::new(|| {
 });
 
 fn lookup(name: &str, arity: usize) -> Option<&'static Decl> {
-    TABLE.get(name)?.iter().find(|d| d.params.len() == arity)
+    TABLE.get(name).and_then(|ds| ds.iter().find(|d| d.params.len() == arity)).or_else(|| {
+        // every conversion observed is declared alike: one not yet observed (half4 from
+        // float4, probes/p48 m_conv) as they are, not bare
+        (name.starts_with("air.convert.") && arity == 1).then(|| TABLE.iter().find(|(k, _)| k.starts_with("air.convert.")).and_then(|(_, ds)| ds.first())).flatten()
+    })
 }
 
 fn strip_attrs(s: &str) -> String {
@@ -113,6 +117,12 @@ pub fn apply(ir: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_conversion_not_yet_observed_is_declared_as_the_others() {
+        let ir = "declare <4 x half> @air.convert.f.v4f16.f.v4f32(<4 x float>)\n";
+        assert!(apply(ir).contains("declare <4 x half> @air.convert.f.v4f16.f.v4f32(<4 x float>) local_unnamed_addr mustprogress nofree nosync nounwind readnone willreturn"), "{}", apply(ir));
+    }
 
     #[test]
     fn declarations_and_calls_get_xcodes_attributes() {
