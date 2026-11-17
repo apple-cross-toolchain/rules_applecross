@@ -89,6 +89,11 @@ pub struct Program {
     pub constant_types: HashMap<String, String>,
     /// Function constants' namespaces (`metalpetal::`), by name.
     pub constant_namespaces: HashMap<String, String>,
+    /// [[host_name]] instances whose specialization clang didn't resolve (an error, not a kernel left out).
+    pub unresolved: Vec<String>,
+    /// Local arrays of pointers into an address space (`device const half *pm[NQ];`), by name:
+    /// the space, or None where variables of that name differ.
+    pub pointer_arrays: HashMap<String, Option<u32>>,
 }
 
 /// A stage function's buffers, textures and samplers written without an index (llama.cpp's
@@ -144,7 +149,28 @@ pub fn program(text: &str, instances: &[Instance]) -> Program {
     let mut specs = HashMap::new();
     instance_specs(&root, &mut specs);
     walk(&root, "", instances, &specs, &mut p, &mut last_anon);
+    pointer_arrays(&root, &mut p.pointer_arrays);
+    p.unresolved = instances.iter().filter(|i| !p.functions.iter().any(|f| f.name == i.host_name)).map(|i| i.host_name.clone()).collect();
     p
+}
+
+/// Every local array of pointers into an address space, in any function's body (a
+/// template's as declared: `half *[NQ]`).
+fn pointer_arrays(n: &Node, out: &mut HashMap<String, Option<u32>>) {
+    for k in &n.kids {
+        if k.kind == "VarDecl" {
+            if let Some((name, ty, _)) = decl(&k.rest) {
+                if let Some(c) = regex!(r"address_space\((\d)\)\)\)[^*\[\]()]*\*\s*(?:\[[^\[\]]+\])+$").captures(&ty) {
+                    let space: u32 = c[1].parse().unwrap();
+                    let e = out.entry(name).or_insert(Some(space));
+                    if *e != Some(space) {
+                        *e = None;
+                    }
+                }
+            }
+        }
+        pointer_arrays(k, out);
+    }
 }
 
 /// Each instance's specialization (host name -> its FunctionDecl's address), from

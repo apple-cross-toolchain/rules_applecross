@@ -115,7 +115,7 @@ impl<'a> Types<'a> {
                 }
             }
         }
-        if let Some(c) = regex!(r"^matrix<(\w[\w ]*), (\d), (\d)>$").captures(&t) {
+        if let Some(c) = regex!(r"^matrix<(\w[\w ]*), (\d), (\d)(?:, void)?>$").captures(&t) {
             return format!("{}{}x{}", canon(&c[1]), &c[2], &c[3]);
         }
         if let Some(c) = regex!(r"^__packed<(\w[\w ]*), (\d)>$").captures(&t) {

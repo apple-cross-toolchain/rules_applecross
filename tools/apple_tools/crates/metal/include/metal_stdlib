@@ -323,7 +323,8 @@ template <bool B> struct __enable_cols {};
 template <> struct __enable_cols<true> { typedef void type; };
 // The columns as one array (as Xcode lays a matrix out: { [C x <R x T>] }),
 // constructed from C columns, so { {..}, {..}, {..} } initialises columns as MSL does.
-template <class T, int C, int R> struct matrix;
+// (a fourth parameter, void, as Xcode's has: mangled names carry it, `N5metal6matrixIfLi4ELi4EvEE`)
+template <class T, int C, int R, class = void> struct matrix;
 template <class V> struct __column_list { const V *p; long n; };
 // A column argument: a vector, or a braced list of elements converted as MSL does.
 template <class T, int R> struct __column {

@@ -143,7 +143,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         }
         c.args(&o.includes).args(&o.defines).arg(&o.source);
         let text = String::from_utf8_lossy(&run(&mut c)?.stdout).to_string();
-        rewrite(&text, ast_mode, air)
+        rewrite(&text, ast_mode, mangle, air)
     };
     let base = |c: &mut Command| {
         c.args(["-x", "c++", "-std=c++17", "-target", "spir64", "-ffast-math", "-fno-builtin", "-fno-exceptions", "-Wno-unknown-attributes", "-nostdinc++"]);
@@ -157,9 +157,14 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     std::fs::write(&cpp, &ast_src.code).map_err(|e| e.to_string())?;
     let mut c = Command::new(&clang);
     base(&mut c);
-    c.args(["-fsyntax-only", "-Xclang", "-ast-dump", "-fno-color-diagnostics"]).arg(&cpp);
+    // (every error: a fatal "too many errors" would leave the rest of the file unread)
+    c.args(["-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump", "-fno-color-diagnostics"]).arg(&cpp);
     let dump = c.output().map_err(|e| e.to_string())?;
     let mut program = ast::program(&String::from_utf8_lossy(&dump.stdout), &ast_src.instances);
+    if !program.unresolved.is_empty() {
+        let errors: Vec<String> = String::from_utf8_lossy(&dump.stderr).lines().filter(|l| l.contains("error:")).take(3).map(str::to_string).collect();
+        return Err(format!("[[host_name]] instances whose specialization didn't resolve: {}\n{}", program.unresolved.join(", "), errors.join("\n")));
+    }
     ast::implicit_resources(&mut program);
     // functions' names with their parameters' address spaces (for Xcode's mangled names)
     let json_decls = |path: &Path| -> Result<Vec<(String, String, String)>, String> {
@@ -198,7 +203,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // Xcode's emits the entry points), not after the file: what they call is declared in
     // Xcode's order; the list itself goes
     let text = regex::Regex::new(r"(?m)^@llvm\.(?:compiler\.)?used = .*\n").unwrap().replace_all(&text, "").to_string();
-    let text = ir::direct_struct_returns(&ir::field_address_spaces(&ir::renumber_types(&ir::constant_inits(&ir::vector_compares_as_bools(&ir::threadgroup_statics(&text)?))), &program.records), &types, &program.functions)?;
+    let text = ir::direct_struct_returns(&ir::local_pointer_arrays(&ir::field_address_spaces(&ir::renumber_types(&ir::constant_inits(&ir::vector_compares_as_bools(&ir::threadgroup_statics(&text)?))), &program.records), &program.pointer_arrays), &types, &program.functions)?;
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::order_constants(&text, &code.constants.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
     let text = ir::samplers(&text, &code.samplers, air);

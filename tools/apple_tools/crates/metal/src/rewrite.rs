@@ -45,10 +45,14 @@ macro_rules! regex {
     }};
 }
 
-pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, String> {
+/// `ast_mode`: the AST pass's source (address spaces as attributes, attributes as
+/// annotations); `mangle`: the one of those for Xcode's mangled names.
+pub fn rewrite(src: &str, ast_mode: bool, mangle: bool, air: (u32, u32)) -> Result<Rewritten, String> {
     let mut r = Rewritten::default();
     let mut s = attributes(src);
-    s = host_names(&s, &mut r.instances);
+    // the AST pass reads instances' signatures alone: their bodies, in address spaces our
+    // stdlib's flat functions don't take, would make the specializations invalid
+    s = host_names(&s, &mut r.instances, !(ast_mode && !mangle));
     s = threadgroup_locals(&s, ast_mode);
     s = replace_all(&s, regex!(r"\b__msl_stage_(kernel|vertex|fragment)\b"), |c| {
         format!("static __MSL_ATTR(\"msl.stage:{}\") __attribute__((always_inline, used))", &c[1])
@@ -190,7 +194,7 @@ fn joined_literals(p: &str) -> String {
 
 /// `template [[host_name("n")]] kernel F_t f<args>;` -> an explicit instantiation;
 /// the entry point named n calls f<args> (llama.cpp and MLX declare kernels this way).
-fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
+fn host_names(src: &str, out: &mut Vec<Instance>, bodies: bool) -> String {
     let pat = regex!(r#"\btemplate\s+__MSL_ATTR\("msl:host_name\(\s*\\"([^"\\]+)\\"\s*\)"\)\s+__msl_stage_(?:kernel|vertex|fragment)\s+([\w:]+)\s+([\w:]+)\s*<"#);
     let b = src.as_bytes();
     let (mut res, mut pos) = (String::new(), 0);
@@ -231,7 +235,14 @@ fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
         res.push_str(&src[pos..m.start()]);
         // the static_assert names the specialization for ast::program, which
         // clang resolves (typedefs, enumerators, expressions); it makes no code
-        res.push_str(&format!("template {} {}<{}>{params}; static_assert(sizeof(&{}<{}>) > 0, \"msl.instance:{}\");", &c[2], &c[3], args, &c[3], args, &c[1]));
+        // without bodies, no instantiation: the static_assert's operand isn't evaluated
+        let (ty, f) = (&c[2], &c[3]);
+        if bodies {
+            res.push_str(&format!("template {ty} {f}<{args}>{params}; "));
+        }
+        // the address as the declared function type, where one is (`F_t f<args>;`), to pick among overloads
+        let address = if params.is_empty() { format!("static_cast<{ty} *>(&{f}<{args}>)") } else { format!("&{f}<{args}>") };
+        res.push_str(&format!("static_assert(sizeof({address}) > 0, \"msl.instance:{}\");", &c[1]));
         pos = j + semi + 1;
     }
     res.push_str(&src[pos..]);
@@ -833,7 +844,7 @@ mod tests {
 
     #[test]
     fn casts_and_literals() {
-        let r = rewrite("float4 a = (float4)h + float2(0.5, 1.0).xyxy; half b = 0.5h;", false, (2, 9)).unwrap();
+        let r = rewrite("float4 a = (float4)h + float2(0.5, 1.0).xyxy; half b = 0.5h;", false, false, (2, 9)).unwrap();
         assert!(r.code.contains("metal::__vec<float4>(h)"), "{}", r.code);
         assert!(r.code.contains("metal::__vec<float2>(0.5f, 1.0f)"), "{}", r.code);
         assert!(r.code.contains("((half)0.5)"), "{}", r.code);
