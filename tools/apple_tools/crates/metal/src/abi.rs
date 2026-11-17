@@ -117,7 +117,7 @@ fn plan(sig: &str, ret_void: bool, xcode: Option<&Xcode>, tys: &HashMap<String, 
         let (ty, attrs, _) = parts(p);
         if i == 0 && ret_void && attrs.contains("sret(") {
             if let Some(st) = ty.strip_suffix('*') {
-                if tys.get(st).is_some_and(|b| fields(b).iter().all(|f| scalar_or_vector(f))) {
+                if tys.get(st).is_some_and(|b| fields(b).iter().all(|f| value_field(f))) {
                     sret = Some(st.to_string());
                     out.push(Param::Same);
                     continue;
@@ -131,7 +131,7 @@ fn plan(sig: &str, ret_void: bool, xcode: Option<&Xcode>, tys: &HashMap<String, 
             let fs = tys.get(&st).map(|b| fields(b)).unwrap_or_default();
             if let Some(h) = tys.get(&st).and_then(|b| crate::ir::wrapped_handle(b)) {
                 out.push(Param::Handle(st, h.to_string()));
-            } else if !fs.is_empty() && fs.iter().all(|f| scalar_or_vector(f)) {
+            } else if !fs.is_empty() && fs.iter().all(|f| value_field(f)) {
                 out.push(Param::Expand(st, fs));
             } else {
                 out.push(Param::Same);
@@ -148,6 +148,15 @@ fn plan(sig: &str, ret_void: bool, xcode: Option<&Xcode>, tys: &HashMap<String, 
 
 fn scalar_or_vector(t: &str) -> bool {
     regex!(r"^(?:half|float|double|i\d+|<\d+ x (?:half|float|double|i\d+)>)$").is_match(t.trim())
+}
+
+/// A field Xcode passes and returns as a value: a scalar, a vector or an array of them
+/// (a matrix's columns, `[2 x <2 x float>]`; padding, `[12 x i8]`; probes/p55_aggregate_abi).
+fn value_field(t: &str) -> bool {
+    match regex!(r"^\[\d+ x (.*)\]$").captures(t.trim()) {
+        Some(c) => value_field(c.get(1).unwrap().as_str()),
+        None => scalar_or_vector(t),
+    }
 }
 
 /// Lower the user's functions' signatures and calls (before optimisation).
@@ -223,7 +232,14 @@ pub fn lower(ir: &str, xcode: &HashMap<String, Xcode>, keep_flat: &[String]) -> 
                 (Some(st), Some(ptr)) => {
                     let r = fresh("ret");
                     let head = regex!(r"^%[\w.]+ = ").replace(head, "");
-                    format!("{pre}{indent}{r} = {head}{st} @{}({}){}\n{indent}store {st} {r}, {st}* {ptr}", &c[4], new_args.join(", "), &c[6])
+                    // stored field by field, as Xcode's frontend stores a returned struct
+                    // (a subscript of a returned matrix's column is two extractvalues; probes/p55_aggregate_abi)
+                    let mut store = String::new();
+                    for (i, ft) in tys.get(st).map(|b| fields(b)).unwrap_or_default().iter().enumerate() {
+                        let (x, g) = (fresh("rf"), fresh("rp"));
+                        store += &format!("\n{indent}{x} = extractvalue {st} {r}, {i}\n{indent}{g} = getelementptr inbounds {st}, {st}* {ptr}, i32 0, i32 {i}\n{indent}store {ft} {x}, {ft}* {g}");
+                    }
+                    format!("{pre}{indent}{r} = {head}{st} @{}({}){}{store}", &c[4], new_args.join(", "), &c[6])
                 }
                 _ => format!("{pre}{indent}{head}{} @{}({}){}", &c[3], &c[4], new_args.join(", "), &c[6]),
             }
