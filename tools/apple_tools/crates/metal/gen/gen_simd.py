@@ -55,18 +55,20 @@ def emit():
                    ' long2 st = transpose ? long2{(long)elements_per_row, 1} : long2{1, (long)elements_per_row};'
                    ' long2 o = transpose ? long2{(long)origin.y, (long)origin.x} : long2{(long)origin.x, (long)origin.y};'
                    ' __air_sgm_store_%s(m.__m, dst, long2{8, 8}, st, o); }' % (AI, t, t, e))
-    out.append('template <class T, int R, int C> %s simdgroup_matrix<T, R, C> make_filled_simdgroup_matrix(T v);' % AI)
+    out.append('template <class T, int R, int C = R> %s simdgroup_matrix<T, R, C> make_filled_simdgroup_matrix(T v);' % AI)
     for t, e in (('float', 'f32'), ('half', 'f16')):
         out.append('template <> %s simdgroup_matrix<%s, 8, 8> make_filled_simdgroup_matrix<%s, 8, 8>(%s v) { return {__air_sgm_fill_%s(v)}; }' % (AI, t, t, t, e))
     # multiply-accumulate: d = a * b + c, named by result and operand types (observed)
-    for d, a, c in (('float', 'float', 'float'), ('float', 'half', 'float'), ('half', 'half', 'half')):
-        de, ae, ce = ('v64f32' if d == 'float' else 'v64f16'), ('v64f32' if a == 'float' else 'v64f16'), ('v64f32' if c == 'float' else 'v64f16')
-        fn = '__air_sgm_mac_%s_%s_%s' % (d, a, c)
+    # (every float/half combination: llama.cpp mixes them; the names follow the observed ones)
+    ty = ('float', 'half')
+    for d, a, b, c in ((d, a, b, c) for d in ty for a in ty for b in ty for c in ty):
+        el = lambda t: 'v64f32' if t == 'float' else 'v64f16'
+        fn = '__air_sgm_mac_%s_%s_%s_%s' % (d, a, b, c)
         out.append('extern "C" __attribute__((convergent)) __vector<%s, 64> %s(__vector<%s, 64>, __vector<%s, 64>, __vector<%s, 64>) __AIR("air.simdgroup_matrix_8x8_multiply_accumulate.%s.%s.%s.%s");'
-                   % (d, fn, a, a, c, de, ae, ae, ce))
+                   % (d, fn, a, b, c, el(d), el(a), el(b), el(c)))
         out.append('%s void simdgroup_multiply_accumulate(thread simdgroup_matrix<%s, 8, 8> &r, simdgroup_matrix<%s, 8, 8> a, simdgroup_matrix<%s, 8, 8> b, simdgroup_matrix<%s, 8, 8> c) { r.__m = %s(a.__m, b.__m, c.__m); }'
-                   % (AI, d, a, a, c, fn))
-        if a == c:
+                   % (AI, d, a, b, c, fn))
+        if a == b == c == d:
             # the accumulator a zero matrix, as Xcode's header passes it (a constant, not a fill)
             out.append('%s void simdgroup_multiply(thread simdgroup_matrix<%s, 8, 8> &r, simdgroup_matrix<%s, 8, 8> a, simdgroup_matrix<%s, 8, 8> b) { r.__m = %s(a.__m, b.__m, (__vector<%s, 64>)0); }'
                        % (AI, d, a, a, fn, c))

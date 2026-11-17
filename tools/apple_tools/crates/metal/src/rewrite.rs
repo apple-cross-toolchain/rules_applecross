@@ -55,10 +55,15 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
     s = function_constants(&s, &mut r);
     s = program_scope_constants(&s);
     s = direct_init(&s);
-    s = replace_all(&s, regex!(r"\b((?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234])\s*\("), |c| {
-        format!("metal::__vec<{}>(", &c[1])
-    });
+    // (not a declarator's parentheses: `thread float2 (*b)[2]`)
+    s = replace_where(
+        &s,
+        regex!(r"\b((?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234])\s*\("),
+        |s, c| !matches!(s[c.get(0).unwrap().end()..].trim_start().as_bytes().first(), Some(b'*' | b'&')),
+        |c| format!("metal::__vec<{}>(", &c[1]),
+    );
     s = vector_casts(&s);
+    s = typed_casts(&s);
     s = lazy_vector_args(&s);
     s = replace_where(
         &s,
@@ -134,19 +139,21 @@ fn attributes(src: &str) -> String {
             cur.push(ch);
         }
         parts.push(cur.trim().to_string());
-        parts
+        let attrs = parts
             .iter()
             .filter(|p| !p.is_empty())
             .map(|p| format!("__MSL_ATTR(\"msl:{}\")", p.replace('"', "\\\"")))
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(" ");
+        // set apart from the name it follows (`uint3 tgpig[[threadgroup_position_in_grid]]`)
+        format!(" {attrs}")
     })
 }
 
 /// `template [[host_name("n")]] kernel F_t f<args>;` -> an explicit instantiation;
 /// the entry point named n calls f<args> (llama.cpp and MLX declare kernels this way).
 fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
-    let pat = regex!(r#"\btemplate\s+__MSL_ATTR\("msl:host_name\(\\"([^"\\]+)\\"\)"\)\s+__msl_stage_(?:kernel|vertex|fragment)\s+([\w:]+)\s+([\w:]+)\s*<"#);
+    let pat = regex!(r#"\btemplate\s+__MSL_ATTR\("msl:host_name\(\s*\\"([^"\\]+)\\"\s*\)"\)\s+__msl_stage_(?:kernel|vertex|fragment)\s+([\w:]+)\s+([\w:]+)\s*<"#);
     let b = src.as_bytes();
     let (mut res, mut pos) = (String::new(), 0);
     for c in pat.captures_iter(src) {
@@ -165,13 +172,26 @@ fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
         }
         let rest = &src[j..];
         let semi = rest.len() - rest.trim_start().len();
-        if !rest[semi..].starts_with(';') {
+        // `F_t f<args>;`, or with the signature written out: `void f<args>(params);`
+        let mut params = String::new();
+        let mut semi = semi;
+        if rest[semi..].starts_with('(') {
+            let open = j + semi;
+            let close = balanced(b, open, b'(', b')');
+            let after = &src[close..];
+            let s2 = after.len() - after.trim_start().len();
+            if !after[s2..].starts_with(';') {
+                continue;
+            }
+            params = src[open..close].to_string();
+            semi = close - j + s2;
+        } else if !rest[semi..].starts_with(';') {
             continue;
         }
         let args = src[m.end()..j - 1].to_string();
         out.push(Instance { host_name: c[1].to_string(), template: c[3].to_string(), args: args.clone() });
         res.push_str(&src[pos..m.start()]);
-        res.push_str(&format!("template {} {}<{}>;", &c[2], &c[3], args));
+        res.push_str(&format!("template {} {}<{}>{params};", &c[2], &c[3], args));
         pos = j + semi + 1;
     }
     res.push_str(&src[pos..]);
@@ -179,7 +199,7 @@ fn host_names(src: &str, out: &mut Vec<Instance>) -> String {
 }
 
 /// Codegen's `constant` (`__msl_constant`): `static` at program scope, where MSL's
-/// variables are constants (and so internal, as Xcode's are), else nothing.
+/// variables are constants (and so internal, as Xcode's are), else `const`.
 fn program_scope_constants(src: &str) -> String {
     const MARK: &str = "__msl_constant";
     if !src.contains(MARK) {
@@ -212,7 +232,8 @@ fn program_scope_constants(src: &str) -> String {
                 let program_scope = parens == 0 && !braces.iter().any(|s| *s);
                 // static rather than const: internal as Xcode's, without clang's invariant.start after a dynamic initialiser
                 let already = regex!(r"\bstatic\s*$").is_match(&out);
-                out.push_str(if program_scope && !already { "static" } else { "" });
+                // elsewhere read-only (MSL's constant memory is): a pointer to it takes a constant array
+                out.push_str(if program_scope { if already { "" } else { "static" } } else { "const" });
                 i += MARK.len();
                 last = i;
                 continue;
@@ -296,6 +317,91 @@ pub fn operand_end(src: &str, mut i: usize) -> Option<usize> {
 
 /// MSL's (float4)h converts element by element; clang would reinterpret.
 /// (T)expr becomes metal::__vec<T>(expr) (or __mat for matrices).
+/// `(T) x` where T is a template's type parameter or a typedef's name (`(q4_t) q4[i]`):
+/// `metal::__cast<T>(x)`, which converts a vector element by element as MSL does.
+fn typed_casts(src: &str) -> String {
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    for c in regex!(r"\btemplate\s*<([^<>]*)>").captures_iter(src) {
+        for p in regex!(r"\b(?:typename|class)\s+([A-Za-z_]\w*)").captures_iter(&c[1]) {
+            names.insert(p[1].to_string());
+        }
+    }
+    // (a typedef's or alias's name only when it names a vector or a matrix)
+    let vector = regex!(r"\b(?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float|bfloat)[234](?:x[234])?\b|ext_vector_type|__vector<|\bmatrix<|\bvec<");
+    for c in regex!(r"\btypedef\s+([^;{}()]*?)\b([A-Za-z_]\w*)\s*;").captures_iter(src) {
+        if vector.is_match(&c[1]) {
+            names.insert(c[2].to_string());
+        }
+    }
+    for c in regex!(r"\busing\s+([A-Za-z_]\w*)\s*=\s*([^;]*);").captures_iter(src) {
+        if vector.is_match(&c[2]) {
+            names.insert(c[1].to_string());
+        }
+    }
+    // (MSL's own vector and matrix names have rewrites of their own)
+    names.retain(|n| !regex!(r"^(?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float|bfloat)[234](?:x[234])?$").is_match(n));
+    if names.is_empty() {
+        return src.to_string();
+    }
+    let b = src.as_bytes();
+    let (mut out, mut pos) = (String::new(), 0);
+    for c in regex!(r"\(\s*([A-Za-z_]\w*)\s*\)").captures_iter(src) {
+        let m = c.get(0).unwrap();
+        if m.start() < pos || !names.contains(&c[1]) {
+            continue;
+        }
+        // a cast: followed by an operand, and not a call's or a declaration's parentheses
+        let mut k = m.end();
+        while k < b.len() && b[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        if k >= b.len() || !(is_word(b[k]) || b"(!~+-*&.".contains(&b[k])) {
+            continue;
+        }
+        let mut p = m.start();
+        while p > 0 && b[p - 1].is_ascii_whitespace() {
+            p -= 1;
+        }
+        if p > 0 && (is_word(b[p - 1]) || b")]>".contains(&b[p - 1])) {
+            continue;
+        }
+        let Some(end) = operand_end(src, m.end()) else { continue };
+        out.push_str(&src[pos..m.start()]);
+        out.push_str(&format!("metal::__cast<{}>({})", &c[1], src[m.end()..end].trim()));
+        pos = end;
+    }
+    out.push_str(&src[pos..]);
+    // and the functional form, `T(x)` with one argument (not a call through a member, a
+    // qualified name or a declaration's type)
+    let src = out;
+    let b = src.as_bytes();
+    let (mut out, mut pos) = (String::new(), 0);
+    for c in regex!(r"\b([A-Za-z_]\w*)\(").captures_iter(&src) {
+        let m = c.get(0).unwrap();
+        if m.start() < pos || !names.contains(&c[1]) {
+            continue;
+        }
+        let mut p = m.start();
+        while p > 0 && b[p - 1].is_ascii_whitespace() {
+            p -= 1;
+        }
+        if p > 0 && (is_word(b[p - 1]) || b".>:~#".contains(&b[p - 1])) {
+            continue;
+        }
+        let open = m.end() - 1;
+        let close = balanced(b, open, b'(', b')');
+        let inner = &src[open + 1..close - 1];
+        if inner.trim().is_empty() || split_args(inner).len() != 1 {
+            continue;
+        }
+        out.push_str(&src[pos..m.start()]);
+        out.push_str(&format!("metal::__cast<{}>({})", &c[1], inner.trim()));
+        pos = close;
+    }
+    out.push_str(&src[pos..]);
+    out
+}
+
 fn vector_casts(src: &str) -> String {
     let cast = regex!(r"\(\s*((?:metal::)?(?:(?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234](?:x[234])?))\s*\)");
     let b = src.as_bytes();
@@ -591,7 +697,7 @@ mod tests {
         let out = program_scope_constants(src);
         assert!(out.starts_with("static float k = 2;"));
         assert!(out.contains("namespace n { static int j = 1; }"));
-        assert!(out.contains("void f( float *p) {  float *q = p; }"));
+        assert!(out.contains("void f(const float *p) { const float *q = p; }"), "{out}");
         assert!(out.contains("static  bool b = true;"));
     }
 
@@ -606,6 +712,13 @@ mod tests {
     }
 
     #[test]
+    fn an_attribute_right_after_a_name_stays_apart_from_it() {
+        let out = attributes("kernel void k(uint3 tgpig[[threadgroup_position_in_grid]], ushort3 t [[thread_position_in_threadgroup]])");
+        assert!(out.contains("uint3 tgpig __MSL_ATTR(\"msl:threadgroup_position_in_grid\"),"), "{out}");
+        assert!(!direct_init(&out).contains("__vec"), "{out}");
+    }
+
+    #[test]
     fn declarations_with_constructor_arguments() {
         let out = direct_init("float4x4 m(s);\nfloat2x2 n(s, 1, 2, s), k;\nfloat4 v(1.0f);\nfloat4x4 helper(float4x4 a, float4x4 b);\nfloat4 f();\ntypedef float float2 __attribute__((ext_vector_type(2)));");
         assert!(out.contains("float4x4 m = metal::__mat<metal::float4x4>(s);"), "{out}");
@@ -615,4 +728,5 @@ mod tests {
         assert!(out.contains("float4 f();"), "{out}");
         assert!(out.contains("typedef float float2 __attribute__((ext_vector_type(2)));"), "{out}");
     }
+
 }

@@ -93,6 +93,12 @@ template <class V, class A, class = typename enable_if<(__elem<A>::n > 1)>::type
   else if constexpr (__is_same(typename __elem<A>::type, bool)) return (V)a;   // a bool vector converts as a whole
   else return __convert_each<V>(a, (typename __mkseq<__elem<V>::n>::type *)0);
 }
+// (T) x where T names a vector type through a typedef or a template parameter: MSL converts
+// element by element (a C-style cast between clang's vectors would reinterpret the bits)
+template <class To, class From> __attribute__((always_inline)) constexpr To __cast(From x) {
+  if constexpr (__elem<To>::n > 1 && __elem<From>::n > 1) return __vec<To>(x);
+  else return (To)x;
+}
 template <class V, class A, int... I, int... U> __attribute__((always_inline)) V __widen(A a, __seq<I...> *, __seq<U...> *) {
   return __builtin_shufflevector(a, a, I..., ((void)U, -1)...);
 }
@@ -323,6 +329,7 @@ template <class T, int R> struct __column {
     matrix() = default; \
     constexpr matrix(PARAMS) : columns{ARGS} {} \
     template <int... I> matrix(const __column_list<__vector<T, R>> &l, __seq<I...> *) { ((columns[I] = I < l.n ? l.p[I] : __vector<T, R>(0)), ...); } \
+    template <class U> explicit matrix(const matrix<U, C, R> &m) { __mat_convert(*this, m, (typename __mkseq<C>::type *)0); } \
     __attribute__((always_inline)) __vector<T, R> &operator[](int c) { return columns[c]; } \
     __attribute__((always_inline)) const __vector<T, R> &operator[](int c) const { return columns[c]; } \
   };
