@@ -2,7 +2,7 @@
 //! Runs on preprocessed text (the stdlib included), once for the AST pass and
 //! once for codegen.
 
-use crate::text::{at, balanced, before, is_word, replace_all, replace_where, split_args};
+use crate::text::{at, balanced, before, cast_keyword_before, is_word, replace_all, replace_where, split_source_args as split_args};
 use regex::{Captures, Regex};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -317,6 +317,33 @@ pub fn operand_end(src: &str, mut i: usize) -> Option<usize> {
 
 /// MSL's (float4)h converts element by element; clang would reinterpret.
 /// (T)expr becomes metal::__vec<T>(expr) (or __mat for matrices).
+/// The spans of preprocessed text that come from our own headers (by clang's line markers:
+/// `# 1 "<scratch>/include/metal_stdlib"`), which the user's rewrites leave alone.
+fn our_header_spans(src: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut open: Option<usize> = None;
+    for m in regex!(r#"(?m)^# \d+ "([^"]*)""#).captures_iter(src) {
+        let at = m.get(0).unwrap().start();
+        let ours = regex!(r"/include/(?:metal_stdlib|__metal_\w+\.h|simd/|TargetConditionals\.h)").is_match(&m[1]);
+        match (ours, open) {
+            (true, None) => open = Some(at),
+            (false, Some(s)) => {
+                spans.push((s, at));
+                open = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = open {
+        spans.push((s, src.len()));
+    }
+    spans
+}
+
+fn in_spans(spans: &[(usize, usize)], i: usize) -> bool {
+    spans.iter().any(|(s, e)| *s <= i && i < *e)
+}
+
 /// `(T) x` where T is a template's type parameter or a typedef's name (`(q4_t) q4[i]`):
 /// `metal::__cast<T>(x)`, which converts a vector element by element as MSL does.
 fn typed_casts(src: &str) -> String {
@@ -343,11 +370,12 @@ fn typed_casts(src: &str) -> String {
     if names.is_empty() {
         return src.to_string();
     }
+    let ours = our_header_spans(src);
     let b = src.as_bytes();
     let (mut out, mut pos) = (String::new(), 0);
     for c in regex!(r"\(\s*([A-Za-z_]\w*)\s*\)").captures_iter(src) {
         let m = c.get(0).unwrap();
-        if m.start() < pos || !names.contains(&c[1]) {
+        if m.start() < pos || !names.contains(&c[1]) || in_spans(&ours, m.start()) {
             continue;
         }
         // a cast: followed by an operand, and not a call's or a declaration's parentheses
@@ -362,7 +390,7 @@ fn typed_casts(src: &str) -> String {
         while p > 0 && b[p - 1].is_ascii_whitespace() {
             p -= 1;
         }
-        if p > 0 && (is_word(b[p - 1]) || b")]>".contains(&b[p - 1])) {
+        if p > 0 && (is_word(b[p - 1]) || b")]>".contains(&b[p - 1])) && !(cast_keyword_before(src, p) && !in_spans(&ours, p)) {
             continue;
         }
         let Some(end) = operand_end(src, m.end()) else { continue };
@@ -374,11 +402,12 @@ fn typed_casts(src: &str) -> String {
     // and the functional form, `T(x)` with one argument (not a call through a member, a
     // qualified name or a declaration's type)
     let src = out;
+    let ours = our_header_spans(&src);
     let b = src.as_bytes();
     let (mut out, mut pos) = (String::new(), 0);
     for c in regex!(r"\b([A-Za-z_]\w*)\(").captures_iter(&src) {
         let m = c.get(0).unwrap();
-        if m.start() < pos || !names.contains(&c[1]) {
+        if m.start() < pos || !names.contains(&c[1]) || in_spans(&ours, m.start()) {
             continue;
         }
         let mut p = m.start();
@@ -403,6 +432,7 @@ fn typed_casts(src: &str) -> String {
 }
 
 fn vector_casts(src: &str) -> String {
+    let ours = our_header_spans(src);
     let cast = regex!(r"\(\s*((?:metal::)?(?:(?:bool|char|uchar|short|ushort|int|uint|long|ulong|half|float)[234](?:x[234])?))\s*\)");
     let b = src.as_bytes();
     let (mut out, mut pos) = (String::new(), 0);
@@ -424,7 +454,7 @@ fn vector_casts(src: &str) -> String {
         while p > 0 && b[p - 1].is_ascii_whitespace() {
             p -= 1;
         }
-        if p > 0 && (is_word(b[p - 1]) || b")]>".contains(&b[p - 1])) {
+        if p > 0 && (is_word(b[p - 1]) || b")]>".contains(&b[p - 1])) && !(cast_keyword_before(src, p) && !in_spans(&ours, p)) {
             continue;
         }
         let Some(end) = operand_end(src, m.end()) else { continue };
