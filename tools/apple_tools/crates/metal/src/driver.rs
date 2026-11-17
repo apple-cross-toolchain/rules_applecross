@@ -242,7 +242,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // the module simplification: the stdlib is inlined and constants folded by its end, so
     // conversions become air.convert calls, the markers resolve and moved values are frozen there,
     // before the inliner's walk and the one attribute inference (as Xcode's frontend has them)
-    let text = step(&text, "o2a", &[O2.0.as_str(), "-assume-default-is-flat-addrspace"])?;
+    let text = step(&ir::conditional_address_spaces(&text), "o2a", &[O2.0.as_str(), "-assume-default-is-flat-addrspace"])?;
     let text = intrinsics::apply(&ir::air_conversions(&text));
     let text = ir::freeze_moved_values(&ir::resolve_as_markers(&ir::resolve_atomics(&ir::drop_scope_decls(&text))?)?);
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;

@@ -79,6 +79,54 @@ pub fn threadgroup_statics(ir: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// A null among a flat pointer phi's or select's values whose others all come from one
+/// address space (`cond ? (threadgroup int *) p : nullptr`, llama.cpp's fa_vec kernels) is
+/// that space's null, as MSL has it: codegen's flat null would leave the pointer flat to
+/// infer-address-spaces (null counts as flat), and in the flat space a null check of
+/// `p + 8` folds away. As that space's null cast to flat, the inference in the inliner's
+/// walk gives the pointer its space where Xcode's AIRConditionalAddressSpace does
+/// (probes/p56_select_null).
+pub fn conditional_address_spaces(ir: &str) -> String {
+    map_functions(ir, |f| {
+        let space_of = |v: &str| address_space_of(f, v, 0);
+        let phi = regex!(r"(?m)^(\s+%[\w.]+ = phi )(.+)\* (\[.*\])$");
+        let f = replace_all(f, phi, |c: &Captures| {
+            let ty = &c[2];
+            let incoming: Vec<String> = regex!(r"\[ ([^,\]]+), %[\w.]+ \]").captures_iter(&c[3]).map(|k| k[1].to_string()).collect();
+            let spaces: BTreeSet<Option<String>> = incoming.iter().filter(|v| *v != "null").map(|v| space_of(v)).collect();
+            match (ty.contains("addrspace"), incoming.iter().any(|v| v == "null"), spaces.iter().next()) {
+                (false, true, Some(Some(n))) if spaces.len() == 1 => {
+                    format!("{}{ty}* {}", &c[1], c[3].replace("[ null,", &format!("[ addrspacecast ({ty} addrspace({n})* null to {ty}*),")))
+                }
+                _ => c[0].to_string(),
+            }
+        });
+        // and a comparison of such a pointer with null (`p != nullptr`) is made in that space, as
+        // Xcode's front end makes it: flat, `p + 8 != null` would fold before the spaces are inferred
+        let icmp = regex!(r"(?m)^(\s+)(%[\w.]+) = icmp (eq|ne) (.+)\* (%[\w.]+), null$");
+        let f = replace_all(&f, icmp, |c: &Captures| match (c[4].contains("addrspace"), space_of(&c[5])) {
+            (false, Some(n)) => {
+                let (ind, name, op, ty, v) = (&c[1], &c[2], &c[3], &c[4], &c[5]);
+                format!("{ind}{name}.as = addrspacecast {ty}* {v} to {ty} addrspace({n})*\n{ind}{name} = icmp {op} {ty} addrspace({n})* {name}.as, null")
+            }
+            _ => c[0].to_string(),
+        });
+        let select = regex!(r"(?m)^(\s+%[\w.]+ = select (?:[a-z]+ )*i1 [^,]+, )(.+)\* (%[\w.]+|null), (.+)\* (%[\w.]+|null)$");
+        replace_all(&f, select, |c: &Captures| {
+            let (ty, a, b) = (&c[2], &c[3], &c[5]);
+            let other = if a == "null" { b } else { a };
+            match (ty.contains("addrspace") || ty != &c[4] || (a == "null") == (b == "null"), space_of(other)) {
+                (false, Some(n)) => {
+                    let null = format!("addrspacecast ({ty} addrspace({n})* null to {ty}*)");
+                    let (a, b) = if a == "null" { (null.as_str(), b) } else { (a, null.as_str()) };
+                    format!("{}{ty}* {a}, {ty}* {b}", &c[1])
+                }
+                _ => c[0].to_string(),
+            }
+        })
+    })
+}
+
 /// Xcode's frontend freezes the value a SIMD-group or quad-group function moves
 /// between threads (shuffles and broadcasts; not reductions or scans) before
 /// the call. clang 15's C++ has no freeze; inside our stdlib's wrapper it would
@@ -413,8 +461,22 @@ pub fn address_space_of(body: &str, v: &str, depth: u32) -> Option<String> {
     if let Some(c) = regex!(r"^getelementptr (?:inbounds )?.*?, .*?\* (%[\w.]+)").captures(&rhs).or_else(|| regex!(r"^bitcast .*?\* (%[\w.]+) to ").captures(&rhs)) {
         return address_space_of(body, &c[1], depth + 1);
     }
-    if let Some(c) = regex!(r"^(?:phi|select) .*?(%[\w.]+)").captures(&rhs) {
+    // a select's values (not its condition), the first whose space is known
+    if let Some(c) = regex!(r"^select (?:[a-z]+ )*i1 [^,]+, (.*)$").captures(&rhs) {
+        return split_args(&c[1]).iter().find_map(|a| {
+            let v = crate::abi::parts(a).2;
+            if v.starts_with('%') { address_space_of(body, &v, depth + 1) } else { global_space(&v) }
+        });
+    }
+    if let Some(c) = regex!(r"^phi .*?(%[\w.]+)").captures(&rhs) {
         return address_space_of(body, &c[1], depth + 1);
+    }
+    // a load from a local the pointer was stored to once (before SROA: an inlined parameter's copy)
+    if let Some(c) = regex!(r"^load [^,]+, [^,]+\* (%[\w.]+)").captures(&rhs) {
+        let stores: Vec<String> = Regex::new(&format!(r"(?m)^\s+store [^,]+ (%[\w.]+|null), [^,]+\* {}(?:,|$)", regex::escape(&c[1]))).unwrap().captures_iter(body).map(|s| s[1].to_string()).collect();
+        if let [v] = stores.as_slice() {
+            return address_space_of(body, v, depth + 1);
+        }
     }
     None
 }
@@ -1927,6 +1989,27 @@ mod tests {
         // passed to a call: left as it is
         assert!(out.contains("  %q = alloca [2 x half*], align 8\n"), "{out}");
         assert!(out.contains("call void @g(half** %d)"), "{out}");
+    }
+
+    #[test]
+    fn a_pointers_space_is_followed_through_a_local_stored_once() {
+        let body = "  %slot = alloca i32*, align 8\n  %0 = addrspacecast i32 addrspace(3)* %tg to i32*\n  store i32* %0, i32** %slot, align 8\n  %l = load i32*, i32** %slot, align 8\n  %twice = alloca i32*, align 8\n  store i32* %0, i32** %twice, align 8\n  store i32* %a, i32** %twice, align 8\n  %m = load i32*, i32** %twice, align 8\n";
+        assert_eq!(address_space_of(body, "%l", 0).as_deref(), Some("3"));
+        let sel = "  %0 = addrspacecast i32 addrspace(3)* %tg to i32*\n  %c = icmp ugt i32 %n, 4\n  %s = select i1 %c, i32* %0, i32* null\n";
+        assert_eq!(address_space_of(sel, "%s", 0).as_deref(), Some("3"));
+        assert_eq!(address_space_of(body, "%m", 0), None);
+    }
+
+    #[test]
+    fn a_null_beside_one_spaces_pointers_is_that_spaces() {
+        let ir = "define void @f(i32 addrspace(3)* %tg, i1 %c) {\nentry:\n  %0 = addrspacecast i32 addrspace(3)* %tg to i32*\n  br i1 %c, label %t, label %j\nt:\n  %p = getelementptr inbounds i32, i32* %0, i64 8\n  br label %j\nj:\n  %cond = phi i32* [ %p, %t ], [ null, %entry ]\n  %s = select i1 %c, i32* null, i32* %p\n  %q = phi i32* [ %a, %t ], [ null, %entry ]\n  ret void\n}\n";
+        let out = conditional_address_spaces(ir);
+        assert!(out.contains("  %cond = phi i32* [ %p, %t ], [ addrspacecast (i32 addrspace(3)* null to i32*), %entry ]\n"), "{out}");
+        assert!(out.contains("  %s = select i1 %c, i32* addrspacecast (i32 addrspace(3)* null to i32*), i32* %p\n"), "{out}");
+        // one whose other values' space isn't known stays as it is
+        assert!(out.contains("  %q = phi i32* [ %a, %t ], [ null, %entry ]\n"), "{out}");
+        let cmp = conditional_address_spaces("define void @g(i32 addrspace(3)* %tg) {\n  %0 = addrspacecast i32 addrspace(3)* %tg to i32*\n  %z = icmp ne i32* %0, null\n  ret void\n}\n");
+        assert!(cmp.contains("  %z.as = addrspacecast i32* %0 to i32 addrspace(3)*\n  %z = icmp ne i32 addrspace(3)* %z.as, null\n"), "{cmp}");
     }
 
     #[test]
