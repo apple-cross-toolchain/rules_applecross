@@ -213,9 +213,13 @@ template <int N, int... K> __attribute__((always_inline)) inline bool __any(__bo
 template <int N, int... K> __attribute__((always_inline)) inline bool __all(__boolvec<N> b, __seq<K...> *) { bool r = true; ((r = r && b[K]), ...); return r; }
 template <class V, int N, int... K> __attribute__((always_inline)) inline V __select(V a, V b, __boolvec<N> c, __seq<K...> *) { V r = a; ((c[K] ? (void)(r[K] = b[K]) : (void)0), ...); return r; }
 template <int N> __attribute__((always_inline)) inline bool any(__boolvec<N> b) { return __any(b, (typename __mkseq<N>::type *)0); }
+// a comparison's own result (an integer mask: a lane is true where it isn't 0) as a bool vector
+template <class M, class = typename enable_if<(__elem<M>::n > 1) && !__is_same(typename __elem<M>::type, float) && !__is_same(typename __elem<M>::type, half) && !__is_same(typename __elem<M>::type, bool)>::type> __attribute__((always_inline)) inline bool any(M m) { return any(__boolvec<__elem<M>::n>(m)); }
+template <class M, class = typename enable_if<(__elem<M>::n > 1) && !__is_same(typename __elem<M>::type, float) && !__is_same(typename __elem<M>::type, half) && !__is_same(typename __elem<M>::type, bool)>::type> __attribute__((always_inline)) inline bool all(M m) { return all(__boolvec<__elem<M>::n>(m)); }
 template <int N> __attribute__((always_inline)) inline bool all(__boolvec<N> b) { return __all(b, (typename __mkseq<N>::type *)0); }
 template <class V, int N> __attribute__((always_inline)) inline V select(V a, V b, __boolvec<N> c) { return __select(a, b, c, (typename __mkseq<N>::type *)0); }
 template <class V> __attribute__((always_inline)) inline V select(V a, V b, bool c) { return c ? b : a; }
+template <class V, class M, class = typename enable_if<(__elem<M>::n > 1) && __elem<M>::n == __elem<V>::n && !__is_same(typename __elem<M>::type, float) && !__is_same(typename __elem<M>::type, half) && !__is_same(typename __elem<M>::type, bool)>::type> __attribute__((always_inline)) inline V select(V a, V b, M c) { return select(a, b, __boolvec<__elem<M>::n>(c)); }
 
 // pack/unpack (observed names)
 extern "C" uint __air_pack_unorm4x8_v4f32(float4) __AIR("air.pack.unorm4x8.v4f32");

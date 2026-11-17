@@ -27,6 +27,56 @@ pub fn split_args(s: &str) -> Vec<String> {
     out
 }
 
+/// `split_args` for source text: `<` opens a template's arguments only right after a name
+/// (`f<2>`; not `a < b`, not `<<`) and `>` closes only an open one, so comparisons in an
+/// argument (`float(any(a > b))`) don't take the commas after them.
+pub fn split_source_args(s: &str) -> Vec<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let (mut depth, mut angles) = (0i32, Vec::<i32>::new());
+    let mut cur = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        let ch = b[i] as char;
+        if ch == ',' && depth == 0 && angles.is_empty() {
+            out.push(cur.trim().to_string());
+            cur.clear();
+            i += 1;
+            continue;
+        }
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            '<' if i > 0 && is_word(b[i - 1]) && b.get(i + 1) != Some(&b'<') && b.get(i + 1) != Some(&b'=') => angles.push(depth),
+            '<' if b.get(i + 1) == Some(&b'<') => {
+                cur.push_str("<<");
+                i += 2;
+                continue;
+            }
+            '>' if angles.last() == Some(&depth) && b.get(i + 1) != Some(&b'=') => {
+                angles.pop();
+            }
+            _ => {}
+        }
+        cur.push(ch);
+        i += 1;
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_string());
+    }
+    out
+}
+
+/// Whether the word ending at `p` (exclusive) is a keyword that a cast's parentheses may follow.
+pub fn cast_keyword_before(s: &str, p: usize) -> bool {
+    let b = s.as_bytes();
+    let mut q = p;
+    while q > 0 && is_word(b[q - 1]) {
+        q -= 1;
+    }
+    matches!(&s[q..p], "return" | "case" | "else" | "do" | "throw" | "co_return" | "co_yield")
+}
+
 pub fn is_word(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
