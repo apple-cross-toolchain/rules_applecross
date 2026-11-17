@@ -45,7 +45,8 @@ pub fn renumber_types(ir: &str) -> String {
     if helpers.is_empty() {
         return ir.to_string();
     }
-    replace_all(ir, regex!(r#"%("?)((?:struct|class|union)\.[^"\s,*()]*?)\.(\d+)("?)([\s,*()]|$)"#), |c| {
+    // (a use ends where a type can: `[2 x %"struct.S.2"]`, `{ %struct.S.2}`)
+    replace_all(ir, regex!(r#"%("?)((?:struct|class|union)\.[^"\s,*()]*?)\.(\d+)("?)([\s,*()\]}>]|$)"#), |c| {
         let n: u64 = c[3].parse().unwrap();
         // the counter is the module's, so a helper's number is its own
         let n = if helpers.contains(&n) || c[1] != c[4] { n } else { n - helpers.iter().filter(|&&h| h < n).count() as u64 };
@@ -592,9 +593,34 @@ pub fn place_inlined_returns(ir: &str, returns: &[(String, String, Option<String
         let to = blocks.iter().position(|x| x.0 == after).unwrap();
         blocks.insert(to + 1, b);
         let body: String = blocks.into_iter().map(|b| b.1).collect();
-        ir.replace_range(start..end, &format!("{head}\n{body}"));
+        // the block moved ahead of others: its unnamed values numbered in order again
+        ir.replace_range(start..end, &renumber_values(&format!("{head}\n{body}")));
     }
     ir
+}
+
+/// A function's unnamed values (`%7 = `, `7:`, its parameters) numbered in the order
+/// they're defined, as LLVM's parser requires: the k-th takes the k-th smallest number
+/// they had, so the numbers an unlabeled entry block takes are kept.
+fn renumber_values(f: &str) -> String {
+    let (head, body) = f.split_once('\n').unwrap_or((f, ""));
+    let params = head.find('(').map(|o| &head[o..balanced(head.as_bytes(), o, b'(', b')')]).unwrap_or("");
+    let mut defs: Vec<u64> = regex!(r"%(\d+)\b").captures_iter(params).filter_map(|c| c[1].parse().ok()).collect();
+    defs.extend(regex!(r"(?m)^(?:\s+%(\d+) = |(\d+):)").captures_iter(body).filter_map(|c| c.get(1).or(c.get(2))?.as_str().parse::<u64>().ok()));
+    let mut sorted = defs.clone();
+    sorted.sort_unstable();
+    if sorted == defs {
+        return f.to_string();
+    }
+    let map: std::collections::HashMap<u64, u64> = defs.iter().copied().zip(sorted).collect();
+    let renamed = |s: &str| {
+        replace_all(s, regex!(r"(?m)%(\d+)\b|^(\d+):"), |c| match (c.get(1), c.get(2)) {
+            (Some(n), _) => format!("%{}", n.as_str().parse().ok().and_then(|n: u64| map.get(&n)).map_or(n.as_str().to_string(), |m| m.to_string())),
+            (_, Some(n)) => format!("{}:", n.as_str().parse().ok().and_then(|n: u64| map.get(&n)).map_or(n.as_str().to_string(), |m| m.to_string())),
+            _ => c[0].to_string(),
+        })
+    };
+    format!("{}\n{}", renamed(head), renamed(body))
 }
 
 /// The inliner puts an inlined function's allocas first in the entry block, before the
@@ -1596,6 +1622,9 @@ mod tests {
         assert!(out.contains("%\"struct.metal::__vbuild.0\" = type"));
         assert!(out.contains("%\"struct.metal::texture2d.3\" = type"));
         assert!(out.contains("%\"struct.metal::matrix.2\" = type { [4 x <2 x float>] }"));
+        // inside an array type
+        let ir = "%\"struct.metal::__vbuild.0\" = type { i32 }\n%\"struct.metal::sgm.1\" = type { <64 x half> }\n  %mq = alloca [2 x %\"struct.metal::sgm.1\"], align 128\n";
+        assert!(renumber_types(ir).contains("alloca [2 x %\"struct.metal::sgm.0\"], align 128"), "{}", renumber_types(ir));
     }
 
     #[test]
@@ -1738,6 +1767,14 @@ mod tests {
         let inlined = "define void @k() {\nentry:\n  %x.i = alloca i32, align 4\n  %y = alloca i32, align 4\n  call void @llvm.lifetime.start.p0i8(i64 4, i8* %0)\n  br label %for.cond.i\nfor.cond.i:\n  br i1 %c, label %for.body.i, label %_ZL1fv.exit\nfor.body.i:\n  br label %for.cond.i\n_ZL1fv.exit:\n  ret void\n}\n";
         let out = own_allocas_first(&place_inlined_returns(&drop_inliner_lifetimes(inlined), &places), &["k".to_string()]);
         assert_eq!(out, "define void @k() {\nentry:\n  %y = alloca i32, align 4\n  %x.i = alloca i32, align 4\n  br label %for.cond.i\nfor.cond.i:\n  br i1 %c, label %for.body.i, label %_ZL1fv.exit\n_ZL1fv.exit:\n  ret void\nfor.body.i:\n  br label %for.cond.i\n}\n");
+    }
+
+    #[test]
+    fn values_moved_ahead_are_numbered_in_order() {
+        let f = "define void @k(i32 %0) {\n  %2 = add i32 %0, 1\n  br label %b\nc:\n  %4 = add i32 %3, 1\n  ret void\nb:\n  %3 = add i32 %2, 1\n  br label %c\n}\n";
+        assert_eq!(renumber_values(f), "define void @k(i32 %0) {\n  %2 = add i32 %0, 1\n  br label %b\nc:\n  %3 = add i32 %4, 1\n  ret void\nb:\n  %4 = add i32 %2, 1\n  br label %c\n}\n");
+        let ordered = "define void @k() {\n  %0 = add i32 1, 1\n  %1 = add i32 %0, 1\n  ret void\n}\n";
+        assert_eq!(renumber_values(ordered), ordered);
     }
 
     #[test]

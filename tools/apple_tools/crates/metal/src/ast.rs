@@ -87,6 +87,39 @@ pub struct Program {
     pub typedefs: HashMap<String, String>,
     /// Function constants' declared types, by name.
     pub constant_types: HashMap<String, String>,
+    /// Function constants' namespaces (`metalpetal::`), by name.
+    pub constant_namespaces: HashMap<String, String>,
+}
+
+/// A stage function's buffers, textures and samplers written without an index (llama.cpp's
+/// `device const char * src0,`) get one, as Xcode's assign them: in parameter order, each
+/// kind counting on from 0 past the indices written out.
+pub fn implicit_resources(program: &mut Program) {
+    for f in program.functions.iter_mut() {
+        let explicit = |kind: &str, ps: &[Param]| -> std::collections::BTreeSet<u32> {
+            ps.iter().filter_map(|p| p.attrs.first()).filter_map(|a| regex!(r"^(\w+)\((\d+)").captures(a).filter(|c| &c[1] == kind).map(|c| c[2].parse().unwrap())).collect()
+        };
+        let mut used: std::collections::HashMap<&str, std::collections::BTreeSet<u32>> = ["buffer", "texture", "sampler"].into_iter().map(|k| (k, explicit(k, &f.params))).collect();
+        for p in f.params.iter_mut() {
+            if !p.attrs.is_empty() || p.stage_in {
+                continue;
+            }
+            let t = format!("{} {}", p.ty, p.desugared);
+            let kind = if regex!(r"\b(?:texture|depth)\w*<|_texture_\w+_t\b").is_match(&t) {
+                "texture"
+            } else if regex!(r"\bsampler\b").is_match(&t) && !t.contains('*') {
+                "sampler"
+            } else if regex!(r"[*&]\s*$").is_match(p.ty.trim_end()) && regex!(r"address_space\((?:1|2)\)|\b(?:device|constant)\b").is_match(&p.ty) {
+                "buffer"
+            } else {
+                continue;
+            };
+            let set = used.get_mut(kind).unwrap();
+            let n = (0..).find(|n| !set.contains(n)).unwrap();
+            set.insert(n);
+            p.attrs.insert(0, format!("{kind}({n})"));
+        }
+    }
 }
 
 fn params(n: &Node) -> Vec<Param> {
@@ -107,25 +140,54 @@ fn stage_of(n: &Node) -> Option<String> {
 pub fn program(text: &str, instances: &[Instance]) -> Program {
     let mut p = Program::default();
     let mut last_anon: Option<Vec<Param>> = None;
-    walk(&tree(text), "", instances, &mut p, &mut last_anon);
+    let root = tree(text);
+    let mut specs = HashMap::new();
+    instance_specs(&root, &mut specs);
+    walk(&root, "", instances, &specs, &mut p, &mut last_anon);
     p
 }
 
-fn walk(n: &Node, ns: &str, instances: &[Instance], p: &mut Program, last_anon: &mut Option<Vec<Param>>) {
+/// Each instance's specialization (host name -> its FunctionDecl's address), from
+/// the `static_assert(sizeof(&f<args>) > 0, "msl.instance:<host name>")` the
+/// rewrite puts after it. Specializations are listed in the order clang made
+/// them, which a `decltype(f<args>)` ahead of the instances changes.
+fn instance_specs(n: &Node, out: &mut HashMap<String, String>) {
+    fn find<'a>(n: &'a Node, f: &dyn Fn(&'a Node) -> Option<&'a str>) -> Option<&'a str> {
+        f(n).or_else(|| n.kids.iter().find_map(|k| find(k, f)))
+    }
+    for k in &n.kids {
+        if k.kind == "StaticAssertDecl" {
+            let name = find(k, &|n| (n.kind == "StringLiteral").then(|| regex!(r#""msl\.instance:([^"]*)"$"#).captures(&n.rest)?.get(1).map(|m| m.as_str())).flatten());
+            let addr = find(k, &|n| (n.kind == "DeclRefExpr").then(|| regex!(r" Function (0x[0-9a-f]+) ").captures(&n.rest)?.get(1).map(|m| m.as_str())).flatten());
+            if let (Some(name), Some(addr)) = (name, addr) {
+                out.insert(name.to_string(), addr.to_string());
+            }
+        } else {
+            instance_specs(k, out);
+        }
+    }
+}
+
+fn address(n: &Node) -> Option<&str> {
+    n.rest.split_whitespace().next()
+}
+
+fn walk(n: &Node, ns: &str, instances: &[Instance], specs: &HashMap<String, String>, p: &mut Program, last_anon: &mut Option<Vec<Param>>) {
     for k in &n.kids {
         match k.kind.as_str() {
-            "TranslationUnitDecl" | "LinkageSpecDecl" => walk(k, ns, instances, p, last_anon),
+            "TranslationUnitDecl" | "LinkageSpecDecl" => walk(k, ns, instances, specs, p, last_anon),
             "NamespaceDecl" => {
                 let inner = match regex!(r" (\w+)$").captures(&k.rest) {
                     Some(c) => format!("{ns}{}::", &c[1]),
                     None => ns.to_string(),
                 };
-                walk(k, &inner, instances, p, last_anon)
+                walk(k, &inner, instances, specs, p, last_anon)
             }
             "VarDecl" if k.rest.contains("__msl_fcinit_") => {
                 if let Some((vn, vt, _)) = decl(&k.rest) {
                     if let Some(c) = regex!(r"^__msl_fcinit_\d+_(\w+)$").captures(&vn) {
                         p.constant_types.insert(c[1].to_string(), vt);
+                        p.constant_namespaces.insert(c[1].to_string(), ns.to_string());
                     }
                 }
             }
@@ -164,8 +226,9 @@ fn walk(n: &Node, ns: &str, instances: &[Instance], p: &mut Program, last_anon: 
                 let Some(pattern) = decls.first() else { continue };
                 let Some(stage) = stage_of(pattern) else { continue };
                 let Some((tname, _, _)) = decl(&pattern.rest) else { continue };
-                let mine: Vec<&Instance> = instances.iter().filter(|i| i.template.rsplit("::").next() == Some(tname.as_str())).collect();
-                for (spec, inst) in decls[1..].iter().zip(mine) {
+                let mine = instances.iter().filter(|i| i.template.rsplit("::").next() == Some(tname.as_str()));
+                for inst in mine {
+                    let Some(spec) = specs.get(&inst.host_name).and_then(|a| decls[1..].iter().find(|d| address(d) == Some(a.as_str()))) else { continue };
                     let Some((_, ty, _)) = decl(&spec.rest) else { continue };
                     p.functions.push(Function {
                         name: inst.host_name.clone(),
@@ -185,5 +248,37 @@ fn walk(n: &Node, ns: &str, instances: &[Instance], p: &mut Program, last_anon: 
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instances_take_their_own_specialization_whatever_the_order_clang_made_them() {
+        // `typedef decltype(f<64, half>)` made f<64, half> before the instance f<128, float>
+        let dump = r#"TranslationUnitDecl 0x10 <<invalid sloc>> <invalid sloc>
+|-FunctionTemplateDecl 0x1 <t.cpp:4:1, col:76> col:56 f
+| |-FunctionDecl 0x2 <col:51, col:76> col:56 f 'void (T *)'
+| | `-AnnotateAttr 0x3 <col:1> "msl.stage:kernel"
+| |-FunctionDecl 0x4 <col:51, col:76> col:56 referenced f 'void (half *)'
+| | `-ParmVarDecl 0x5 <col:10> col:16 p 'half *'
+| `-FunctionDecl 0x6 <col:51, col:76> col:56 f 'void (float *)'
+|   `-ParmVarDecl 0x7 <col:10> col:16 p 'float *'
+`-StaticAssertDecl 0x8 <line:9:1, col:60> col:1
+  |-BinaryOperator 0x9 <col:15, col:40> 'bool' '>'
+  | |-UnaryExprOrTypeTraitExpr 0xa <col:15, col:36> 'unsigned long' sizeof
+  | | `-UnaryOperator 0xb <col:22, col:35> 'void (*)(float *)' prefix '&' cannot overflow
+  | |   `-DeclRefExpr 0xc <col:23, col:35> 'void (float *)' lvalue Function 0x6 'f' 'void (float *)' (FunctionTemplate 0x1 'f') non_odr_use_unevaluated
+  | `-IntegerLiteral 0xd <col:40> 'int' 0
+  `-StringLiteral 0xe <col:43> 'const char[19]' lvalue "msl.instance:f_128"
+"#;
+        let inst = Instance { host_name: "f_128".into(), template: "f".into(), args: "128, float".into() };
+        let p = program(dump, &[inst]);
+        assert_eq!(p.functions.len(), 1);
+        assert_eq!(p.functions[0].name, "f_128");
+        assert_eq!(p.functions[0].call, "f<128, float>");
+        assert_eq!(p.functions[0].params[0].ty, "float *");
     }
 }

@@ -126,9 +126,14 @@ pub fn to_air(ir: &str, x: &Inputs) -> Result<String, String> {
             continue;
         }
         let mty = x.types.msl_name(x.program.constant_types.get(name).map(String::as_str).unwrap_or(""));
-        let new = format!("_Z{}{}.MTL_FC_INIT_{idx}_{}", name.len(), name, itanium(&mty));
+        // named as declared, in its namespace (`_ZN10metalpetal1xE`, "metalpetal::x")
+        let ns = x.program.constant_namespaces.get(name).map(String::as_str).unwrap_or("");
+        let parts: Vec<&str> = ns.split("::").filter(|p| !p.is_empty()).chain([name.as_str()]).collect();
+        let source = parts.iter().map(|p| format!("{}{p}", p.len())).collect::<String>();
+        let mangled = if parts.len() > 1 { format!("_ZN{source}E") } else { format!("_Z{source}") };
+        let new = format!("{mangled}.MTL_FC_INIT_{idx}_{}", itanium(&mty));
         ir = refs.replace_all(&ir, format!("@{new}").as_str()).to_string();
-        fcnodes.push(d.md.add(format!("!{{{lty} addrspace(2)* @{new}, {}, {}, i32 {idx}}}", s(&mty), s(name))));
+        fcnodes.push(d.md.add(format!("!{{{lty} addrspace(2)* @{new}, {}, {}, i32 {idx}}}", s(&mty), s(&parts.join("::")))));
     }
     // constexpr samplers
     let mut snodes = Vec::new();

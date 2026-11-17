@@ -35,6 +35,13 @@ def emit():
             for fn in LANE:
                 out.append('%s %s __air_%s_%s(%s, ushort) __AIR("air.%s.%s");' % (CV, ty, fn, c, ty, fn, s))
                 out.append('%s %s %s(%s x, ushort l) { return __air_%s_%s(x, l); }' % (AI, ty, fn, ty, fn, c))
+    # simd_ballot: one bit per lane as an i64 (observed in llama.cpp's argsort);
+    # simd_vote holds it and converts to its vote_t explicitly
+    out.append('struct simd_vote { typedef uint64_t vote_t; vote_t __v;'
+               ' %s explicit constexpr simd_vote(vote_t v = 0) : __v(v) {}'
+               ' %s explicit constexpr operator vote_t() const { return __v; } };' % (AI.replace(' inline', ''), AI.replace(' inline', '')))
+    out.append('%s ulong __air_simd_ballot(bool) __AIR("air.simd_ballot.i64");' % CV)
+    out.append('%s simd_vote simd_ballot(bool b) { return simd_vote(__air_simd_ballot(b)); }' % AI)
     # 8x8 simdgroup matrices: a <64 x T> per thread; load/store name the pointer's
     # address space (p1 device, p3 threadgroup): %AS% is filled in by the driver.
     # thread_elements()[k] is element k of the per-thread vector (observed: extractelement)

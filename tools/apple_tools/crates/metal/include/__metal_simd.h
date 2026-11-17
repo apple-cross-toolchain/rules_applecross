@@ -1104,6 +1104,9 @@ extern "C" __attribute__((convergent)) ushort4 __air_quad_shuffle_xor_u_v4i16(us
 __attribute__((always_inline)) inline ushort4 quad_shuffle_xor(ushort4 x, ushort l) { return __air_quad_shuffle_xor_u_v4i16(x, l); }
 extern "C" __attribute__((convergent)) ushort4 __air_quad_broadcast_u_v4i16(ushort4, ushort) __AIR("air.quad_broadcast.u.v4i16");
 __attribute__((always_inline)) inline ushort4 quad_broadcast(ushort4 x, ushort l) { return __air_quad_broadcast_u_v4i16(x, l); }
+struct simd_vote { typedef uint64_t vote_t; vote_t __v; __attribute__((always_inline)) explicit constexpr simd_vote(vote_t v = 0) : __v(v) {} __attribute__((always_inline)) explicit constexpr operator vote_t() const { return __v; } };
+extern "C" __attribute__((convergent)) ulong __air_simd_ballot(bool) __AIR("air.simd_ballot.i64");
+__attribute__((always_inline)) inline simd_vote simd_ballot(bool b) { return simd_vote(__air_simd_ballot(b)); }
 template <class T> struct __sgm_elements { T *p; __attribute__((always_inline)) T &operator[](int k) const { return p[k]; } };
 template <class T, int R, int C> struct simdgroup_matrix { __vector<T, R * C> __m; __attribute__((always_inline)) __sgm_elements<T> thread_elements() { return {(T *)&__m}; } };
 typedef simdgroup_matrix<float, 8, 8> simdgroup_float8x8;
