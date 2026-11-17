@@ -194,7 +194,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // Xcode's emits the entry points), not after the file: what they call is declared in
     // Xcode's order; the list itself goes
     let text = regex::Regex::new(r"(?m)^@llvm\.(?:compiler\.)?used = .*\n").unwrap().replace_all(&text, "").to_string();
-    let text = ir::direct_struct_returns(&ir::field_address_spaces(&ir::renumber_types(&ir::constant_inits(&text)), &program.records), &types, &program.functions)?;
+    let text = ir::direct_struct_returns(&ir::field_address_spaces(&ir::renumber_types(&ir::constant_inits(&ir::vector_compares_as_bools(&text))), &program.records), &types, &program.functions)?;
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::order_constants(&text, &code.constants.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
     let text = ir::samplers(&text, &code.samplers, air);
