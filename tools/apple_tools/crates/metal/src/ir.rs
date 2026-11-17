@@ -1090,6 +1090,103 @@ fn constant_init_stores(ind: &str, align: u64, dest: &str, ty: &str, var: &str, 
     Some(out.trim_end_matches('\n').to_string())
 }
 
+/// Local arrays of pointers into an address space (`device const half *pm[NQ];`): codegen's
+/// hold flat pointers, Xcode's pointers in their space (`alloca [2 x half addrspace(1)*]`).
+/// The alloca takes the space and its element addresses follow it; each pointer stored is
+/// cast into the space, each loaded cast back to flat (inferring address spaces carries on
+/// from there). An array used any other way (passed to a call, say) stays as it is.
+pub fn local_pointer_arrays(ir: &str, spaces: &std::collections::HashMap<String, Option<u32>>) -> String {
+    if !spaces.values().any(Option::is_some) {
+        return ir.to_string();
+    }
+    map_functions(ir, |f| {
+        let mut f = f.to_string();
+        let allocas: Vec<(String, String)> = regex!(r"(?m)^\s+%([\w.]+) = alloca (\[.*\]), align \d+$").captures_iter(&f).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+        for (var, ty) in allocas {
+            // clang numbers a name declared again (`pm` -> `pm1`)
+            let space = spaces.get(&var).or_else(|| spaces.get(var.trim_end_matches(|c: char| c.is_ascii_digit()))).copied().flatten();
+            let Some(space) = space else { continue };
+            let mut elem = ty.as_str();
+            while let Some(c) = regex!(r"^\[\d+ x (.*)\]$").captures(elem) {
+                elem = c.get(1).unwrap().as_str();
+            }
+            if !elem.ends_with('*') || elem.matches('*').count() != 1 || elem.contains("addrspace") {
+                continue;
+            }
+            let new = format!("{} addrspace({space})*", &elem[..elem.len() - 1]);
+            if let Some(g) = retype_pointer_array(&f, &var, elem, &new) {
+                f = g;
+            }
+        }
+        f
+    })
+}
+
+/// `f` with the array `%var` (and what's derived from it) holding `new` for `elem`, or None
+/// where it's used in a way that isn't followed.
+fn retype_pointer_array(f: &str, var: &str, elem: &str, new: &str) -> Option<String> {
+    let retype = |line: &str| line.replace(elem, new);
+    let mut tracked: BTreeSet<String> = [format!("%{var}")].into();
+    let mut lines: Vec<String> = f.lines().map(str::to_string).collect();
+    // the values each line names, read once
+    let names: Vec<BTreeSet<String>> = lines.iter().map(|l| regex!(r"%[\w.]+").find_iter(l).map(|m| m.as_str().to_string()).collect()).collect();
+    let mut done = vec![false; lines.len()];
+    let mut n = 0;
+    // to a fixed point: a GEP's uses may come before it in the text
+    loop {
+        let mut changed = false;
+        for i in 0..lines.len() {
+            if done[i] {
+                continue;
+            }
+            let line = lines[i].clone();
+            let line = line.as_str();
+            let Some(v) = names[i].intersection(&tracked).next().cloned() else { continue };
+            let indent = &line[..line.len() - line.trim_start().len()];
+            let body = line.trim_start();
+            if body.starts_with(&format!("{v} = alloca ")) {
+                lines[i] = retype(line);
+            } else if let Some(c) = regex!(r"^(%[\w.]+) = getelementptr inbounds (.*)$").captures(body) {
+                let args = split_args(&c[2]);
+                if args.len() < 2 || crate::abi::parts(&args[1]).2 != v {
+                    return None;
+                }
+                lines[i] = retype(line);
+                tracked.insert(c[1].to_string());
+            } else if let Some(c) = regex!(r"^(%[\w.]+) = bitcast (.*) to i8\*$").captures(body) {
+                if crate::abi::parts(&c[2]).2 != v {
+                    return None;
+                }
+                lines[i] = retype(line);
+            } else if let Some(c) = regex!(r"^(%[\w.]+) = load (.*)$").captures(body) {
+                let args = split_args(&c[2]);
+                if args.len() < 2 || args[0].trim() != elem || crate::abi::parts(&args[1]).2 != v {
+                    return None;
+                }
+                let rest = if args.len() > 2 { format!(", {}", args[2..].join(", ")) } else { String::new() };
+                lines[i] = format!("{indent}{0}.as = load {new}, {new}* {v}{rest}\n{indent}{0} = addrspacecast {new} {0}.as to {elem}", &c[1]);
+            } else if let Some(c) = regex!(r"^store (.*)$").captures(body) {
+                let args = split_args(&c[1]);
+                let (vt, _, value) = crate::abi::parts(&args[0]);
+                if args.len() < 2 || vt != elem || crate::abi::parts(&args[1]).2 != v {
+                    return None;
+                }
+                n += 1;
+                let rest = if args.len() > 2 { format!(", {}", args[2..].join(", ")) } else { String::new() };
+                lines[i] = format!("{indent}%__pa{n}.{var} = addrspacecast {elem} {value} to {new}\n{indent}store {new} %__pa{n}.{var}, {new}* {v}{rest}");
+            } else {
+                return None;
+            }
+            done[i] = true;
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+    Some(lines.join("\n") + if f.ends_with('\n') { "\n" } else { "" })
+}
+
 /// Codegen is flat, and the entry points' parameters give the address spaces back, but a
 /// pointer loaded from memory has none to infer: a struct's pointer and reference fields
 /// (an argument buffer's `device float *data`, `constant uint &n`) get their declared space
@@ -1815,6 +1912,21 @@ mod tests {
         assert_eq!(address_space_of(&body, "%q", 0).as_deref(), Some("3"));
         assert_eq!(address_space_of(&body, g, 0).as_deref(), Some("3"));
         assert_eq!(address_space_of(&body, "%d", 0), None);
+    }
+
+    #[test]
+    fn local_pointer_arrays_hold_pointers_in_their_space() {
+        let spaces: std::collections::HashMap<String, Option<u32>> = [("pm".to_string(), Some(1)), ("q".to_string(), Some(1))].into();
+        let ir = "define void @f(half* %a, i64 %i) {\nentry:\n  %pm = alloca [2 x half*], align 8\n  %q = alloca [2 x half*], align 8\n  %0 = bitcast [2 x half*]* %pm to i8*\n  %arrayidx = getelementptr inbounds [2 x half*], [2 x half*]* %pm, i64 0, i64 %i\n  store half* %a, half** %arrayidx, align 8, !tbaa !3\n  %p = load half*, half** %arrayidx, align 8, !tbaa !3\n  %d = getelementptr inbounds [2 x half*], [2 x half*]* %q, i64 0, i64 0\n  call void @g(half** %d)\n  ret void\n}\n";
+        let out = local_pointer_arrays(ir, &spaces);
+        assert!(out.contains("  %pm = alloca [2 x half addrspace(1)*], align 8\n"), "{out}");
+        assert!(out.contains("  %0 = bitcast [2 x half addrspace(1)*]* %pm to i8*\n"), "{out}");
+        assert!(out.contains("  %arrayidx = getelementptr inbounds [2 x half addrspace(1)*], [2 x half addrspace(1)*]* %pm, i64 0, i64 %i\n"), "{out}");
+        assert!(out.contains("  %__pa1.pm = addrspacecast half* %a to half addrspace(1)*\n  store half addrspace(1)* %__pa1.pm, half addrspace(1)** %arrayidx, align 8, !tbaa !3\n"), "{out}");
+        assert!(out.contains("  %p.as = load half addrspace(1)*, half addrspace(1)** %arrayidx, align 8, !tbaa !3\n  %p = addrspacecast half addrspace(1)* %p.as to half*\n"), "{out}");
+        // passed to a call: left as it is
+        assert!(out.contains("  %q = alloca [2 x half*], align 8\n"), "{out}");
+        assert!(out.contains("call void @g(half** %d)"), "{out}");
     }
 
     #[test]
