@@ -884,6 +884,22 @@ pub fn entries_at_stages(ir: &str, home: &std::collections::HashMap<String, Stri
     ir
 }
 
+/// A comparison of vectors is MSL's bool vector: true converts to 1. clang's vectors give
+/// a mask of -1 (its `sext` of the comparison), so `float4(a < b)` gave -1.0 for true; the
+/// comparison's lanes are zero-extended instead (as Xcode's convert them, unsigned).
+pub fn vector_compares_as_bools(ir: &str) -> String {
+    crate::text::map_functions(ir, |f| {
+        let compares: BTreeSet<&str> = regex!(r"(?m)^\s+(%[\w.]+) = [if]cmp [^\n]*<\d+ x ").captures_iter(f).map(|c| c.get(1).unwrap().as_str()).collect();
+        if compares.is_empty() {
+            return f.to_string();
+        }
+        regex!(r"(?m)^(\s+%[\w.]+ = )sext (<\d+ x i1> (%[\w.]+) to <\d+ x i\d+>)").replace_all(f, |c: &Captures| {
+            if compares.contains(&c[3]) { format!("{}zext {}", &c[1], &c[2]) } else { c[0].to_string() }
+        })
+        .to_string()
+    })
+}
+
 /// Xcode's front end initialises a local aggregate from constants in place, where clang
 /// 15 copies it from a private constant (`@__const.f.v`): element by element (vectors
 /// whole, zeros too) or, when at most a quarter of more than 16 bytes isn't zero, a
@@ -1634,6 +1650,14 @@ mod tests {
         let home = [("s".to_string(), "e".to_string())].into_iter().collect();
         let out = entries_at_stages(ir, &home);
         assert_eq!(out, "define void @a() {\n  ret void\n}\n\n; Function Attrs: y\ndefine void @e() {\n  call void @s()\n  ret void\n}\n\n; Function Attrs: x\ndefine internal void @s() {\n  call void @llvm.lifetime.start.p0i8(i64 4, i8* null)\n  ret void\n}\n\ndeclare void @llvm.lifetime.start.p0i8(i64, i8*)\n\n");
+    }
+
+    #[test]
+    fn a_vector_comparison_is_a_bool_vector() {
+        let ir = "define void @f(<4 x float> %a, <4 x float> %b, <4 x i1> %m) {\n  %c = fcmp olt <4 x float> %a, %b\n  %s = sext <4 x i1> %c to <4 x i32>\n  %t = sext <4 x i1> %m to <4 x i32>\n  ret void\n}\n";
+        let out = vector_compares_as_bools(ir);
+        assert!(out.contains("%s = zext <4 x i1> %c to <4 x i32>"), "{out}");
+        assert!(out.contains("%t = sext <4 x i1> %m to <4 x i32>"), "{out}");
     }
 
     #[test]
