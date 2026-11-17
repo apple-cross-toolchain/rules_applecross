@@ -202,30 +202,46 @@ fn edit_attrs(ir: &str, name: &str, edit: impl Fn(&str) -> String) -> String {
     ir.trim_end().to_string() + &format!("\nattributes #{n} = {{ {new_attrs} }}\n")
 }
 
-/// Each function's "min-legal-vector-width" as clang 15 sets it in Xcode's front
-/// end, before inlining merges them: its vector parameters and return value and
-/// the vectors its calls pass and return. Our own stdlib helpers (metal::__*),
-/// which Xcode's front end has no calls to, don't count.
-pub fn vector_widths(ir: &str) -> String {
-    fn direct(t: &str) -> usize {
+/// Each function's "min-legal-vector-width" as Xcode's front end sets it, before
+/// inlining merges them: its vector parameters and return value, and the widest vector
+/// in what its calls pass and return, arrays and structs included (a matrix passed by
+/// value, `[4 x <4 x float>]`: 128; probes/p48 m_helper_ni, while m_conv returning a
+/// struct with a float4 is 0). An aggregate our calls pass in memory (byval, sret)
+/// counts as Xcode's passes it, directly. Our own stdlib helpers (metal::__*), which
+/// Xcode's front end has no calls to, don't count, nor do an entry point's calls to
+/// the user's stage functions (`stages`): Xcode's entry point is the user's function.
+pub fn vector_widths(ir: &str, stages: &[String]) -> String {
+    let tys: std::collections::HashMap<String, String> = regex!(r#"(?m)^(%[\w.]+|%"[^"]+") = type (.*)$"#).captures_iter(ir).map(|c| (c[1].to_string(), c[2].to_string())).collect();
+    fn width(t: &str, tys: &std::collections::HashMap<String, String>, depth: u32) -> usize {
         let t = t.trim();
-        // a vector, not a pointer to one
-        if regex!(r"^<\d+ x \w+>\s*(?:\*|addrspace)").is_match(t) {
+        if depth > 16 || t.ends_with('*') {
             return 0;
         }
-        regex!(r"^<(\d+) x (half|float|double|bfloat|i\d+)>")
-            .captures(t)
-            .map(|c| {
-                let bits = match &c[2] {
-                    "half" | "bfloat" => 16,
-                    "float" => 32,
-                    "double" => 64,
-                    i => i[1..].parse().unwrap_or(0),
-                };
-                c[1].parse::<usize>().unwrap_or(0) * bits
-            })
-            .unwrap_or(0)
+        if let Some(c) = regex!(r"^<(\d+) x (half|float|double|bfloat|i\d+)>$").captures(t) {
+            let bits = match &c[2] {
+                "half" | "bfloat" => 16,
+                "float" => 32,
+                "double" => 64,
+                i => i[1..].parse().unwrap_or(0),
+            };
+            return c[1].parse::<usize>().unwrap_or(0) * bits;
+        }
+        if let Some(c) = regex!(r"^\[\d+ x (.*)\]$").captures(t) {
+            return width(&c[1], tys, depth + 1);
+        }
+        if let Some(body) = t.strip_prefix("<{").and_then(|b| b.strip_suffix("}>")).or_else(|| t.strip_prefix('{').and_then(|b| b.strip_suffix('}'))) {
+            return split_args(body).iter().map(|f| width(f, tys, depth + 1)).max().unwrap_or(0);
+        }
+        tys.get(t).map_or(0, |b| width(b, tys, depth + 1))
     }
+    // a value's type, or the aggregate a byval or sret pointer stands for
+    let arg = |a: &str| -> usize {
+        let (ty, attrs, _) = crate::abi::parts(a);
+        match regex!(r"\b(?:byval|sret)\((.*?)\)(?: |$)").captures(&attrs) {
+            Some(c) => width(&c[1], &tys, 0),
+            None => width(&ty, &tys, 0),
+        }
+    };
     let helper = regex!(r#"^"?_ZNK?5metal\d+__"#);
     let mut widths: Vec<(usize, usize)> = Vec::new(); // (define line start, width)
     for (start, end) in crate::text::functions(ir) {
@@ -239,18 +255,22 @@ pub fn vector_widths(ir: &str) -> String {
         }
         let open = at + head[at..].find('(').unwrap_or(0);
         let close = crate::text::balanced(head.as_bytes(), open, b'(', b')');
-        let mut w = direct(regex!(r"(<\d+ x \w+>)$").captures(&head[..at]).map(|c| c[1].to_string()).unwrap_or_default().as_str());
+        // the return type: what precedes the name, after the linkage and attributes
+        let ret = crate::abi::parts(regex!(r"^define (?:(?:internal|linkonce_odr|weak_odr|dso_local|hidden|fastcc|noundef|zeroext|signext|nonnull|dereferenceable\(\d+\)|align \d+) )*").replace(&head[..at], "").as_ref()).0;
+        // its own: vectors only
+        let vector = |t: &str| if t.trim().starts_with('<') && !t.trim().starts_with("<{") { width(t, &tys, 0) } else { 0 };
+        let mut w = vector(&ret);
         for a in split_args(&head[open + 1..close - 1]) {
-            w = w.max(direct(&a));
+            w = w.max(vector(&crate::abi::parts(&a).0));
         }
         for l in f.lines().skip(1) {
-            let Some(c) = regex!(r#"\bcall (?:[a-z_]+ )*(<\d+ x \w+>|[^ @]+) @("?[^("]+"?)\((.*)\)"#).captures(l) else { continue };
-            if helper.is_match(&c[2]) {
+            let Some(c) = regex!(r#"\bcall (?:(?:fast|nnan|ninf|nsz|arcp|contract|afn|reassoc|fastcc|noundef|zeroext|signext) )*(.*?) @("?[^("]+"?)\((.*)\)"#).captures(l) else { continue };
+            if helper.is_match(&c[2]) || stages.iter().any(|st| st == c[2].trim_matches('"')) {
                 continue;
             }
-            w = w.max(direct(&c[1]));
+            w = w.max(width(&c[1], &tys, 0));
             for a in split_args(&c[3]) {
-                w = w.max(direct(&a));
+                w = w.max(arg(&a));
             }
         }
         widths.push((start, w));

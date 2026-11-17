@@ -202,7 +202,9 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     // the stage functions are `used` so that the front end emits them where they stand (as
     // Xcode's emits the entry points), not after the file: what they call is declared in
     // Xcode's order; the list itself goes
-    let text = regex::Regex::new(r"(?m)^@llvm\.(?:compiler\.)?used = .*\n").unwrap().replace_all(&text, "").to_string();
+    // and the C calling convention, Xcode's, from the start: GlobalOpt makes an internal function
+    // called only directly fastcc, as Xcode's has it (probes/p48 helper_ni), only from C
+    let text = regex::Regex::new(r"(?m)^@llvm\.(?:compiler\.)?used = .*\n").unwrap().replace_all(&text, "").replace("spir_func ", "");
     let text = ir::direct_struct_returns(&ir::local_pointer_arrays(&ir::field_address_spaces(&ir::renumber_types(&ir::constant_inits(&ir::vector_compares_as_bools(&ir::threadgroup_statics(&text)?))), &program.records), &program.pointer_arrays), &types, &program.functions)?;
     let (text, constants) = ir::function_constants(&ir::direct_returns(&text));
     let text = ir::order_constants(&text, &code.constants.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
@@ -220,7 +222,7 @@ pub fn compile(o: &Options) -> Result<Output, String> {
         }
     }
     let text = crate::abi::lower(&ir::entries_at_stages(&text, &home), &user, &stages);
-    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::handle_tbaa(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text), &entries, &stages), &types.tbaa_struct_fields()))));
+    let text = intrinsics::apply(&ir::user_scalar_conversions(&ir::handle_tbaa(&ir::vector_tbaa(&ir::prepare_flat(&crate::air::vector_widths(&text, &stages), &entries, &stages), &types.tbaa_struct_fields()))));
     let step = |input: &str, name: &str, passes: &[&str]| -> Result<String, String> {
         let i = tmp.0.join(format!("{name}.in.ll"));
         let out = tmp.0.join(format!("{name}.ll"));

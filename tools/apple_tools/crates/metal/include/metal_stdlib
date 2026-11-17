@@ -332,6 +332,9 @@ template <class T, int R> struct __column {
   constexpr __column(__vector<T, R> c) : v(c) {}
   template <class... X> constexpr __column(X... x) : v{(T)x...} {}
 };
+// a column given its place, then its value (defined below), and its non-counting twin
+template <class V> __attribute__((always_inline)) constexpr void _set_column(V &d, V v);
+template <class V> __attribute__((always_inline)) constexpr void __set_column(V &d, V v) { d = v; }
 #define __MSL_MATRIX(C, PARAMS, ARGS) \
   template <class T, int R> struct matrix<T, C, R> { \
     __vector<T, R> columns[C]; \
@@ -395,8 +398,9 @@ template <class T, int C, int R, int... I> __attribute__((always_inline)) inline
   ((m[I] = a[I] - b[I]), ...);
   return m;
 }
-template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator+(const matrix<T, C, R> &a, const matrix<T, C, R> &b) { return __add(a, b, (typename __mkseq<C>::type *)0); }
-template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator-(const matrix<T, C, R> &a, const matrix<T, C, R> &b) { return __subtract(a, b, (typename __mkseq<C>::type *)0); }
+// by value, as Xcode's take them: the operands copied (every column read) before the sums (probes/p48 m_mm_local_stored)
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator+(matrix<T, C, R> a, matrix<T, C, R> b) { return __add(a, b, (typename __mkseq<C>::type *)0); }
+template <class T, int C, int R> __attribute__((always_inline)) inline matrix<T, C, R> operator-(matrix<T, C, R> a, matrix<T, C, R> b) { return __subtract(a, b, (typename __mkseq<C>::type *)0); }
 // row J of a C-column matrix, as a column of its transpose
 template <int J, class T, int C, int R, int... I> __attribute__((always_inline)) inline __vector<T, C> __row(const matrix<T, C, R> &m, __seq<I...> *) { return __vector<T, C>{m[I][J]...}; }
 template <class T, int C, int R, int... J> __attribute__((always_inline)) inline matrix<T, R, C> __transpose(const matrix<T, C, R> &m, __seq<J...> *) {
@@ -411,10 +415,16 @@ template <class T> __attribute__((always_inline)) inline T __det3(T a0, T a1, T 
 }
 template <class T> __attribute__((always_inline)) inline T determinant(const matrix<T, 2, 2> &m) { return __det2(m[0][0], m[0][1], m[1][0], m[1][1]); }
 template <class T> __attribute__((always_inline)) inline T determinant(const matrix<T, 3, 3> &m) { return __det3(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]); }
+// 4x4: each element read where it's used, in the order Xcode's reads them, a column at a
+// time through a function that has its vector width, as Xcode's has it (probes/p48 m_det)
+template <class T> __attribute__((always_inline)) inline __vector<T, 4> _det_column(const matrix<T, 4, 4> &m, int c) { return m[c]; }
+template <class T> __attribute__((always_inline)) inline T __det3x(const matrix<T, 4, 4> &m, int i, int j, int k) {
+  return _det_column(m, 1)[i] * (_det_column(m, 2)[j] * _det_column(m, 3)[k] - _det_column(m, 2)[k] * _det_column(m, 3)[j])
+       - _det_column(m, 1)[j] * (_det_column(m, 2)[i] * _det_column(m, 3)[k] - _det_column(m, 2)[k] * _det_column(m, 3)[i])
+       + _det_column(m, 1)[k] * (_det_column(m, 2)[i] * _det_column(m, 3)[j] - _det_column(m, 2)[j] * _det_column(m, 3)[i]);
+}
 template <class T> __attribute__((always_inline)) inline T determinant(const matrix<T, 4, 4> &m) {
-  const __vector<T, 4> a = m[0], b = m[1], c = m[2], d = m[3];
-  return a[0] * __det3(b[1], b[2], b[3], c[1], c[2], c[3], d[1], d[2], d[3]) - a[1] * __det3(b[0], b[2], b[3], c[0], c[2], c[3], d[0], d[2], d[3])
-       + a[2] * __det3(b[0], b[1], b[3], c[0], c[1], c[3], d[0], d[1], d[3]) - a[3] * __det3(b[0], b[1], b[2], c[0], c[1], c[2], d[0], d[1], d[2]);
+  return _det_column(m, 0)[0] * __det3x(m, 1, 2, 3) - _det_column(m, 0)[1] * __det3x(m, 0, 2, 3) + _det_column(m, 0)[2] * __det3x(m, 0, 1, 3) - _det_column(m, 0)[3] * __det3x(m, 0, 1, 2);
 }
 // T CxR(...) constructors, rewritten by the driver to __mat: C columns, one
 // scalar for the diagonal, or C*R scalars in column order.
@@ -429,8 +439,10 @@ template <class M, int... I, class... A> constexpr M __mat_scalars(__seq<I...> *
 }
 template <int I, class M, class E> constexpr void __mat_diagonal_column(M &m, E d) { m[I] = (E)0; if constexpr (I < __mat_traits<M>::r) m[I][I] = d; }
 template <class M, class E, int... I> constexpr void __mat_diagonal(M &m, E d, __seq<I...> *) { (__mat_diagonal_column<I>(m, d), ...); }
+// each column converted as a vector (one air.convert per column) into its place, as Xcode's
+// conversion constructor does, which has no vector width of its own (probes/p48 m_conv)
 template <class M, class S, int... I> constexpr void __mat_convert(M &m, const S &s, __seq<I...> *) {
-  typedef __mat_traits<M> tr; ((m[I] = __convert_each<__vector<typename tr::E, tr::r>>(s[I], (typename __mkseq<tr::r>::type *)0)), ...);
+  typedef __mat_traits<M> tr; (__set_column(m[I], __vec<__vector<typename tr::E, tr::r>>(s[I])), ...);
 }
 // columns that are packed vectors are read where they are (a copy of one, a buffer's
 // element say, would count as a write to the attribute inference): every element first,
@@ -456,6 +468,8 @@ template <class M, class T, int N, class... P> constexpr M __mat(const __packed<
   static_assert(1 + sizeof...(P) == tr::c && N == tr::r, "a matrix's columns");
   return __mat_packed<M>((typename __mkseq<tr::c>::type *)0, a, p...);
 }
+// another matrix: converted where it is, column by column (not copied first, as by value)
+template <class M, class T, int C, int R> __attribute__((always_inline)) constexpr M __mat(const matrix<T, C, R> &s) { return M(s); }
 template <class M, class... A> constexpr M __mat(A... a) {
   typedef __mat_traits<M> tr; typedef __vector<typename tr::E, tr::r> C;
   if constexpr (sizeof...(A) == tr::c && (... && (__elem<A>::n == tr::r))) {
