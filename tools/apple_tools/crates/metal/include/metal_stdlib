@@ -33,7 +33,8 @@
 #define device
 // resolved by the driver: static at program scope (MSL's program-scope constants are internal), else nothing
 #define constant __msl_constant
-#define threadgroup
+// resolved by the driver: a static in address space 3 for a kernel's variable, else nothing
+#define threadgroup __msl_threadgroup
 #endif
 #ifndef __MSL_MANGLE
 #define thread

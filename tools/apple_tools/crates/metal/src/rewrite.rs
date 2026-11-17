@@ -49,6 +49,7 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
     let mut r = Rewritten::default();
     let mut s = attributes(src);
     s = host_names(&s, &mut r.instances);
+    s = threadgroup_locals(&s, ast_mode);
     s = replace_all(&s, regex!(r"\b__msl_stage_(kernel|vertex|fragment)\b"), |c| {
         format!("static __MSL_ATTR(\"msl.stage:{}\") __attribute__((always_inline, used))", &c[1])
     });
@@ -74,12 +75,6 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
         },
         |c| format!("metal::__mat<metal::{}>(", &c[1]),
     );
-    // The AST pass sees address spaces, and an automatic variable may have none:
-    // its threadgroup locals (`threadgroup float shmem[N];`) static there, or a template
-    // declaring one has no valid specialization for host_names' static_assert to name
-    if ast_mode {
-        s = regex!(r"([;{}]\s*)(__attribute__\(\(address_space\(3\)\)\)\s+[A-Za-z_][\w:]*(?:\s*<[^;{}()]*>)?\s+[A-Za-z_]\w*\s*[\[;=])").replace_all(&s, "${1}static ${2}").to_string();
-    }
     // The AST pass sees attributes as annotations; codegen doesn't see them.
     s = replace_all(&s, regex!(r#"__MSL_ATTR\(("(?:[^"\\]|\\.)*")\)"#), |c| {
         if ast_mode {
@@ -117,7 +112,9 @@ pub fn rewrite(src: &str, ast_mode: bool, air: (u32, u32)) -> Result<Rewritten, 
 fn attributes(src: &str) -> String {
     replace_all(src, regex!(r"\[\[\s*((?:[^\[\]]|\[[^\[\]]*\])*?)\s*\]\]"), |c| {
         // the preprocessor expanded address-space words inside attributes
-        let mut body = replace_all(&c[1], regex!(r"__attribute__\(\(address_space\((\d)\)\)\)"), |a| {
+        // (and codegen's marker: `[[threadgroup(0)]]`)
+        let body = c[1].replace("__msl_threadgroup", "threadgroup");
+        let mut body = replace_all(&body, regex!(r"__attribute__\(\(address_space\((\d)\)\)\)"), |a| {
             match &a[1] {
                 "1" => "device",
                 "2" => "constant",
@@ -287,6 +284,25 @@ fn program_scope_constants(src: &str) -> String {
     }
     out.push_str(&src[last..]);
     out
+}
+
+/// A kernel's threadgroup variables (`threadgroup float shmem[N];`), one per threadgroup:
+/// statics, as Xcode has them (`@_ZZ<kernel>E5shmem = internal addrspace(3) global`).
+/// Codegen has no address spaces, so its are marked by a section the IR pass
+/// (ir::threadgroup_statics) moves to address space 3; elsewhere (pointers,
+/// parameters) the word goes. The AST pass has the address space, which an
+/// automatic variable may not have.
+fn threadgroup_locals(src: &str, ast_mode: bool) -> String {
+    const MARK: &str = "__msl_threadgroup";
+    let decl = regex!(r"([;{}]\s*)(?:__msl_threadgroup|__attribute__\(\(address_space\(3\)\)\))(\s+[A-Za-z_][\w:]*(?:\s*<[^;{}()]*>)?\s+[A-Za-z_]\w*\s*[\[;])");
+    if ast_mode {
+        return decl.replace_all(src, "${1}static __attribute__((address_space(3)))${2}").to_string();
+    }
+    if !src.contains(MARK) {
+        return src.to_string();
+    }
+    let s = decl.replace_all(src, "${1}static __attribute__((section(\"msl.threadgroup\")))${2}");
+    replace_where(&s, regex!(r"__msl_threadgroup\s*"), |s, c| !is_word(before(s, c.get(0).unwrap().start())), |_| String::new())
 }
 
 /// `constant T x [[function_constant(i)]];` becomes an internal global copied at
@@ -865,13 +881,13 @@ mod tests {
     }
 
     #[test]
-    fn threadgroup_locals_are_static_to_the_ast_pass() {
-        let src = "kernel void k(threadgroup float *p [[threadgroup(0)]]) {\n    threadgroup float shmem[N];\n    threadgroup float *q = p;\n}\n";
+    fn threadgroup_locals_are_statics() {
         let tg = "__attribute__((address_space(3)))";
-        let src = src.replace("threadgroup float", &format!("{tg} float"));
-        let ast = rewrite(&src, true, (2, 8)).unwrap().code;
-        assert!(ast.contains(&format!("{{\n    static {tg} float shmem[N];\n    {tg} float *q = p;")), "{ast}");
-        assert!(!rewrite(&src, false, (2, 8)).unwrap().code.contains("static"));
+        let ast = threadgroup_locals(&format!("void k({tg} float *p) {{\n    {tg} float shmem[N];\n    {tg} uint hits;\n    {tg} float *q = p;\n}}\n"), true);
+        assert!(ast.contains(&format!("{{\n    static {tg} float shmem[N];\n    static {tg} uint hits;\n    {tg} float *q = p;")), "{ast}");
+        let code = threadgroup_locals("void k(__msl_threadgroup float *p) {\n    __msl_threadgroup float shmem[N];\n    __msl_threadgroup half4 sq4 [8];\n    __msl_threadgroup float4 *w = (__msl_threadgroup float4 *) shmem;\n}\n", false);
+        assert_eq!(code, "void k(float *p) {\n    static __attribute__((section(\"msl.threadgroup\"))) float shmem[N];\n    static __attribute__((section(\"msl.threadgroup\"))) half4 sq4 [8];\n    float4 *w = (float4 *) shmem;\n}\n");
+        assert!(attributes("float *p [[__msl_threadgroup(0)]]").contains("msl:threadgroup(0)"));
     }
 
     #[test]

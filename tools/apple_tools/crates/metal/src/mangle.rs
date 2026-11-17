@@ -129,18 +129,55 @@ pub fn apply(ir: &str, renames: &HashMap<String, String>) -> String {
     if renames.is_empty() {
         return ir.to_string();
     }
-    // functions and their comdats
+    // functions and their comdats, and their statics (`_ZZ<function>E<name>`; a kernel's
+    // without the L kernel_statics took from it)
     regex!(r"([@$])(_Z[\w.$]+)")
-        .replace_all(ir, |c: &regex::Captures| match renames.get(&c[2]) {
-            Some(n) => format!("{}{n}", &c[1]),
-            None => c[0].to_string(),
+        .replace_all(ir, |c: &regex::Captures| {
+            if let Some(n) = renames.get(&c[2]) {
+                return format!("{}{n}", &c[1]);
+            }
+            let Some(inner) = c[2].strip_prefix("_ZZ") else { return c[0].to_string() };
+            for (k, v) in renames {
+                let (enc, to) = (&k[2..], &v[2..]);
+                for (enc, to) in [(enc, to), (enc.strip_prefix('L').unwrap_or(enc), to.strip_prefix('L').unwrap_or(to))] {
+                    if let Some(rest) = inner.strip_prefix(enc).filter(|r| r.starts_with('E')) {
+                        return format!("{}_ZZ{to}{rest}", &c[1]);
+                    }
+                }
+            }
+            c[0].to_string()
         })
         .to_string()
+}
+
+/// A kernel's statics (its threadgroup variables) named as Xcode names them, in a
+/// function that isn't static (`_ZZ9tg_reduce...E6shared`): we make the stage
+/// functions (`stages`, `_ZL...`) static.
+pub fn kernel_statics(ir: &str, stages: &[String]) -> String {
+    let mut out = ir.to_string();
+    for s in stages {
+        if let Some(enc) = s.strip_prefix("_ZL") {
+            out = out.replace(&format!("@_ZZL{enc}E"), &format!("@_ZZ{enc}E"));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kernels_statics_follow_its_name() {
+        let ir = "@_ZZL1kPfE6shared = internal addrspace(3) global [16 x float] undef\n@_ZZL1hPfE1t = internal global i32 0\n";
+        let ir = kernel_statics(ir, &["_ZL1kPf".to_string()]);
+        assert!(ir.starts_with("@_ZZ1kPfE6shared = "));
+        let renames: HashMap<String, String> = [("_ZL1kPf".to_string(), "_ZL1kPU9MTLdevicef".to_string()), ("_ZL1hPf".to_string(), "_ZL1hPU9MTLdevicef".to_string())].into();
+        let out = apply(&ir, &renames);
+        assert!(out.contains("@_ZZ1kPU9MTLdevicefE6shared = "), "{out}");
+        // a static helper's statics keep its L
+        assert!(out.contains("@_ZZL1hPU9MTLdevicefE1t = "), "{out}");
+    }
 
     #[test]
     fn spells_address_spaces_as_xcode() {

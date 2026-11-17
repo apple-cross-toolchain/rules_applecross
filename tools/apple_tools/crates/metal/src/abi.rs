@@ -71,7 +71,7 @@ fn fields(body: &str) -> Vec<String> {
 
 /// A parameter's type, attributes and name (or an argument's value, which may be
 /// a constant expression: `getelementptr inbounds ([16 x float], ...)`).
-fn parts(p: &str) -> (String, String, String) {
+pub(crate) fn parts(p: &str) -> (String, String, String) {
     let p = p.trim();
     let ty_end = type_end(p);
     let mut rest = &p[ty_end..];
