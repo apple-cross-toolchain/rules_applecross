@@ -54,6 +54,31 @@ pub fn renumber_types(ir: &str) -> String {
     })
 }
 
+/// A kernel's threadgroup variables, statics in rewrite::threadgroup_locals' section:
+/// in address space 3 with no initial value, as Xcode's (`@_ZZ<kernel>E6shared =
+/// internal addrspace(3) global [16 x float] undef`), each use cast to the flat
+/// pointer codegen has (inferring address spaces takes the casts away).
+pub fn threadgroup_statics(ir: &str) -> Result<String, String> {
+    let defs: Vec<(String, String, String)> = regex!(r#"(?m)^@([\w.$]+) = internal global (.*) [^ ,]+, section "msl\.threadgroup", align (\d+)$"#)
+        .captures_iter(ir)
+        .map(|c| (c[1].to_string(), c[2].to_string(), c[3].to_string()))
+        .collect();
+    let mut out = ir.to_string();
+    for (name, ty, align) in defs {
+        // MSL gives a threadgroup variable no initializer: a constructor that runs is one we can't place
+        if out.contains(&format!("@_ZGV{}", &name[2..])) {
+            return Err(format!("threadgroup variable {name} needs a constructor run"));
+        }
+        out = Regex::new(&format!(r#"(?m)^@{} = internal global .*, section "msl\.threadgroup", align \d+$"#, regex::escape(&name)))
+            .unwrap()
+            .replace(&out, format!("@{name} = internal addrspace(3) global {ty} undef, align {align}").as_str())
+            .to_string();
+        let uses = Regex::new(&format!(r"{}\* @{}\b", regex::escape(&ty), regex::escape(&name))).unwrap();
+        out = uses.replace_all(&out, format!("{ty}* addrspacecast ({ty} addrspace(3)* @{name} to {ty}*)").as_str()).to_string();
+    }
+    Ok(out)
+}
+
 /// Xcode's frontend freezes the value a SIMD-group or quad-group function moves
 /// between threads (shuffles and broadcasts; not reductions or scans) before
 /// the call. clang 15's C++ has no freeze; inside our stdlib's wrapper it would
@@ -370,11 +395,18 @@ pub fn nounwind_inlined_calls(ir: &str) -> String {
 
 /// Follow GEPs, bitcasts and casts back to the address space a flat pointer came from.
 pub fn address_space_of(body: &str, v: &str, depth: u32) -> Option<String> {
-    if depth > 32 || !v.starts_with('%') {
+    if depth > 32 {
         return None;
+    }
+    if !v.starts_with('%') {
+        return global_space(v);
     }
     let re = Regex::new(&format!(r"(?m)^\s*{} = (.*)$", regex::escape(v))).unwrap();
     let rhs = re.captures(body)?[1].to_string();
+    // on a constant expression (a threadgroup variable's cast, ir::threadgroup_statics)
+    if regex!(r"^(?:getelementptr|bitcast)\b").is_match(&rhs) && !regex!(r"^(?:getelementptr (?:inbounds )?.*?, .*?\*|bitcast .*?\*) %").is_match(&rhs) {
+        return global_space(&rhs);
+    }
     if let Some(c) = regex!(r"^addrspacecast .*? addrspace\((\d)\)\* (%[\w.]+) to ").captures(&rhs) {
         return Some(c[1].to_string());
     }
@@ -387,6 +419,11 @@ pub fn address_space_of(body: &str, v: &str, depth: u32) -> Option<String> {
     None
 }
 
+/// The address space of the global a constant expression casts to the flat one.
+fn global_space(expr: &str) -> Option<String> {
+    regex!(r"addrspacecast \([^@]*? addrspace\((\d)\)\* @").captures(expr).map(|c| c[1].to_string())
+}
+
 /// `__msl_atomic_<op>_<u|s|n>_<i32|f32>` placeholders -> `air.atomic.<global|local>.<op>[.<u|s>].<i32|f32>`
 /// on the pointer's address space (scope 2 device, 1 threadgroup). Observed shapes: ops (p, v, order,
 /// scope, 0, false); load (p, order, scope, 0, false); cmpxchg.weak (p, expected*, desired, order,
@@ -395,12 +432,16 @@ pub fn resolve_atomics(ir: &str) -> Result<String, String> {
     let mut decls: BTreeSet<(String, String, String, String)> = BTreeSet::new();
     let mut err = None;
     let mut n = 0;
-    let pat = regex!(r"(?m)^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:(?:spir_func|noundef|fast|nnan|ninf|nsz|arcp|contract|afn|reassoc) )*(?:i32|float|void) @__msl_atomic_(\w+?)_([usn])_(i32|f32)\((?:i32|float)\* (?:noundef )?(?:nonnull )?(%[\w.]+), (.*?)\)(?: #\d+)?(?:, ![\w.]+ !\d+)*$");
+    let pat = regex!(r"(?m)^(\s*)(?:(%[\w.]+) = )?(?:tail )?call (?:(?:spir_func|noundef|fast|nnan|ninf|nsz|arcp|contract|afn|reassoc) )*(?:i32|float|void) @__msl_atomic_(\w+?)_([usn])_(i32|f32)\(((?:i32|float)\* .*)\)(?: #\d+)?(?:, ![\w.]+ !\d+)*$");
     let out = map_functions(ir, |body| {
         replace_all(body, pat, |c: &Captures| {
-            let (indent, op, sg, ty, ptr) = (&c[1], &c[3], &c[4], &c[5], &c[6]);
+            let (indent, op, sg, ty) = (&c[1], &c[3], &c[4], &c[5]);
             let lt = if ty == "f32" { "float" } else { "i32" };
-            let args: Vec<String> = split_args(&c[7]).iter().map(|x| regex!(r"^(?:i32|float)\*? (?:noundef )?(?:nonnull )?").replace(x.trim(), "").to_string()).collect();
+            // the pointer a value or a constant expression (a threadgroup variable)
+            let all = split_args(&c[6]);
+            let ptr = crate::abi::parts(&all[0]).2;
+            let ptr = ptr.as_str();
+            let args: Vec<String> = all[1..].iter().map(|x| regex!(r"^(?:i32|float)\*? (?:noundef )?(?:nonnull )?").replace(x.trim(), "").to_string()).collect();
             let space = address_space_of(body, ptr, 0);
             let (kind, scope) = match space.as_deref() {
                 Some("1") => ("global", 2),
@@ -459,23 +500,21 @@ pub fn resolve_as_markers(ir: &str) -> Result<String, String> {
     let mut err = None;
     let mut n = 0;
     let call_re = regex!(r#"(?m)^(\s*)(%[\w.]+ = )?((?:tail )?call [^@]*)@"(air\.[^"]*%AS%[^"]*)"\((.*)\)(?: #\d+)?(?:, ![\w.]+ !\d+)*$"#);
-    let ptr_re = regex!(r"^(.*?)\* (?:(?:noundef|nonnull|nocapture|readonly|writeonly|align \d+) )*(%[\w.]+)$");
     let mut out = map_functions(ir, |body| {
         replace_all(body, call_re, |c: &Captures| {
             let (indent, lhs, head, name) = (&c[1], c.get(2).map(|m| m.as_str()).unwrap_or(""), &c[3], &c[4]);
             let mut parts = split_args(&c[5]);
             for k in 0..parts.len() {
-                let Some(pm) = ptr_re.captures(&parts[k]) else { continue };
-                if pm[1].contains("addrspace") {
-                    continue;
-                }
-                let Some(space) = address_space_of(body, &pm[2], 0) else {
+                // a flat pointer: a value or a constant expression (a threadgroup variable)
+                let (pty, _, value) = crate::abi::parts(&parts[k]);
+                let Some(ty) = pty.strip_suffix('*').filter(|t| !t.contains("addrspace")) else { continue };
+                let Some(space) = address_space_of(body, &value, 0) else {
                     err = Some(format!("{name} on a pointer of unknown address space"));
                     return c[0].to_string();
                 };
                 n += 1;
-                let ty = pm[1].trim().to_string();
-                let cast = format!("{indent}%__asp{n} = addrspacecast {ty}* {} to {ty} addrspace({space})*\n", &pm[2]);
+                let ty = ty.trim().to_string();
+                let cast = format!("{indent}%__asp{n} = addrspacecast {ty}* {value} to {ty} addrspace({space})*\n");
                 parts[k] = format!("{ty} addrspace({space})* %__asp{n}");
                 let real = name.replace("%AS%", &space);
                 used.insert((name.to_string(), real.clone(), k, space));
@@ -1767,6 +1806,24 @@ mod tests {
         let inlined = "define void @k() {\nentry:\n  %x.i = alloca i32, align 4\n  %y = alloca i32, align 4\n  call void @llvm.lifetime.start.p0i8(i64 4, i8* %0)\n  br label %for.cond.i\nfor.cond.i:\n  br i1 %c, label %for.body.i, label %_ZL1fv.exit\nfor.body.i:\n  br label %for.cond.i\n_ZL1fv.exit:\n  ret void\n}\n";
         let out = own_allocas_first(&place_inlined_returns(&drop_inliner_lifetimes(inlined), &places), &["k".to_string()]);
         assert_eq!(out, "define void @k() {\nentry:\n  %y = alloca i32, align 4\n  %x.i = alloca i32, align 4\n  br label %for.cond.i\nfor.cond.i:\n  br i1 %c, label %for.body.i, label %_ZL1fv.exit\n_ZL1fv.exit:\n  ret void\nfor.body.i:\n  br label %for.cond.i\n}\n");
+    }
+
+    #[test]
+    fn a_threadgroup_variables_space_is_found_through_constant_expressions() {
+        let g = "getelementptr inbounds ([16 x half], [16 x half]* addrspacecast ([16 x half] addrspace(3)* @_ZZ1kE2sk to [16 x half]*), i64 0, i64 0)";
+        let body = format!("  %p = getelementptr inbounds half, half* {g}, i64 %i\n  %q = getelementptr inbounds half, half* %p, i64 8\n  %d = getelementptr inbounds half, half* %a, i64 1\n");
+        assert_eq!(address_space_of(&body, "%q", 0).as_deref(), Some("3"));
+        assert_eq!(address_space_of(&body, g, 0).as_deref(), Some("3"));
+        assert_eq!(address_space_of(&body, "%d", 0), None);
+    }
+
+    #[test]
+    fn threadgroup_statics_are_in_address_space_3() {
+        let ir = "@_ZZL1kPfE6shared = internal global [16 x float] zeroinitializer, section \"msl.threadgroup\", align 4\n@_ZZL1kPfE4hits = internal global i32 0, section \"msl.threadgroup\", align 4\ndefine void @_ZL1kPf(float* %p) {\n  %a = getelementptr inbounds [16 x float], [16 x float]* @_ZZL1kPfE6shared, i64 0, i64 1\n  store i32 1, i32* @_ZZL1kPfE4hits, align 4\n  ret void\n}\n";
+        let out = threadgroup_statics(ir).unwrap();
+        assert!(out.starts_with("@_ZZL1kPfE6shared = internal addrspace(3) global [16 x float] undef, align 4\n"), "{out}");
+        assert!(out.contains("[16 x float]* addrspacecast ([16 x float] addrspace(3)* @_ZZL1kPfE6shared to [16 x float]*), i64 0, i64 1"), "{out}");
+        assert!(out.contains("store i32 1, i32* addrspacecast (i32 addrspace(3)* @_ZZL1kPfE4hits to i32*), align 4"), "{out}");
     }
 
     #[test]
