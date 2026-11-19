@@ -147,14 +147,13 @@ diff --git a/apple/internal/entitlements_support.bzl b/apple/internal/entitlemen
 index aae3e1f2..b95f8133 100644
 --- a/apple/internal/entitlements_support.bzl
 +++ b/apple/internal/entitlements_support.bzl
-@@ -407,22 +407,12 @@ def _generate_der_entitlements(
+@@ -407,26 +407,9 @@ def _generate_der_entitlements(
      der_entitlements = actions.declare_file(
          "entitlements/%s.der" % label_name,
      )
 -    apple_support.run(
-+    apple_support.run_shell(
-         actions = actions,
-         apple_fragment = apple_fragment,
+-        actions = actions,
+-        apple_fragment = apple_fragment,
 -        arguments = [
 -            "query",
 -            "-f",
@@ -165,13 +164,19 @@ index aae3e1f2..b95f8133 100644
 -            der_entitlements.path,
 -            "--raw",
 -        ],
-+        command = "touch " + der_entitlements.path,
-         env = shared_environment.default_env,
-         exec_group = mac_exec_group,
+-        env = shared_environment.default_env,
+-        exec_group = mac_exec_group,
 -        executable = "/usr/bin/derq",
-         inputs = [entitlements],
-         mnemonic = "ProcessDEREntitlements",
-         outputs = [der_entitlements],
+-        inputs = [entitlements],
+-        mnemonic = "ProcessDEREntitlements",
+-        outputs = [der_entitlements],
+-        xcode_config = xcode_version_config,
++    actions.write(
++        output = der_entitlements,
++        content = "",
+     )
+     return der_entitlements
+ 
 diff --git a/apple/internal/environment_plist.bzl b/apple/internal/environment_plist.bzl
 index c31321a3..9cf4dcf3 100644
 --- a/apple/internal/environment_plist.bzl
