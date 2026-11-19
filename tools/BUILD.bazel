@@ -34,6 +34,15 @@ py_binary(
     srcs = ["notarize.py"],
 )
 
+# bazel run //tools:check_async_frames -- <App.app | binary>: fails when a Swift async
+# function's code uses more context than its async function pointer allocates, as when a
+# link keeps one module's pointer and another module's body of the same weak function.
+py_binary(
+    name = "check_async_frames",
+    srcs = ["check_async_frames.py"],
+    visibility = ["//visibility:public"],
+)
+
 # Outputs compared with Xcode's, allowing only what Xcode itself varies
 # (docs/clean-room/README.md#determinism).
 py_library(
