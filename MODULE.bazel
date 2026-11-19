@@ -143,10 +143,7 @@ register_toolchains("@apple_cross_toolchain//:all", dev_dependency = True)
 # LLVM 15's clang, opt and llvm-as for Metal shaders under relax_metal: the
 # last LLVM with typed pointers, which AIR uses (tools/apple_tools/crates/metal).
 # Only its tools are used, not registered as a C++ toolchain, and only builds
-# with --//toolchain:relax_metal fetch it.
-llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
-llvm.toolchain(
-    name = "applecross_metal_llvm",
-    llvm_version = "15.0.6",
-)
-use_repo(llvm, "applecross_metal_llvm_llvm")
+# with --//toolchain:relax_metal fetch it. Through our own extension, as
+# toolchains_llvm's is for the root module only (toolchain/metal_llvm.bzl).
+metal_llvm = use_extension("//toolchain:metal_llvm.bzl", "metal_llvm")
+use_repo(metal_llvm, "applecross_metal_llvm_llvm")
