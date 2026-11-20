@@ -971,9 +971,18 @@ fn alias_scopes(ir: &str, entries: &[String], retag_only: bool) -> String {
     ir.trim_end().to_string() + "\n" + &nodes
 }
 
-/// Xcode's alias analysis knows address space 2 is constant: nothing writes it, so its
-/// loads are as invariant to its optimiser as `!invariant.load` makes them to ours. For O2
-/// only (`strip_invariant_loads` after).
+/// Whether Xcode's alias analysis takes address space 2 as constant memory: only while
+/// nothing in the module writes it. A function constant a kernel reads has a program-scope
+/// copy there that the static initializer stores to; with one, a barrier or a call writing
+/// through a pointer is a write to constant buffers too, as to any memory (an unused one is
+/// gone before: probes/p57_constmem_none, _unused, _used).
+pub fn constant_memory_immutable(ir: &str) -> bool {
+    !regex!(r"(?m)^\s+store [^\n]*addrspace\(2\)\*").is_match(ir)
+}
+
+/// Xcode's alias analysis knows address space 2 is constant (`constant_memory_immutable`), so
+/// its loads are as invariant to its optimiser as `!invariant.load` makes them to ours. For
+/// O2 only (`strip_invariant_loads` after).
 pub fn constant_loads_invariant(ir: &str) -> String {
     let next = regex!(r"(?m)^!(\d+) = ").captures_iter(ir).map(|c| c[1].parse::<usize>().unwrap()).max().unwrap_or(0) + 1;
     let out = regex!(r"(?m)^(\s+%[\w.]+ = load [^,]+, [^,]* addrspace\(2\)\* [^,]+, align \d+)(.*)$").replace_all(ir, |c: &Captures| format!("{}, !invariant.load !{next}{}", &c[1], &c[2]));
@@ -1329,8 +1338,9 @@ pub fn field_address_spaces(ir: &str, records: &std::collections::HashMap<String
     })
 }
 
-/// Constant buffers are immutable to Xcode's alias analysis, so its attribute inference
-/// ignores loads from them (not from program-scope constants, which count as reads): for
+/// Constant buffers are immutable to Xcode's alias analysis (`constant_memory_immutable`), so
+/// its attribute inference ignores loads from them (not from program-scope constants, which
+/// count as reads): for
 /// O2 each such load's TBAA tag is a copy marked immutable (TBAA's fourth operand), which
 /// LLVM's own analysis honours, and an untagged one gets an immutable tag of a type of its
 /// own. A copy of a buffer (a memcpy) keeps its tags: one tag covers both its ends, and
@@ -1954,6 +1964,14 @@ mod tests {
         assert!(out.contains("%b = load float, float addrspace(1)* %d, align 4, !tbaa !1\n"));
         assert!(out.ends_with("!2 = !{}\n"));
         assert!(strip_invariant_loads(&out).contains("%a = load float, float addrspace(2)* %c, align 4, !tbaa !1\n"));
+    }
+
+    #[test]
+    fn constant_memory_is_immutable_until_the_module_writes_it() {
+        let kernel = "define void @k(i32 addrspace(2)* %a, i32 addrspace(1)* %o) {\n  %v = load i32, i32 addrspace(2)* %a, align 4\n  store i32 %v, i32 addrspace(1)* %o, align 4\n  ret void\n}\n";
+        assert!(constant_memory_immutable(kernel));
+        let init = "define internal void @_GLOBAL__sub_I_k.metal() section \"air.static_init\" {\n  %1 = load i32, i32 addrspace(2)* @_Z4FC_x.MTL_FC_INIT_0_i, align 4\n  store i32 %1, i32 addrspace(2)* @_ZL4FC_x, align 4\n  ret void\n}\n";
+        assert!(!constant_memory_immutable(&format!("{kernel}{init}")));
     }
 
     #[test]

@@ -248,12 +248,14 @@ pub fn compile(o: &Options) -> Result<Output, String> {
     let text = step(&text, "infer", &["-passes=infer-address-spaces", "-assume-default-is-flat-addrspace"])?;
     // from here the entry points' accesses have Xcode's alias scopes (its AIRAliasScopePropagation
     // runs in the inliner's walk, after the module simplification; written again on what O2 left),
-    // and constant memory is invariant and immutable to O2 (its attribute inference ignores it), as Xcode's alias analysis has it
+    // and constant memory is invariant and immutable to O2 (its attribute inference ignores it) while nothing writes it, as Xcode's alias analysis has it
     // (the inliner adds no noalias scopes for returned values: Xcode's constructors take `this`,
     // which isn't noalias, where ours return through sret, and the scope declarations would
     // count as writes to the attribute inference)
     // the intrinsics resolved since (atomics) get their attributes; Xcode keeps no local value names
-    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::xcode_alias_scopes_kept(&ir::strip_invariant_loads(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&ir::restore_constant_tbaa(&step(&ir::constant_tbaa(&intrinsics::apply(&ir::constant_loads_invariant(&ir::xcode_alias_scopes(&text, &entries)))), "o2b", &[O2.1.as_str(), "-assume-default-is-flat-addrspace", "-enable-noalias-to-md-conversion=false"])?))))), &entries)))));
+    let scoped = ir::xcode_alias_scopes(&text, &entries);
+    let o2b_in = if ir::constant_memory_immutable(&text) { ir::constant_tbaa(&intrinsics::apply(&ir::constant_loads_invariant(&scoped))) } else { intrinsics::apply(&scoped) };
+    let text = ir::place_scalar_conversions(&ir::splat_poison(&ir::scalar_tbaa_struct(&ir::unwrap_packed(&ir::xcode_alias_scopes_kept(&ir::strip_invariant_loads(&intrinsics::apply(&ir::air_conversions(&ir::nounwind_inlined_calls(&ir::restore_constant_tbaa(&step(&o2b_in, "o2b", &[O2.1.as_str(), "-assume-default-is-flat-addrspace", "-enable-noalias-to-md-conversion=false"])?))))), &entries)))));
     let text = crate::abi::strip_comdats(&crate::mangle::apply(&text, &renames));
     // generic pointer parameters: address space 8, and a copy for each space the calls pass
     let specialized = crate::abi::specialize_generic(&text, &crate::mangle::generic_params(&spaced));
