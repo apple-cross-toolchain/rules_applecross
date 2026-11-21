@@ -8343,6 +8343,12 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         item_outlets.push((attr(o, "property")?.to_string(), view_name(destination)));
                         continue;
                     }
+                    // So is one to its own navigation item's title view (a
+                    // corpus storyboard's segmented control).
+                    Some(v) if v.attribute("key") == Some("titleView") && v.parent_element().is_some_and(|i| i.has_tag_name("navigationItem") && i.parent_element() == Some(vc)) => {
+                        item_outlets.push((attr(o, "property")?.to_string(), view_name(destination)));
+                        continue;
+                    }
                     _ => view_name(destination),
                 };
                 vc_outlets.push((attr(o, "property")?.to_string(), name));
