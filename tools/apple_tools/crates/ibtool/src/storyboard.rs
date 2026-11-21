@@ -8326,6 +8326,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         bar_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
                         continue;
                     }
+                    // So is one to its own toolbar items' bar button item, by
+                    // name among them (a corpus storyboard's table view
+                    // controller).
+                    Some(b) if b.has_tag_name("barButtonItem") && b.parent_element().is_some_and(|t| t.has_tag_name("toolbarItems") && t.parent_element() == Some(vc)) => {
+                        bar_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
+                        continue;
+                    }
                     // And one to a custom view of its navigation item's bar
                     // button items in the nib that holds the item, after
                     // the controller's storyboard outlet (two probes).
@@ -9564,7 +9571,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // its identifier; listed after its navigation item, before the
         // item's bar button items, their custom views after those; their
         // custom views' outlets, actions and pairs as the navigation item's
-        // (a corpus storyboard's two identified controllers). Elsewhere, or
+        // (a corpus storyboard's two identified controllers, and a table view
+        // controller's in another). Elsewhere, or
         // beside a navigation item's custom views, segues, recognizers or
         // later settings, they are refused.
         let toolbar: Vec<Node> = children(vc, "toolbarItems").flat_map(|t| children(t, "barButtonItem")).collect();
@@ -9578,7 +9586,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 || vc.attribute("hidesBottomBarWhenPushed").is_some()
                 || extended_edges(vc)?.is_some()
                 || children(vc, "value").next().is_some();
-            if embedded || is_list || vc.attribute("storyboardIdentifier").is_none() || later || !recognizers.is_empty()
+            if embedded || is_collection || vc.attribute("storyboardIdentifier").is_none() || later || !recognizers.is_empty()
                 || !view_segues.is_empty() || !own_segues.is_empty() || !bar_segues.is_empty() || bar_items.iter().any(|b| b.starts_with("view "))
             {
                 return fail("toolbar items here, or beside these settings, segues or recognizers, are not supported by this ibtool");
@@ -9592,6 +9600,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     return fail("a toolbar item's segues are not supported by this ibtool");
                 }
                 values.push(Value::New(object.named(name.clone())));
+                item_ids.push((attr(*b, "id")?.to_string(), name.clone()));
                 toolbar_names.push(name);
                 if let Some(v) = custom_view(*b) {
                     toolbar_views.push(view_name(attr(v, "id")?));
