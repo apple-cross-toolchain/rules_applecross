@@ -1007,7 +1007,12 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     // The separator: a point high at the cell's foot, from 8 points in,
     // and the separator inset's left edge further (three probes; its other
     // edges change nothing).
-    let f = frame(cell)?;
+    // A cell without a frame has the missing frame too (older documents'
+    // cells: two corpus storyboards at toolsVersion 6250, no bounds or centre).
+    let f = match frame_node(cell) {
+        Some(_) => frame(cell)?,
+        None => missing_frame(cell)?,
+    };
     let inset = match child(cell, "inset", "separatorInset") {
         Some(i) => number(attr(i, "minX")?)?,
         None => 0.0,

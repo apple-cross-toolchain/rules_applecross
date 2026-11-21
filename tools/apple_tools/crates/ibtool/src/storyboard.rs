@@ -3824,17 +3824,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some((_, scale)) = minimum {
                 values.push(("UIMinimumScaleFactor", Value::Float(scale)));
             }
-            // A preferred maximum width, a float, after the alignment and
-            // any scale factor (one probe, one corpus storyboard); beside
-            // letter spacing it is refused.
-            if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
-                if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
-                    return fail("a label's preferredMaxLayoutWidth beside letter spacing is not supported by this ibtool");
-                }
-                values.push(("UIPreferredMaxLayoutWidth", Value::Float(number(w)? as f32)));
-            }
             if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
                 values.push(("UIAdjustsLetterSpacingToFit", Value::Bool(true)));
+            }
+            // A preferred maximum width, a float, after the alignment, any
+            // scale factor and any letter spacing (one probe, two corpus
+            // storyboards).
+            if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
+                values.push(("UIPreferredMaxLayoutWidth", Value::Float(number(w)? as f32)));
             }
             values.push(("UIDisableUpdateTextColorOnTraitCollectionChange", Value::Bool(declared_color)));
             // A custom class is swapped in, last (two probes).
@@ -7175,7 +7172,13 @@ fn text_attributes(nib: &mut Nib, t: Node) -> Result<Value, String> {
         if c.attribute("key") != Some("textColor") || children(t, "color").count() > 1 {
             return fail("text attributes other than one text colour and a font are not supported by this ibtool");
         }
-        entries.extend([nib.string("NSColor"), color(nib, c)?]);
+        // As a colour-matched document has it, even in one that isn't: a
+        // calibrated white text colour is `whiteColor` where the bar's own
+        // tint of that white is RGB (a corpus storyboard at toolsVersion 6250).
+        let matched = std::mem::replace(&mut nib.color_matched, true);
+        let text_color = color(nib, c);
+        nib.color_matched = matched;
+        entries.extend([nib.string("NSColor"), text_color?]);
     }
     if let Some(f) = child(t, "fontDescription", "fontDescription") {
         entries.extend([nib.string("NSFont"), font(nib, Some(f), None)?]);
