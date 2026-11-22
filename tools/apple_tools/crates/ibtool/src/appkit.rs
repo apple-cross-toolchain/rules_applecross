@@ -133,6 +133,9 @@ struct Collected {
     /// Views Xcode lays out whatever their frames say (a box's content
     /// view).
     laid_out: HashMap<String, Frame>,
+    /// The alignment rectangles of the views `auto_layout` laid out, before
+    /// their frames' rounding, which their constraints measure.
+    aligned: HashMap<String, Frame>,
     /// Views' accessibility identifiers: (view id, identifier).
     accessibility: Vec<(String, String)>,
     /// Stack views, whose early decoding connectors lead the connections.
@@ -614,6 +617,8 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
                 w: bounds.w,
                 h: bounds.h,
             }),
+            // One laid out, by its alignment rectangle (`auto_layout`).
+            Some(id) if c.aligned.contains_key(id) => Ok(c.aligned[id]),
             Some(id) => {
                 let s = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).find(|s| s.attribute("id") == Some(id));
                 frame(s.ok_or("a constraint on a view other than its view or a subview is not supported by this ibtool")?, "frame")
@@ -1663,6 +1668,199 @@ fn constrained(doc: &Document) -> std::collections::HashSet<String> {
     ids
 }
 
+/// Interface Builder's Auto Layout of content-sized controls as it compiles
+/// a document (probes of labels, push, check box and pop-up buttons, text
+/// fields and sliders in five fonts): a control whose constraints, all
+/// with its superview, place it on each axis by one edge or centre, at the
+/// size its content gives it (`intrinsic`), is laid out there. Its frame is
+/// its alignment rectangle outset by the control's insets, its origin
+/// rounded half up in AppKit's coordinates (48 probes centring labels in
+/// views of even and odd sizes). Other layouts are left to the refusal.
+fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Frame)>, String> {
+    let mut out = HashMap::new();
+    for n in doc.descendants().filter(|d| d.is_element() && d.attribute("translatesAutoresizingMaskIntoConstraints") == Some("NO")) {
+        let Some(id) = n.attribute("id") else { continue };
+        let Some(superview) = n.parent().filter(|p| p.has_tag_name("subviews")).and_then(|p| p.parent()) else { continue };
+        if !matches!(superview.tag_name().name(), "view" | "customView") || superview.attribute("flipped").is_some() {
+            continue;
+        }
+        let Some(sid) = superview.attribute("id") else { continue };
+        let Some((size, insets)) = intrinsic(n)? else { continue };
+        let constraints: Vec<Node> = doc.descendants().filter(|d| d.has_tag_name("constraint")).filter(|k| {
+            let holder = k.parent().and_then(|cs| cs.parent()).and_then(|v| v.attribute("id"));
+            let first = k.attribute("firstItem").or(holder);
+            first == Some(id) || k.attribute("secondItem") == Some(id)
+        }).collect();
+        if constraints.is_empty() {
+            continue;
+        }
+        let sf = frame(superview, "frame")?;
+        let mut axes: [Option<(f64, f64)>; 2] = [None, None];
+        let mut fixed: [Option<f64>; 2] = [None, None];
+        let mut supported = true;
+        for k in &constraints {
+            let holder = k.parent().and_then(|cs| cs.parent()).and_then(|v| v.attribute("id"));
+            let first = k.attribute("firstItem").or(holder);
+            let a1 = k.attribute("firstAttribute").unwrap_or("");
+            let simple = k.attributes().all(|a| matches!(a.name(), "firstItem" | "firstAttribute" | "secondItem" | "secondAttribute" | "constant" | "id" | "symbolic"));
+            if !simple {
+                supported = false;
+                break;
+            }
+            let constant = k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+            // Its own width or height.
+            if k.attribute("secondItem").is_none() && first == Some(id) && matches!(a1, "width" | "height") {
+                let axis = usize::from(a1 == "height");
+                if fixed[axis].replace(constant).is_some() {
+                    supported = false;
+                }
+                continue;
+            }
+            let (Some(second), Some(a2)) = (k.attribute("secondItem").or(holder), k.attribute("secondAttribute")) else {
+                supported = false;
+                break;
+            };
+            let (own, other, sign) = if first == Some(id) { (a1, (second, a2), 1.0) } else { (a2, (first.unwrap_or(""), a1), -1.0) };
+            if other.0 != sid {
+                supported = false;
+                break;
+            }
+            // Where an attribute is along its axis: across (leading 0) or
+            // down from the top (top 0), and the share of the size it adds.
+            let place = |a: &str| -> Option<(usize, f64)> {
+                Some(match a {
+                    "leading" | "left" => (0, 0.0),
+                    "trailing" | "right" => (0, 1.0),
+                    "centerX" => (0, 0.5),
+                    "top" => (1, 0.0),
+                    "bottom" => (1, 1.0),
+                    "centerY" => (1, 0.5),
+                    _ => return None,
+                })
+            };
+            let (Some((axis, share)), Some((other_axis, other_share))) = (place(own), place(other.1)) else {
+                supported = false;
+                break;
+            };
+            if axis != other_axis || axes[axis].is_some() {
+                supported = false;
+                break;
+            }
+            let span = if axis == 0 { sf.w } else { sf.h };
+            axes[axis] = Some((other_share * span + sign * constant, share));
+        }
+        let (Some((x_at, x_share)), Some((y_at, y_share))) = (axes[0], axes[1]) else { continue };
+        if !supported {
+            continue;
+        }
+        let w = match (fixed[0], size.0) {
+            (Some(w), _) => w,
+            (None, Some(w)) => w,
+            (None, None) => frame(n, "frame")?.w - insets.0 - insets.2,
+        };
+        let h = match (fixed[1], size.1) {
+            (Some(h), _) => h,
+            (None, Some(h)) => h,
+            (None, None) => frame(n, "frame")?.h - insets.1 - insets.3,
+        };
+        // The alignment rectangle, then the frame: left, top, right and
+        // bottom insets outset; y up from the superview's bottom.
+        let left = x_at - x_share * w;
+        let top = y_at - y_share * h;
+        let (fw, fh) = (w + insets.0 + insets.2, h + insets.1 + insets.3);
+        let x = left - insets.0;
+        let y = sf.h - (top - insets.1) - fh;
+        let round = |v: f64| (v + 0.5).floor();
+        let laid = Frame { x: round(x), y: round(y), w: fw, h: fh };
+        // Before rounding, as the constraints have it.
+        let aligned = Frame { x: left, y: sf.h - top - h, w, h };
+        out.insert(id.to_string(), (laid, aligned));
+    }
+    Ok(out)
+}
+
+/// A control's size as its content gives it (width, height; `None` where
+/// it has none, keeping the document's) and its alignment insets (left,
+/// top, right, bottom), when established: a label's text measured plus
+/// four (eight centred), outset two either side; a regular push button's plus 24, 24 tall,
+/// a small one's plus 20, 20 tall; a check box's plus 22; a pop-up button's
+/// plus 48, 24 tall; a bezeled editable text field 24 tall, a horizontal
+/// slider 16, outset two (probes in the system font at 9 to 36 points and
+/// bold, the small system font, the menu font).
+fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f64, f64))>, String> {
+    let measure = |cell: Node, title: &str| -> Option<(f64, f64)> {
+        let font = children(cell, "font").next()?;
+        let (name, default) = match (font.attribute("metaFont"), font.attribute("usesAppearanceFont")) {
+            (_, Some("YES")) => (".SFNS-Regular", 13.0),
+            (Some("system" | "message" | "menu"), _) => (".SFNS-Regular", 13.0),
+            (Some("systemBold"), _) => (".SFNS-Bold", 13.0),
+            (Some("smallSystem"), _) => (".SFNS-Regular", 11.0),
+            _ => return None,
+        };
+        let size = font.attribute("size").and_then(|s| number(s).ok()).unwrap_or(default);
+        crate::font_metrics::measure(name, size, title)
+    };
+    let plain = |cell: Node, allowed: &[&str]| cell.attributes().all(|a| allowed.contains(&a.name()));
+    Ok(match n.tag_name().name() {
+        "textField" => {
+            let Some(cell) = child(n, "textFieldCell", "cell") else { return Ok(None) };
+            if n.attribute("preferredMaxLayoutWidth").is_some() {
+                return Ok(None);
+            }
+            if cell.attribute("editable").is_some() {
+                // A bezeled field: no width of its own.
+                let regular = children(cell, "font").next().is_some_and(|f| f.attribute("metaFont") == Some("system") && f.attribute("size").is_none());
+                if cell.attribute("borderStyle") != Some("bezel") || !regular || !plain(cell, &["key", "scrollable", "lineBreakMode", "selectable", "editable", "sendsActionOnEndEditing", "borderStyle", "drawsBackground", "title", "placeholderString", "id", "alignment"]) {
+                    return Ok(None);
+                }
+                Some(((None, Some(24.0)), (0.0, 0.0, 0.0, 0.0)))
+            } else {
+                if !plain(cell, &["key", "lineBreakMode", "title", "id", "alignment", "selectable", "sendsActionOnEndEditing", "truncatesLastVisibleLine"]) || cell.attribute("borderStyle").is_some() {
+                    return Ok(None);
+                }
+                let Some((w, h)) = measure(cell, cell.attribute("title").unwrap_or("")) else { return Ok(None) };
+                // Centred text four wider, whatever its line breaking (45
+                // probes of alignments and line break modes).
+                let centred = match cell.attribute("alignment") {
+                    None | Some("left" | "right" | "natural") => 0.0,
+                    Some("center") => 4.0,
+                    Some(_) => return Ok(None),
+                };
+                Some(((Some(w.ceil() + centred), Some(h)), (2.0, 0.0, 2.0, 0.0)))
+            }
+        }
+        "button" => {
+            let Some(cell) = child(n, "buttonCell", "cell") else { return Ok(None) };
+            let title = cell.attribute("title").unwrap_or("");
+            let Some((w, h)) = measure(cell, title) else { return Ok(None) };
+            let regular13 = h == 16.0;
+            match (cell.attribute("type"), cell.attribute("bezelStyle"), cell.attribute("controlSize"), cell.attribute("image")) {
+                (Some("push"), Some("rounded"), None, None) if regular13 => Some(((Some(w.ceil() + 24.0), Some(24.0)), (0.0, 0.0, 0.0, 0.0))),
+                (Some("push"), Some("rounded"), Some("small"), None) if h == 14.0 => Some(((Some(w.ceil() + 20.0), Some(20.0)), (0.0, 0.0, 0.0, 0.0))),
+                (Some("check"), Some("regularSquare"), None, None) if regular13 => Some(((Some(w.ceil() + 22.0), Some(16.0)), (0.0, 0.0, 0.0, 0.0))),
+                _ => None,
+            }
+        }
+        "popUpButton" => {
+            let Some(cell) = child(n, "popUpButtonCell", "cell") else { return Ok(None) };
+            let Some((w, h)) = measure(cell, cell.attribute("title").unwrap_or("")) else { return Ok(None) };
+            match (cell.attribute("type"), cell.attribute("bezelStyle"), cell.attribute("controlSize"), cell.attribute("borderStyle")) {
+                (Some("push"), Some("rounded"), None, Some("borderAndBezel")) if h == 16.0 => Some(((Some(w.ceil() + 48.0), Some(24.0)), (0.0, 0.0, 0.0, 0.0))),
+                _ => None,
+            }
+        }
+        "slider" => {
+            let f = frame(n, "frame")?;
+            let Some(cell) = child(n, "sliderCell", "cell") else { return Ok(None) };
+            if f.h > f.w || cell.attribute("controlSize").is_some() || cell.attribute("numberOfTickMarks").is_some() {
+                return Ok(None);
+            }
+            Some(((None, Some(16.0)), (2.0, 0.0, 2.0, 0.0)))
+        }
+        _ => None,
+    })
+}
+
 fn new_collected(sources: Vec<String>) -> Collected {
     Collected {
         parents: Vec::new(),
@@ -1671,6 +1869,7 @@ fn new_collected(sources: Vec<String>) -> Collected {
         definitions: HashMap::new(),
         at_origin: Vec::new(),
         laid_out: HashMap::new(),
+        aligned: HashMap::new(),
         accessibility: Vec::new(),
         stacks: Vec::new(),
         runtime: Vec::new(),
@@ -1688,6 +1887,10 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
     let objects_node = children(root, "objects").next().ok_or("a xib without objects")?;
     let mut nib = new_nib(&doc, localizable, false);
     let mut c = new_collected(vec!["-2".into()]);
+    for (id, (laid, aligned)) in auto_layout(&doc)? {
+        c.laid_out.insert(id.clone(), laid);
+        c.aligned.insert(id, aligned);
+    }
     let mut owner = None;
     let mut application = None;
     let mut tops = Vec::new();
@@ -1982,6 +2185,10 @@ fn main_menu(doc: &Document, application: Node, others: &[Node], first_responder
     let mut nib = new_nib(doc, localizable, true);
     let app_id = attr(application, "id")?;
     let mut c = new_collected(vec![app_id.to_string()]);
+    for (id, (laid, aligned)) in auto_layout(&doc)? {
+        c.laid_out.insert(id.clone(), laid);
+        c.aligned.insert(id, aligned);
+    }
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let app_name = object_name(app_id);
@@ -2093,6 +2300,10 @@ fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], f
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(vec![attr(window_node, "id")?.to_string()]);
+    for (id, (laid, aligned)) in auto_layout(&doc)? {
+        c.laid_out.insert(id.clone(), laid);
+        c.aligned.insert(id, aligned);
+    }
     let wc_name = object_name(wc_id);
     let vc_name = object_name(attr(vc, "id")?);
     let vc_placeholder = format!("{vc_name} storyboard");
@@ -2542,6 +2753,10 @@ fn controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, loc
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(Vec::new());
+    for (id, (laid, aligned)) in auto_layout(&doc)? {
+        c.laid_out.insert(id.clone(), laid);
+        c.aligned.insert(id, aligned);
+    }
     let vc_name = object_name(attr(vc, "id")?);
     c.parents.push((vc_name.clone(), root_name.clone()));
     let (value, templates) = content_controller(&mut nib, xml, vc, module, &vc_name, identified)?;
@@ -2575,6 +2790,10 @@ fn view_nib(doc: &Document, vc: Node, first_responder: Option<&str>, module: Opt
     let root_name = object_name("root");
     let root_object = Object::new("NSCustomObject", vec![("NSClassName", nib.string("NSObject"))]).named(root_name.clone());
     let mut c = new_collected(vec![attr(vc, "id")?.to_string()]);
+    for (id, (laid, aligned)) in auto_layout(&doc)? {
+        c.laid_out.insert(id.clone(), laid);
+        c.aligned.insert(id, aligned);
+    }
     let view_name = object_name(attr(view_node, "id")?);
     let value = if view_node.has_tag_name("sceneView") {
         scene_view(&mut nib, &mut c, view_node, module, &root_name)?
@@ -2970,10 +3189,11 @@ fn font_as(nib: &mut Nib, n: Node, meta: Option<(&str, &str)>) -> Result<Value, 
 /// older than those differs (133 of 227 text fields' and buttons' frames in
 /// the corpus). `--config=relax_ibtool_layout` keeps the document's frames,
 /// which only the first layout at run time uses.
-fn content_sized(nib: &Nib, n: Node) -> Result<(), String> {
+fn content_sized(nib: &Nib, c: &Collected, n: Node) -> Result<(), String> {
     let constrained = n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && n.attribute("id").is_some_and(|id| nib.constrained.contains(id));
     let relaxed = layout_relaxed();
-    if constrained && !relaxed {
+    let laid_out = n.attribute("id").is_some_and(|id| c.laid_out.contains_key(id));
+    if constrained && !relaxed && !laid_out {
         return fail(format!(
             "a constrained <{}> is laid out again by Xcode's Auto Layout as it compiles, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frame",
             n.tag_name().name()
@@ -3015,7 +3235,7 @@ fn text_field(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     only_children(n, &["rect", "autoresizingMask", cell_tag, "constraints", "point", "accessibility", "connections"])?;
     canvas_location_only(n)?;
     let id = attr(n, "id")?;
-    content_sized(nib, n)?;
+    content_sized(nib, c, n)?;
     if children(n, "connections").next().is_some() {
         c.connection_sources.push(id.to_string());
     }
@@ -3293,7 +3513,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point", "accessibility", "title"],
     )?;
     canvas_location_only(n)?;
-    content_sized(nib, n)?;
+    content_sized(nib, c, n)?;
     // A pop-up button is a button whose cell holds a menu (about 10
     // probes).
     let popup = n.has_tag_name("popUpButton");
@@ -4104,7 +4324,7 @@ fn image_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
     only_children(n, &["rect", "autoresizingMask", "imageCell", "constraints", "point", "accessibility"])?;
     canvas_location_only(n)?;
     // Its image sizes it.
-    content_sized(nib, n)?;
+    content_sized(nib, c, n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
     let cell = child(n, "imageCell", "cell").ok_or("an image view without a cell")?;
@@ -4619,7 +4839,7 @@ fn progress_indicator(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask", "constraints", "accessibility"])?;
-    content_sized(nib, n)?;
+    content_sized(nib, c, n)?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
@@ -4678,7 +4898,7 @@ fn slider(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask", "sliderCell", "constraints", "connections", "accessibility"])?;
-    content_sized(nib, n)?;
+    content_sized(nib, c, n)?;
     let id = attr(n, "id")?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));

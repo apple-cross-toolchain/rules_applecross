@@ -3,6 +3,7 @@
 
 mod appkit;
 mod colorsync;
+mod font_metrics;
 mod fonts;
 mod nib;
 mod storyboard;

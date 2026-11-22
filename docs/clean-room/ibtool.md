@@ -2942,6 +2942,31 @@ Layout measures left to right and down from the view's top);
 `--config=relax_ibtool_layout` compiles them with the document's frames,
 which only their first layout at run time uses.
 
+It does lay out a content-sized control whose constraints, all with its
+(unflipped plain or custom) superview, place it on each axis by one edge
+or centre, sized by its content or its own width and height constraints
+(166 probes, 23 corpus documents). Its content's size is its text's, as
+AppKit measures a string in its font: the sum of each character's width
+and each adjacent pair's adjustment, measured on a Mac in the system font
+and its bold at 9 to 36 points (`tools/font_metrics_probe` writes
+`font_metrics.bin`; strings with other characters, and other fonts, are
+refused). Each control's alignment rectangle and insets, from probes of
+seven titles in five fonts:
+- a label: the text's width rounded up, plus 4 more when it is centred
+  (whatever its line breaking), and the font's line height, outset 2
+  left and right;
+- a regular push button: the width plus 24, 24 tall; a small one: plus
+  20, 20 tall; a check box: plus 22, the line height;
+- a pop-up button: its title's width plus 48, 24 tall;
+- a bezeled editable text field: the document's width, 24 tall;
+- a horizontal slider: the document's width, 16 tall, outset 2 left and
+  right.
+
+The frame is the alignment rectangle outset, its origin rounded half up
+in AppKit's coordinates (48 probes centring labels in views of even and
+odd sizes). Constraints are then measured on the alignment rectangle,
+before rounding.
+
 **Menus.** An `NSMenu`: title, items, and a system menu's name
 (`_NSMainMenu`, `_NSAppleMenu`, `_NSServicesMenu`, `_NSRecentDocumentsMenu`,
 `_NSFontMenu`, `_NSWindowsMenu`, `_NSHelpMenu`). An `NSMenuItem`: its menu,
