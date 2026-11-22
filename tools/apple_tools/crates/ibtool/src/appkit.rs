@@ -204,11 +204,9 @@ fn view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent:
     // A container view is a plain view; its embed segue's template finds it
     // through its controller (four probes).
     let container = n.has_tag_name("containerView");
-    // The context Interface Builder simulates changes Xcode's layout of the
-    // text in it (rules_apple's HelloToday example, a probe).
-    if n.attribute("simulatedAppContext").is_some() && !layout_relaxed() {
-        return fail("a simulated app context is laid out by Xcode with its own metrics, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
-    }
+    // The context Interface Builder simulates is the editor's alone: with
+    // or without it Xcode archives the same (probes sc_*, three compiles
+    // each; the label it seemed to move is a resized root's, `auto_layout`).
     // Without an embed segue, a container view is any view, of its class
     // or a plain one (two probes, a corpus storyboard).
     if container && custom_class(n, "NSView").is_some() && embed_segue(n)?.is_some() {

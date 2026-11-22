@@ -3388,8 +3388,9 @@ app class's is.
   same corner by their ids as bytes (nine probes).
 - A view controller shown as a single window has presentation style 1 and
   `NSStoryboardSegueDestinationOptions`, as a window controller does.
-- `simulatedAppContext` changes Xcode's layout of the text in it, so only
-  `relax_ibtool_layout` compiles it.
+- `simulatedAppContext` is the editor's alone: with or without it Xcode
+  archives the same (three compiles each of four probes; the label it
+  seemed to move is a resized root view's, below).
 - After a window's full-screen sizes come its toolbar style as
   `NSWindowToolbarStyle` (expanded 1, preference 2, unified 3; automatic,
   the default, left out), `NSWindowTitleVisibility` 1 with a hidden title,
