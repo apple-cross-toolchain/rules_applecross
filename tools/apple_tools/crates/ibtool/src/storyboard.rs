@@ -4880,12 +4880,16 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 // placeholder intrinsic size (one probe each).
                 ("fixedFrame", Some("YES")), ("placeholderIntrinsicWidth", None), ("placeholderIntrinsicHeight", None), ("keyboardDismissMode", None),
                 ("horizontalHuggingPriority", None), ("verticalHuggingPriority", None), ("horizontalCompressionResistancePriority", None),
-                ("verticalCompressionResistancePriority", None),
+                ("verticalCompressionResistancePriority", None), ("usesAttributedText", Some("YES")),
             ])?;
             only_children(n, &[
                 "rect", "autoresizingMask", "color", "nil", "string", "fontDescription", "textInputTraits", "constraints", "connections", "accessibility",
-                "userDefinedRuntimeAttributes", "dataDetectorType",
+                "userDefinedRuntimeAttributes", "dataDetectorType", "attributedString",
             ])?;
+            let attributed = n.attribute("usesAttributedText").is_some();
+            if attributed != child(n, "attributedString", "attributedText").is_some() {
+                return fail("a text view's attributed text without usesAttributedText, or the other way round, is not supported by this ibtool");
+            }
             // Data detectors given are UIDataDetectorTypes after its
             // alignment (phone numbers 1, links 2; two probes).
             let detectors = data_detectors(n)?.unwrap_or(0);
@@ -5015,8 +5019,15 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 Some(other) => return fail(format!("contentInsetAdjustmentBehavior {other} is not supported by this ibtool")),
             };
             values.push(("UIScrollViewContentInsetAdjustmentBehavior", Value::Int(insets)));
-            let alignment = text_alignment(n.attribute("textAlignment"))?;
-            let font_node = Some(child(n, "fontDescription", "fontDescription").ok_or("a text view without a font")?);
+            let (alignment, font_node, attributed_font) = if attributed {
+                if text.is_some() || child(n, "fontDescription", "fontDescription").is_some() || n.attribute("textAlignment").is_some() || text_color.is_some() {
+                    return fail("a text view's attributed text beside its own text, font, alignment or colour is not supported by this ibtool");
+                }
+                let (font, alignment) = attributed_text_view(nib, n, &mut values)?;
+                (alignment, None, Some(font))
+            } else {
+                (text_alignment(n.attribute("textAlignment"))?, Some(child(n, "fontDescription", "fontDescription").ok_or("a text view without a font")?), None)
+            };
             // The text is attributed with its colour, font and alignment
             // (AppKit's NSTextAlignment: right 1, center 2; left left out),
             // which the view's own values then refer to.
@@ -5084,7 +5095,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if n.attribute("adjustsFontForContentSizeCategory").is_some() {
                 values.push(("UIAdjustsFontForContentSizeCategory", Value::Bool(true)));
             }
-            values.push(("UIFont", font(nib, font_node, None)?));
+            let view_font = match attributed_font {
+                Some(f) => f,
+                None => font(nib, font_node, None)?,
+            };
+            values.push(("UIFont", view_font));
             if let Some(c) = text_color {
                 values.push(("UITextColor", color(nib, c)?));
             }
@@ -7160,6 +7175,123 @@ fn navigation_bar(nib: &mut Nib, nav: Node, name: &str, item: Option<&str>, dele
     values.push(("UIBarPosition", Value::Int(2)));
     values.push(("UIBarTranslucence", Value::Int(if opaque { 2 } else { 1 })));
     Ok(Value::New(Object::new("UINavigationBar", values).named(name)))
+}
+
+/// A text view's attributed text (`usesAttributedText`): its fragments with
+/// their fonts and paragraph styles, as Xcode archives it (a corpus
+/// storyboard's three fragments). `UIText` is the plain text and
+/// `UIAttributedText` an NSAttributedString of it, its strings as a plain
+/// text view's are (mutable beyond 512 characters); with one run its
+/// `NSAttributes` is that run's dictionary, with several an array of the
+/// distinct dictionaries in order of first use, and `NSAttributeInfo` the
+/// runs as (UTF-16 length, dictionary index) pairs of 7-bit varints. A
+/// dictionary holds `NSFont` and an `NSParagraphStyle` (its alignment in
+/// AppKit's numbering, left left out, and no tab stops). Returns the first
+/// run's font and its alignment in UIKit's numbering, the view's own.
+fn attributed_text_view(nib: &mut Nib, n: Node, values: &mut Vec<(&'static str, Value)>) -> Result<(Value, i64), String> {
+    let string_node = child(n, "attributedString", "attributedText").ok_or("a text view's attributed text without its string")?;
+    only_attributes(string_node, &[("key", Some("attributedText"))])?;
+    only_children(string_node, &["fragment"])?;
+    if nib.localizable {
+        return fail("a localizable text view's attributed text is not supported by this ibtool");
+    }
+    let mut text = String::new();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    let mut styles: Vec<(String, String, &str)> = Vec::new();
+    let mut dictionaries = Vec::new();
+    let mut first = None;
+    for f in children(string_node, "fragment") {
+        only_attributes(f, &[("content", None)])?;
+        only_children(f, &["string", "attributes"])?;
+        let content = match (f.attribute("content"), child(f, "string", "content")) {
+            (Some(c), None) => c.to_string(),
+            (None, Some(c)) => {
+                only_attributes(c, &[("key", Some("content"))])?;
+                c.text().unwrap_or("").to_string()
+            }
+            _ => return fail("a fragment without one content is not supported by this ibtool"),
+        };
+        let a = children(f, "attributes").next().ok_or("a fragment without attributes is not supported by this ibtool")?;
+        only_attributes(a, &[])?;
+        only_children(a, &["font", "paragraphStyle"])?;
+        let font_node = child(a, "font", "NSFont").ok_or("a fragment without a font is not supported by this ibtool")?;
+        only_attributes(font_node, &[("key", None), ("size", None), ("name", None)])?;
+        let (name, size) = (attr(font_node, "name")?, attr(font_node, "size")?);
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
+            return fail(format!("a fragment's font {name} is not supported by this ibtool"));
+        }
+        let paragraph = child(a, "paragraphStyle", "NSParagraphStyle").ok_or("a fragment without a paragraph style is not supported by this ibtool")?;
+        only_attributes(paragraph, &[("key", None), ("alignment", None), ("lineBreakMode", Some("wordWrapping")), ("baseWritingDirection", Some("natural"))])?;
+        let alignment = attr(paragraph, "alignment")?;
+        let (uikit, appkit) = match alignment {
+            "left" => (0, None),
+            "center" => (1, Some(2)),
+            "right" => (2, Some(1)),
+            other => return fail(format!("a fragment's {other} alignment is not supported by this ibtool")),
+        };
+        let style = (name.to_string(), size.to_string(), alignment);
+        let index = match styles.iter().position(|s| *s == style) {
+            Some(i) => i,
+            None => {
+                let font_value = named_font(nib, name, size)?;
+                let mut style_values = Vec::new();
+                if let Some(a) = appkit {
+                    style_values.push(("NSAlignment", Value::Int(a)));
+                }
+                style_values.push(("NSTabStops", Value::Nil));
+                let entries = vec![nib.string("NSFont"), font_value, nib.string("NSParagraphStyle"), Value::New(Object::new("NSParagraphStyle", style_values))];
+                dictionaries.push(nib.array("NSDictionary", entries));
+                styles.push(style);
+                styles.len() - 1
+            }
+        };
+        if first.is_none() {
+            first = Some((name.to_string(), size.to_string(), uikit));
+        }
+        runs.push((content.encode_utf16().count(), index));
+        text.push_str(&content);
+    }
+    let Some((first_name, first_size, first_alignment)) = first else { return fail("an attributed text without fragments is not supported by this ibtool") };
+    let (utf16, utf8) = (text.encode_utf16().count(), text.len());
+    if (utf16 > 512) != (utf8 > 512) {
+        return fail("a text view's non-ASCII text of about 512 characters is not supported by this ibtool");
+    }
+    let long = utf16 > 512;
+    let mutable = |t: &str| Value::New(Object::new("NSMutableString", vec![("NS.bytes", Value::Data(t.as_bytes().to_vec()))]));
+    values.push(("UIText", if long { mutable(&text) } else { nib.string(&text) }));
+    let string = if long { mutable(&text) } else { nib.string(&text) };
+    let mut attributed = vec![("NSString", string)];
+    if runs.len() == 1 {
+        attributed.push(("NSAttributes", dictionaries.remove(0)));
+    } else {
+        let mut info = Vec::new();
+        for (length, index) in &runs {
+            for mut v in [*length, *index] {
+                loop {
+                    let byte = (v & 0x7f) as u8;
+                    v >>= 7;
+                    if v == 0 {
+                        info.push(byte);
+                        break;
+                    }
+                    info.push(byte | 0x80);
+                }
+            }
+        }
+        attributed.push(("NSAttributes", nib.array("NSMutableArray", dictionaries)));
+        attributed.push(("NSAttributeInfo", Value::New(Object::new("NSMutableData", vec![("NS.bytes", Value::Data(info))]))));
+    }
+    values.push(("UIAttributedText", Value::New(Object::new("NSAttributedString", attributed))));
+    // The view's font: the first run's, the same object.
+    Ok((named_font(nib, &first_name, &first_size)?, first_alignment))
+}
+
+/// A `<font key="NSFont" name size>`'s font, as the fontDescription of the
+/// same font and size.
+fn named_font(nib: &mut Nib, name: &str, size: &str) -> Result<Value, String> {
+    let xml = format!(r#"<fontDescription key="fontDescription" name="{name}" pointSize="{size}"/>"#);
+    let description = roxmltree::Document::parse(&xml).map_err(|e| e.to_string())?;
+    font(nib, Some(description.root_element()), None)
 }
 
 /// A bar's `<textAttributes>`: a dictionary of its text colour (`NSColor`)

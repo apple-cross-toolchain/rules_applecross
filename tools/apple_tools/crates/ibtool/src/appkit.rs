@@ -2847,6 +2847,13 @@ fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
     font_as(nib, n, None)
 }
 
+/// `<font key="font" metaFont="system"/>`, the font of a control that gives
+/// none.
+fn system_font_node() -> Node<'static, 'static> {
+    static DOCUMENT: std::sync::OnceLock<roxmltree::Document<'static>> = std::sync::OnceLock::new();
+    DOCUMENT.get_or_init(|| roxmltree::Document::parse(r#"<font key="font" metaFont="system"/>"#).expect("a font element")).root_element()
+}
+
 /// A font, with a metafont read as another (`meta`: a pop-up button's menu
 /// font is the message font, two probes).
 fn font_as(nib: &mut Nib, n: Node, meta: Option<(&str, &str)>) -> Result<Value, String> {
@@ -3307,12 +3314,20 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         other => return fail(format!("bezel style {other} is not supported by this ibtool")),
     };
     // Its behaviour's bits, and the button type it makes.
-    let behavior = child(cell, "behavior", "behavior").ok_or("a button without a behaviour")?;
-    let mut behaviors: Vec<&str> = behavior.attributes().filter(|a| a.name() != "key").map(|a| a.name()).collect();
+    // A plain push button without one behaves as Interface Builder's
+    // default, momentarily pushing in (a hand-written conformance xib);
+    // another type without one is refused.
+    let mut behaviors: Vec<&str> = match child(cell, "behavior", "behavior") {
+        Some(behavior) => {
+            if behavior.attributes().any(|a| a.name() != "key" && a.value() != "YES") {
+                return fail("a button behaviour other than YES is not supported by this ibtool");
+            }
+            behavior.attributes().filter(|a| a.name() != "key").map(|a| a.name()).collect()
+        }
+        None if cell.attribute("type").is_none() && !popup => vec!["lightByBackground", "lightByGray", "pushIn"],
+        None => return fail("a button without a behaviour"),
+    };
     behaviors.sort();
-    if behavior.attributes().any(|a| a.name() != "key" && a.value() != "YES") {
-        return fail("a button behaviour other than YES is not supported by this ibtool");
-    }
     let mut flags_b: i64 = 0;
     for b in &behaviors {
         flags_b |= match *b {
@@ -3436,7 +3451,13 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         Some(other) => return fail(format!("control size {other} is not supported by this ibtool")),
     };
     let signed = |v: i64| v as u32 as i32 as i64;
-    let font_node = child(cell, "font", "font").ok_or("a button cell without a font")?;
+    // Without a font, a regular-size button's is the system font (a
+    // hand-written conformance xib).
+    let font_node = match child(cell, "font", "font") {
+        Some(f) => f,
+        None if !popup && control_size == 0 => system_font_node(),
+        None => return fail("a button cell without a font"),
+    };
     let mut cell_values = vec![
         ("NSCellFlags", Value::Int(signed(flags))),
         ("NSCellFlags2", Value::Int(signed(flags2))),
@@ -4203,12 +4224,17 @@ fn collection_item(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&st
 /// by 50.
 fn collection_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
     only_attributes(n, &[("id", None), ("ambiguous", Some("YES")), ("selectable", Some("YES")), ("allowsMultipleSelection", Some("YES"))])?;
-    only_children(n, &["rect", "autoresizingMask", "collectionViewFlowLayout", "color"])?;
+    only_children(n, &["rect", "autoresizingMask", "collectionViewFlowLayout", "color", "connections"])?;
     let name = object_name(attr(n, "id")?);
     c.parents.push((name.clone(), parent.to_string()));
+    // Its outlets (a data source, a delegate) as any view's (a corpus
+    // storyboard's data source).
+    if children(n, "connections").next().is_some() {
+        c.connection_sources.push(attr(n, "id")?.to_string());
+    }
     let layout = child(n, "collectionViewFlowLayout", "collectionViewLayout").ok_or("a collection view without a flow layout is not supported by this ibtool")?;
     only_attributes(layout, &[("key", None), ("id", None), ("minimumInteritemSpacing", None), ("minimumLineSpacing", None)])?;
-    only_children(layout, &["size"])?;
+    only_children(layout, &["size", "edgeInsets"])?;
     let layout_name = object_name(attr(layout, "id")?);
     c.parents.push((layout_name.clone(), name.clone()));
     let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
@@ -4226,6 +4252,25 @@ fn collection_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&st
         if (w, h) != (50.0, 50.0) {
             let text = nib.string(&format!("{{{}, {}}}", g(w), g(h)));
             layout_values.push(("NSItemSize", Value::New(Object::new("NSValue", vec![("NS.special", Value::Int(2)), ("NS.sizeval", text)]))));
+        }
+    }
+    // Its section inset after its item size: an NSValue of edge insets as
+    // doubles, top, left, bottom, right (a corpus storyboard).
+    if let Some(inset) = child(layout, "edgeInsets", "sectionInset") {
+        only_attributes(inset, &[("key", None), ("left", None), ("right", None), ("top", None), ("bottom", None)])?;
+        let edge = |k: &str| inset.attribute(k).map(number).transpose().map(|v| v.unwrap_or(0.0));
+        let (top, left, bottom, right) = (edge("top")?, edge("left")?, edge("bottom")?, edge("right")?);
+        if (top, left, bottom, right) != (0.0, 0.0, 0.0, 0.0) {
+            layout_values.push((
+                "NSSectionInset",
+                Value::New(Object::new("NSValue", vec![
+                    ("NS.special", Value::Int(12)),
+                    ("NS.edgeval.top", Value::Double(top)),
+                    ("NS.edgeval.left", Value::Double(left)),
+                    ("NS.edgeval.bottom", Value::Double(bottom)),
+                    ("NS.edgeval.right", Value::Double(right)),
+                ])),
+            ));
         }
     }
     let layout_value = Value::New(Object::new("NSCollectionViewFlowLayout", layout_values).named(layout_name));
