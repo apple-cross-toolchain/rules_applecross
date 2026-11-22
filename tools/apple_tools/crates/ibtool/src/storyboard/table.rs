@@ -924,6 +924,12 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
     let mut subviews = Vec::new();
+    // Subviews its default variation leaves out aren't among its subviews,
+    // as a root view's aren't, but their constraints' order isn't
+    // established (a corpus storyboard's prototype): refused.
+    if !default_excluded_subviews(content)?.is_empty() {
+        return fail("a cell whose content view's default variation leaves subviews out is not supported by this ibtool");
+    }
     for s in children(content, "subviews") {
         for c in s.children().filter(|c| c.is_element()) {
             let mut v = subview(nib, &mut scene, c)?;
@@ -1280,22 +1286,21 @@ fn cell_nib_varied(settings: Settings, module: Option<&str>, cell: Node, has_seg
     scene.pairs.sort_by_key(|p| listed(&p.0));
     let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
     let accessibility = std::mem::take(&mut scene.accessibility).into_iter().map(|a| a.1).collect();
-    // Excluded constraints are encoded where the objects list them, and
-    // the trait storage list's top-level object is the cell, its views in
-    // the document's order; several excluded from one view, whose ranking
-    // isn't established here, are refused.
+    // Excluded constraints are encoded where the objects list them, ranked
+    // as a view nib's (`variation_keys`, the records' sets in Xcode's hash
+    // order otherwise), and the trait storage list's top-level object is
+    // the cell, its views in the document's order.
     let mut objects = objects;
+    let holder = |name: &String| scene.own_constraints.iter().find(|c| &c.1 == name).map(|c| c.0.clone());
+    let keys = variation_keys(&nib, &objects, holder);
     for o in std::mem::take(&mut nib.withheld) {
         let name = o.name.clone().expect("named");
         let at = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == name)).ok_or("an excluded constraint a cell's objects don't list is not supported by this ibtool")?;
         objects[at] = Value::New(o);
     }
-    if nib.variations.as_ref().is_some_and(|v| v.iter().any(|v| v.excluded.len() > 1)) {
-        return fail("several constraints a cell's view's variation excludes are not supported by this ibtool");
-    }
     let mut order = vec![content_name.clone()];
     order.extend(scene.subviews.iter().map(|s| s.1.clone()));
-    let traits = trait_storage_list(&mut nib, &cell_name, &order, &HashMap::new(), &[], &[])?;
+    let traits = trait_storage_list(&mut nib, &cell_name, &order, &keys, &[], &[])?;
     let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
     if let Some(list) = traits {
         let lists = nib.array("NSArray", vec![list]);
