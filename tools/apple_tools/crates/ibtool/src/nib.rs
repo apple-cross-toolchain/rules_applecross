@@ -58,7 +58,24 @@ pub const SHARED: char = '=';
 
 /// Takes the shared objects' definitions out of `values` (and theirs), leaving
 /// references in their place.
-fn lift(values: &mut [(&'static str, Value)], defs: &mut HashMap<String, Object>) {
+/// The key of an object to encode where something first refers to it, not
+/// where it stands: a subview a size class puts back, which isn't among its
+/// superview's subviews (`lift` takes it out of its values).
+pub const DEFERRED: &str = "\u{0}deferred";
+
+fn lift(values: &mut Vec<(&'static str, Value)>, defs: &mut HashMap<String, Object>) {
+    let mut i = 0;
+    while i < values.len() {
+        if values[i].0 == DEFERRED {
+            let (_, v) = values.remove(i);
+            let Value::New(mut o) = v else { continue };
+            lift(&mut o.values, defs);
+            let name = o.name.clone().expect("a deferred object is named");
+            defs.insert(name, o);
+            continue;
+        }
+        i += 1;
+    }
     for (_, v) in values.iter_mut() {
         if let Value::New(o) = v {
             lift(&mut o.values, defs);

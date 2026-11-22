@@ -351,9 +351,19 @@ struct Variation {
     /// Its size classes' records, sorted by their variations' keys: the
     /// traits, the constraints added and those removed.
     classes: Vec<(Vec<(&'static str, i64)>, Vec<String>, Vec<String>)>,
-    /// Its subviews, when a size class leaves some out: the candidates in
-    /// document order, and each size class's traits and removed subviews.
-    subviews: Option<(Vec<String>, Vec<(Vec<(&'static str, i64)>, Vec<String>)>)>,
+    /// Its subviews, when a variation leaves some out (`SubviewVariation`).
+    subviews: Option<SubviewVariation>,
+}
+
+/// A view's subviews' variations: the candidates in document order, those
+/// its default variation leaves out (not among its subviews, and the first
+/// record removes them), and each size class's traits with the subviews it
+/// adds and removes.
+#[derive(Clone)]
+struct SubviewVariation {
+    all: Vec<String>,
+    default_removed: Vec<String>,
+    classes: Vec<(Vec<(&'static str, i64)>, Vec<String>, Vec<String>)>,
 }
 
 /// The ids of the constraints `n` holds that the nib withholds: those its
@@ -399,6 +409,10 @@ struct SizeMask<'a> {
     include: Vec<&'a str>,
     exclude: Vec<&'a str>,
     subviews: Vec<&'a str>,
+    /// The subviews it puts back, which the default variation leaves out.
+    subviews_included: Vec<&'a str>,
+    /// Whether it has a mask of constraints at all.
+    constraints: bool,
 }
 
 /// A view's size classes' masks (`SizeMask`), its attributes' variations
@@ -409,11 +423,12 @@ fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
         only_attributes(v, &[("key", None)])?;
         only_children(v, &["mask"])?;
         let key = attr(v, "key")?;
-        let mut mask = SizeMask { key, traits: size_class_traits(key)?, include: Vec::new(), exclude: Vec::new(), subviews: Vec::new() };
+        let mut mask = SizeMask { key, traits: size_class_traits(key)?, include: Vec::new(), exclude: Vec::new(), subviews: Vec::new(), subviews_included: Vec::new(), constraints: false };
         for m in children(v, "mask") {
             only_attributes(m, &[("key", None)])?;
             match attr(m, "key")? {
                 "constraints" => {
+                    mask.constraints = true;
                     only_children(m, &["include", "exclude"])?;
                     for e in m.children().filter(|e| e.is_element()) {
                         only_attributes(e, &[("reference", None)])?;
@@ -422,10 +437,11 @@ fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
                     }
                 }
                 "subviews" => {
-                    only_children(m, &["exclude"])?;
-                    for e in children(m, "exclude") {
+                    only_children(m, &["include", "exclude"])?;
+                    for e in m.children().filter(|e| e.is_element()) {
                         only_attributes(e, &[("reference", None)])?;
-                        mask.subviews.push(attr(e, "reference")?);
+                        let r = attr(e, "reference")?;
+                        if e.has_tag_name("include") { mask.subviews_included.push(r) } else { mask.subviews.push(r) }
                     }
                 }
                 other => return fail(format!("a size class's variation of {other} is not supported by this ibtool")),
@@ -667,6 +683,18 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         let sc = &SYSTEM_COLORS.iter().find(|(c, _)| *c == name).ok_or_else(|| format!("system color {name} is not supported by this ibtool"))?.1;
         return nib.system_color(name, sc);
     }
+    // An AppKit system catalog colour in an iOS document is an RGB colour,
+    // as Xcode resolves it: controlBackgroundColor white (a corpus
+    // storyboard's button, label and collection view); others aren't
+    // measured.
+    if n.attribute("catalog") == Some("System") && n.attribute("colorSpace") == Some("catalog") && nib.platform == Platform::Ios {
+        only_attributes(n, &[("key", None), ("name", None), ("catalog", Some("System")), ("colorSpace", Some("catalog"))])?;
+        let c = match attr(n, "name")? {
+            "controlBackgroundColor" => [1.0, 1.0, 1.0, 1.0],
+            other => return fail(format!("the system catalog colour {other} in an iOS document is not supported by this ibtool")),
+        };
+        return Ok(rgb_color(nib, c.map(|x| nib.component(x))));
+    }
     // A colour of the asset catalog, by name: its definition in the
     // document's resources, marked as the catalog's.
     if let Some(name) = n.attribute("name") {
@@ -841,16 +869,22 @@ fn unmatched_color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         _ => c,
     }
     .map(|x| nib.component(x));
+    Ok(rgb_color(nib, c))
+}
+
+/// An RGB colour of these components as the nib keeps them, one object for
+/// equal colours.
+fn rgb_color(nib: &mut Nib, c: [f64; 4]) -> Value {
     let key = format!("color:rgb:{c:?}");
     if let Some(v) = nib.existing(&key) {
-        return Ok(v);
+        return v;
     }
     let (components, text) = exact_color_components(&RGB_KEYS, &c);
     let mut keys = vec![("UIColorComponentCount", Value::Int(4))];
     keys.extend(components);
     keys.push(("NSRGB", Value::Data(text)));
     keys.push(("NSColorSpace", Value::Int(2)));
-    Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")))
+    nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor"))
 }
 
 /// A view controller's navigation item: its title, also as an attributed
@@ -2739,16 +2773,38 @@ fn excluded_constraints<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
         only_attributes(v, &[("key", None)])?;
         only_children(v, &["mask"])?;
         for m in children(v, "mask") {
-            only_attributes(m, &[("key", Some("constraints"))])?;
+            only_attributes(m, &[("key", None)])?;
             only_children(m, &["exclude"])?;
+            match attr(m, "key")? {
+                "constraints" => {
+                    for e in children(m, "exclude") {
+                        only_attributes(e, &[("reference", None)])?;
+                        ids.push(attr(e, "reference")?);
+                    }
+                }
+                // Its subviews it leaves out are `default_excluded_subviews`'.
+                "subviews" => {}
+                other => return fail(format!("a default variation of {other} is not supported by this ibtool")),
+            }
+        }
+    }
+    if ids.is_empty() && default_excluded_subviews(n)?.is_empty() && children(n, "variation").any(|v| v.attribute("key") == Some("default")) {
+        return fail("a variation that excludes no constraints is not supported by this ibtool");
+    }
+    Ok(ids)
+}
+
+/// The ids of the subviews `n`'s default variation leaves out (Installed
+/// unchecked), which a size class may put back.
+fn default_excluded_subviews<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
+    let mut ids = Vec::new();
+    for v in children(n, "variation").filter(|v| v.attribute("key") == Some("default")) {
+        for m in children(v, "mask").filter(|m| m.attribute("key") == Some("subviews")) {
             for e in children(m, "exclude") {
                 only_attributes(e, &[("reference", None)])?;
                 ids.push(attr(e, "reference")?);
             }
         }
-    }
-    if ids.is_empty() && children(n, "variation").any(|v| v.attribute("key") == Some("default")) {
-        return fail("a variation that excludes no constraints is not supported by this ibtool");
     }
     Ok(ids)
 }
@@ -2927,7 +2983,9 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
     fn class_order<'k>(k: &&'k str) -> (usize, &'k str) {
         (k.matches('=').count(), *k)
     }
-    let mut keys: Vec<&str> = masks.iter().map(|m| m.key).chain(left_out.iter().map(|m| m.key)).collect();
+    // A size class that only puts subviews back has no constraints' record
+    // (a probe).
+    let mut keys: Vec<&str> = masks.iter().filter(|m| m.constraints || m.subviews_included.is_empty()).map(|m| m.key).chain(left_out.iter().map(|m| m.key)).collect();
     keys.sort_by_key(class_order);
     keys.dedup();
     let mut classes = Vec::new();
@@ -2964,14 +3022,21 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
             classes.push((traits, added, removed));
         }
     }
-    let subview_classes: Vec<(Vec<(&'static str, i64)>, Vec<String>)> = {
-        let mut sorted: Vec<&SizeMask> = masks.iter().filter(|m| !m.subviews.is_empty()).collect();
+    // The subviews its default variation leaves out and its size classes
+    // put back or leave out; a size class can put back only those.
+    let default_removed: Vec<&str> = default_excluded_subviews(n)?;
+    if masks.iter().any(|m| m.subviews_included.iter().any(|s| !default_removed.contains(s))) {
+        return fail("a size class putting back a subview the default variation doesn't leave out is not supported by this ibtool");
+    }
+    let subview_classes: Vec<(Vec<(&'static str, i64)>, Vec<String>, Vec<String>)> = {
+        let mut sorted: Vec<&SizeMask> = masks.iter().filter(|m| !m.subviews.is_empty() || !m.subviews_included.is_empty()).collect();
         sorted.sort_by_key(|m| class_order(&m.key));
-        sorted.into_iter().map(|m| (m.traits.clone(), m.subviews.iter().map(|s| view_name(s)).collect())).collect()
+        sorted.into_iter().map(|m| (m.traits.clone(), m.subviews_included.iter().map(|s| view_name(s)).collect(), m.subviews.iter().map(|s| view_name(s)).collect())).collect()
     };
-    let subviews = (!subview_classes.is_empty()).then(|| {
-        let all = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter_map(|c| c.attribute("id")).map(view_name).collect();
-        (all, subview_classes)
+    let subviews = (!subview_classes.is_empty() || !default_removed.is_empty()).then(|| SubviewVariation {
+        all: children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter_map(|c| c.attribute("id")).map(view_name).collect(),
+        default_removed: default_removed.iter().map(|s| view_name(s)).collect(),
+        classes: subview_classes,
     });
     nib.varied.push(id.to_string());
     if excluded.is_empty() && classes.is_empty() && subviews.is_none() {
@@ -3311,23 +3376,33 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMa
         }
         // The view itself among the descendants first, but the root (a
         // corpus storyboard's prototype's content view).
-        if v.subviews.is_some() && v.view != root && !descendants.contains(&v.view) {
+        if v.subviews.as_ref().is_some_and(|sv| sv.default_removed.is_empty()) && v.view != root && !descendants.contains(&v.view) {
             descendants.push(v.view.clone());
         }
         // Its subviews' storage first (four probes and a corpus
         // storyboard).
-        if let Some((all, classes)) = &v.subviews {
-            for s in all {
-                if !descendants.contains(s) {
-                    descendants.push(s.clone());
+        if let Some(sv) = &v.subviews {
+            // Its subviews are among the descendants, but not when its
+            // default variation leaves some out: then only the constraints'
+            // items are (three probes).
+            if sv.default_removed.is_empty() {
+                for s in &sv.all {
+                    if !descendants.contains(s) {
+                        descendants.push(s.clone());
+                    }
                 }
             }
+            // The default's record first when it leaves subviews out (a
+            // corpus storyboard), then the size classes'.
             let mut records = Vec::new();
-            for (traits, removed) in classes {
-                records.push(record(nib, Some(traits), &[], removed)?);
+            if !sv.default_removed.is_empty() {
+                records.push(record(nib, None, &[], &sv.default_removed)?);
+            }
+            for (traits, added, removed) in &sv.classes {
+                records.push(record(nib, Some(traits), added, removed)?);
             }
             let records = nib.array("NSMutableArray", records);
-            let candidates = nib.set("NSOrderedSet", all.iter().map(|s| reference(s.clone())).collect())?;
+            let candidates = nib.set("NSOrderedSet", sv.all.iter().map(|s| reference(s.clone())).collect())?;
             storages.push(Value::New(Object::new("_UIRelationshipTraitStorage", vec![
                 ("UIObject", reference(v.view.clone())),
                 ("UIKeyPath", nib.string("traitStorageSubviews")),
@@ -8710,9 +8785,19 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             // (one probe).
             accessibility(&mut nib, &mut scene, view, &root_name)?;
             let mut subview_values = Vec::new();
+            let left_out = default_excluded_subviews(view)?;
+            let mut deferred = Vec::new();
             for s in children(view, "subviews") {
                 for c in s.children().filter(|c| c.is_element()) {
-                    subview_values.push(subview(&mut nib, &mut scene, c)?);
+                    let value = subview(&mut nib, &mut scene, c)?;
+                    // One its default variation leaves out isn't among its
+                    // subviews: encoded where something first refers to it,
+                    // its constraints (a corpus storyboard).
+                    if c.attribute("id").is_some_and(|id| left_out.contains(&id)) {
+                        deferred.push((crate::nib::DEFERRED, value));
+                    } else {
+                        subview_values.push(value);
+                    }
                 }
             }
             // Each control's segue has a placeholder of its own, after the
@@ -8793,6 +8878,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if !subview_values.is_empty() {
                 values.push(("UISubviews", nib.array("NSMutableArray", subview_values)));
             }
+            values.extend(deferred);
             if let Some(background) = background {
                 values.push(("UIBackgroundColor", color(&mut nib, background)?));
             } else if scenekit {
@@ -8994,6 +9080,20 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 }
             }
             let mut constraint_values: Vec<Value> = guide_constraints.iter().map(|n| reference(n.clone())).collect();
+            // Those relating subviews its default variation leaves out come
+            // first (two probes); one of them installed by default isn't
+            // established (a probe: Xcode leaves it out too).
+            let hidden = default_excluded_subviews(view)?;
+            if !hidden.is_empty() {
+                let excluded_ids = excluded_constraints(view)?;
+                let on_hidden = |first: &str, second: Option<&str>| hidden.contains(&first) || second.is_some_and(|s| hidden.contains(&s));
+                for (_, _, c, first, second) in &xml_constraints {
+                    if on_hidden(first, *second) && !excluded_ids.contains(&attr(*c, "id")?) {
+                        return fail("a constraint installed on a subview the default variation leaves out is not supported by this ibtool");
+                    }
+                }
+                xml_constraints.sort_by_key(|(_, _, _, first, second)| !on_hidden(first, *second));
+            }
             let mut constraint_names = Vec::new();
             let excluded = excluded_constraints(view)?;
             let withheld_ids = device_withheld(&nib, view, &excluded)?;

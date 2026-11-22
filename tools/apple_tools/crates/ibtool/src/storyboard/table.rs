@@ -1034,6 +1034,8 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     let accessory = match cell.attribute("accessoryType") {
         None | Some("none") => None,
         Some("disclosureIndicator") => Some(1),
+        // UIKit's detail disclosure button (a corpus storyboard).
+        Some("detailDisclosureButton") => Some(2),
         Some("checkmark") => Some(3),
         Some("detailButton") => Some(4),
         Some(other) => return fail(format!("accessory type {other} is not supported by this ibtool")),
