@@ -193,6 +193,25 @@ any other (one probe).
   iPhone and iPad, tab bar, split view; three probes renaming outlets; two
   cases of this repository's). A tab bar's `clearsContextBeforeDrawing="NO"`
   is `UIClearsContextBeforeDrawing` false after its mask (a corpus xib).
+- **Deploying before iOS 17.0,** a xib compiles as a storyboard does in
+  four more ways (corpus xibs at iOS 12, 16 and 18; probes at iOS 13 to
+  18):
+  - a constrained view not translating its autoresizing mask is archived
+    with flexible right and bottom margins (36), a web view's too, where
+    from 17.0 on it keeps the document's mask;
+  - an attribute varied by size class (a label's font, a stack view's
+    axis) is archived with the document device's value, its record
+    sharing it, where from 17.0 on it is the default's;
+  - a date picker has no date from iOS 14.0 to 16.x and the compile time
+    before, and a date-mode picker's minute interval is 0, as a
+    storyboard's is at any target, where from 17.0 on the document's are
+    kept;
+  - in a colour-matched xib saved before toolsVersion 11019 (from before
+    Interface Builder matched colours; between 11010 and 11019 by
+    probes), every grey is RGB of its grey, unnamed. Such a document's
+    other RGB colours (calibrated, Display P3) are converted otherwise
+    there (clamped) and are refused, as are such storyboards, which
+    differ at any target.
 - Refused: other top-level objects (a controller beside a view, a cell or
   view before the view), an owner's connections beside a cell alone,
   macOS xibs, and xibs in the archive format of Interface Builder before
