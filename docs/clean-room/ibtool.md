@@ -2942,10 +2942,16 @@ Layout measures left to right and down from the view's top);
 `--config=relax_ibtool_layout` compiles them with the document's frames,
 which only their first layout at run time uses.
 
-It does lay out a content-sized control whose constraints, all with its
-(unflipped plain or custom) superview, place it on each axis by one edge
-or centre, sized by its content or its own width and height constraints
-(166 probes, 23 corpus documents). Its content's size is its text's, as
+It does lay out the constrained subviews of an unflipped plain or custom
+view as Auto Layout does: required constraints hold, then each priority's
+constraints are violated as little as they can be from the highest down
+(the sum of their violations least, without giving up what higher ones
+got); a content-sized control hugs its content at its hugging priority
+(250 unless given) and resists compression at its compression resistance
+(750); and every view keeps its document's frame where nothing else
+decides it (204 probes, 29 corpus documents, equal widths and
+inequalities among them). A superview with margins, baselines, a control
+whose size isn't established or items elsewhere is refused. Its content's size is its text's, as
 AppKit measures a string in its font: the sum of each character's width
 and each adjacent pair's adjustment, measured on a Mac in the system font
 and its bold at 9 to 36 points (`tools/font_metrics_probe` writes
@@ -3315,8 +3321,10 @@ app class's is.
 - A menu item's `NSIndent` follows its disabled flag.
 - A view's accessibility identifier is an `NSNibAXAttributeConnector` (the
   view, a new `NSMutableString` `AXIdentifier`, the identifier) in
-  `NSAccessibilityConnectors`, by the view's id as bytes, listed again in
-  `NSAccessibilityOidsKeys` with ids numbered after the other objects'.
+  `NSAccessibilityConnectors`, listed again in `NSAccessibilityOidsKeys`
+  with ids numbered after the other objects'. Their order Xcode varies
+  from run to run (six compiles of one storyboard with two identifiers,
+  either order); this ibtool's is by the view's id as bytes.
 - Subview groups as far from the corner go leftmost first, and at the
   same corner by their ids as bytes (nine probes).
 - A view controller shown as a single window has presentation style 1 and
