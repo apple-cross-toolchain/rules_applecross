@@ -294,6 +294,34 @@ struct Nib {
     /// Whether a bar's text attributes are being encoded, whose colours
     /// are as a modern colour-matched document has them (`text_attributes`).
     text_attributes: bool,
+    /// Whether this is a versioned bundle's `runtime.nib`, without what iOS
+    /// 12.3 added (`runtime_nibs`).
+    runtime: bool,
+}
+
+thread_local! {
+    static RUNTIME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A document's nibs for iOS before 12.3, where it uses what 12.3 added (a
+/// collection view cell's content view pinned to its edges by Xcode's
+/// constraints): `compile` again with that left out, as Xcode compiles
+/// the `runtime.nib` beside each nib's `objects-12.3+.nib` (fifteen corpus
+/// xibs and a storyboard at iOS 12, every nib of the storyboard so, the
+/// others' two the same). `None` when the document doesn't, or deploys to
+/// 12.3 or later.
+pub fn runtime_nibs<T>(minimum_deployment_target: Option<&str>, compile: impl FnOnce() -> Result<T, String>) -> Result<Option<T>, String> {
+    let Some(target) = minimum_deployment_target else { return Ok(None) };
+    let mut parts = target.split('.').map(|p| p.parse::<u32>().map_err(|_| format!("not a deployment target: {target}")));
+    let major = parts.next().transpose()?.unwrap_or(0);
+    let minor = parts.next().transpose()?.unwrap_or(0);
+    if (major, minor) >= (12, 3) {
+        return Ok(None);
+    }
+    RUNTIME.with(|r| r.set(true));
+    let compiled = compile();
+    RUNTIME.with(|r| r.set(false));
+    compiled.map(Some)
 }
 
 /// One of the nibs Xcode compiles a xib deploying before iOS 8 into: for
@@ -458,7 +486,7 @@ fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
 impl Nib {
     fn new(settings: Settings) -> Nib {
         let Settings { platform, color_matched, localizable, target } = settings;
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None, target, text_attributes: false }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None, target, text_attributes: false, runtime: RUNTIME.with(|r| r.get()) }
     }
 
     /// The settings it was made with, for another nib of the document.
@@ -1900,7 +1928,79 @@ struct Frame {
     h: f64,
 }
 
+thread_local! {
+    /// The frames Xcode lays views out at where they differ from the
+    /// document's (`autoresize`), by document and node, for the root view
+    /// being compiled.
+    static LAID_OUT: std::cell::RefCell<HashMap<(usize, roxmltree::NodeId), Frame>> = std::cell::RefCell::new(HashMap::new());
+}
+
+fn laid_out_key(n: Node) -> (usize, roxmltree::NodeId) {
+    (n.document() as *const Document as usize, n.id())
+}
+
+/// Lays out the subviews of `view`, resized from `old` to `new` (width,
+/// height), by their autoresizing masks as Xcode does below iOS 17 (49
+/// probed subviews at iOS 16): along each axis a single flexible part
+/// takes the whole change (a size no less than 0); several share it in
+/// proportion to their lengths; then both edges are rounded down, unless
+/// neither moved. Several flexible parts one of which is empty, or that
+/// the change leaves less than nothing, are refused (Xcode does
+/// otherwise), as is a resized subview's own subviews' layout. `skip`
+/// keeps a subview's frame.
+fn autoresize(view: Node, old: (f64, f64), new: (f64, f64), skip: &dyn Fn(Node) -> bool) -> Result<(), String> {
+    fn axis(origin: f64, size: f64, old: f64, new: f64, flexible: [bool; 3]) -> Result<(f64, f64), String> {
+        let change = new - old;
+        let parts = [origin, size, old - origin - size];
+        let (left, right) = match flexible {
+            [false, false, _] => return Ok((origin, size)),
+            [true, false, false] => (origin + change, origin + change + size),
+            [false, true, false] => (origin, origin + (size + change).max(0.0)),
+            _ => {
+                let total: f64 = (0..3).filter(|i| flexible[*i]).map(|i| parts[i]).sum();
+                if (0..3).any(|i| flexible[i] && parts[i] == 0.0) || total + change < 0.0 {
+                    return fail("an autoresizing subview with an empty flexible part, or one its superview's resizing leaves less than nothing, is not supported by this ibtool");
+                }
+                let scale = (total + change) / total;
+                let left = if flexible[0] { origin * scale } else { origin };
+                (left, left + if flexible[1] { size * scale } else { size })
+            }
+        };
+        let (left, right) = (left.floor(), right.floor());
+        Ok((left, right - left))
+    }
+    for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
+        if skip(s) {
+            continue;
+        }
+        let mask = match children(s, "autoresizingMask").next() {
+            Some(m) => autoresizing_mask(m)?,
+            None => 36,
+        };
+        // Only a flexible leading margin or size moves it.
+        if mask & (1 | 2 | 8 | 16) == 0 {
+            continue;
+        }
+        let f = frame(s)?;
+        let flexible = |bits: [i64; 3]| bits.map(|b| mask & b != 0);
+        let (x, w) = axis(f.x, f.w, old.0, new.0, flexible([1, 2, 4]))?;
+        let (y, h) = axis(f.y, f.h, old.1, new.1, flexible([8, 16, 32]))?;
+        if (x, y, w, h) == (f.x, f.y, f.w, f.h) {
+            continue;
+        }
+        let nested = children(s, "subviews").flat_map(|v| v.descendants()).any(|d| d.has_tag_name("autoresizingMask") && autoresizing_mask(d).is_ok_and(|m| m & (1 | 2 | 8 | 16) != 0));
+        if (w, h) != (f.w, f.h) && nested {
+            return fail("a resized autoresizing subview's own autoresizing subviews are not supported by this ibtool");
+        }
+        LAID_OUT.with(|m| m.borrow_mut().insert(laid_out_key(s), Frame { x, y, w, h }));
+    }
+    Ok(())
+}
+
 fn frame(n: Node) -> Result<Frame, String> {
+    if let Some(f) = LAID_OUT.with(|m| m.borrow().get(&laid_out_key(n)).copied()) {
+        return Ok(f);
+    }
     let r = frame_node(n).ok_or_else(|| format!("<{}> without a frame", n.tag_name().name()))?;
     // A table's header view is at the table's origin and as wide as the
     // table, whatever its frame or frame inset says (six probes: offsets,
@@ -5516,7 +5616,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                         && c.attribute("blue") == Some("0.52156862745098043")
                         && c.attribute("alpha") == Some("1")
                 };
-                if let Some(c) = child(*st, "color", "titleColor").filter(|c| !old_default(*c)) {
+                // A configured button's is its configuration's base
+                // foreground colour (a corpus storyboard at iOS 12, a probe at
+                // 14).
+                let base = configuration.and_then(|c| child(c, "color", "baseForegroundColor")).filter(|_| legacy);
+                if let Some(c) = base.or_else(|| child(*st, "color", "titleColor").filter(|c| !old_default(*c))) {
                     content.push(("UITitleColor", color(nib, c)?));
                 }
                 if let Some(c) = child(*st, "color", "titleShadowColor") {
@@ -8791,28 +8895,17 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         } else {
             nib.variations = Some(Vec::new());
             // Laid out at another size than its frame's, the root view resizes
-            // its subviews by their masks, translating them into constraints
-            // or not, constrained or not (six probes at iOS 16 and 18, two
-            // corpus storyboards without size classes), but for constrained
-            // ones on size classes' generic canvas, which keep their frames
-            // (a probe and a corpus storyboard): only those whose masks keep
-            // their frames (fixed left and top margins, size) are
-            // established.
+            // its subviews by their masks (`autoresize`), translating them
+            // into constraints or not, constrained or not (six probes at iOS
+            // 16 and 18, two corpus storyboards without size classes), but
+            // for constrained ones on size classes' generic canvas, which
+            // keep their frames (a probe and a corpus storyboard).
             let document = if frame_node(view).is_none() && !has_device { missing_frame(view)? } else { frame(view)? };
+            LAID_OUT.with(|m| m.borrow_mut().clear());
             if (f.w, f.h) != (document.w, document.h) {
                 let constrained = constrained_views(view);
-                for s in children(view, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())) {
-                    if generic_canvas && traits && s.attribute("id").is_some_and(|id| constrained.contains(&id)) {
-                        continue;
-                    }
-                    let mask = match children(s, "autoresizingMask").next() {
-                        Some(m) => autoresizing_mask(m)?,
-                        None => 36,
-                    };
-                    if mask & (1 | 2 | 8 | 16) != 0 {
-                        return fail("an autoresizing subview of a view laid out at another size than its frame is not supported by this ibtool");
-                    }
-                }
+                let keeps = |s: Node| generic_canvas && traits && s.attribute("id").is_some_and(|id| constrained.contains(&id));
+                autoresize(view, (document.w, document.h), (f.w, f.h), &keeps)?;
             }
             // Without a mask, Interface Builder's default, flexible right
             // and bottom margins; an empty one is left out (four probes).
@@ -9127,11 +9220,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     }
                 }
             }
-            // The guides as their ties measure them (docs/clean-room/ibtool.md).
+            // The guides as their ties measure them (docs/clean-room/ibtool.md),
+            // at the root's frame in the document, where it is laid out at
+            // another size too (a corpus storyboard at iOS 12 and 16).
             let mut tie_guides: Vec<(&str, Frame)> = safe_area_id.map(|id| (id, Frame { x: 0.0, y: 0.0, w: 0.0, h: 0.0 })).into_iter().collect();
             for (id, kind) in &scene.guides {
-                let y = if *kind == "bottom" { f.h } else { 0.0 };
-                tie_guides.push((id, Frame { x: 0.0, y, w: f.w, h: if *kind == "bottom" { 0.0 } else { 1.0 } }));
+                let y = if *kind == "bottom" { document.h } else { 0.0 };
+                tie_guides.push((id, Frame { x: 0.0, y, w: document.w, h: if *kind == "bottom" { 0.0 } else { 1.0 } }));
             }
             order_ties(&mut xml_constraints, |o| (o.1, o.2), &direct, &tie_guides)?;
             // Views deeper than the root's subviews that its constraints name,

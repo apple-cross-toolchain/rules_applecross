@@ -533,7 +533,10 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
     // as a prototype's (six corpus xibs at iOS 12 and 16, the 22 with
     // constraints alike).
     let constrained = held || children(content, "constraints").any(|c| c.has_children());
+    // Not in a versioned bundle's runtime nib, from before iOS 12.3
+    // (`runtime_nibs`).
     let pinned = match xib {
+        _ if nib.runtime => false,
         None => constrained,
         Some(_) if constrained => true,
         Some(XibCell { before_17: Some(before_17), .. }) => !before_17,

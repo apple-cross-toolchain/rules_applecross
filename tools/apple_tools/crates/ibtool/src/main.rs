@@ -132,8 +132,20 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             Err(e) => return skip(format!("{}: {e}", input.display())),
         }
-        return match xib::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable) {
-            Ok(nib) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
+        let compile = || xib::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable);
+        let nib = match compile() {
+            Ok(nib) => nib,
+            Err(e) => return skip(format!("{}: {e}", input.display())),
+        };
+        // Below iOS 12.3, a directory of the nib and its runtime nib where
+        // they differ (`runtime_nibs`).
+        return match storyboard::runtime_nibs(minimum_deployment_target.as_deref(), compile) {
+            Ok(Some(runtime)) if runtime != nib => {
+                std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+                std::fs::write(out.join("objects-12.3+.nib"), nib).map_err(|e| format!("{}: {e}", out.display()))?;
+                std::fs::write(out.join("runtime.nib"), runtime).map_err(|e| format!("{}: {e}", out.display()))
+            }
+            Ok(_) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
             Err(e) => skip(format!("{}: {e}", input.display())),
         };
     }
@@ -155,7 +167,25 @@ fn run(args: Vec<String>) -> Result<(), String> {
         } else if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml, module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj")))
         } else {
-            storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files)
+            let compile = || storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files);
+            // Below iOS 12.3, every nib a directory of it and its runtime
+            // nib where any differs (`runtime_nibs`).
+            compile().and_then(|files| match storyboard::runtime_nibs(minimum_deployment_target.as_deref(), compile)? {
+                Some(runtime) if runtime != files => {
+                    let mut versioned = Vec::new();
+                    for (name, data) in files {
+                        if !name.ends_with(".nib") {
+                            versioned.push((name, data));
+                            continue;
+                        }
+                        let (_, other) = runtime.iter().find(|r| r.0 == name).ok_or_else(|| format!("{name}: no runtime nib"))?;
+                        versioned.push((format!("{name}/objects-12.3+.nib"), data));
+                        versioned.push((format!("{name}/runtime.nib"), other.clone()));
+                    }
+                    Ok(versioned)
+                }
+                _ => Ok(files),
+            })
         };
         let files = match compiled {
             Ok(files) => files,
@@ -171,7 +201,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
         for (name, data) in files {
-            std::fs::write(out.join(name), data).map_err(|e| e.to_string())?;
+            let path = out.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(path, data).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
