@@ -302,12 +302,13 @@ struct Nib {
     named_colors: Vec<(String, &'static str, String)>,
 }
 
-/// A versioned nib bundle (`runtime_nibs`): `objects-12.3+.nib` or
-/// `objects-13.0+.nib` beside `runtime.nib`.
+/// A versioned nib bundle (`runtime_nibs`): `objects-12.3+.nib`,
+/// `objects-13.0+.nib` or `objects-14.0+.nib` beside `runtime.nib`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Bundle {
     Ios12_3,
     Ios13,
+    Ios14,
 }
 
 impl Bundle {
@@ -315,6 +316,7 @@ impl Bundle {
         match self {
             Bundle::Ios12_3 => "objects-12.3+.nib",
             Bundle::Ios13 => "objects-13.0+.nib",
+            Bundle::Ios14 => "objects-14.0+.nib",
         }
     }
 }
@@ -331,7 +333,10 @@ thread_local! {
 /// and a storyboard at iOS 12, every nib of the storyboard so, the others'
 /// two the same); from 13.0, a named colour, a view's own then trait
 /// storage in the runtime nib, whether or not it differs (a corpus xib and
-/// storyboard at iOS 12). Both are refused, being unestablished.
+/// storyboard at iOS 12); from 14.0, an SF Symbol, the runtime nib the
+/// same (eleven symbols in buttons and an image view, probes at iOS 12 to
+/// 14 and a corpus storyboard). Two of them are refused, being
+/// unestablished.
 pub fn runtime_nibs<T: PartialEq>(xml: &str, minimum_deployment_target: Option<&str>, compile: impl Fn() -> Result<T, String>) -> Result<(T, Option<(Bundle, T)>), String> {
     let objects = compile()?;
     let Some(target) = minimum_deployment_target else { return Ok((objects, None)) };
@@ -349,14 +354,19 @@ pub fn runtime_nibs<T: PartialEq>(xml: &str, minimum_deployment_target: Option<&
     };
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let named = version < (13, 0) && doc.descendants().any(|d| d.has_tag_name("color") && d.attribute("name").is_some() && d.attribute("catalog").is_none());
-    match (pinned, named) {
-        (Some(_), true) => fail("a document using both what iOS 12.3 and 13 added, deploying before 12.3, is not supported by this ibtool"),
-        (Some(r), false) => Ok((objects, Some((Bundle::Ios12_3, r)))),
-        (None, true) => {
+    let symbols = version < (14, 0) && doc.descendants().any(|d| !d.has_tag_name("color") && d.attribute("catalog") == Some("system"));
+    match (pinned, named, symbols) {
+        (Some(r), false, false) => Ok((objects, Some((Bundle::Ios12_3, r)))),
+        (None, true, false) => {
             let r = runtime(Bundle::Ios13)?;
             Ok((objects, Some((Bundle::Ios13, r))))
         }
-        (None, false) => Ok((objects, None)),
+        (None, false, true) => {
+            let r = runtime(Bundle::Ios14)?;
+            Ok((objects, Some((Bundle::Ios14, r))))
+        }
+        (None, false, false) => Ok((objects, None)),
+        _ => fail("a document using what two of iOS 12.3, 13 and 14 added, deploying before them, is not supported by this ibtool"),
     }
 }
 

@@ -804,10 +804,12 @@ other values of the attributes these use, is refused. Observed:
   `UIRecords`, `UINamedColor`) for a view's own named background colour,
   its descendants without the root view. A colour in a button's
   background configuration adds nothing (a corpus xib and storyboard at
-  iOS 12). Several such colours, other keys, and a document using both
-  12.3's and 13's features below 12.3 are refused. `objects-14.0+.nib`
-  (the pair the same; its trigger isn't established, in a storyboard with
-  SF Symbols and system colours) isn't made (a corpus storyboard).
+  iOS 12). Deploying before iOS 14, a document using an SF Symbol (an
+  image of the `system` catalog, any of eleven symbols, in a button or an
+  image view) has each nib as `objects-14.0+.nib` and `runtime.nib`, the
+  same bytes (probes at iOS 12, 13 and 13.4; none at 14; a corpus
+  storyboard). Several such colours, other keys, and a document using
+  what two of these versions added, deploying before both, are refused.
 - A storyboard in a `Base.lproj` directory has its translatable strings
   archived as `NSLocalizableString`s: the string inline (`NS.bytes`),
   `NSKey` `<id>.<property>` and `NSDev` the string (shared as strings
