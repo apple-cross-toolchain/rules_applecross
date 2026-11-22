@@ -2950,8 +2950,29 @@ got); a content-sized control hugs its content at its hugging priority
 (250 unless given) and resists compression at its compression resistance
 (750); and every view keeps its document's frame where nothing else
 decides it (204 probes, 29 corpus documents, equal widths and
-inequalities among them). A superview with margins, baselines, a control
-whose size isn't established or items elsewhere is refused. Its content's size is its text's, as
+inequalities among them). A superview with margins, a control whose size
+isn't established or items elsewhere is refused.
+
+A top-level view, or a view controller's, takes the size its constraints
+give it, its top edge kept: its own size is held just below priority 500
+(a label's hugging at 499 keeps it, at 500 shrinks it: eight probes), so
+compression resistance grows it and strong hugging shrinks it. Xcode
+then lays each of its subviews out, run to run, either in its new frame
+or in its old one moved with it (six compiles of one xib gave four
+outputs, a subview a point lower or higher by the root's move); this
+ibtool lays them out in the new frame, as AppKit does at run time, and
+the corpus harness counts either.
+
+Baselines: a label's first baseline is AppKit's for its font, down from
+its top (`firstBaselineOffsetFromTop`: 10 at 9 points, 13 at 13, 15 at
+16, 35 at 36), and its last up from its bottom (2, 3, 4, 8); a regular
+push button's first is 17 down, a small one's 14 (measured on a Mac with
+AppKit, recorded in `font_metrics.bin`; probes of each).
+
+A wrapping label (no line break mode, or word wrapping) narrower than its
+text is as many lines tall as it wraps into at the width it gets, broken
+between words greedily, and laid out again (a corpus storyboard's ten
+lines at 500 points). Its content's size is its text's, as
 AppKit measures a string in its font: the sum of each character's width
 and each adjacent pair's adjustment, measured on a Mac in the system font
 and its bold at 9 to 36 points (`tools/font_metrics_probe` writes
@@ -2961,9 +2982,11 @@ seven titles in five fonts:
 - a label: the text's width rounded up, plus 4 more when it is centred
   (whatever its line breaking or scrolling), at most its preferred
   maximum width, and the font's line height (one line whatever its
-  text), outset 2 left and right;
+  text unless it wraps), outset 2 left and right; a cell of a custom
+  class measured as its own;
 - a regular push button: the width plus 24, 24 tall; a small one: plus
-  20, 20 tall; a check box: plus 22, the line height;
+  20, 20 tall; a check box: plus 22, the line height; a square shadowless
+  button: plus 10, 22 tall (four probes);
 - a pop-up button: its title's width plus 48, 24 tall;
 - a bezeled editable text field: the document's width, 24 tall;
 - a horizontal slider: the document's width, 16 tall, outset 2 left and

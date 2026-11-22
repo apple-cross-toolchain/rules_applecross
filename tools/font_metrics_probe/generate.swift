@@ -5,10 +5,12 @@
 //
 // Run on a Mac (a leased VM): xcrun swift generate.swift font_metrics.bin
 //
-// Format, little-endian: "IBFM" u32 version, u32 table count; per table: u8 name length,
-// name (a PostScript name, UTF-8), f64 size, f64 line height, u32 character count, the
-// characters (u32 scalars), their widths (f64), u32 pair count, pairs (u16 first index,
-// u16 second index, f64 adjustment).
+// Format, little-endian: "IBFM" u32 version (2), u32 table count; per table: u8 name
+// length, name (a PostScript name, UTF-8), f64 size, f64 line height, f64 a label's first
+// baseline from its top and f64 its last baseline from its bottom (an NSTextField's
+// firstBaselineOffsetFromTop and lastBaselineOffsetFromBottom in the font), u32 character
+// count, the characters (u32 scalars), their widths (f64), u32 pair count, pairs (u16
+// first index, u16 second index, f64 adjustment).
 import AppKit
 
 let characters: [Character] = (32...126).map { Character(UnicodeScalar(UInt8($0))) }
@@ -26,7 +28,7 @@ fonts.append(.menuFont(ofSize: 0))
 var out = Data()
 func put<T>(_ v: T) { withUnsafeBytes(of: v) { out.append(contentsOf: $0) } }
 out.append(contentsOf: Array("IBFM".utf8))
-put(UInt32(1).littleEndian)
+put(UInt32(2).littleEndian)
 put(UInt32(fonts.count).littleEndian)
 for font in fonts {
     func width(_ s: String) -> Double { Double((s as NSString).size(withAttributes: [.font: font]).width) }
@@ -35,6 +37,10 @@ for font in fonts {
     out.append(contentsOf: name)
     put(Double(font.pointSize).bitPattern.littleEndian)
     put(Double((("X" as NSString).size(withAttributes: [.font: font])).height).bitPattern.littleEndian)
+    let label = NSTextField(labelWithString: "X")
+    label.font = font
+    put(Double(label.firstBaselineOffsetFromTop).bitPattern.littleEndian)
+    put(Double(label.lastBaselineOffsetFromBottom).bitPattern.littleEndian)
     put(UInt32(characters.count).littleEndian)
     for c in characters { put(c.unicodeScalars.first!.value.littleEndian) }
     let widths = characters.map { width(String($0)) }

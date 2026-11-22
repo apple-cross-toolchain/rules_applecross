@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 struct Table {
     line_height: f64,
+    baselines: (f64, f64),
     index: HashMap<char, u16>,
     widths: Vec<f64>,
     pairs: HashMap<(u16, u16), f64>,
@@ -33,7 +34,9 @@ fn parse(b: &[u8]) -> Option<HashMap<(String, u64), Table>> {
     }
     let u32_ = |s: &[u8]| u32::from_le_bytes(s.try_into().expect("four bytes"));
     let f64_ = |s: &[u8]| f64::from_le_bytes(s.try_into().expect("eight bytes"));
-    let _version = u32_(take(4)?);
+    if u32_(take(4)?) != 2 {
+        return None;
+    }
     let count = u32_(take(4)?);
     let mut out = HashMap::new();
     for _ in 0..count {
@@ -41,6 +44,7 @@ fn parse(b: &[u8]) -> Option<HashMap<(String, u64), Table>> {
         let name = String::from_utf8(take(n)?.to_vec()).ok()?;
         let size = f64_(take(8)?);
         let line_height = f64_(take(8)?);
+        let baselines = (f64_(take(8)?), f64_(take(8)?));
         let chars = u32_(take(4)?) as usize;
         let mut index = HashMap::new();
         for i in 0..chars {
@@ -56,7 +60,7 @@ fn parse(b: &[u8]) -> Option<HashMap<(String, u64), Table>> {
         }
         // The first table for a font and size (the menu font is the system
         // font's).
-        out.entry((name, size.to_bits())).or_insert(Table { line_height, index, widths, pairs });
+        out.entry((name, size.to_bits())).or_insert(Table { line_height, baselines, index, widths, pairs });
     }
     Some(out)
 }
@@ -73,6 +77,38 @@ pub fn measure(font: &str, size: f64, text: &str) -> Option<(f64, f64)> {
     Some((w, t.line_height))
 }
 
+/// A label's first baseline from its top and last from its bottom in the
+/// font at a size, one line of it, as AppKit gives them.
+pub fn label_baselines(font: &str, size: f64) -> Option<(f64, f64)> {
+    tables().get(&(font.to_string(), size.to_bits())).map(|t| t.baselines)
+}
+
+/// How many lines text wraps into at a width, broken between words, each
+/// line's words as wide as `measure` has them; `None` where a word alone is
+/// wider or the text has runs of white space this doesn't model.
+pub fn wrapped_lines(font: &str, size: f64, text: &str, width: f64) -> Option<usize> {
+    let mut count = 0;
+    for paragraph in text.split('\n') {
+        if paragraph.contains("  ") || paragraph.contains('\t') || paragraph.starts_with(' ') || paragraph.ends_with(' ') {
+            return None;
+        }
+        let mut line = String::new();
+        for word in paragraph.split(' ').filter(|w| !w.is_empty()) {
+            let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+            if measure(font, size, &candidate)?.0 <= width + 1e-9 {
+                line = candidate;
+            } else if line.is_empty() || measure(font, size, word)?.0 > width + 1e-9 {
+                return None;
+            } else {
+                count += 1;
+                line = word.to_string();
+            }
+        }
+        count += 1;
+    }
+    Some(count)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -82,5 +118,7 @@ mod tests {
         assert_eq!(super::measure(".SFNS-Regular", 13.0, "A longer title"), Some((77.23193359375, 16.0)));
         assert_eq!(super::measure(".SFNS-Bold", 13.0, "Hello"), Some((33.334716796875, 16.0)));
         assert_eq!(super::measure(".SFNS-Regular", 13.0, "\u{4e00}"), None);
+        assert_eq!(super::label_baselines(".SFNS-Regular", 9.0), Some((10.0, 2.0)));
+        assert_eq!(super::label_baselines(".SFNS-Regular", 13.0), Some((13.0, 3.0)));
     }
 }

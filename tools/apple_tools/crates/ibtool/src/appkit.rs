@@ -135,7 +135,7 @@ struct Collected {
     laid_out: HashMap<String, Frame>,
     /// The alignment rectangles of the views `auto_layout` laid out, before
     /// their frames' rounding, which their constraints measure.
-    aligned: HashMap<String, Frame>,
+    aligned: HashMap<String, Aligned>,
     /// Views' accessibility identifiers: (view id, identifier).
     accessibility: Vec<(String, String)>,
     /// Stack views, whose early decoding connectors lead the connections.
@@ -611,21 +611,20 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
     let height = bounds.h;
     let rect = |id: Option<&str>| -> Result<Frame, String> {
         match id.filter(|i| Some(*i) != own) {
-            None => Ok(Frame {
-                x: 0.0,
-                y: 0.0,
-                w: bounds.w,
-                h: bounds.h,
-            }),
+            // Its own size by its alignment rectangle where laid out.
+            None => {
+                let (w, h) = own.and_then(|o| c.aligned.get(o)).map_or((bounds.w, bounds.h), |a| (a.rect.w, a.rect.h));
+                Ok(Frame { x: 0.0, y: 0.0, w, h })
+            }
             // One laid out, by its alignment rectangle (`auto_layout`).
-            Some(id) if c.aligned.contains_key(id) => Ok(c.aligned[id]),
+            Some(id) if c.aligned.contains_key(id) => Ok(c.aligned[id].rect),
             Some(id) => {
                 let s = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).find(|s| s.attribute("id") == Some(id));
                 frame(s.ok_or("a constraint on a view other than its view or a subview is not supported by this ibtool")?, "frame")
             }
         }
     };
-    let value = |f: &Frame, a: &str| -> Result<f64, String> {
+    let value_of = |f: &Frame, a: &str| -> Result<f64, String> {
         Ok(match a {
             "leading" | "left" => f.x,
             "trailing" | "right" => f.x + f.w,
@@ -638,13 +637,22 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
             other => return fail(format!("a constraint on {other} is not supported by this ibtool")),
         })
     };
+    let value = |id: Option<&str>, a: &str| -> Result<f64, String> {
+        let f = &rect(id)?;
+        let baselines = id.and_then(|i| c.aligned.get(i)).and_then(|a| a.baselines);
+        Ok(match (a, baselines) {
+            ("firstBaseline", Some((first, _))) => height - (f.y + f.h) + first,
+            ("baseline" | "lastBaseline", Some((_, last))) => height - f.y - last,
+            _ => value_of(f, a)?,
+        })
+    };
     for k in list {
-        let first = value(&rect(k.attribute("firstItem"))?, attr(*k, "firstAttribute")?)?;
+        let first = value(k.attribute("firstItem"), attr(*k, "firstAttribute")?)?;
         let second = match k.attribute("secondItem") {
-            Some(s) => value(&rect(Some(s))?, k.attribute("secondAttribute").ok_or("a constraint with a second item and no attribute")?)?,
+            Some(s) => value(Some(s), k.attribute("secondAttribute").ok_or("a constraint with a second item and no attribute")?)?,
             // A size alone, or a second attribute of the view's own.
             None => match k.attribute("secondAttribute") {
-                Some(a) => value(&rect(None)?, a)?,
+                Some(a) => value(None, a)?,
                 None => 0.0,
             },
         };
@@ -1683,10 +1691,17 @@ fn constrained(doc: &Document) -> std::collections::HashSet<String> {
 /// centring labels in views of even and odd sizes, and corpus documents).
 /// A superview with anything else (margins, baselines, a control whose
 /// size isn't established, items elsewhere) is left to the refusal.
-fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Frame)>, String> {
+/// A laid-out view's alignment rectangle and baselines (`Content`).
+#[derive(Clone, Copy)]
+struct Aligned {
+    rect: Frame,
+    baselines: Option<(f64, f64)>,
+}
+
+fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Aligned)>, String> {
     use crate::layout_solver::{solve, Constraint, Relation};
-    let mut out: HashMap<String, (Frame, Frame)> = HashMap::new();
-    let content_sized = |n: Node| matches!(n.tag_name().name(), "textField" | "searchField" | "button" | "popUpButton" | "slider" | "imageView" | "progressIndicator" | "segmentedControl" | "stepper" | "datePicker" | "colorWell" | "levelIndicator" | "comboBox" | "textView" | "stackView" | "scrollView" | "tableView" | "box");
+    let mut out: HashMap<String, (Frame, Aligned)> = HashMap::new();
+    let content_sized = |n: Node| matches!(n.tag_name().name(), "textField" | "searchField" | "button" | "popUpButton" | "slider" | "imageView" | "progressIndicator" | "segmentedControl" | "stepper" | "datePicker" | "colorWell" | "levelIndicator" | "comboBox" | "textView" | "stackView" | "tableView" | "box");
     'containers: for sup in doc.descendants().filter(|d| matches!(d.tag_name().name(), "view" | "customView")) {
         let members: Vec<Node> = children(sup, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter(|c| c.attribute("translatesAutoresizingMaskIntoConstraints") == Some("NO")).collect();
         if members.is_empty() || sup.attribute("flipped").is_some() {
@@ -1697,6 +1712,11 @@ fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Frame)>, String
             Some((f, _)) => *f,
             None => frame(sup, "frame")?,
         };
+        // A top-level view, or a view controller's, takes the size its
+        // constraints give it, its top edge kept, where they decide it
+        // (Xcode's templates: one grown by a pixel, one shrunk to a
+        // wrapped label).
+        let resizable = out.get(sid).is_none() && sup.parent().is_some_and(|p| p.has_tag_name("objects") || (sup.attribute("key") == Some("view") && p.tag_name().name() == "viewController"));
         let ids: Vec<&str> = members.iter().filter_map(|m| m.attribute("id")).collect();
         if ids.len() != members.len() {
             continue;
@@ -1708,8 +1728,9 @@ fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Frame)>, String
             continue;
         }
         // Variables: each member's left, top (down from the superview's
-        // top), width and height.
+        // top), width and height; then the superview's width and height.
         let var = |id: &str, a: usize| ids.iter().position(|i| *i == id).map(|k| 4 * k + a);
+        let root = 4 * members.len();
         let mut rows: Vec<Constraint> = Vec::new();
         let mut sizes = Vec::new();
         for m in &members {
@@ -1719,19 +1740,28 @@ fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Frame)>, String
             }
             sizes.push(size);
         }
+        let baselines: Vec<Option<(f64, f64)>> = sizes.iter().map(|c| c.as_ref().and_then(|c| c.baselines)).collect();
         // An attribute of an item as coefficients and a constant.
         let term = |item: &str, a: &str| -> Option<(Vec<(usize, f64)>, f64)> {
             if item == sid {
-                return Some((Vec::new(), match a {
-                    "leading" | "left" | "top" => 0.0,
-                    "trailing" | "right" | "width" => bounds.w,
-                    "centerX" => bounds.w / 2.0,
-                    "bottom" | "height" => bounds.h,
-                    "centerY" => bounds.h / 2.0,
+                let (w, h) = if resizable { (vec![(root, 1.0)], vec![(root + 1, 1.0)]) } else { (Vec::new(), Vec::new()) };
+                let (cw, ch) = if resizable { (0.0, 0.0) } else { (bounds.w, bounds.h) };
+                let half = |v: Vec<(usize, f64)>| v.into_iter().map(|(i, a)| (i, a / 2.0)).collect();
+                return Some(match a {
+                    "leading" | "left" | "top" => (Vec::new(), 0.0),
+                    "trailing" | "right" | "width" => (w, cw),
+                    "centerX" => (half(w), cw / 2.0),
+                    "bottom" | "height" => (h, ch),
+                    "centerY" => (half(h), ch / 2.0),
                     _ => return None,
-                }));
+                });
             }
             let (l, t, w, h) = (var(item, 0)?, var(item, 1)?, var(item, 2)?, var(item, 3)?);
+            match (a, baselines[ids.iter().position(|i| *i == item)?]) {
+                ("firstBaseline", Some((first, _))) => return Some((vec![(t, 1.0)], first)),
+                ("baseline" | "lastBaseline", Some((_, last))) => return Some((vec![(t, 1.0), (h, 1.0)], -last)),
+                _ => {}
+            }
             Some((match a {
                 "leading" | "left" => vec![(l, 1.0)],
                 "trailing" | "right" => vec![(l, 1.0), (w, 1.0)],
@@ -1784,38 +1814,78 @@ fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Frame)>, String
             let priority = k.attribute("priority").map(number).transpose()?.unwrap_or(1000.0);
             rows.push(Constraint { coefficients, constant, relation, priority });
         }
+        // The superview's own size, held just below 500: a label's
+        // hugging at 499 keeps it, at 500 shrinks it (probes rp_*).
+        if resizable {
+            rows.push(Constraint { coefficients: vec![(root, 1.0)], constant: -bounds.w, relation: Relation::Equal, priority: 499.99 });
+            rows.push(Constraint { coefficients: vec![(root + 1, 1.0)], constant: -bounds.h, relation: Relation::Equal, priority: 499.99 });
+        }
         // Content: hugging and compression resistance; the document's
         // frames where nothing else decides.
         for (k, m) in members.iter().enumerate() {
             let doc_frame = frame(*m, "frame")?;
-            let insets = sizes[k].map(|s| s.1).unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let insets = sizes[k].as_ref().map_or((0.0, 0.0, 0.0, 0.0), |c| c.insets);
             let aligned = (doc_frame.x + insets.0, bounds.h - (doc_frame.y + doc_frame.h) + insets.1, doc_frame.w - insets.0 - insets.2, doc_frame.h - insets.1 - insets.3);
             for (a, v) in [aligned.0, aligned.1, aligned.2, aligned.3].into_iter().enumerate() {
                 rows.push(Constraint { coefficients: vec![(4 * k + a, 1.0)], constant: -v, relation: Relation::Equal, priority: 0.001 });
             }
-            if let Some(((w, h), _)) = sizes[k] {
-                let priority = |key: &str, default: f64| m.attribute(key).map(number).transpose().map(|p| p.unwrap_or(default));
-                for (axis, size, hug, resist) in [(2, w, priority("horizontalHuggingPriority", 250.0)?, priority("horizontalCompressionResistancePriority", 750.0)?), (3, h, priority("verticalHuggingPriority", 250.0)?, priority("verticalCompressionResistancePriority", 750.0)?)] {
-                    if let Some(size) = size {
-                        rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtMost, priority: hug });
-                        rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtLeast, priority: resist });
+        }
+        let fixed = rows.len();
+        // The simplex's floating point, to a millionth of a point.
+        let snap = |v: f64| (v * 1e6).round() / 1e6;
+        // A wrapping label narrower than its text: as many lines tall as it
+        // wraps into at the width it gets, laid out again.
+        let mut values = Vec::new();
+        for pass in 0..3 {
+            rows.truncate(fixed);
+            for (k, m) in members.iter().enumerate() {
+                if let Some(Content { size: (w, h), .. }) = sizes[k] {
+                    let priority = |key: &str, default: f64| m.attribute(key).map(number).transpose().map(|p| p.unwrap_or(default));
+                    for (axis, size, hug, resist) in [(2, w, priority("horizontalHuggingPriority", 250.0)?, priority("horizontalCompressionResistancePriority", 750.0)?), (3, h, priority("verticalHuggingPriority", 250.0)?, priority("verticalCompressionResistancePriority", 750.0)?)] {
+                        if let Some(size) = size {
+                            rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtMost, priority: hug });
+                            rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtLeast, priority: resist });
+                        }
                     }
                 }
             }
+            let Some(v) = solve(root + 2, &rows) else { continue 'containers };
+            values = v.into_iter().map(snap).collect();
+            let mut again = false;
+            for (k, size) in sizes.iter_mut().enumerate() {
+                let Some(Content { size: (Some(w), h), wrap: Some(wrap), .. }) = size else { continue };
+                if values[4 * k + 2] < *w - 1e-6 {
+                    let Some(lines) = crate::font_metrics::wrapped_lines(wrap.0, wrap.1, &wrap.2, values[4 * k + 2]) else { continue 'containers };
+                    let Some((_, line)) = crate::font_metrics::measure(wrap.0, wrap.1, "") else { continue 'containers };
+                    let wrapped = Some(lines as f64 * line);
+                    if *h != wrapped {
+                        *h = wrapped;
+                        again = true;
+                    }
+                }
+            }
+            if !again {
+                break;
+            }
+            if pass == 2 {
+                continue 'containers;
+            }
         }
-        let Some(values) = solve(4 * members.len(), &rows) else { continue };
-        // The simplex's floating point, to a millionth of a point.
-        let snap = |v: f64| (v * 1e6).round() / 1e6;
+        let height = if resizable { values[root + 1] } else { bounds.h };
+        if resizable && (values[root], height) != (bounds.w, bounds.h) {
+            let laid = Frame { x: bounds.x, y: bounds.y + bounds.h - height, w: values[root], h: height };
+            out.insert(sid.to_string(), (laid, Aligned { rect: laid, baselines: None }));
+        }
         for (k, m) in members.iter().enumerate() {
-            let [left, top, w, h] = [0, 1, 2, 3].map(|a| snap(values[4 * k + a]));
-            let insets = sizes[k].map(|s| s.1).unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let [left, top, w, h] = [0, 1, 2, 3].map(|a| values[4 * k + a]);
+            let insets = sizes[k].as_ref().map_or((0.0, 0.0, 0.0, 0.0), |c| c.insets);
             let (fw, fh) = (w + insets.0 + insets.2, h + insets.1 + insets.3);
             let x = left - insets.0;
-            let y = bounds.h - (top - insets.1) - fh;
+            let y = height - (top - insets.1) - fh;
             let round = |v: f64| (v + 0.5).floor();
             let laid = Frame { x: round(x), y: round(y), w: fw, h: fh };
             // Before rounding, as the constraints have it.
-            let aligned = Frame { x: left, y: bounds.h - top - h, w, h };
+            let aligned = Aligned { rect: Frame { x: left, y: height - top - h, w, h }, baselines: baselines[k] };
             let doc_frame = frame(*m, "frame")?;
             let moved = (laid.x, laid.y, laid.w, laid.h) != (doc_frame.x, doc_frame.y, doc_frame.w, doc_frame.h);
             if sizes[k].is_some() || moved {
@@ -1837,10 +1907,24 @@ fn frame_node_appkit<'a, 'i>(n: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
 /// four (eight centred), outset two either side; a regular push button's plus 24, 24 tall,
 /// a small one's plus 20, 20 tall; a check box's plus 22; a pop-up button's
 /// plus 48, 24 tall; a bezeled editable text field 24 tall, a horizontal
-/// slider 16, outset two (probes in the system font at 9 to 36 points and
-/// bold, the small system font, the menu font).
-fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f64, f64))>, String> {
-    let measure = |cell: Node, title: &str| -> Option<(f64, f64)> {
+/// slider 16, outset two; a square shadowless button's plus 10, 22 tall
+/// (probes in the system font at 9 to 36 points and bold, the small system
+/// font, the menu font). Baselines where established: a label's as AppKit
+/// gives them for its font (font_metrics), a regular push button's first 17
+/// down, a small one's 14.
+struct Content {
+    size: (Option<f64>, Option<f64>),
+    insets: (f64, f64, f64, f64),
+    /// The first baseline down from the alignment rectangle's top, the last
+    /// up from its bottom.
+    baselines: Option<(f64, f64)>,
+    /// A wrapping label's font, size and text.
+    wrap: Option<(&'static str, f64, String)>,
+}
+
+fn intrinsic(n: Node) -> Result<Option<Content>, String> {
+    let content = |size: (Option<f64>, Option<f64>), insets: (f64, f64, f64, f64), baselines: Option<(f64, f64)>| Some(Content { size, insets, baselines, wrap: None });
+    let font_of = |cell: Node| -> Option<(&'static str, f64)> {
         let font = children(cell, "font").next()?;
         let (name, default) = match (font.attribute("metaFont"), font.attribute("usesAppearanceFont")) {
             (_, Some("YES")) => (".SFNS-Regular", 13.0),
@@ -1849,7 +1933,10 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
             (Some("smallSystem"), _) => (".SFNS-Regular", 11.0),
             _ => return None,
         };
-        let size = font.attribute("size").and_then(|s| number(s).ok()).unwrap_or(default);
+        Some((name, font.attribute("size").and_then(|s| number(s).ok()).unwrap_or(default)))
+    };
+    let measure = |cell: Node, title: &str| -> Option<(f64, f64)> {
+        let (name, size) = font_of(cell)?;
         crate::font_metrics::measure(name, size, title)
     };
     let plain = |cell: Node, allowed: &[&str]| cell.attributes().all(|a| allowed.contains(&a.name()));
@@ -1865,12 +1952,22 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
                 if cell.attribute("borderStyle") != Some("bezel") || !regular || !plain(cell, &["key", "scrollable", "lineBreakMode", "selectable", "editable", "sendsActionOnEndEditing", "borderStyle", "drawsBackground", "title", "placeholderString", "id", "alignment"]) {
                     return Ok(None);
                 }
-                Some(((None, Some(24.0)), (0.0, 0.0, 0.0, 0.0)))
+                content((None, Some(24.0)), (0.0, 0.0, 0.0, 0.0), None)
             } else {
-                if !plain(cell, &["key", "lineBreakMode", "title", "id", "alignment", "selectable", "sendsActionOnEndEditing", "truncatesLastVisibleLine", "scrollable"]) || cell.attribute("borderStyle").is_some() {
+                // A cell of a custom class is measured as its own (Interface
+                // Builder runs none of an app's code).
+                if !plain(cell, &["key", "lineBreakMode", "title", "id", "alignment", "selectable", "sendsActionOnEndEditing", "truncatesLastVisibleLine", "scrollable", "customClass", "customModule"]) || cell.attribute("borderStyle").is_some() {
                     return Ok(None);
                 }
-                let Some((w, h)) = measure(cell, cell.attribute("title").unwrap_or("")) else { return Ok(None) };
+                // Each line as wide as its text, one line high each; a
+                // wrapping label's lines broken again at the width it gets
+                // (`auto_layout`).
+                let text = title(cell)?;
+                let Some((name, size)) = font_of(cell) else { return Ok(None) };
+                let Some(lines) = text.split('\n').map(|l| crate::font_metrics::measure(name, size, l)).collect::<Option<Vec<_>>>() else { return Ok(None) };
+                let w = lines.iter().map(|l| l.0).fold(0.0, f64::max);
+                let h = lines[0].1 * lines.len() as f64;
+                let wraps = matches!(cell.attribute("lineBreakMode"), None | Some("wordWrapping"));
                 // Centred text four wider, whatever its line breaking (45
                 // probes of alignments and line break modes).
                 let centred = match cell.attribute("alignment") {
@@ -1879,7 +1976,8 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
                     Some(_) => return Ok(None),
                 };
                 let w = w.ceil() + centred;
-                Some(((Some(preferred.map_or(w, |p| w.min(p))), Some(h)), (2.0, 0.0, 2.0, 0.0)))
+                let baselines = font_of(cell).and_then(|(name, size)| crate::font_metrics::label_baselines(name, size));
+                content((Some(preferred.map_or(w, |p| w.min(p))), Some(h)), (2.0, 0.0, 2.0, 0.0), baselines).map(|c| Content { wrap: wraps.then(|| (name, size, text)), ..c })
             }
         }
         "button" => {
@@ -1888,9 +1986,10 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
             let Some((w, h)) = measure(cell, title) else { return Ok(None) };
             let regular13 = h == 16.0;
             match (cell.attribute("type"), cell.attribute("bezelStyle"), cell.attribute("controlSize"), cell.attribute("image")) {
-                (Some("push"), Some("rounded"), None, None) if regular13 => Some(((Some(w.ceil() + 24.0), Some(24.0)), (0.0, 0.0, 0.0, 0.0))),
-                (Some("push"), Some("rounded"), Some("small"), None) if h == 14.0 => Some(((Some(w.ceil() + 20.0), Some(20.0)), (0.0, 0.0, 0.0, 0.0))),
-                (Some("check"), Some("regularSquare"), None, None) if regular13 => Some(((Some(w.ceil() + 22.0), Some(16.0)), (0.0, 0.0, 0.0, 0.0))),
+                (Some("push"), Some("rounded"), None, None) if regular13 => content((Some(w.ceil() + 24.0), Some(24.0)), (0.0, 0.0, 0.0, 0.0), Some((17.0, 7.0))),
+                (Some("push"), Some("rounded"), Some("small"), None) if h == 14.0 => content((Some(w.ceil() + 20.0), Some(20.0)), (0.0, 0.0, 0.0, 0.0), Some((14.0, 6.0))),
+                (Some("check"), Some("regularSquare"), None, None) if regular13 => content((Some(w.ceil() + 22.0), Some(16.0)), (0.0, 0.0, 0.0, 0.0), None),
+                (Some("square"), Some("shadowlessSquare"), None, None) if regular13 => content((Some(w.ceil() + 10.0), Some(22.0)), (0.0, 0.0, 0.0, 0.0), None),
                 _ => None,
             }
         }
@@ -1898,7 +1997,7 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
             let Some(cell) = child(n, "popUpButtonCell", "cell") else { return Ok(None) };
             let Some((w, h)) = measure(cell, cell.attribute("title").unwrap_or("")) else { return Ok(None) };
             match (cell.attribute("type"), cell.attribute("bezelStyle"), cell.attribute("controlSize"), cell.attribute("borderStyle")) {
-                (Some("push"), Some("rounded"), None, Some("borderAndBezel")) if h == 16.0 => Some(((Some(w.ceil() + 48.0), Some(24.0)), (0.0, 0.0, 0.0, 0.0))),
+                (Some("push"), Some("rounded"), None, Some("borderAndBezel")) if h == 16.0 => content((Some(w.ceil() + 48.0), Some(24.0)), (0.0, 0.0, 0.0, 0.0), None),
                 _ => None,
             }
         }
@@ -1917,7 +2016,7 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
                     (Some(number(w)?), Some(number(h)?))
                 }
             };
-            Some((size, (0.0, 0.0, 0.0, 0.0)))
+            content(size, (0.0, 0.0, 0.0, 0.0), None)
         }
         "slider" => {
             let f = frame(n, "frame")?;
@@ -1925,7 +2024,7 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
             if f.h > f.w || cell.attribute("controlSize").is_some() || cell.attribute("numberOfTickMarks").is_some() {
                 return Ok(None);
             }
-            Some(((None, Some(16.0)), (2.0, 0.0, 2.0, 0.0)))
+            content((None, Some(16.0)), (2.0, 0.0, 2.0, 0.0), None)
         }
         _ => None,
     })
