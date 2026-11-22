@@ -2779,7 +2779,8 @@ Every object is defined where the encoder first meets it. A menu item's
 `NSMenu` is a conditional reference: it doesn't define the menu.
 
 **Placeholders.** The First Responder isn't archived; actions targeting it
-leave `NSDestination` out. The Application placeholder is an
+leave `NSDestination` out. A storyboard scene without one compiles exactly
+as one with it, the Application placeholder still added. The Application placeholder is an
 `NSCustomObject` named `NSApplication`, referring to its class
 (`IBClassReference` of `NSObject`) when that is its class. A custom object
 of an AppKit class (`NSFontManager`) is an `NSCustomObject` of it; one of
@@ -2959,7 +2960,13 @@ pushing in, 0 for changing and lighting by contents, lighting by
 background and gray, or pushing in and lighting by contents; a check box 3
 and a radio button 4). A catalog image is `NSNormalImage`, after the bezel
 style. The other behaviours, AppKit's own images and the inline bezel are
-refused.
+refused. A button without a cell is AppKit's default button: no hugging,
+an `NSButtonCell` out of the objects' list (cell flags 0x4000000 and
+0x2000, `Button` in the 13-point system font, `NSButtonFlags` 0x86804000,
+`NSButtonFlags2` 1, bezel style 0, an empty key equivalent, delay and
+interval, `NSAuxButtonType` -1), `NSCellIsDiscardable`, and the control
+keys with alignment and writing direction 0. A UIKit `<title>` on it is
+ignored.
 
 **Boxes** (about 30 probes). A separator or a custom box: `NSBox`'s view
 keys, then `NSOffsets` (`{5, 5}` for a separator, `{0, 0}` otherwise),
