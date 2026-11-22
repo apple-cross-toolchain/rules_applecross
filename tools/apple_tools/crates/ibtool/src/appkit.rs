@@ -1486,7 +1486,7 @@ fn custom_object(nib: &mut Nib, c: &mut Collected, t: Node, module: Option<&str>
 /// the first responder), each by their source's id (as bytes; Xcode's main
 /// menu template's 87, and two corpus xibs), in document order for one
 /// source.
-fn connections(nib: &mut Nib, doc: &Document, sources: &[String], first_responder: &str) -> Result<Vec<(String, Value)>, String> {
+fn connections(nib: &mut Nib, doc: &Document, sources: &[String], first_responder: Option<&str>) -> Result<Vec<(String, Value)>, String> {
     let by_id: HashMap<&str, Node> = doc.descendants().filter(|d| d.is_element()).filter_map(|d| d.attribute("id").map(|id| (id, d))).collect();
     let mut sorted: Vec<&str> = sources.iter().map(String::as_str).collect();
     sorted.sort();
@@ -1523,7 +1523,7 @@ fn connections(nib: &mut Nib, doc: &Document, sources: &[String], first_responde
                         only_attributes(o, &[("selector", None), ("target", None), ("id", None)])?;
                         let mut values = vec![("NSSource", reference(object_name(id)))];
                         let target = attr(o, "target")?;
-                        if target != first_responder {
+                        if Some(target) != first_responder {
                             values.push(("NSDestination", reference(object_name(target))));
                         }
                         // An old storyboard's toggleSourceList: is AppKit's
@@ -1740,7 +1740,7 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
         };
         c.definitions.insert(object_name(attr(*t, "id")?), value);
     }
-    let connections = connections(&mut nib, &doc, &c.connection_sources.clone(), "-1")?;
+    let connections = connections(&mut nib, &doc, &c.connection_sources.clone(), Some("-1"))?;
     assemble(&mut nib, root_object, &owner_name, c, connections)
 }
 
@@ -1822,14 +1822,16 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
             canvas_location_only(scene)?;
             let objects = children(scene, "objects").next().ok_or("a scene without objects")?;
             let members: Vec<Node> = objects.children().filter(|c| c.is_element()).collect();
-            let first_responder = members
-                .iter()
-                .find(|m| m.attribute("sceneMemberID") == Some("firstResponder"))
-                .ok_or("a scene without a first responder")?;
-            only_attributes(*first_responder, &[("id", None), ("userLabel", None), ("customClass", Some("NSResponder")), ("sceneMemberID", None)])?;
-            only_children(*first_responder, &[])?;
+            // A scene without a first responder compiles as one with it (a
+            // hand-written corpus storyboard and two probes).
+            let first_responder = members.iter().copied().find(|m| m.attribute("sceneMemberID") == Some("firstResponder"));
+            if let Some(f) = first_responder {
+                only_attributes(f, &[("id", None), ("userLabel", None), ("customClass", Some("NSResponder")), ("sceneMemberID", None)])?;
+                only_children(f, &[])?;
+            }
+            let first_responder_id = first_responder.map(|f| attr(f, "id")).transpose()?;
             let controller = members.iter().find(|m| m.attribute("sceneMemberID") == Some("viewController")).ok_or("a scene without a controller")?;
-            let others: Vec<Node> = members.iter().copied().filter(|m| m != first_responder && m != controller).collect();
+            let others: Vec<Node> = members.iter().copied().filter(|m| Some(*m) != first_responder && m != controller).collect();
             match controller.tag_name().name() {
                 "windowController" => {
                     let id = attr(*controller, "id")?;
@@ -1843,7 +1845,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                         }
                         None => format!("NSWindowController-{id}"),
                     };
-                    let (bytes, uuid) = window_controller_nib(&doc, xml, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
+                    let (bytes, uuid) = window_controller_nib(&doc, xml, *controller, &others, first_responder_id, module, localizable)?;
                     files.push((format!("{identifier}.nib"), bytes));
                     nib_names.push((identifier.clone(), identifier.clone()));
                     uuids.push((identifier.clone(), uuid));
@@ -1864,7 +1866,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     if !others.is_empty() || controller.attribute("storyboardIdentifier").is_some() {
                         return fail("a content controller with an identifier or objects beside it is not supported by this ibtool");
                     }
-                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    let (name, bytes) = view_nib(&doc, *controller, first_responder_id, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                 }
                 // An embedded view controller: its nib, named for its id, and
@@ -1876,7 +1878,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     }
                     let identifier = format!("NSViewController-{id}");
                     files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, false)?));
-                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    let (name, bytes) = view_nib(&doc, *controller, first_responder_id, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                 }
                 // The initial view controller: its nib, named for its id, as
@@ -1889,7 +1891,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     }
                     let identifier = format!("NSViewController-{id}");
                     files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, true)?));
-                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    let (name, bytes) = view_nib(&doc, *controller, first_responder_id, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                     nib_names.push((identifier.clone(), identifier.clone()));
                     uuids.push((identifier.clone(), uuid(xml, id)));
@@ -1902,14 +1904,14 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
                     }
                     let identifier = attr(*controller, "storyboardIdentifier")?;
                     files.push((format!("{identifier}.nib"), controller_nib(&doc, xml, *controller, module, localizable, true)?));
-                    let (name, bytes) = view_nib(&doc, *controller, attr(*first_responder, "id")?, module, localizable)?;
+                    let (name, bytes) = view_nib(&doc, *controller, first_responder_id, module, localizable)?;
                     files.push((format!("{name}.nib"), bytes));
                     nib_names.push((identifier.to_string(), identifier.to_string()));
                     uuids.push((identifier.to_string(), uuid(xml, attr(*controller, "id")?)));
                     identified.push(identifier.to_string());
                 }
                 "application" => {
-                    let nib = main_menu(&doc, *controller, &others, attr(*first_responder, "id")?, module, localizable)?;
+                    let nib = main_menu(&doc, *controller, &others, first_responder_id, module, localizable)?;
                     files.push(("MainMenu.nib".to_string(), nib));
                     nib_names.push(("MainMenu".into(), "MainMenu".into()));
                 }
@@ -1974,7 +1976,7 @@ pub fn compile_storyboard(xml: &str, module: Option<&str>, localizable: bool) ->
 /// The application scene's nib: an NSObject root, the application (its
 /// main menu, NSApplication at run time), the scene's objects, an
 /// Application placeholder, then the menu.
-fn main_menu(doc: &Document, application: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
+fn main_menu(doc: &Document, application: Node, others: &[Node], first_responder: Option<&str>, module: Option<&str>, localizable: bool) -> Result<Vec<u8>, String> {
     only_attributes(application, &[("id", None), ("sceneMemberID", None)])?;
     only_children(application, &["menu", "connections"])?;
     let mut nib = new_nib(doc, localizable, true);
@@ -2052,7 +2054,7 @@ fn outlet(name: String, source: &str, destination: &str, label: Value) -> (Strin
 /// window as a runtime attribute. Xcode lists the connections in an order
 /// that varies from run to run, and gives each controller a new UUID; this
 /// ibtool keeps one order of each.
-fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
+fn window_controller_nib(doc: &Document, xml: &str, wc: Node, others: &[Node], first_responder: Option<&str>, module: Option<&str>, localizable: bool) -> Result<(Vec<u8>, String), String> {
     only_attributes(
         wc,
         &[
@@ -2560,7 +2562,7 @@ fn controller_nib(doc: &Document, xml: &str, vc: Node, module: Option<&str>, loc
 
 /// A view controller's view nib: an NSObject root (the controller) whose
 /// `view` outlet is the view.
-fn view_nib(doc: &Document, vc: Node, first_responder: &str, module: Option<&str>, localizable: bool) -> Result<(String, Vec<u8>), String> {
+fn view_nib(doc: &Document, vc: Node, first_responder: Option<&str>, module: Option<&str>, localizable: bool) -> Result<(String, Vec<u8>), String> {
     only_children(vc, &["view", "sceneView", "connections"])?;
     // The controller's own connections, and those to it, go through an
     // upstream placeholder standing for it (Xcode's SpriteKit template).
@@ -3288,7 +3290,7 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     )?;
     only_children(
         n,
-        &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point", "accessibility"],
+        &["rect", "autoresizingMask", "buttonCell", "popUpButtonCell", "constraints", "connections", "point", "accessibility", "title"],
     )?;
     canvas_location_only(n)?;
     content_sized(nib, n)?;
@@ -3301,7 +3303,15 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     if children(n, "connections").next().is_some() {
         c.connection_sources.push(id.to_string());
     }
-    let cell = child(n, if popup { "popUpButtonCell" } else { "buttonCell" }, "cell").ok_or("a button without a cell")?;
+    let Some(cell) = child(n, if popup { "popUpButtonCell" } else { "buttonCell" }, "cell") else {
+        if popup {
+            return fail("a pop-up button without a cell");
+        }
+        return default_button(nib, c, n, module, parent, name);
+    };
+    if child(n, "title", "title").is_some() {
+        return fail("a button's <title> beside its cell is not supported by this ibtool");
+    }
     // Its cell comes before its own constraints in the objects' list (a
     // probe).
     c.parents.push((object_name(attr(cell, "id")?), name.clone()));
@@ -3602,6 +3612,55 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
     values.push(("NSControlSendActionMask", Value::Int(4)));
     values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
     swapped(nib, n, module, if popup { "NSPopUpButton" } else { "NSButton" }, values, name)
+}
+
+/// A button without a cell, AppKit's default one: titled Button in the
+/// system font, without a bezel, its cell discardable and out of the
+/// objects' list. A `<title>` (UIKit's) is ignored (a hand-written corpus
+/// storyboard, and probes with and without one).
+fn default_button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str, name: String) -> Result<Value, String> {
+    only_attributes(n, &[("id", None)])?;
+    only_children(n, &["rect", "autoresizingMask", "connections", "title"])?;
+    for t in children(n, "title") {
+        only_attributes(t, &[("key", Some("title")), ("string", None)])?;
+    }
+    let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
+    let contents = nib.string("Button");
+    let font_name = nib.string(".AppleSystemUIFont");
+    let font = nib.shared("font:.AppleSystemUIFont:13:1044".to_string(), || {
+        Object::new("NSFont", vec![("NSName", font_name), ("NSSize", Value::Double(13.0)), ("NSfFlags", Value::Int(0x414))])
+    });
+    let key_equivalent = nib.string("");
+    let cell = Object::new(
+        "NSButtonCell",
+        vec![
+            ("NSCellFlags", Value::Int(0x400_0000)),
+            ("NSCellFlags2", Value::Int(0x2000)),
+            ("NSContents", contents),
+            ("NSSupport", font),
+            ("NSButtonFlags", Value::Int(0x8680_4000_u32 as i32 as i64)),
+            ("NSButtonFlags2", Value::Int(1)),
+            ("NSBezelStyle", Value::Int(0)),
+            ("NSKeyEquivalent", key_equivalent),
+            ("NSPeriodicDelay", Value::Int(400)),
+            ("NSPeriodicInterval", Value::Int(75)),
+            ("NSAuxButtonType", Value::Int(-1)),
+        ],
+    );
+    values.push(("NSEnabled", Value::Bool(true)));
+    values.push(("NSCell", Value::New(cell)));
+    values.push(("NSCellIsDiscardable", Value::Bool(true)));
+    values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
+    values.push(("NSControlSize", Value::Int(0)));
+    values.push(("NSControlContinuous", Value::Bool(false)));
+    values.push(("NSControlRefusesFirstResponder", Value::Bool(false)));
+    values.push(("NSControlUsesSingleLineMode", Value::Bool(false)));
+    values.push(("NSControlTextAlignment", Value::Int(0)));
+    values.push(("NSControlLineBreakMode", Value::Int(0)));
+    values.push(("NSControlWritingDirection", Value::Int(0)));
+    values.push(("NSControlSendActionMask", Value::Int(4)));
+    values.push(("IBNSShadowedSymbolConfiguration", Value::Nil));
+    swapped(nib, n, module, "NSButton", values, name)
 }
 
 /// A scroll view, as Xcode archives one it doesn't tile again: no border,
