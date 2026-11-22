@@ -3057,21 +3057,55 @@ Xcode names in the `system` namespace, are refused.
 
 **Scroll views**, as Xcode archives those it doesn't lay out again: no
 border, hidden scrollers that hide themselves, no content insets, and a
-document view (a plain or custom view) no larger than the clip view. With
-a border, a scroller showing, or a larger document, Xcode tiles it with
-AppKit's scroller metrics, and this ibtool refuses it. The scroll view's
+document view (a plain, custom, collection or text view) no larger than
+the clip view. With a border, a scroller showing, or a larger document,
+Xcode tiles it with AppKit's scroller metrics, and this ibtool refuses it
+(`relax_ibtool_layout` compiles it with the document's frames). The scroll view's
 subviews are its clip view and two scrollers; `NSsFlags` 0x20a00, with the
 horizontal and vertical scrollers 0x20 and 0x10, predominant-axis
 scrolling 0x10000, content insets 0x100000, and the scroll elasticity,
 vertical in bits 12 and 13 and horizontal in 14 and 15 (automatic 0, none
 1, allowed 2); the line and page scroll
 amounts as big-endian floats (vertical, then horizontal); magnification
-0.25 to 4. The clip view holds the document view at its origin and the
-control background colour, drawing it (4) and copying on scroll (2). The
-scrollers are layer-backed and target the scroll view with
-`_doScroller:`. In a storyboard whose document view is off its clip view's
+0.25 to 4. The clip view holds the document view at its origin and its
+background colour (the control background colour unless given), drawing
+it (4) and copying on scroll (2); around a text view, the arrow cursor
+(hot spot `{1, -1}`). The scrollers target the scroll view with
+`_doScroller:`. They are layer-backed in the first compile of an ssh
+session; in later ones only with `wantsLayer` (Xcode varies here, so
+either counts; two probes, six compiles each). In a storyboard whose document view is off its clip view's
 origin, the vertical scroller comes before the horizontal one among the
 scroll view's subviews (not in the objects' list).
+
+**Text views** (`NSTextView`, 32 probes, one per attribute and colour,
+and the Action Extension template): the view, then `NSTextContainer`,
+`NSSharedData`, `NSTVFlags`, the maximum size as text, a nil delegate and
+the text colour. The container holds an `NSLayoutManager` (its
+`NSTextStorage` an empty mutable string, itself in `NSTextContainers`,
+`NSLMFlags` 102, 230 laying out non-contiguously), the text view, its
+frame's width and a minimum width of 15. `NSTextViewSharedData` holds
+`NSFlags` from 0x90F: selecting 0x1, editing 0x2, rich text 0x4,
+importing graphics 0x8 and drawing its background 0x100, each set unless
+NO (not selectable is neither selecting nor editing, not rich neither rich
+nor graphics); the font panel 0x20, the ruler 0x40, continuous spell checking 0x80, smart insert
+and delete 0x200, undo 0x400, the find panel 0x2000, grammar 0x8000,
+image editing 0x10000, smart quotes 0x20000, links 0x40000, data
+detectors 0xC00000, smart dashes 0x1000000, text replacement 0x2000000,
+spelling correction 0x4000000, incremental searching 0x40000000 and the
+inspector bar 0x80000000; `NSMoreFlags` 1, 3 with the character picker;
+the background and insertion point colours; selected text's attributes
+(the selected text background and text colours), links' (the link
+colour, the pointing-hand cursor, type 13, at `{8, -8}`, and a single
+underline); `NSPreferredTextFinderStyle` (none 0, panel 1, bar 2) and
+`NSWritingToolsFlags` 256. `NSTVFlags` is 132, resizable vertically 2
+and horizontally 1. The insertion point defaults to the System
+`textInsertionPointColor`, resolved as the system blue, which with the
+link colour resolves to sRGB `0 0 0.9981992245`. A document saved before
+tools version 14269 has Interface Builder's old defaults (probes on both
+sides of it): a calibrated white background is the text background
+colour, a calibrated black insertion point the default, and no text
+colour the text colour; a calibrated white clip view around such a text
+view neither draws nor keeps its colour.
 
 **Storyboards.** `Info.plist`: the main menu's nib name `MainMenu` (whether
 or not there is one), the controllers' nib names, the entry point, the
