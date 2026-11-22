@@ -2848,7 +2848,10 @@ Every object is defined where the encoder first meets it. A menu item's
 
 **Placeholders.** The First Responder isn't archived; actions targeting it
 leave `NSDestination` out. A storyboard scene without one compiles exactly
-as one with it, the Application placeholder still added. The Application placeholder is an
+as one with it, the Application placeholder still added. An old xib's First
+Responder of class `NSResponder` compiles as one of `FirstResponder`
+(rules_apple's `view_macos.xib`, its blank first line removed, and Xcode's
+View template give identical nibs). The Application placeholder is an
 `NSCustomObject` named `NSApplication`, referring to its class
 (`IBClassReference` of `NSObject`) when that is its class. A custom object
 of an AppKit class (`NSFontManager`) is an `NSCustomObject` of it; one of
