@@ -3824,17 +3824,14 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             if let Some((_, scale)) = minimum {
                 values.push(("UIMinimumScaleFactor", Value::Float(scale)));
             }
-            // A preferred maximum width, a float, after the alignment and
-            // any scale factor (one probe, one corpus storyboard); beside
-            // letter spacing it is refused.
-            if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
-                if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
-                    return fail("a label's preferredMaxLayoutWidth beside letter spacing is not supported by this ibtool");
-                }
-                values.push(("UIPreferredMaxLayoutWidth", Value::Float(number(w)? as f32)));
-            }
             if n.attribute("adjustsLetterSpacingToFitWidth").is_some() {
                 values.push(("UIAdjustsLetterSpacingToFit", Value::Bool(true)));
+            }
+            // A preferred maximum width, a float, after the alignment, any
+            // scale factor and any letter spacing (one probe, two corpus
+            // storyboards).
+            if let Some(w) = n.attribute("preferredMaxLayoutWidth") {
+                values.push(("UIPreferredMaxLayoutWidth", Value::Float(number(w)? as f32)));
             }
             values.push(("UIDisableUpdateTextColorOnTraitCollectionChange", Value::Bool(declared_color)));
             // A custom class is swapped in, last (two probes).
@@ -7175,7 +7172,13 @@ fn text_attributes(nib: &mut Nib, t: Node) -> Result<Value, String> {
         if c.attribute("key") != Some("textColor") || children(t, "color").count() > 1 {
             return fail("text attributes other than one text colour and a font are not supported by this ibtool");
         }
-        entries.extend([nib.string("NSColor"), color(nib, c)?]);
+        // As a colour-matched document has it, even in one that isn't: a
+        // calibrated white text colour is `whiteColor` where the bar's own
+        // tint of that white is RGB (a corpus storyboard at toolsVersion 6250).
+        let matched = std::mem::replace(&mut nib.color_matched, true);
+        let text_color = color(nib, c);
+        nib.color_matched = matched;
+        entries.extend([nib.string("NSColor"), text_color?]);
     }
     if let Some(f) = child(t, "fontDescription", "fontDescription") {
         entries.extend([nib.string("NSFont"), font(nib, Some(f), None)?]);
@@ -8323,6 +8326,13 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         bar_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
                         continue;
                     }
+                    // So is one to its own toolbar items' bar button item, by
+                    // name among them (a corpus storyboard's table view
+                    // controller).
+                    Some(b) if b.has_tag_name("barButtonItem") && b.parent_element().is_some_and(|t| t.has_tag_name("toolbarItems") && t.parent_element() == Some(vc)) => {
+                        bar_outlets.push((attr(o, "property")?.to_string(), destination.to_string()));
+                        continue;
+                    }
                     // And one to a custom view of its navigation item's bar
                     // button items in the nib that holds the item, after
                     // the controller's storyboard outlet (two probes).
@@ -8337,6 +8347,12 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         if item.and_then(|i| i.parent_element()) != Some(vc) {
                             return fail("an outlet to a custom view outside the controller's navigation item is not supported by this ibtool");
                         }
+                        item_outlets.push((attr(o, "property")?.to_string(), view_name(destination)));
+                        continue;
+                    }
+                    // So is one to its own navigation item's title view (a
+                    // corpus storyboard's segmented control).
+                    Some(v) if v.attribute("key") == Some("titleView") && v.parent_element().is_some_and(|i| i.has_tag_name("navigationItem") && i.parent_element() == Some(vc)) => {
                         item_outlets.push((attr(o, "property")?.to_string(), view_name(destination)));
                         continue;
                     }
@@ -9555,7 +9571,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // its identifier; listed after its navigation item, before the
         // item's bar button items, their custom views after those; their
         // custom views' outlets, actions and pairs as the navigation item's
-        // (a corpus storyboard's two identified controllers). Elsewhere, or
+        // (a corpus storyboard's two identified controllers, and a table view
+        // controller's in another). Elsewhere, or
         // beside a navigation item's custom views, segues, recognizers or
         // later settings, they are refused.
         let toolbar: Vec<Node> = children(vc, "toolbarItems").flat_map(|t| children(t, "barButtonItem")).collect();
@@ -9569,7 +9586,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                 || vc.attribute("hidesBottomBarWhenPushed").is_some()
                 || extended_edges(vc)?.is_some()
                 || children(vc, "value").next().is_some();
-            if embedded || is_list || vc.attribute("storyboardIdentifier").is_none() || later || !recognizers.is_empty()
+            if embedded || is_collection || vc.attribute("storyboardIdentifier").is_none() || later || !recognizers.is_empty()
                 || !view_segues.is_empty() || !own_segues.is_empty() || !bar_segues.is_empty() || bar_items.iter().any(|b| b.starts_with("view "))
             {
                 return fail("toolbar items here, or beside these settings, segues or recognizers, are not supported by this ibtool");
@@ -9583,6 +9600,7 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     return fail("a toolbar item's segues are not supported by this ibtool");
                 }
                 values.push(Value::New(object.named(name.clone())));
+                item_ids.push((attr(*b, "id")?.to_string(), name.clone()));
                 toolbar_names.push(name);
                 if let Some(v) = custom_view(*b) {
                     toolbar_views.push(view_name(attr(v, "id")?));
