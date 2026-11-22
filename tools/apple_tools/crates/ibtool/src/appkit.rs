@@ -2847,6 +2847,13 @@ fn font(nib: &mut Nib, n: Node) -> Result<Value, String> {
     font_as(nib, n, None)
 }
 
+/// `<font key="font" metaFont="system"/>`, the font of a control that gives
+/// none.
+fn system_font_node() -> Node<'static, 'static> {
+    static DOCUMENT: std::sync::OnceLock<roxmltree::Document<'static>> = std::sync::OnceLock::new();
+    DOCUMENT.get_or_init(|| roxmltree::Document::parse(r#"<font key="font" metaFont="system"/>"#).expect("a font element")).root_element()
+}
+
 /// A font, with a metafont read as another (`meta`: a pop-up button's menu
 /// font is the message font, two probes).
 fn font_as(nib: &mut Nib, n: Node, meta: Option<(&str, &str)>) -> Result<Value, String> {
@@ -3307,12 +3314,20 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         other => return fail(format!("bezel style {other} is not supported by this ibtool")),
     };
     // Its behaviour's bits, and the button type it makes.
-    let behavior = child(cell, "behavior", "behavior").ok_or("a button without a behaviour")?;
-    let mut behaviors: Vec<&str> = behavior.attributes().filter(|a| a.name() != "key").map(|a| a.name()).collect();
+    // A plain push button without one behaves as Interface Builder's
+    // default, momentarily pushing in (a hand-written conformance xib);
+    // another type without one is refused.
+    let mut behaviors: Vec<&str> = match child(cell, "behavior", "behavior") {
+        Some(behavior) => {
+            if behavior.attributes().any(|a| a.name() != "key" && a.value() != "YES") {
+                return fail("a button behaviour other than YES is not supported by this ibtool");
+            }
+            behavior.attributes().filter(|a| a.name() != "key").map(|a| a.name()).collect()
+        }
+        None if cell.attribute("type").is_none() && !popup => vec!["lightByBackground", "lightByGray", "pushIn"],
+        None => return fail("a button without a behaviour"),
+    };
     behaviors.sort();
-    if behavior.attributes().any(|a| a.name() != "key" && a.value() != "YES") {
-        return fail("a button behaviour other than YES is not supported by this ibtool");
-    }
     let mut flags_b: i64 = 0;
     for b in &behaviors {
         flags_b |= match *b {
@@ -3436,7 +3451,13 @@ fn button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, paren
         Some(other) => return fail(format!("control size {other} is not supported by this ibtool")),
     };
     let signed = |v: i64| v as u32 as i32 as i64;
-    let font_node = child(cell, "font", "font").ok_or("a button cell without a font")?;
+    // Without a font, a regular-size button's is the system font (a
+    // hand-written conformance xib).
+    let font_node = match child(cell, "font", "font") {
+        Some(f) => f,
+        None if !popup && control_size == 0 => system_font_node(),
+        None => return fail("a button cell without a font"),
+    };
     let mut cell_values = vec![
         ("NSCellFlags", Value::Int(signed(flags))),
         ("NSCellFlags2", Value::Int(signed(flags2))),
