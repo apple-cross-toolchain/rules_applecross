@@ -2969,6 +2969,16 @@ its top (`firstBaselineOffsetFromTop`: 10 at 9 points, 13 at 13, 15 at
 push button's first is 17 down, a small one's 14 (measured on a Mac with
 AppKit, recorded in `font_metrics.bin`; probes of each).
 
+A scroll view is tiled again as AppKit tiles it with legacy scrollers
+(AppKit's `tile()` on a Mac for each border and scroller; a corpus xib):
+inside its border (line and bezel 1, groove 2), a scroller that doesn't
+hide itself 17 wide along the right or bottom edge, the clip view the
+rest, and the document view resized with the clip view along the axes
+its autoresizing mask makes sizable. An ssh session's first compile
+instead backs scrollers without `wantsLayer` and tiles overlay scrollers
+over the clip view (three compiles of one xib); this ibtool compiles as
+the later ones do, and the corpus harness counts either.
+
 A wrapping label (no line break mode, or word wrapping) narrower than its
 text is as many lines tall as it wraps into at the width it gets, broken
 between words greedily, and laid out again (a corpus storyboard's ten
@@ -3371,9 +3381,9 @@ background colours, `NSSelectable` and `NSAllowsMultipleSelection` when
 set, and dragging masks -1 and 0. The flow layout, listed after its
 collection view, archives its interitem and line spacings as floats when
 not 10, then its item size when not 50 by 50. A scroll view leaves out its
-scroll amounts when all four are 10. Laying a constrained scroll view out
-again, Xcode may turn its collection view's horizontal scroller off, so a
-constrained one without `hasHorizontalScroller="NO"` is refused.
+scroll amounts when all four are 10. A constrained scroll view keeps its
+collection view's horizontal scroller (six compiles of a corpus
+storyboard with Xcode 27.2).
 
 **Top-level objects.** A xib may hold controls at its top level
 (boxes, text fields, buttons, pop-up buttons, image views, scroll views),

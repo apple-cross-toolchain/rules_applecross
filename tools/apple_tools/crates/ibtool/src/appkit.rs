@@ -4052,17 +4052,16 @@ fn default_button(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str
     swapped(nib, n, module, "NSButton", values, name)
 }
 
-/// A scroll view, as Xcode archives one it doesn't tile again: no border,
-/// scrollers hidden and hiding themselves, no content insets, a document
-/// view no larger than its clip view (20 probes: with a border, a scroller
-/// showing, insets or a larger document, Xcode lays it out with AppKit's
-/// scroller metrics, which this ibtool doesn't reproduce). `NSsFlags`:
+/// A scroll view, tiled again as Xcode tiles it (below): no content
+/// insets, a document view no larger than its clip view (20 probes: with
+/// insets or a larger document, Xcode shows scrollers this ibtool doesn't
+/// place). `NSsFlags`:
 /// 0x20800, hiding scrollers 0x200, horizontal and vertical scrollers 0x20
 /// and 0x10 (the defaults), predominant-axis scrolling 0x10000 (the
 /// default), content insets given 0x100000; its border type in the low two
 /// bits (none 0, line 1, bezel 2, groove 3; bezel unless given: two corpus
-/// documents). `relax_ibtool_layout` compiles one Xcode tiles again (a border,
-/// scrollers that don't hide themselves) with the document's frames.
+/// documents). `relax_ibtool_layout` compiles one with the document's
+/// frames.
 fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
     only_attributes(
         n,
@@ -4093,9 +4092,6 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         Some(other) => return fail(format!("border type {other} on a scroll view is not supported by this ibtool")),
     };
     let hides = n.attribute("autohidesScrollers").is_some();
-    if (border != 0 || !hides) && !layout_relaxed() {
-        return fail("a scroll view with a border or scrollers that don't hide themselves is laid out by Xcode, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
-    }
     let id = attr(n, "id")?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
@@ -4107,27 +4103,56 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     )?;
     only_children(clip, &["rect", "autoresizingMask", "subviews", "color"])?;
     let clip_frame = frame(clip, "frame")?;
-    // One inset from them (a border's) is tiled again too.
-    if (clip_frame.x, clip_frame.y, clip_frame.w, clip_frame.h) != (0.0, 0.0, frame_n.w, frame_n.h) && !layout_relaxed() {
-        return fail("a clip view other than its scroll view's bounds is laid out by Xcode, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
-    }
     let docs: Vec<Node> = children(clip, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
     let [doc] = docs.as_slice() else {
         return fail("a clip view without one document view is not supported by this ibtool");
     };
-    // Laying a constrained scroll view out again, Xcode may turn off a
-    // collection view's horizontal scroller (a corpus xib); one without it
-    // is established (eleven corpus xibs, a probe).
-    let constrained = n.attribute("translatesAutoresizingMaskIntoConstraints").is_some() && nib.constrained.contains(attr(n, "id")?);
-    if doc.has_tag_name("collectionView") && constrained && n.attribute("hasHorizontalScroller").is_none() && !layout_relaxed() {
-        return fail("a constrained scroll view's collection view with a horizontal scroller is laid out by Xcode, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it as the document has it");
-    }
     if !matches!(doc.tag_name().name(), "view" | "customView" | "collectionView" | "textView") {
         return fail(format!("a scroll view's document <{}> is not supported by this ibtool", doc.tag_name().name()));
     }
     let doc_frame = frame(*doc, "frame")?;
-    if (doc_frame.w > clip_frame.w || doc_frame.h > clip_frame.h) && !layout_relaxed() {
-        return fail("a document view larger than its clip view makes Xcode show a scroller, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
+    // Tiled as AppKit tiles it with legacy scrollers, as Xcode compiles
+    // (AppKit on a Mac; a corpus xib): inside its border (line and bezel
+    // 1, groove 2), a scroller that doesn't hide itself 17 wide along the
+    // right or bottom edge, the clip view the rest; the document view
+    // resized with the clip view along the axes it is sizable in. (An ssh
+    // session's first compile tiles overlay scrollers, over the clip view:
+    // either counts in the corpus harness.)
+    let mut doc_size = (doc_frame.w, doc_frame.h);
+    if !layout_relaxed() {
+        let laid = c.laid_out.get(id).copied().unwrap_or(frame_n);
+        let inset = [0.0, 1.0, 1.0, 2.0][border as usize];
+        let shown = (n.attribute("hasHorizontalScroller").is_none() && !hides, n.attribute("hasVerticalScroller").is_none() && !hides);
+        let bar = |on: bool| if on { 17.0 } else { 0.0 };
+        let tiled = Frame { x: inset, y: inset, w: laid.w - 2.0 * inset - bar(shown.1), h: laid.h - 2.0 * inset - bar(shown.0) };
+        let sizable = child(*doc, "autoresizingMask", "autoresizingMask").map_or((false, false), |m| (m.attribute("widthSizable").is_some(), m.attribute("heightSizable").is_some()));
+        if sizable.0 {
+            doc_size.0 += tiled.w - clip_frame.w;
+        }
+        if sizable.1 {
+            doc_size.1 += tiled.h - clip_frame.h;
+        }
+        if doc_size.0 > tiled.w || doc_size.1 > tiled.h {
+            return fail("a document view larger than its clip view makes Xcode show a scroller, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
+        }
+        // A text view's width beside a horizontal scroller isn't
+        // established.
+        if shown.0 && doc.has_tag_name("textView") {
+            return fail("a text view in a scroll view with a horizontal scroller is laid out by Xcode, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
+        }
+        c.laid_out.insert(view_id(clip)?, tiled);
+        c.laid_out.insert(view_id(*doc)?, Frame { x: doc_frame.x, y: doc_frame.y, w: doc_size.0, h: doc_size.1 });
+        for sc in children(n, "scroller") {
+            let horizontal = sc.attribute("key") == Some("horizontalScroller");
+            if !(if horizontal { shown.0 } else { shown.1 }) {
+                continue;
+            }
+            if sc.attribute("hidden").is_some() {
+                return fail("a hidden scroller a scroll view shows is not supported by this ibtool");
+            }
+            let f = if horizontal { Frame { x: inset, y: laid.h - inset - 17.0, w: tiled.w, h: 17.0 } } else { Frame { x: laid.w - inset - 17.0, y: inset, w: 17.0, h: tiled.h } };
+            c.laid_out.insert(view_id(sc)?, f);
+        }
     }
     if let Some(insets) = child(n, "edgeInsets", "contentInsets") {
         only_attributes(insets, &[("key", None), ("left", Some("0.0")), ("right", Some("0.0")), ("top", Some("0.0")), ("bottom", Some("0.0"))])?;
@@ -4277,7 +4302,8 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask"])?;
-    if n.attribute("hidden").is_none() && !layout_relaxed() {
+    // One showing is tiled by its scroll view (`scroll_view`).
+    if n.attribute("hidden").is_none() && !c.laid_out.contains_key(&view_id(n)?) && !layout_relaxed() {
         return fail("a scroller showing is laid out by Xcode, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
     }
     if n.attribute("horizontal") != Some(if horizontal { "YES" } else { "NO" }) {
@@ -4287,13 +4313,9 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     nib.remove(&mut values, "NSHuggingPriority");
-    // Layer-backed whether or not it says so, as in an ssh session's first
-    // compile; Xcode's later ones leave a scroller without wantsLayer
-    // unbacked (two probes, six compiles each).
-    if !values.iter().any(|v| v.0 == "NSViewIsLayerTreeHost") {
-        let at = values.iter().position(|v| v.0 == "NSViewWantsBestResolutionOpenGLSurface").expect("its OpenGL key");
-        values.insert(at, ("NSViewIsLayerTreeHost", Value::Bool(true)));
-    }
+    // Without wantsLayer, unbacked, as in Xcode's compiles after an ssh
+    // session's first, which backs it and tiles overlay scrollers (two
+    // probes, six compiles each; `scroll_view` tiles legacy ones to match).
     let action = nib.string("_doScroller:");
     values.push(("NSAllowsLogicalLayoutDirection", Value::Bool(nib.localizable)));
     values.push(("NSControlAction", action));
@@ -4776,7 +4798,10 @@ fn text_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, pa
     let id = attr(n, "id")?;
     let name = object_name(id);
     c.parents.push((name.clone(), parent.to_string()));
-    let f = frame(n, "frame")?;
+    let f = match c.laid_out.get(id) {
+        Some(f) => *f,
+        None => frame(n, "frame")?,
+    };
     let mut flags: i64 = 0x90F;
     for (attribute, cleared) in [("editable", 0x2), ("selectable", 0x3), ("importsGraphics", 0x8), ("richText", 0xC), ("drawsBackground", 0x100)] {
         if yes(attribute) {
@@ -4814,12 +4839,14 @@ fn text_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, pa
             return fail(format!("a text view's colour {key} is not supported by this ibtool"));
         }
     }
+    let doc_frame = frame(n, "frame")?;
     let mut max_size = None;
     for sz in children(n, "size") {
         only_attributes(sz, &[("key", None), ("width", None), ("height", None)])?;
         let (w, h) = (number(attr(sz, "width")?)?, number(attr(sz, "height")?)?);
         match attr(sz, "key")? {
-            "minSize" if (w, h) == (f.w, f.h) => {}
+            // The document's frame, whatever its scroll view's tiling.
+            "minSize" if (w, h) == (doc_frame.w, doc_frame.h) => {}
             "maxSize" => max_size = Some((w, h)),
             other => return fail(format!("a text view's {other} other than its frame's is not supported by this ibtool")),
         }
