@@ -11,7 +11,7 @@ use super::*;
 pub(super) fn collection_view_nib(
     settings: Settings, module: Option<&str>, vc_id: &str, cv: Node, f: &Frame,
     vc_outlets: &[(String, String)], gestures: &[String],
-) -> Result<(Object, bool, Vec<String>), String> {
+) -> Result<(Object, bool, Vec<String>, Vec<String>), String> {
     only_attributes(cv, &[
         ("key", Some("view")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("scaleToFill")),
         ("dataMode", Some("prototypes")), ("id", None), ("opaque", Some("NO")), ("minimumZoomScale", None), ("maximumZoomScale", None),
@@ -91,7 +91,8 @@ pub(super) fn collection_view_nib(
         connections.push(outlet(&mut nib, label, source, destination));
     }
     let pairs = if estimated { vec![estimated_item_size(&mut nib, "layout")] } else { Vec::new() };
-    Ok((root_object_with_pairs(&mut nib, top, objects, connections, pairs), upstream_used, segues))
+    let root = root_object_with_pairs(&mut nib, top, objects, connections, pairs);
+    Ok((root, upstream_used, segues, std::mem::take(&mut nib.varied)))
 }
 
 /// A collection view's prototype cells with their reuse identifiers, in
@@ -250,7 +251,8 @@ fn collection_values(
     if !cells.is_empty() {
         let mut nibs = Vec::new();
         for (reuse, c, placeholder) in cells {
-            let bytes = cell_nib(nib.settings(), module, *c, placeholder.is_some(), None)?;
+            let (bytes, mut varied) = cell_nib_varied(nib.settings(), module, *c, placeholder.is_some(), None)?;
+            nib.varied.append(&mut varied);
             nibs.push(nib.string(reuse));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -260,7 +262,8 @@ fn collection_values(
     if !supplementary.is_empty() {
         let mut nibs = Vec::new();
         for (key, v) in &supplementary {
-            let bytes = reusable_view_nib(nib.settings(), module, *v)?;
+            let (bytes, mut varied) = reusable_view_nib(nib.settings(), module, *v)?;
+            nib.varied.append(&mut varied);
             nibs.push(nib.string(key));
             let data = Value::New(Object::new("NSData", vec![("NS.bytes", Value::Data(bytes))]));
             nibs.push(Value::New(Object::new("UINib", vec![("captureEnclosingNIBBundleOnDecode", Value::Bool(true)), ("archiveData", data)])));
@@ -443,6 +446,11 @@ pub(super) struct XibCell<'a> {
 /// A xib's cell keeps its colours exact and lists its guide after its
 /// content view.
 pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<XibCell>) -> Result<Vec<u8>, String> {
+    Ok(cell_nib_varied(settings, module, cell, has_segue, xib)?.0)
+}
+
+/// `cell_nib`, with the ids of the views whose variations it compiled.
+fn cell_nib_varied(settings: Settings, module: Option<&str>, cell: Node, has_segue: bool, xib: Option<XibCell>) -> Result<(Vec<u8>, Vec<String>), String> {
     only_attributes(cell, &[
         ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("insetsLayoutMarginsFromSafeArea", Some("NO")),
@@ -517,6 +525,12 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
 
     let mut nib = Nib::new(settings);
     nib.xib = xib.is_some();
+    // A prototype's size classes' variations, as a table view cell's (a
+    // corpus storyboard's old-format cell).
+    let size_classes = cell.descendants().any(|d| d.has_tag_name("variation") && d.attribute("key") != Some("default") && d.children().any(|m| m.has_tag_name("mask")));
+    if size_classes && xib.is_none() {
+        nib.variations = Some(Vec::new());
+    }
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     // A cell's segue is its placeholder's.
@@ -546,9 +560,19 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
     let mut subviews = Vec::new();
+    // Those its default variation leaves out (the cell's mask in the old
+    // format) aren't among its subviews: encoded where something first
+    // refers to them, as a root view's.
+    let left_out = default_excluded_subviews(if old { cell } else { content })?;
+    let mut deferred = Vec::new();
     for s in children(content, "subviews") {
         for c in s.children().filter(|c| c.is_element()) {
-            subviews.push(subview(&mut nib, &mut scene, c)?);
+            let v = subview(&mut nib, &mut scene, c)?;
+            if c.attribute("id").is_some_and(|id| left_out.contains(&id)) {
+                deferred.push((crate::nib::DEFERRED, v));
+            } else {
+                subviews.push(v);
+            }
         }
     }
     // A subview's own safe-area guide is a placeholder first in its turn
@@ -569,6 +593,7 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
     }
+    cv.extend(deferred);
     cv.push(("UIDeepDrawRect", Value::Bool(true)));
     if old {
         cv.push(("UIOpaque", Value::Bool(true)));
@@ -589,7 +614,7 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
         if let Some(g) = xib.and_then(|x| x.safe_area).filter(|_| held) {
             scene.safe_areas.push((g.to_string(), content_name.clone()));
         }
-        if let Some(own) = held_constraints(&mut nib, &mut scene, cell, content, &content_name)? {
+        if let Some(own) = held_constraints(&mut nib, &mut scene, cell, content, &content_name, &cell_name)? {
             cv.push(("UIViewAutolayoutConstraints", own));
         }
         // A xib's cell with a safe-area guide and constraints of its own
@@ -786,7 +811,26 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
     }
     scene.pairs.sort_by_key(|p| listed(&p.0));
     let pairs = std::mem::take(&mut scene.pairs).into_iter().map(|p| p.1).collect();
-    nib::archive(root_object_with_pairs(&mut nib, top, objects, connections, pairs))
+    // Its excluded constraints where the objects list them, and its trait
+    // storage list, the cell its top-level object, as a table view cell's
+    // (`table::cell_nib`).
+    let holder = |name: &String| scene.own_constraints.iter().find(|c| &c.1 == name).map(|c| c.0.clone());
+    let keys = super::variation_keys(&nib, &objects, holder);
+    let mut objects = objects;
+    for o in std::mem::take(&mut nib.withheld) {
+        let name = o.name.clone().expect("named");
+        let at = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == name)).ok_or("an excluded constraint a cell's objects don't list is not supported by this ibtool")?;
+        objects[at] = Value::New(o);
+    }
+    let mut order = vec![cell_name.clone(), content_name.clone()];
+    order.extend(scene.subviews.iter().map(|s| s.1.clone()));
+    let traits = super::trait_storage_list(&mut nib, &cell_name, &order, &keys, &[], &[], if old { std::slice::from_ref(&content_name) } else { &[] })?;
+    let mut root = root_object_with_pairs(&mut nib, top, objects, connections, pairs);
+    if let Some(list) = traits {
+        let lists = nib.array("NSArray", vec![list]);
+        root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
+    }
+    Ok((nib::archive(root)?, std::mem::take(&mut nib.varied)))
 }
 
 /// A section header's or footer's nib: the owner, the first responder and
@@ -794,7 +838,9 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
 /// container's, then the flags and its reuse identifier; the objects list a
 /// safe-area guide after it (one probe). Its own constraints, outlets,
 /// actions, colours and a custom class are refused.
-fn reusable_view_nib(settings: Settings, module: Option<&str>, v: Node) -> Result<Vec<u8>, String> {
+/// A reusable view's nib, with the ids of the views whose variations it
+/// compiled.
+fn reusable_view_nib(settings: Settings, module: Option<&str>, v: Node) -> Result<(Vec<u8>, Vec<String>), String> {
     only_attributes(v, &[
         ("key", None), ("opaque", Some("NO")), ("clipsSubviews", Some("YES")), ("multipleTouchEnabled", Some("YES")), ("contentMode", Some("center")),
         ("reuseIdentifier", None), ("customClass", None), ("customModule", None), ("customModuleProvider", None), ("id", None),
@@ -815,13 +861,25 @@ fn reusable_view_nib(settings: Settings, module: Option<&str>, v: Node) -> Resul
     }
     let name = view_name(attr(v, "id")?);
     let mut nib = Nib::new(settings);
+    // Its size classes' variations, as a cell's (a corpus storyboard's
+    // section header).
+    if v.descendants().any(|d| d.has_tag_name("variation") && d.attribute("key") != Some("default") && d.children().any(|m| m.has_tag_name("mask"))) {
+        nib.variations = Some(Vec::new());
+    }
     let owner = proxy(&mut nib, "IBFilesOwner", "owner");
     let responder = proxy(&mut nib, "IBFirstResponder", "responder");
     let mut scene = Scene::new(attr(v, "id")?, module, v, Some(name.clone()));
     let mut subviews = Vec::new();
+    let left_out = default_excluded_subviews(v)?;
+    let mut deferred = Vec::new();
     for s in children(v, "subviews") {
         for c in s.children().filter(|c| c.is_element()) {
-            subviews.push(subview(&mut nib, &mut scene, c)?);
+            let sv = subview(&mut nib, &mut scene, c)?;
+            if c.attribute("id").is_some_and(|id| left_out.contains(&id)) {
+                deferred.push((crate::nib::DEFERRED, sv));
+            } else {
+                subviews.push(sv);
+            }
         }
     }
     // These nibs don't list placeholder guides: a subview's own safe-area
@@ -838,6 +896,7 @@ fn reusable_view_nib(settings: Settings, module: Option<&str>, v: Node) -> Resul
     if !subviews.is_empty() {
         values.push(("UISubviews", nib.array("NSMutableArray", subviews)));
     }
+    values.extend(deferred);
     // Its background colour after its subviews, its tint after clipping and
     // then its constraints; a custom class swaps it in after its reuse
     // identifier (one probe each, and one of all of them).
@@ -906,7 +965,24 @@ fn reusable_view_nib(settings: Settings, module: Option<&str>, v: Node) -> Resul
     }
     outlets.sort_by(|a, b| a.0.cmp(b.0));
     let connections = outlets.iter().map(|(label, destination)| outlet(&mut nib, label, &name, destination)).collect();
-    nib::archive(root_object(&mut nib, top, objects, connections))
+    // Its excluded constraints where the objects list them, and its trait
+    // storage list, as a cell's.
+    let holder = |n: &String| scene.own_constraints.iter().find(|c| &c.1 == n).map(|c| c.0.clone());
+    let keys = super::variation_keys(&nib, &objects, holder);
+    for o in std::mem::take(&mut nib.withheld) {
+        let n = o.name.clone().expect("named");
+        let at = objects.iter().position(|x| matches!(x, Value::Ref(r) if *r == n)).ok_or("an excluded constraint a reusable view's objects don't list is not supported by this ibtool")?;
+        objects[at] = Value::New(o);
+    }
+    let mut order = vec![name.clone()];
+    order.extend(scene.subviews.iter().map(|s| s.1.clone()));
+    let traits = super::trait_storage_list(&mut nib, &name, &order, &keys, &[], &[], &[])?;
+    let mut root = root_object(&mut nib, top, objects, connections);
+    if let Some(list) = traits {
+        let lists = nib.array("NSArray", vec![list]);
+        root.values.iter_mut().find(|v| v.0 == "UINibTraitStorageListsKey").expect("a root object's").1 = lists;
+    }
+    Ok((nib::archive(root)?, std::mem::take(&mut nib.varied)))
 }
 
 /// A constraint Xcode makes between the cell's and its content view's

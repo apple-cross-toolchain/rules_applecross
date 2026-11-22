@@ -554,8 +554,10 @@ pub(super) fn table_view_nib(
             d.ancestors().any(|a| a.parent() == Some(table) && matches!(a.attribute("key"), Some("tableHeaderView" | "tableFooterView")))
         })
     };
-    if nib.varied.iter().any(|id| !in_header_or_footer(id)) {
-        return fail("size class variations in a table view other than its header's or footer's are not supported by this ibtool");
+    // A prototype cell's are its own nib's (`cell_nib`).
+    let in_cell = |id: &String| table.descendants().find(|d| d.attribute("id") == Some(id.as_str())).is_some_and(|d| d.ancestors().any(|a| a.has_tag_name("tableViewCell")));
+    if nib.varied.iter().any(|id| !in_header_or_footer(id) && !in_cell(id)) {
+        return fail("size class variations in a table view other than its header's, footer's or cells' are not supported by this ibtool");
     }
     if scene.segues != header_segues {
         return fail("segues in a table's header or footer other than its containers' are not supported by this ibtool");
@@ -924,12 +926,11 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     let mut cv = Vec::new();
     geometry(&mut cv, &cf);
     let mut subviews = Vec::new();
-    // Subviews its default variation leaves out aren't among its subviews,
-    // as a root view's aren't, but their constraints' order isn't
-    // established (a corpus storyboard's prototype): refused.
-    if !default_excluded_subviews(content)?.is_empty() {
-        return fail("a cell whose content view's default variation leaves subviews out is not supported by this ibtool");
-    }
+    // One its default variation leaves out isn't among its subviews, as a
+    // root view's isn't: encoded where something first refers to it (a
+    // corpus storyboard's prototype).
+    let left_out = default_excluded_subviews(content)?;
+    let mut deferred = Vec::new();
     for s in children(content, "subviews") {
         for c in s.children().filter(|c| c.is_element()) {
             let mut v = subview(nib, &mut scene, c)?;
@@ -940,6 +941,10 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
                     }
                     o.class = "UITableViewLabel";
                 }
+            }
+            if c.attribute("id").is_some_and(|id| left_out.contains(&id)) {
+                deferred.push((crate::nib::DEFERRED, v));
+                continue;
             }
             subviews.push(v);
         }
@@ -977,6 +982,7 @@ fn cell_object<'a>(nib: &mut Nib, module: Option<&'a str>, cell: Node<'a, '_>, t
     if !subviews.is_empty() {
         cv.push(("UISubviews", nib.array("NSMutableArray", subviews)));
     }
+    cv.extend(deferred);
     // A background colour after its subviews, layout margins after its
     // constraints (two probes).
     if let Some(c) = child(content, "color", "backgroundColor").filter(|_| !old_content) {
@@ -1188,7 +1194,13 @@ fn cell_nib_varied(settings: Settings, module: Option<&str>, cell: Node, has_seg
     }
     objects.extend([reference(cell_name.clone()), reference(content_name.clone())]);
     let content_parent = Some(content_name.clone());
-    let content: Vec<&String> = scene.subviews.iter().filter(|s| s.0 == content_parent).map(|s| &s.1).collect();
+    // Subviews its default variation leaves out come after its constraints
+    // (a corpus storyboard's prototype).
+    let left_out: Vec<String> = match cell.children().find(|c| c.has_tag_name("tableViewCellContentView")) {
+        Some(c) => default_excluded_subviews(c)?.into_iter().map(view_name).collect(),
+        None => Vec::new(),
+    };
+    let content: Vec<&String> = scene.subviews.iter().filter(|s| s.0 == content_parent && !left_out.contains(&s.1)).map(|s| &s.1).collect();
     // A xib's safe-area guide follows the content view and its style's
     // detail label, which is listed first (five probes).
     let at = match cell.attribute("detailTextLabel").map(view_name) {
@@ -1213,7 +1225,7 @@ fn cell_nib_varied(settings: Settings, module: Option<&str>, cell: Node, has_seg
         // Its excluded constraints among them in their places (a probe).
         objects.extend(scene.own_constraints.iter().filter(|c| &c.0 == v).map(|c| reference(c.1.clone())));
         for (_, s) in others {
-            if *v != content_name {
+            if *v != content_name || left_out.contains(s) {
                 objects.push(reference(s.clone()));
             }
             queue.push_back(s);
@@ -1300,7 +1312,7 @@ fn cell_nib_varied(settings: Settings, module: Option<&str>, cell: Node, has_seg
     }
     let mut order = vec![content_name.clone()];
     order.extend(scene.subviews.iter().map(|s| s.1.clone()));
-    let traits = trait_storage_list(&mut nib, &cell_name, &order, &keys, &[], &[])?;
+    let traits = trait_storage_list(&mut nib, &cell_name, &order, &keys, &[], &[], &[])?;
     let mut root = root_object_full(&mut nib, top, objects, connections, accessibility, pairs);
     if let Some(list) = traits {
         let lists = nib.array("NSArray", vec![list]);

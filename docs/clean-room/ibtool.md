@@ -718,12 +718,22 @@ other values of the attributes these use, is refused. Observed:
   subviews and their constraints break it), so the corpus harness compares
   an `NSSet`'s members unordered. A prototype cell's records rank as a
   view nib's (a probe with six withheld constraints). A subview the
-  default variation leaves out, with one constraint, with the root view,
-  has its constraints first among the root's (four probes); with several,
-  or with a sibling, Xcode's order is neither the installed views' (37 of
-  40 random probes differ) nor any order of their frames' places, the
-  lines Interface Builder draws, attributes, ids or document order found,
-  and such views, and any a cell's content view leaves out, are refused.
+  default variation leaves out has its constraints first among the
+  root's, in an order established for one constraint each with the root
+  view (four probes); with several, or with a sibling, Xcode's order is
+  neither the installed views' (37 of 40 random probes differ) nor any
+  order of their frames' places, the lines Interface Builder draws,
+  attributes, ids or document order found (moving the frames permutes
+  blocks of them), so this ibtool keeps the installed views' order there
+  and the corpus harness compares those constraints unordered among
+  themselves, the rest exact. A prototype cell's content view, an
+  old-format collection view cell (its masks and constraints on the cell,
+  for its synthesized content view, which isn't among the descendants)
+  and a collection view's section header leave subviews out the same
+  way, the subviews listed after the constraints, each nib with its own
+  trait storage list, its top-level object the cell or header (a corpus
+  storyboard). A controller's segue without an identifier has none in its
+  template (the same storyboard).
   When the document's
   device has one of the size classes, the nib archives the device's state,
   that class's included constraints installed and its excluded ones

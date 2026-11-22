@@ -3011,6 +3011,16 @@ fn excluded_constraints<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
 
 /// The ids of the subviews `n`'s default variation leaves out (Installed
 /// unchecked), which a size class may put back.
+/// The element holding a view's subviews: an old-format collection view
+/// cell's content view (a `<view key="contentView">` without an id), whose
+/// masks and constraints the cell holds; any other view itself.
+fn subviews_holder<'a, 'i>(n: Node<'a, 'i>) -> Node<'a, 'i> {
+    match n.children().find(|c| c.has_tag_name("view") && c.attribute("key") == Some("contentView") && c.attribute("id").is_none()) {
+        Some(content) if n.has_tag_name("collectionViewCell") => content,
+        _ => n,
+    }
+}
+
 fn default_excluded_subviews<'a>(n: Node<'a, '_>) -> Result<Vec<&'a str>, String> {
     let mut ids = Vec::new();
     for v in children(n, "variation").filter(|v| v.attribute("key") == Some("default")) {
@@ -3186,7 +3196,7 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
     // constraints all its own or this view's.
     for m in masks {
         for s in &m.subviews {
-            let leaf = n.descendants().find(|d| d.is_element() && d.attribute("id") == Some(*s) && d.parent().and_then(|p| p.parent()) == Some(n));
+            let leaf = n.descendants().find(|d| d.is_element() && d.attribute("id") == Some(*s) && d.parent().and_then(|p| p.parent()) == Some(subviews_holder(n)));
             let Some(leaf) = leaf else { return fail("a size class leaving out anything but a subview is not supported by this ibtool") };
             if children(leaf, "subviews").next().is_some() {
                 return fail("a size class leaving out a subview with subviews is not supported by this ibtool");
@@ -3256,7 +3266,7 @@ fn record_size_classes(nib: &mut Nib, n: Node, name: &str, excluded: &[&str], ca
         sorted.into_iter().map(|m| (m.traits.clone(), m.subviews_included.iter().map(|s| view_name(s)).collect(), m.subviews.iter().map(|s| view_name(s)).collect())).collect()
     };
     let subviews = (!subview_classes.is_empty() || !default_removed.is_empty()).then(|| SubviewVariation {
-        all: children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter_map(|c| c.attribute("id")).map(view_name).collect(),
+        all: children(subviews_holder(n), "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter_map(|c| c.attribute("id")).map(view_name).collect(),
         default_removed: default_removed.iter().map(|s| view_name(s)).collect(),
         classes: subview_classes,
     });
@@ -3465,10 +3475,10 @@ fn encode_variation_lists(nib: &mut Nib, keys: &HashMap<String, usize>, root_nam
         }
     }
     nib.variations = Some(all.into_iter().filter(|v| !in_cells.contains(&v.view)).collect());
-    let mut lists: Vec<Value> = trait_storage_list(nib, root_name, &preorder, &keys, &repeated, &footer.into_iter().collect::<Vec<_>>())?.into_iter().collect();
+    let mut lists: Vec<Value> = trait_storage_list(nib, root_name, &preorder, &keys, &repeated, &footer.into_iter().collect::<Vec<_>>(), &[])?.into_iter().collect();
     for (cell, order, repeated, mine) in cell_lists {
         nib.variations = Some(mine);
-        lists.extend(trait_storage_list(nib, &cell, &order, &keys, &repeated, &order)?);
+        lists.extend(trait_storage_list(nib, &cell, &order, &keys, &repeated, &order, &[])?);
     }
     Ok(lists)
 }
@@ -3489,7 +3499,10 @@ fn encode_variation_lists(nib: &mut Nib, keys: &HashMap<String, usize>, root_nam
 /// device installs by its place in the objects without the excluded ones.
 /// For the views in `unsure` (a table's footer's, a xib's cells'), a set
 /// whose keys cross ten is refused.
-fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMap<String, usize>, repeated: &[String], unsure: &[String]) -> Result<Option<Value>, String> {
+/// `unlisted`: views the nib's objects leave out (an old-format collection
+/// view cell's content view), never among the descendants (a corpus
+/// storyboard).
+fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMap<String, usize>, repeated: &[String], unsure: &[String], unlisted: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
     let named = std::mem::take(&mut nib.named_colors);
@@ -3675,7 +3688,7 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMa
         }
         for (_, items) in &v.candidates {
             for item in items {
-                if item != root && !descendants.contains(item) {
+                if item != root && !descendants.contains(item) && !unlisted.contains(item) {
                     descendants.push(item.clone());
                 }
             }
@@ -3707,13 +3720,16 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMa
 /// aspect ratio; then, for a container, those between it
 /// and its subviews or among them, ordered as a root view's are.
 fn own_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, name: &str) -> Result<Option<Value>, String> {
-    held_constraints(nib, scene, n, n, name)
+    held_constraints(nib, scene, n, n, name, name)
 }
 
 /// The constraints `n` holds, compiled as those of the view `name` whose
 /// subviews are `container`'s: an old-format collection view cell holds
 /// those of the content view Xcode makes for it.
-fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, name: &str) -> Result<Option<Value>, String> {
+/// `varied`: the name the view's variation is recorded under (an
+/// old-format collection view cell's, holding its content view's
+/// constraints and masks).
+fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, name: &str, varied: &str) -> Result<Option<Value>, String> {
     let id = attr(n, "id")?;
     // Its aspect ratios its superview holds are its own, as Xcode moves them
     // (one probe).
@@ -3728,11 +3744,8 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
     let excluded = excluded_constraints(n)?;
     let withheld_ids = device_withheld(nib, n, &excluded)?;
     if own.is_empty() && held.is_empty() {
-        record_variation(nib, n, name, &excluded, Vec::new())?;
+        record_variation(nib, n, varied, &excluded, Vec::new())?;
         return Ok(None);
-    }
-    if !excluded.is_empty() && n != container {
-        return fail("a variation of an old-format collection view cell is not supported by this ibtool");
     }
     for cs in children(n, "constraints") {
         only_children(cs, &["constraint"])?;
@@ -3919,7 +3932,7 @@ fn held_constraints(nib: &mut Nib, scene: &mut Scene, n: Node, container: Node, 
             values.push(Value::New(o.named(constraint_name)));
         }
     }
-    record_variation(nib, n, name, &excluded, candidates)?;
+    record_variation(nib, n, varied, &excluded, candidates)?;
     // An empty list writes nothing (one corpus storyboard).
     if values.is_empty() {
         return Ok(None);
@@ -8987,7 +9000,8 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
             if gestures.len() != recognizers.len() || attached.len() != recognizers.len() {
                 return fail("a collection view controller's gesture recognizers other than its collection view's are not supported by this ibtool");
             }
-            let (root, upstream_used, segues) = collection::collection_view_nib(settings, module, vc_id, view, &f, &vc_outlets, &gestures)?;
+            let (root, upstream_used, segues, mut collection_varied) = collection::collection_view_nib(settings, module, vc_id, view, &f, &vc_outlets, &gestures)?;
+            varied.append(&mut collection_varied);
             scene.segues = segues;
             if !gestures.is_empty() {
                 scene.gesture_views.push((view_name(attr(view, "id")?), gestures));
@@ -9356,24 +9370,11 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                         return fail("a constraint installed on a subview the default variation leaves out is not supported by this ibtool");
                     }
                 }
-                // Their order is established for one constraint each with the
-                // root view (four probes); with more, or between two such
-                // subviews, Xcode's isn't the installed views' (37 of 40
-                // random probes) nor any order of their places, attributes
-                // and ids found, and is refused.
-                let mut per_view: HashMap<&str, usize> = HashMap::new();
-                for (_, _, _, first, second) in &xml_constraints {
-                    let items: Vec<&str> = std::iter::once(*first).chain(*second).filter(|i| hidden.contains(i)).collect();
-                    if items.len() > 1 || (items.len() == 1 && *first != view_id && second.is_some_and(|s| s != view_id)) {
-                        return fail("a constraint between a subview the default variation leaves out and another subview is not supported by this ibtool");
-                    }
-                    for i in items {
-                        *per_view.entry(i).or_default() += 1;
-                    }
-                }
-                if per_view.values().any(|n| *n > 1) {
-                    return fail("several constraints on a subview the default variation leaves out are not supported by this ibtool");
-                }
+                // Their order among themselves is established for one each with
+                // the root view (four probes); with more, or between such
+                // subviews, Xcode's isn't the installed views' nor any order of
+                // their places, attributes and ids found (40 random probes), so
+                // this ibtool keeps that order, the rest of the nib exact.
                 xml_constraints.sort_by_key(|(_, _, _, first, second)| !on_hidden(first, *second));
             }
             let mut constraint_names = Vec::new();
