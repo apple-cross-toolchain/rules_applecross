@@ -2942,6 +2942,97 @@ Layout measures left to right and down from the view's top);
 `--config=relax_ibtool_layout` compiles them with the document's frames,
 which only their first layout at run time uses.
 
+It does lay out constrained views as Auto Layout does, a tree at a time:
+an unflipped plain, custom or stack view, its constrained subviews,
+theirs and so on, solved together. Required constraints hold, then each
+priority's constraints are violated as little as they can be from the
+highest down (the sum of their violations least, without giving up what
+higher ones got); a content-sized control hugs its content at its
+hugging priority (250 unless given) and resists compression at its
+compression resistance (750), unless its own required width and height
+fix it; and every view keeps its document's frame where nothing else
+decides it, more weakly than any constraint (a width at priority 1 wins:
+nine probes; 204 probes, 29 corpus documents, equal widths and
+inequalities among them). A view no constraint names keeps its frame, as
+Interface Builder pins one; a misplaced one (`misplaced="YES"`) is laid
+out with the rest, which follow where it lands, but keeps its document's
+frame (eight probes). Each edge is then rounded to a whole point, half
+up. A tree with margins, a control whose size isn't established or items
+elsewhere is refused.
+
+A stack view adds the constraints AppKit gives its arranged views
+(listed on a Mac for each orientation, alignment and distribution):
+along it, the first its inset from the leading or top edge, each next its
+spacing (or custom spacing) after the last, the far edge the last one's
+end and inset, all required; across it, each view within its edges
+(required, insets aside), held to both with their insets at its hugging
+priority for that axis, and aligned at priority 260 (its leading, top or
+trailing edge, the trailing one at the edge whatever its inset, or its
+centre). Interface Builder's hugging below 250 is weaker than a view's
+document frame and only settles frames that tie (probes). Views equally
+weak along the stack give way first to last, as AppKit does (stretching
+and compressing buttons and labels). Filling proportionally is filling
+when no arranged view has a size of its own; other distributions,
+alignments by size or baseline and hidden views are refused.
+
+A top-level view, or a view controller's, takes the size its constraints
+give it, its top edge kept: its own size is held just below priority 500
+(a label's hugging at 499 keeps it, at 500 shrinks it: eight probes), so
+compression resistance grows it and strong hugging shrinks it. Xcode
+then lays each of its subviews out, run to run, either in its new frame
+or in its old one moved with it (six compiles of one xib gave four
+outputs, a subview a point lower or higher by the root's move); this
+ibtool lays them out in the new frame, as AppKit does at run time, and
+the corpus harness counts either.
+
+Baselines: a label's first baseline is AppKit's for its font, down from
+its top (`firstBaselineOffsetFromTop`: 10 at 9 points, 13 at 13, 15 at
+16, 35 at 36), and its last up from its bottom (2, 3, 4, 8); a regular
+push button's first is 17 down, a small one's 14 (measured on a Mac with
+AppKit, recorded in `font_metrics.bin`; probes of each).
+
+A scroll view is tiled again as AppKit tiles it with legacy scrollers
+(AppKit's `tile()` on a Mac for each border and scroller; a corpus xib):
+inside its border (line and bezel 1, groove 2), a scroller that doesn't
+hide itself 17 wide along the right or bottom edge, the clip view the
+rest, and the document view resized with the clip view along the axes
+its autoresizing mask makes sizable. An ssh session's first compile
+instead backs scrollers without `wantsLayer` and tiles overlay scrollers
+over the clip view (three compiles of one xib); this ibtool compiles as
+the later ones do, and the corpus harness counts either.
+
+A wrapping label (no line break mode, or word wrapping) narrower than its
+text is as many lines tall as it wraps into at the width it gets, broken
+between words greedily, and laid out again (a corpus storyboard's ten
+lines at 500 points). Its content's size is its text's, as
+AppKit measures a string in its font: the sum of each character's width
+and each adjacent pair's adjustment, measured on a Mac in the system font
+and its bold at 9 to 36 points (`tools/font_metrics_probe` writes
+`font_metrics.bin`; strings with other characters, and other fonts, are
+refused). Each control's alignment rectangle and insets, from probes of
+seven titles in five fonts:
+- a label: the text's width rounded up, plus 4 more when it is centred
+  (whatever its line breaking or scrolling), at most its preferred
+  maximum width, and the font's line height (one line whatever its
+  text unless it wraps), outset 2 left and right; a cell of a custom
+  class measured as its own;
+- a regular push button: the width plus 24, 24 tall; a small one: plus
+  20, 20 tall; a check box: plus 22, the line height; a square shadowless
+  button: plus 10, 22 tall (four probes);
+- a pop-up button: its title's width plus 48, 24 tall;
+- a bezeled editable text field: the document's width, 24 tall;
+- a horizontal slider: the document's width, 16 tall, outset 2 left and
+  right.
+
+The frame is the alignment rectangle outset, its origin rounded half up
+in AppKit's coordinates (48 probes centring labels in views of even and
+odd sizes). Constraints are then measured on the alignment rectangle,
+before rounding.
+
+A File's Owner of class `NSObject` with no module is archived as one
+without a class (six probes of owner classes); the Application
+placeholder's `NSObject` keeps its reference.
+
 **Menus.** An `NSMenu`: title, items, and a system menu's name
 (`_NSMainMenu`, `_NSAppleMenu`, `_NSServicesMenu`, `_NSRecentDocumentsMenu`,
 `_NSFontMenu`, `_NSWindowsMenu`, `_NSHelpMenu`). An `NSMenuItem`: its menu,
@@ -3109,9 +3200,9 @@ isn't archived. Each stack view adds an `NSNibConnector` asking to be
 decoded early, first among the connections by the stack's id and without
 an object id. A view's next responder and superview are conditional
 references, so a stack reached first through its connector has its
-superview defined later. A stack lays its views out, so only
-`relax_ibtool_layout` compiles it; gravity areas and visibility priorities
-other than 1000 are refused.
+superview defined later. A stack lays its views out (Layout, below); one
+Auto Layout doesn't lay out here is refused strict, as are gravity areas
+and visibility priorities other than 1000.
 
 **Image views** (about 15 probes). An `NSImageView`'s view keys, with
 `NSDragTypes` before its frame: a set of eight pasteboard types (PDF,
@@ -3289,14 +3380,17 @@ app class's is.
 - A menu item's `NSIndent` follows its disabled flag.
 - A view's accessibility identifier is an `NSNibAXAttributeConnector` (the
   view, a new `NSMutableString` `AXIdentifier`, the identifier) in
-  `NSAccessibilityConnectors`, by the view's id as bytes, listed again in
-  `NSAccessibilityOidsKeys` with ids numbered after the other objects'.
+  `NSAccessibilityConnectors`, listed again in `NSAccessibilityOidsKeys`
+  with ids numbered after the other objects'. Their order Xcode varies
+  from run to run (six compiles of one storyboard with two identifiers,
+  either order); this ibtool's is by the view's id as bytes.
 - Subview groups as far from the corner go leftmost first, and at the
   same corner by their ids as bytes (nine probes).
 - A view controller shown as a single window has presentation style 1 and
   `NSStoryboardSegueDestinationOptions`, as a window controller does.
-- `simulatedAppContext` changes Xcode's layout of the text in it, so only
-  `relax_ibtool_layout` compiles it.
+- `simulatedAppContext` is the editor's alone: with or without it Xcode
+  archives the same (three compiles each of four probes; the label it
+  seemed to move is a resized root view's, below).
 - After a window's full-screen sizes come its toolbar style as
   `NSWindowToolbarStyle` (expanded 1, preference 2, unified 3; automatic,
   the default, left out), `NSWindowTitleVisibility` 1 with a hidden title,
@@ -3314,9 +3408,9 @@ background colours, `NSSelectable` and `NSAllowsMultipleSelection` when
 set, and dragging masks -1 and 0. The flow layout, listed after its
 collection view, archives its interitem and line spacings as floats when
 not 10, then its item size when not 50 by 50. A scroll view leaves out its
-scroll amounts when all four are 10. Laying a constrained scroll view out
-again, Xcode may turn its collection view's horizontal scroller off, so a
-constrained one without `hasHorizontalScroller="NO"` is refused.
+scroll amounts when all four are 10. A constrained scroll view keeps its
+collection view's horizontal scroller (six compiles of a corpus
+storyboard with Xcode 27.2).
 
 **Top-level objects.** A xib may hold controls at its top level
 (boxes, text fields, buttons, pop-up buttons, image views, scroll views),

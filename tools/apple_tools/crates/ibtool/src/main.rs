@@ -3,7 +3,9 @@
 
 mod appkit;
 mod colorsync;
+mod font_metrics;
 mod fonts;
+mod layout_solver;
 mod nib;
 mod storyboard;
 mod watch;

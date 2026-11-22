@@ -4,6 +4,7 @@ rust_binary(
     name = "ibtool",
     srcs = glob(["src/**/*.rs"]),
     compile_data = [
+        "src/font_metrics.bin",
         "src/installed_fonts.txt",
         "src/vimage_pow.bin",
     ],

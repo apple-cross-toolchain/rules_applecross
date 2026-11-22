@@ -37,6 +37,9 @@ implementation.
     Each use is noted on the tool's page: what was called or read, on what
     inputs, and what it established. The probe programs stay in the
     repository with how to rerun them (`tools/vimage_pow_probe`).
+  - AppKit's text measurement of the system fonts macOS gives every app
+    (`NSString.size(withAttributes:)`), from a small program; nothing is
+    decompiled (`tools/font_metrics_probe`, ibtool's [layout](ibtool.md#appkit)).
 - Apple's public CreateML framework, called from small programs, to make test
   models of the types Create ML exports.
 
