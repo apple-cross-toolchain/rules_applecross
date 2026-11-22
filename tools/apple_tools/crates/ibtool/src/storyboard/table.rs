@@ -13,8 +13,12 @@ fn header_or_footer<'a, 'i>(table: Node<'a, 'i>, key: &str) -> Option<Node<'a, '
 /// or any opaque grey white, is its own `tableBackgroundColor`.
 fn table_background(nib: &mut Nib, n: Node, plain: bool) -> Result<Value, String> {
     // Without colorMatched, a grey white stays as it is (one corpus
-    // storyboard).
-    let white = n.attribute("systemColor") == Some("systemBackgroundColor") || (nib.color_matched && opaque_grey_white(n)?);
+    // storyboard); where greys are RGB (`old_greys`), it isn't established.
+    let grey_white = nib.color_matched && opaque_grey_white(n)?;
+    if grey_white && old_greys(nib, n)? {
+        return fail("a table's grey white background in a colour-matched xib saved before toolsVersion 11019 is not supported by this ibtool");
+    }
+    let white = n.attribute("systemColor") == Some("systemBackgroundColor") || grey_white;
     if plain && white {
         return nib.system_color("tableBackgroundColor", &SystemColor::Gray([1.0, 1.0]));
     }

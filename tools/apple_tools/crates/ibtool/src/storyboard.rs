@@ -291,6 +291,9 @@ struct Nib {
     idiom: Option<Idiom>,
     /// The deployment target's major version (`Settings`).
     target: Option<u32>,
+    /// Whether a bar's text attributes are being encoded, whose colours
+    /// are as a modern colour-matched document has them (`text_attributes`).
+    text_attributes: bool,
 }
 
 /// One of the nibs Xcode compiles a xib deploying before iOS 8 into: for
@@ -455,7 +458,7 @@ fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
 impl Nib {
     fn new(settings: Settings) -> Nib {
         let Settings { platform, color_matched, localizable, target } = settings;
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None, target }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None, target, text_attributes: false }
     }
 
     /// The settings it was made with, for another nib of the document.
@@ -467,6 +470,19 @@ impl Nib {
     /// without a target).
     fn before(&self, major: u32) -> Option<bool> {
         self.target.map(|t| t < major)
+    }
+
+    /// Whether the document compiles as a storyboard does: a storyboard,
+    /// or a xib deploying before iOS 17, whose views keep the masks a
+    /// storyboard's do (`document_mask`), have its device's size classes
+    /// (`device_size_classes`) and its date pickers (corpus xibs at iOS 12
+    /// to 18, probes at iOS 13 to 18). `what` names what needs a target to
+    /// tell.
+    fn as_storyboard(&self, what: &str) -> Result<bool, String> {
+        if !self.xib {
+            return Ok(true);
+        }
+        self.before(17).ok_or_else(|| format!("{what} in a xib needs --minimum-deployment-target for this ibtool"))
     }
 
     /// A colour's component as this nib keeps it.
@@ -748,6 +764,20 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     // the result a float, archived without rounding; white comes out a
     // float's step above 1 unless it's opaque (and so `whiteColor`).
     let calibrated = n.attribute("colorSpace") == Some("calibratedWhite") || n.attribute("customColorSpace") == Some("calibratedWhite");
+    // A colour-matched xib saved before toolsVersion 11019 (`old_greys`)
+    // archives its greys as RGB of the grey (converted as below), none
+    // named (nine probes by toolsVersion and target, a corpus xib).
+    let grey = calibrated || n.attribute("customColorSpace") == Some("genericGamma22GrayColorSpace");
+    if grey && old_greys(nib, n)? {
+        only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", None)])?;
+        let white = number(attr(n, "white")?)?;
+        let alpha = nib.component(number(attr(n, "alpha")?)?);
+        if calibrated && white == 1.0 && alpha != 1.0 {
+            return fail("a translucent calibrated white in a document before toolsVersion 11019 is not supported by this ibtool");
+        }
+        let w = if calibrated && white != 0.0 && white != 1.0 { crate::colorsync::calibrated_white(white)? } else { nib.component(white) };
+        return Ok(rgb_color(nib, [w, w, w, alpha]));
+    }
     if calibrated {
         only_attributes(n, &[("key", None), ("white", None), ("alpha", None), ("colorSpace", None), ("customColorSpace", Some("calibratedWhite"))])?;
         let white = number(attr(n, "white")?)?;
@@ -810,6 +840,9 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
         (Some("custom"), Some("displayP3")) => "displayP3",
         _ => "sRGB",
     };
+    if space != "sRGB" && old_greys(nib, n)? {
+        return fail(format!("a {space} colour in a colour-matched xib saved before toolsVersion 11019 is not supported by this ibtool"));
+    }
     let c = if space == "sRGB" {
         only_attributes(n, &[("key", None), ("red", None), ("green", None), ("blue", None), ("alpha", None), ("colorSpace", Some("custom")), ("customColorSpace", Some("sRGB"))])?;
         [number(attr(n, "red")?)?, number(attr(n, "green")?)?, number(attr(n, "blue")?)?, number(attr(n, "alpha")?)?].map(|x| nib.component(x))
@@ -828,6 +861,23 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     keys.push(("NSRGB", Value::Data(text)));
     keys.push(("NSColorSpace", Value::Int(2)));
     Ok(nib.shared(key, || Object::new("UIColor", keys).with_fallback("NSColor")))
+}
+
+/// Whether a colour-matched document archives its greys as RGB (`color`):
+/// one saved before toolsVersion 11019, from before Interface Builder
+/// matched colours, as a xib deploying before iOS 17. There Xcode also
+/// converts RGB other than sRGB differently (clamped, three probes), and
+/// such a storyboard differs throughout, at any target (a probe), neither
+/// of which this ibtool reproduces.
+fn old_greys(nib: &Nib, n: Node) -> Result<bool, String> {
+    let tools = n.document().root_element().attribute("toolsVersion").and_then(|v| v.parse::<f64>().ok());
+    if !tools.is_some_and(|v| v < 11019.0) || nib.text_attributes {
+        return Ok(false);
+    }
+    if !nib.xib {
+        return fail("a colour-matched storyboard saved before toolsVersion 11019 is not supported by this ibtool");
+    }
+    nib.as_storyboard("a colour of a colour-matched document saved before toolsVersion 11019")
 }
 
 /// A colour in a document without `colorMatched`: archived as sRGB with
@@ -2715,11 +2765,13 @@ fn text_alignment(s: Option<&str>) -> Result<i64, String> {
 /// constraints, as `does_not_translate` decides; otherwise the document's,
 /// whether or not it says `translatesAutoresizingMaskIntoConstraints="NO"`
 /// (ten probes: labels, buttons and switches, constrained or not,
-/// translating or not). A xib keeps the document's either way (four
-/// probes: labels and plain views, in a view and a cell).
+/// translating or not). A xib deploying to iOS 17 or later keeps the
+/// document's either way (four probes: labels and plain views, in a view
+/// and a cell); one deploying earlier is a storyboard's (a corpus xib at
+/// iOS 12 to 18).
 fn document_mask(nib: &Nib, scene: &Scene, n: Node) -> Result<i64, String> {
     match children(n, "autoresizingMask").next() {
-        Some(m) if nib.xib || !does_not_translate(scene, n) => autoresizing_mask(m),
+        Some(m) if !does_not_translate(scene, n) || !nib.as_storyboard("a view not translating its autoresizing mask")? => autoresizing_mask(m),
         _ => Ok(36),
     }
 }
@@ -2852,11 +2904,18 @@ fn size_class_traits(key: &str) -> Result<Vec<(&'static str, i64)>, String> {
 /// with: an iPhone's compact and regular in portrait, a small one's both
 /// compact in landscape, an iPad's both regular; none without a device
 /// (seven probes). Other iPhones in landscape are refused. A xib's views
-/// are archived with their defaults, whatever its device (two probes).
+/// are archived with their defaults, whatever its device (two probes),
+/// when it deploys to iOS 17 or later; deploying earlier, as a
+/// storyboard's (two corpus xibs at iOS 12 and 16).
 fn device_size_classes(nib: &Nib, n: Node) -> Result<Option<(i64, i64)>, String> {
     if nib.xib {
         // But for a pre-iOS 8 xib's runtime nib (`Idiom`).
-        return Ok(nib.idiom.filter(|i| i.runtime).map(|i| if i.pad { (2, 2) } else { (1, 2) }));
+        if nib.idiom.is_some() {
+            return Ok(nib.idiom.filter(|i| i.runtime).map(|i| if i.pad { (2, 2) } else { (1, 2) }));
+        }
+        if !nib.as_storyboard("a size class variation")? {
+            return Ok(None);
+        }
     }
     let Some(device) = n.document().root_element().children().find(|c| c.has_tag_name("device")) else { return Ok(None) };
     let id = attr(device, "id")?;
@@ -4291,11 +4350,13 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             // iOS 14 (a corpus storyboard at iOS 12 to 15), where Xcode
             // archives the time it compiles instead: there this ibtool
             // archives the document's date, Xcode's own output differing
-            // from run to run (fifteen probes). A countdown timer has none
-            // (two probes).
+            // from run to run (fifteen probes). A xib deploying before iOS
+            // 17 is a storyboard's (`as_storyboard`, eight probes). A
+            // countdown timer has none (two probes).
             let versioned = n.document().descendants().any(|d| d.has_tag_name("deployment") && d.attribute("version").is_some());
+            let as_storyboard = nib.as_storyboard("a date picker")?;
             let dated = match nib.before(14) {
-                _ if nib.xib || versioned => true,
+                _ if !as_storyboard || versioned => true,
                 Some(before_14) => before_14,
                 None => return fail("a storyboard's date picker needs --minimum-deployment-target for this ibtool"),
             };
@@ -4345,8 +4406,10 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
                 values.push(("UIPickerStyle", Value::Int(s)));
             }
             // 0 unless given, and left out at 1, UIDatePicker's default (three
-            // probes).
+            // probes); a date's, without minutes, 0 as a storyboard has it
+            // (`as_storyboard`, twelve probes by mode and target).
             let interval: i64 = n.attribute("minuteInterval").map_or(Ok(0), |i| i.parse().map_err(|_| format!("not a number: {i}")))?;
+            let interval = if mode == Some(1) && as_storyboard { 0 } else { interval };
             if interval != 1 {
                 values.push(("UIMinuteInterval", Value::Int(interval)));
             }
@@ -4817,8 +4880,11 @@ fn placed_subview(nib: &mut Nib, scene: &mut Scene, n: Node, f: Frame) -> Result
             }
             values.extend([("UIDeepDrawRect", Value::Bool(true)), ("UIOpaque", Value::Bool(true)), ("UIAutoresizeSubviews", Value::Bool(true))]);
             // The document's mask, 36 without one, even when constrained
-            // (three probes).
+            // (three probes); constrained in a xib deploying before iOS 17,
+            // 36 (two corpus xibs at iOS 12 and 16, as `document_mask`).
+            let early_xib = nib.xib && does_not_translate(scene, n) && nib.as_storyboard("a view not translating its autoresizing mask")?;
             let mask = match children(n, "autoresizingMask").next() {
+                _ if early_xib => 36,
                 Some(m) => autoresizing_mask(m)?,
                 None => 36,
             };
@@ -7383,8 +7449,10 @@ fn text_attributes(nib: &mut Nib, t: Node) -> Result<Value, String> {
         // calibrated white text colour is `whiteColor` where the bar's own
         // tint of that white is RGB (a corpus storyboard at toolsVersion 6250).
         let matched = std::mem::replace(&mut nib.color_matched, true);
+        nib.text_attributes = true;
         let text_color = color(nib, c);
         nib.color_matched = matched;
+        nib.text_attributes = false;
         entries.extend([nib.string("NSColor"), text_color?]);
     }
     if let Some(f) = child(t, "fontDescription", "fontDescription") {
