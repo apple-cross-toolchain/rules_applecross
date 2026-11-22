@@ -1804,9 +1804,9 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
     Ok(match n.tag_name().name() {
         "textField" => {
             let Some(cell) = child(n, "textFieldCell", "cell") else { return Ok(None) };
-            if n.attribute("preferredMaxLayoutWidth").is_some() {
-                return Ok(None);
-            }
+            // A preferred width caps a label's, one line tall whatever its
+            // text (32 probes).
+            let preferred = n.attribute("preferredMaxLayoutWidth").map(number).transpose()?;
             if cell.attribute("editable").is_some() {
                 // A bezeled field: no width of its own.
                 let regular = children(cell, "font").next().is_some_and(|f| f.attribute("metaFont") == Some("system") && f.attribute("size").is_none());
@@ -1815,7 +1815,7 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
                 }
                 Some(((None, Some(24.0)), (0.0, 0.0, 0.0, 0.0)))
             } else {
-                if !plain(cell, &["key", "lineBreakMode", "title", "id", "alignment", "selectable", "sendsActionOnEndEditing", "truncatesLastVisibleLine"]) || cell.attribute("borderStyle").is_some() {
+                if !plain(cell, &["key", "lineBreakMode", "title", "id", "alignment", "selectable", "sendsActionOnEndEditing", "truncatesLastVisibleLine", "scrollable"]) || cell.attribute("borderStyle").is_some() {
                     return Ok(None);
                 }
                 let Some((w, h)) = measure(cell, cell.attribute("title").unwrap_or("")) else { return Ok(None) };
@@ -1826,7 +1826,8 @@ fn intrinsic(n: Node) -> Result<Option<((Option<f64>, Option<f64>), (f64, f64, f
                     Some("center") => 4.0,
                     Some(_) => return Ok(None),
                 };
-                Some(((Some(w.ceil() + centred), Some(h)), (2.0, 0.0, 2.0, 0.0)))
+                let w = w.ceil() + centred;
+                Some(((Some(preferred.map_or(w, |p| w.min(p))), Some(h)), (2.0, 0.0, 2.0, 0.0)))
             }
         }
         "button" => {

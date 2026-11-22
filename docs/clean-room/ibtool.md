@@ -2953,8 +2953,9 @@ and its bold at 9 to 36 points (`tools/font_metrics_probe` writes
 refused). Each control's alignment rectangle and insets, from probes of
 seven titles in five fonts:
 - a label: the text's width rounded up, plus 4 more when it is centred
-  (whatever its line breaking), and the font's line height, outset 2
-  left and right;
+  (whatever its line breaking or scrolling), at most its preferred
+  maximum width, and the font's line height (one line whatever its
+  text), outset 2 left and right;
 - a regular push button: the width plus 24, 24 tall; a small one: plus
   20, 20 tall; a check box: plus 22, the line height;
 - a pop-up button: its title's width plus 48, 24 tall;
