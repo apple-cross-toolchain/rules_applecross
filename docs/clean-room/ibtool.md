@@ -797,13 +797,17 @@ other values of the attributes these use, is refused. Observed:
   `runtime.nib`, the same without those constraints or the content view's
   not translating its mask. That covers every nib of a storyboard, most of
   them pairs of the same bytes (fifteen corpus xibs and a storyboard of 33
-  nibs at iOS 12). Newer features make `objects-13.0+.nib` (named colours:
-  `runtime.nib` adds a `_UIColorAttributeTraitStorage` of the object, key
-  path and colour to the root's trait storage list for a view's own, and
-  is the same for one in a button configuration) and `objects-14.0+.nib`
+  nibs at iOS 12). Deploying before iOS 13, a document referring to a
+  named colour has each nib as `objects-13.0+.nib` and `runtime.nib`,
+  whether or not they differ. `runtime.nib` adds the root's trait storage
+  list, a `_UIColorAttributeTraitStorage` (`UIObject`, `UIKeyPath`, empty
+  `UIRecords`, `UINamedColor`) for a view's own named background colour,
+  its descendants without the root view. A colour in a button's
+  background configuration adds nothing (a corpus xib and storyboard at
+  iOS 12). Several such colours, other keys, and a document using both
+  12.3's and 13's features below 12.3 are refused. `objects-14.0+.nib`
   (the pair the same; its trigger isn't established, in a storyboard with
-  SF Symbols and system colours), which this ibtool doesn't make (three
-  corpus documents).
+  SF Symbols and system colours) isn't made (a corpus storyboard).
 - A storyboard in a `Base.lproj` directory has its translatable strings
   archived as `NSLocalizableString`s: the string inline (`NS.bytes`),
   `NSKey` `<id>.<property>` and `NSDev` the string (shared as strings

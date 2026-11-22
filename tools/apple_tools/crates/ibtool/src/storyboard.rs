@@ -294,34 +294,70 @@ struct Nib {
     /// Whether a bar's text attributes are being encoded, whose colours
     /// are as a modern colour-matched document has them (`text_attributes`).
     text_attributes: bool,
-    /// Whether this is a versioned bundle's `runtime.nib`, without what iOS
-    /// 12.3 added (`runtime_nibs`).
-    runtime: bool,
+    /// The version of the bundle whose `runtime.nib` this is, without what
+    /// that version added (`runtime_nibs`).
+    runtime: Option<Bundle>,
+    /// A `runtime.nib`'s named colours as trait storage (`runtime_nibs`):
+    /// the view, its key path and the colour's shared key.
+    named_colors: Vec<(String, &'static str, String)>,
+}
+
+/// A versioned nib bundle (`runtime_nibs`): `objects-12.3+.nib` or
+/// `objects-13.0+.nib` beside `runtime.nib`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Bundle {
+    Ios12_3,
+    Ios13,
+}
+
+impl Bundle {
+    pub fn objects(self) -> &'static str {
+        match self {
+            Bundle::Ios12_3 => "objects-12.3+.nib",
+            Bundle::Ios13 => "objects-13.0+.nib",
+        }
+    }
 }
 
 thread_local! {
-    static RUNTIME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static RUNTIME: std::cell::Cell<Option<Bundle>> = const { std::cell::Cell::new(None) };
 }
 
-/// A document's nibs for iOS before 12.3, where it uses what 12.3 added (a
-/// collection view cell's content view pinned to its edges by Xcode's
-/// constraints): `compile` again with that left out, as Xcode compiles
-/// the `runtime.nib` beside each nib's `objects-12.3+.nib` (fifteen corpus
-/// xibs and a storyboard at iOS 12, every nib of the storyboard so, the
-/// others' two the same). `None` when the document doesn't, or deploys to
-/// 12.3 or later.
-pub fn runtime_nibs<T>(minimum_deployment_target: Option<&str>, compile: impl FnOnce() -> Result<T, String>) -> Result<Option<T>, String> {
-    let Some(target) = minimum_deployment_target else { return Ok(None) };
+/// A document's nibs (`compile`), and below a version whose features it
+/// uses, Xcode's nib bundle of them: each nib a directory of the nib as
+/// from that version and `runtime.nib`, compiled again without them. From
+/// iOS 12.3, a collection view cell's content view pinned to its edges by
+/// Xcode's constraints, where the runtime nib differs (fifteen corpus xibs
+/// and a storyboard at iOS 12, every nib of the storyboard so, the others'
+/// two the same); from 13.0, a named colour, a view's own then trait
+/// storage in the runtime nib, whether or not it differs (a corpus xib and
+/// storyboard at iOS 12). Both are refused, being unestablished.
+pub fn runtime_nibs<T: PartialEq>(xml: &str, minimum_deployment_target: Option<&str>, compile: impl Fn() -> Result<T, String>) -> Result<(T, Option<(Bundle, T)>), String> {
+    let objects = compile()?;
+    let Some(target) = minimum_deployment_target else { return Ok((objects, None)) };
     let mut parts = target.split('.').map(|p| p.parse::<u32>().map_err(|_| format!("not a deployment target: {target}")));
-    let major = parts.next().transpose()?.unwrap_or(0);
-    let minor = parts.next().transpose()?.unwrap_or(0);
-    if (major, minor) >= (12, 3) {
-        return Ok(None);
+    let version = (parts.next().transpose()?.unwrap_or(0), parts.next().transpose()?.unwrap_or(0));
+    let runtime = |bundle: Bundle| {
+        RUNTIME.with(|r| r.set(Some(bundle)));
+        let compiled = compile();
+        RUNTIME.with(|r| r.set(None));
+        compiled
+    };
+    let pinned = match version < (12, 3) {
+        true => Some(runtime(Bundle::Ios12_3)?).filter(|r| *r != objects),
+        false => None,
+    };
+    let doc = Document::parse(xml).map_err(|e| e.to_string())?;
+    let named = version < (13, 0) && doc.descendants().any(|d| d.has_tag_name("color") && d.attribute("name").is_some() && d.attribute("catalog").is_none());
+    match (pinned, named) {
+        (Some(_), true) => fail("a document using both what iOS 12.3 and 13 added, deploying before 12.3, is not supported by this ibtool"),
+        (Some(r), false) => Ok((objects, Some((Bundle::Ios12_3, r)))),
+        (None, true) => {
+            let r = runtime(Bundle::Ios13)?;
+            Ok((objects, Some((Bundle::Ios13, r))))
+        }
+        (None, false) => Ok((objects, None)),
     }
-    RUNTIME.with(|r| r.set(true));
-    let compiled = compile();
-    RUNTIME.with(|r| r.set(false));
-    compiled.map(Some)
 }
 
 /// One of the nibs Xcode compiles a xib deploying before iOS 8 into: for
@@ -486,7 +522,7 @@ fn size_masks<'a>(n: Node<'a, '_>) -> Result<Vec<SizeMask<'a>>, String> {
 impl Nib {
     fn new(settings: Settings) -> Nib {
         let Settings { platform, color_matched, localizable, target } = settings;
-        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None, target, text_attributes: false, runtime: RUNTIME.with(|r| r.get()) }
+        Nib { platform, color_matched, localizable, shared: HashMap::new(), next: 0, variations: None, varied: Vec::new(), attribute_variations: Vec::new(), withheld: Vec::new(), xib: false, idiom: None, target, text_attributes: false, runtime: RUNTIME.with(|r| r.get()), named_colors: Vec::new() }
     }
 
     /// The settings it was made with, for another nib of the document.
@@ -744,6 +780,20 @@ fn color(nib: &mut Nib, n: Node) -> Result<Value, String> {
     if let Some(name) = n.attribute("name") {
         only_attributes(n, &[("key", None), ("name", None)])?;
         let key = format!("color:named:{name}");
+        // Before iOS 13, a view's own background is trait storage too; one
+        // in a button's background configuration isn't (`runtime_nibs`);
+        // others aren't established.
+        if nib.runtime == Some(Bundle::Ios13) {
+            let parent = n.parent().filter(|p| p.is_element());
+            match (parent.map(|p| p.tag_name().name()), n.attribute("key")) {
+                (Some("backgroundConfiguration"), _) => {}
+                (Some(_), Some("backgroundColor")) if parent.is_some_and(|p| frame_node(p).is_some()) && nib.variations.is_some() => {
+                    let id = attr(parent.expect("matched"), "id")?;
+                    nib.named_colors.push((view_name(id), "backgroundColor", key.clone()));
+                }
+                _ => return fail("a named colour here, deploying before iOS 13, is not supported by this ibtool"),
+            }
+        }
         if let Some(v) = nib.existing(&key) {
             return Ok(v);
         }
@@ -3416,6 +3466,28 @@ fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&Stri
 fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMap<String, usize>, repeated: &[String], unsure: &[String]) -> Result<Option<Value>, String> {
     let mut variations = nib.variations.take().unwrap_or_default();
     let mut attributes = std::mem::take(&mut nib.attribute_variations);
+    let named = std::mem::take(&mut nib.named_colors);
+    // A runtime nib's named colour (`runtime_nibs`): a
+    // `_UIColorAttributeTraitStorage` of its view, key path, no records
+    // and the colour, its descendants but the root view (a corpus xib);
+    // several, or beside variations, aren't established.
+    if !named.is_empty() {
+        if named.len() > 1 || !variations.is_empty() || !attributes.is_empty() {
+            return fail("several named colours, or one beside size class variations, deploying before iOS 13 are not supported by this ibtool");
+        }
+        let (view, key_path, key) = &named[0];
+        let records = nib.array("NSMutableArray", Vec::new());
+        let color = nib.existing(key).ok_or("a named colour's object")?;
+        let storage = Value::New(Object::new("_UIColorAttributeTraitStorage", vec![
+            ("UIObject", reference(view.clone())),
+            ("UIKeyPath", nib.string(key_path)),
+            ("UIRecords", records),
+            ("UINamedColor", color),
+        ]));
+        let storages = nib.array("NSArray", vec![storage]);
+        let descendants = nib.set("NSSet", if view == root { Vec::new() } else { vec![reference(view.clone())] })?;
+        return Ok(Some(Value::New(Object::new("_UITraitStorageList", vec![("UITopLevelObject", reference(root.to_string())), ("UITraitStorages", storages), ("UIDescendants", descendants)]))));
+    }
     if variations.is_empty() && attributes.is_empty() {
         return Ok(None);
     }

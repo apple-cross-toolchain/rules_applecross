@@ -536,7 +536,7 @@ pub(super) fn cell_nib(settings: Settings, module: Option<&str>, cell: Node, has
     // Not in a versioned bundle's runtime nib, from before iOS 12.3
     // (`runtime_nibs`).
     let pinned = match xib {
-        _ if nib.runtime => false,
+        _ if nib.runtime == Some(super::Bundle::Ios12_3) => false,
         None => constrained,
         Some(_) if constrained => true,
         Some(XibCell { before_17: Some(before_17), .. }) => !before_17,
