@@ -347,6 +347,7 @@ fn view_values(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
                 "imageView" => image_view(nib, c, s, module, name)?,
                 "wkWebView" => web_view(nib, c, s, module, name)?,
                 "collectionView" => collection_view(nib, c, s, module, name)?,
+                "textView" => text_view(nib, c, s, module, name)?,
                 "slider" => slider(nib, c, s, module, name)?,
                 "progressIndicator" => progress_indicator(nib, c, s, module, name)?,
                 "stackView" => stack_view(nib, c, s, module, name)?,
@@ -2625,6 +2626,20 @@ fn profile(gray: bool) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("{}: {e} (an SDK archive packaged before it kept the Mac's colour profiles)", path.display()))
 }
 
+/// Whether a colour is opaque calibrated white of `white`.
+fn calibrated_white(n: Node, white: f64) -> bool {
+    n.attributes().all(|a| matches!(a.name(), "key" | "white" | "alpha" | "colorSpace"))
+        && n.attribute("colorSpace") == Some("calibratedWhite")
+        && n.attribute("white").and_then(|v| number(v).ok()) == Some(white)
+        && n.attribute("alpha").and_then(|v| number(v).ok()) == Some(1.0)
+}
+
+/// Whether a text view's document is from before tools version 14269 and
+/// so has Interface Builder's old text view defaults (`text_view`).
+fn old_text_view_defaults(n: Node) -> Result<bool, String> {
+    Ok(number(attr(n.document().root_element(), "toolsVersion")?)? < 14269.0)
+}
+
 /// A colour. A System catalog colour names itself and carries the colour
 /// it resolves to on the Mac, in Generic Gray Gamma 2.2 or sRGB with the
 /// profile embedded (the corpus's 15 System colours, each always the
@@ -2787,6 +2802,24 @@ fn resolved_gray(nib: &mut Nib, white: &str, components: &str, space: Value) -> 
     })
 }
 
+/// The same for an sRGB colour (`NSRGB` its components as resolved).
+fn resolved_rgb(nib: &mut Nib, rgb: &str, components: &str, space: Value) -> Value {
+    let mut text = rgb.as_bytes().to_vec();
+    text.push(0);
+    nib.shared(format!("resolved-rgb:{rgb}:{components}"), || {
+        Object::new(
+            "NSColor",
+            vec![
+                ("NSColorSpace", Value::Int(1)),
+                ("NSRGB", Value::Data(text)),
+                ("NSCustomColorSpace", space),
+                ("NSComponents", Value::Data(components.as_bytes().to_vec())),
+                ("NSLinearExposure", Value::Data(b"1".to_vec())),
+            ],
+        )
+    })
+}
+
 /// A System catalog colour by name.
 fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
     let (white, components): (Option<&str>, &str) = match name {
@@ -2794,15 +2827,27 @@ fn system_color(nib: &mut Nib, name: &str) -> Result<Value, String> {
         "labelColor" | "controlTextColor" | "headerTextColor" | "selectedTextColor" | "textColor" => (Some("0"), "0 1"),
         "controlBackgroundColor" | "controlColor" | "selectedTextBackgroundColor" => (Some("0.602715373"), "0.6666666667 1"),
         "windowBackgroundColor" | "gridColor" => (Some("0.4246723652"), "0.5 1"),
+        // Blue as sRGB: the system blue, the link colour beside it (its
+        // resolved colour, the same object), and the insertion point's, the
+        // system blue itself (31 text view probes).
+        "systemBlueColor" | "linkColor" | "textInsertionPointColor" => (None, "0 0 1 1"),
         _ => return fail(format!("the System colour {name} is not supported by this ibtool")),
     };
     let key = format!("color:{name}");
     if let Some(existing) = nib.shared.get(&key) {
         return Ok(reference(existing.clone()));
     }
-    let gray = white.is_some();
-    let space = color_space(nib, gray)?;
-    let fallback = resolved_gray(nib, white.unwrap_or_default(), components, space);
+    let fallback = match white {
+        Some(white) => {
+            let space = color_space(nib, true)?;
+            resolved_gray(nib, white, components, space)
+        }
+        None if name == "textInsertionPointColor" => system_color(nib, "systemBlueColor")?,
+        None => {
+            let space = color_space(nib, false)?;
+            resolved_rgb(nib, "0 0 0.9981992245", components, space)
+        }
+    };
     let catalog = nib.string("System");
     let color_name = nib.string(name);
     Ok(nib.shared(key, || {
@@ -3612,7 +3657,7 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         clip,
         &[("key", None), ("id", None), ("drawsBackground", Some("NO")), ("copiesOnScroll", Some("NO")), ("ambiguous", Some("YES"))],
     )?;
-    only_children(clip, &["rect", "autoresizingMask", "subviews"])?;
+    only_children(clip, &["rect", "autoresizingMask", "subviews", "color"])?;
     let clip_frame = frame(clip, "frame")?;
     // One inset from them (a border's) is tiled again too.
     if (clip_frame.x, clip_frame.y, clip_frame.w, clip_frame.h) != (0.0, 0.0, frame_n.w, frame_n.h) && !layout_relaxed() {
@@ -3629,7 +3674,7 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     if doc.has_tag_name("collectionView") && constrained && n.attribute("hasHorizontalScroller").is_none() && !layout_relaxed() {
         return fail("a constrained scroll view's collection view with a horizontal scroller is laid out by Xcode, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it as the document has it");
     }
-    if !matches!(doc.tag_name().name(), "view" | "customView" | "collectionView") {
+    if !matches!(doc.tag_name().name(), "view" | "customView" | "collectionView" | "textView") {
         return fail(format!("a scroll view's document <{}> is not supported by this ibtool", doc.tag_name().name()));
     }
     let doc_frame = frame(*doc, "frame")?;
@@ -3651,9 +3696,9 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
         return fail("a scroll view without both scrollers is not supported by this ibtool");
     };
 
-    // The clip view: its flags without its mask, the document view, the
-    // control background colour, drawing it (4) and copying on scroll
-    // (unless not, 2).
+    // The clip view: its flags without its mask, the document view, its
+    // colour (the control background colour by default), drawing it (4) and
+    // copying on scroll (unless not, 2).
     let clip_name = object_name(attr(clip, "id")?);
     c.parents.push((clip_name.clone(), name.clone()));
     let doc_name = object_name(attr(*doc, "id")?);
@@ -3668,9 +3713,32 @@ fn scroll_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, 
     let at = clip_values.iter().position(|v| v.0 == "NSSuperview").expect("its superview") + 1;
     clip_values.insert(at, ("NSNextKeyView", reference(doc_name.clone())));
     clip_values.push(("NSDocView", reference(doc_name)));
-    clip_values.push(("NSBGColor", system_color(nib, "controlBackgroundColor")?));
+    let mut clip_color = None;
+    for k in children(clip, "color") {
+        if attr(k, "key")? != "backgroundColor" || clip_color.replace(k).is_some() {
+            return fail(format!("a clip view's colour {} is not supported by this ibtool", attr(k, "key")?));
+        }
+    }
+    // With Interface Builder's old defaults (`text_view`), a calibrated
+    // white clip view around a calibrated white text view (drawing it or
+    // not) neither draws nor keeps its colour (probes by toolsVersion and
+    // colour; Xcode's Action Extension template).
+    let doc_white = doc.has_tag_name("textView")
+        && old_text_view_defaults(*doc)?
+        && child(*doc, "color", "backgroundColor").is_some_and(|k| calibrated_white(k, 1.0));
+    let as_text_view = doc_white && clip_color.is_some_and(|k| calibrated_white(k, 1.0));
+    let clip_color = match clip_color {
+        Some(k) if !as_text_view => color(nib, k)?,
+        _ => system_color(nib, "controlBackgroundColor")?,
+    };
+    clip_values.push(("NSBGColor", clip_color));
+    // Around a text view, the arrow cursor (two probes).
+    if doc.has_tag_name("textView") {
+        let hot_spot = nib.string("{1, -1}");
+        clip_values.push(("NSCursor", Value::New(Object::new("NSCursor", vec![("NSHotSpot", hot_spot), ("NSCursorType", Value::Int(0))]))));
+    }
     let mut cv_flags = 0;
-    if clip.attribute("drawsBackground").is_none() {
+    if clip.attribute("drawsBackground").is_none() && !as_text_view {
         cv_flags |= 4;
     }
     if clip.attribute("copiesOnScroll").is_some() {
@@ -3761,8 +3829,8 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
         ],
     )?;
     only_children(n, &["rect", "autoresizingMask"])?;
-    if n.attribute("hidden").is_none() {
-        return fail("a scroller showing is laid out by Xcode, which this ibtool doesn't reproduce");
+    if n.attribute("hidden").is_none() && !layout_relaxed() {
+        return fail("a scroller showing is laid out by Xcode, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
     }
     if n.attribute("horizontal") != Some(if horizontal { "YES" } else { "NO" }) {
         return fail("a scroller of the other orientation");
@@ -3771,7 +3839,9 @@ fn scroller(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, par
     c.parents.push((name.clone(), parent.to_string()));
     let mut values = view_values(nib, c, n, module, &name, parent, superview(n, parent))?;
     nib.remove(&mut values, "NSHuggingPriority");
-    // Layer-backed whether or not it says so (a probe).
+    // Layer-backed whether or not it says so, as in an ssh session's first
+    // compile; Xcode's later ones leave a scroller without wantsLayer
+    // unbacked (two probes, six compiles each).
     if !values.iter().any(|v| v.0 == "NSViewIsLayerTreeHost") {
         let at = values.iter().position(|v| v.0 == "NSViewWantsBestResolutionOpenGLSurface").expect("its OpenGL key");
         values.insert(at, ("NSViewIsLayerTreeHost", Value::Bool(true)));
@@ -4222,6 +4292,158 @@ fn collection_item(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&st
 /// sizes, its background colours and selection, and dragging masks. The
 /// layout archives its spacings and item size only when not 10, 10 and 50
 /// by 50.
+/// A text view, as a scroll view's document (31 probes of Interface
+/// Builder's library text view, each attribute alone, and Xcode's Action
+/// Extension template). Its text container, layout manager and storage
+/// (empty), then its shared data: `NSFlags` from 0x90F, selecting 0x1,
+/// editing 0x2, rich text 0x4, importing graphics 0x8, drawing its
+/// background 0x100 (each set unless NO; not selectable is neither, not rich
+/// neither rich nor graphics), the font panel 0x20, the ruler 0x40,
+/// continuous spell checking 0x80, smart insert and delete 0x200, undo
+/// 0x400, the find panel 0x2000, grammar 0x8000, image editing 0x10000,
+/// smart quotes 0x20000, links 0x40000, data detectors 0xC00000, smart
+/// dashes 0x1000000, text replacement 0x2000000, spelling correction
+/// 0x4000000, incremental searching 0x40000000, the inspector bar
+/// 0x80000000; `NSMoreFlags` 1, 3 without the character picker;
+/// `NSTVFlags` 132, resizable vertically 2 and horizontally 1; the layout
+/// manager's 102, 230 laying out non-contiguously. Selected text, the
+/// insertion point and links have the System catalog's colours; the
+/// background, insertion point and text colours given are kept, except in a
+/// document from before tools version 14269, which has Interface Builder's
+/// old defaults: a calibrated white background is the text background
+/// colour, a calibrated black insertion point the default, and no text
+/// colour the text colour (probes by toolsVersion).
+fn text_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
+    let old_defaults = old_text_view_defaults(n)?;
+    let yes = |a: &str| n.attribute(a).is_some();
+    only_attributes(n, &[
+        ("id", None), ("importsGraphics", Some("NO")), ("richText", Some("NO")), ("verticallyResizable", Some("YES")), ("horizontallyResizable", Some("YES")),
+        ("usesFontPanel", Some("YES")), ("findStyle", None), ("continuousSpellChecking", Some("YES")), ("allowsUndo", Some("YES")), ("usesRuler", Some("YES")),
+        ("allowsNonContiguousLayout", Some("YES")), ("quoteSubstitution", Some("YES")), ("dashSubstitution", Some("YES")), ("spellingCorrection", Some("YES")),
+        ("smartInsertDelete", Some("YES")), ("editable", Some("NO")), ("selectable", Some("NO")), ("textReplacement", Some("YES")), ("linkDetection", Some("YES")),
+        ("dataDetection", Some("YES")), ("grammarChecking", Some("YES")), ("drawsBackground", Some("NO")), ("allowsCharacterPickerTouchBarItem", Some("NO")),
+        ("allowsImageEditing", Some("YES")), ("usesInspectorBar", Some("YES")), ("incrementalSearchingEnabled", Some("YES")),
+    ])?;
+    only_children(n, &["rect", "autoresizingMask", "color", "size"])?;
+    let id = attr(n, "id")?;
+    let name = object_name(id);
+    c.parents.push((name.clone(), parent.to_string()));
+    let f = frame(n, "frame")?;
+    let mut flags: i64 = 0x90F;
+    for (attribute, cleared) in [("editable", 0x2), ("selectable", 0x3), ("importsGraphics", 0x8), ("richText", 0xC), ("drawsBackground", 0x100)] {
+        if yes(attribute) {
+            flags &= !cleared;
+        }
+    }
+    for (attribute, bit) in [
+        ("usesFontPanel", 0x20), ("usesRuler", 0x40), ("continuousSpellChecking", 0x80), ("smartInsertDelete", 0x200), ("allowsUndo", 0x400),
+        ("grammarChecking", 0x8000), ("allowsImageEditing", 0x1_0000), ("quoteSubstitution", 0x2_0000), ("linkDetection", 0x4_0000), ("dataDetection", 0xC0_0000),
+        ("dashSubstitution", 0x100_0000), ("textReplacement", 0x200_0000), ("spellingCorrection", 0x400_0000), ("incrementalSearchingEnabled", 0x4000_0000),
+        ("usesInspectorBar", 0x8000_0000),
+    ] {
+        if yes(attribute) {
+            flags |= bit;
+        }
+    }
+    let find = match n.attribute("findStyle") {
+        None => 0,
+        Some("panel") => {
+            flags |= 0x2000;
+            1
+        }
+        Some("bar") => 2,
+        Some(other) => return fail(format!("find style {other} is not supported by this ibtool")),
+    };
+    let tv_flags = 132 | if yes("verticallyResizable") { 2 } else { 0 } | if yes("horizontallyResizable") { 1 } else { 0 };
+    let lm_flags = if yes("allowsNonContiguousLayout") { 230 } else { 102 };
+    let more_flags = if yes("allowsCharacterPickerTouchBarItem") { 3 } else { 1 };
+    // Its colours and sizes: a minimum size other than its frame's isn't
+    // established.
+    let mut colors: HashMap<&str, Node> = HashMap::new();
+    for k in children(n, "color") {
+        let key = attr(k, "key")?;
+        if !matches!(key, "backgroundColor" | "insertionPointColor" | "textColor") || colors.insert(key, k).is_some() {
+            return fail(format!("a text view's colour {key} is not supported by this ibtool"));
+        }
+    }
+    let mut max_size = None;
+    for sz in children(n, "size") {
+        only_attributes(sz, &[("key", None), ("width", None), ("height", None)])?;
+        let (w, h) = (number(attr(sz, "width")?)?, number(attr(sz, "height")?)?);
+        match attr(sz, "key")? {
+            "minSize" if (w, h) == (f.w, f.h) => {}
+            "maxSize" => max_size = Some((w, h)),
+            other => return fail(format!("a text view's {other} other than its frame's is not supported by this ibtool")),
+        }
+    }
+    let mut values = view_values(nib, c, n, module, &name, parent, Some(parent))?;
+    let container_name = format!("{name} container");
+    let empty = Value::New(Object::new("NSMutableString", vec![("NS.bytes", Value::Data(Vec::new()))]));
+    let storage = Object::new("NSTextStorage", vec![("NSString", empty), ("NSDelegate", Value::Nil)]);
+    let containers = nib.array("NSMutableArray", vec![reference(container_name.clone())]);
+    let layout_manager = Object::new("NSLayoutManager", vec![("NSTextStorage", Value::New(storage)), ("NSTextContainers", containers), ("NSLMFlags", Value::Int(lm_flags)), ("NSDelegate", Value::Nil)]);
+    let container = Object::new("NSTextContainer", vec![
+        ("NSLayoutManager", Value::New(layout_manager)),
+        ("NSTextLayoutManager", Value::Nil),
+        ("NSTextView", reference(name.clone())),
+        ("NSWidth", Value::Double(f.w)),
+        ("NSMinWidth", Value::Double(15.0)),
+        ("NSTCFlags", Value::Int(1)),
+    ])
+    .named(container_name);
+    let background = match colors.get("backgroundColor") {
+        Some(k) if old_defaults && calibrated_white(*k, 1.0) => system_color(nib, "textBackgroundColor")?,
+        Some(k) => color(nib, *k)?,
+        None => Value::Nil,
+    };
+    let selected_background_key = nib.string("NSBackgroundColor");
+    let selected_background = system_color(nib, "selectedTextBackgroundColor")?;
+    let color_key = nib.string("NSColor");
+    let selected_color = system_color(nib, "selectedTextColor")?;
+    let selected = nib.array("NSDictionary", vec![selected_background_key, selected_background, color_key, selected_color]);
+    let insertion = match colors.get("insertionPointColor") {
+        Some(k) if !(old_defaults && calibrated_white(*k, 0.0)) => color(nib, *k)?,
+        _ => system_color(nib, "textInsertionPointColor")?,
+    };
+    let link_color = system_color(nib, "linkColor")?;
+    let cursor_key = nib.string("NSCursor");
+    let hot_spot = nib.string("{8, -8}");
+    let cursor = Value::New(Object::new("NSCursor", vec![("NSHotSpot", hot_spot), ("NSCursorType", Value::Int(13))]));
+    let underline_key = nib.string("NSUnderline");
+    let underline = nib.int_number(1);
+    let link_color_key = nib.string("NSColor");
+    let links = nib.array("NSDictionary", vec![link_color_key, link_color, cursor_key, cursor, underline_key, underline]);
+    let shared = Object::new("NSTextViewSharedData", vec![
+        ("NSAutomaticTextCompletionDisabled", Value::Bool(false)),
+        ("NSFlags", Value::Int(flags as u32 as i32 as i64)),
+        ("NSMoreFlags", Value::Int(more_flags)),
+        ("NSTextCheckingTypes", Value::Int(0)),
+        ("NSMarkedAttributes", Value::Nil),
+        ("NSBackgroundColor", background),
+        ("NSSelectedAttributes", selected),
+        ("NSInsertionColor", insertion),
+        ("NSLinkAttributes", links),
+        ("NSDefaultParagraphStyle", Value::Nil),
+        ("NSTextFinder", Value::Nil),
+        ("NSPreferredTextFinderStyle", Value::Int(find)),
+        ("NSTextHighlightAttributes", Value::Nil),
+        ("NSWritingToolsFlags", Value::Int(256)),
+    ]);
+    values.push(("NSTextContainer", Value::New(container)));
+    values.push(("NSSharedData", Value::New(shared)));
+    values.push(("NSTVFlags", Value::Int(tv_flags)));
+    if let Some((w, h)) = max_size {
+        values.push(("NSMaxSize", nib.string(&format!("{{{}, {}}}", g(w), g(h)))));
+    }
+    values.push(("NSDelegate", Value::Nil));
+    match colors.get("textColor") {
+        Some(k) => values.push(("NSTextViewTextColor", color(nib, *k)?)),
+        None if old_defaults => values.push(("NSTextViewTextColor", system_color(nib, "textColor")?)),
+        None => {}
+    }
+    Ok(Value::New(Object::new("NSTextView", values).named(name)))
+}
+
 fn collection_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, parent: &str) -> Result<Value, String> {
     only_attributes(n, &[("id", None), ("ambiguous", Some("YES")), ("selectable", Some("YES")), ("allowsMultipleSelection", Some("YES"))])?;
     only_children(n, &["rect", "autoresizingMask", "collectionViewFlowLayout", "color", "connections"])?;
