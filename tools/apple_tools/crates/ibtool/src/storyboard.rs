@@ -3355,6 +3355,21 @@ fn symbol_configuration(nib: &mut Nib, c: Node) -> Result<Value, String> {
 /// objects that follows it, and each view's installed constraints in a run
 /// before its excluded ones (198 probes).
 fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&String) -> Option<String>, root_name: &str, view: Node) -> Result<Vec<Value>, String> {
+    let keys = variation_keys(nib, objects, holder);
+    // Excluded constraints are encoded where the objects list them.
+    for o in std::mem::take(&mut nib.withheld) {
+        let name = o.name.clone().expect("named");
+        let at = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == name));
+        let at = at.ok_or("an excluded constraint the objects don't list is not supported by this ibtool")?;
+        objects[at] = Value::New(o);
+    }
+    encode_variation_lists(nib, &keys, root_name, view)
+}
+
+/// The keys a nib's size class records order their objects by
+/// (`encode_variations`), from its `objects` before its excluded
+/// constraints (`nib.withheld`) are encoded among them.
+pub(super) fn variation_keys(nib: &Nib, objects: &[Value], holder: impl Fn(&String) -> Option<String>) -> HashMap<String, usize> {
     let withheld: Vec<String> = nib.withheld.iter().map(|o| o.name.clone().expect("named")).collect();
     let listed: Vec<(Option<&String>, Option<String>)> = objects
         .iter()
@@ -3392,13 +3407,11 @@ fn encode_variations(nib: &mut Nib, objects: &mut [Value], holder: impl Fn(&Stri
             _ => place += 1,
         }
     }
-    // Excluded constraints are encoded where the objects list them.
-    for o in std::mem::take(&mut nib.withheld) {
-        let name = o.name.clone().expect("named");
-        let at = objects.iter().position(|v| matches!(v, Value::Ref(r) if *r == name));
-        let at = at.ok_or("an excluded constraint the objects don't list is not supported by this ibtool")?;
-        objects[at] = Value::New(o);
-    }
+    keys
+}
+
+/// `encode_variations`'s trait storage lists, by `keys`.
+fn encode_variation_lists(nib: &mut Nib, keys: &HashMap<String, usize>, root_name: &str, view: Node) -> Result<Vec<Value>, String> {
     // The views in the document's order, depth first; a table's footer
     // view and its views, then its header's, as the table lists its
     // subviews (eight probes with both).
@@ -3588,7 +3601,10 @@ fn trait_storage_list(nib: &mut Nib, root: &str, order: &[String], keys: &HashMa
         }
     }
     let again: Vec<Variation> = first_repeated.map(|at| variations[at..].to_vec()).unwrap_or_default();
-    // A record's traits: the default's shared, a size class's its own.
+    // A record's traits: the default's shared, a size class's its own. Its
+    // objects go by their keys as decimal strings, which is Xcode's order
+    // mostly: it is the sets' hash order, which follows ids Interface
+    // Builder assigns internally (24 random probes break it).
     let record = |nib: &mut Nib, traits: Option<&Vec<(&'static str, i64)>>, added: &[String], removed: &[String]| -> Result<Value, String> {
         let traits = match traits {
             None => nib.shared("default traits".into(), || Object::new("UITraitCollection", Vec::new())),
@@ -9339,6 +9355,24 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
                     if on_hidden(first, *second) && !excluded_ids.contains(&attr(*c, "id")?) {
                         return fail("a constraint installed on a subview the default variation leaves out is not supported by this ibtool");
                     }
+                }
+                // Their order is established for one constraint each with the
+                // root view (four probes); with more, or between two such
+                // subviews, Xcode's isn't the installed views' (37 of 40
+                // random probes) nor any order of their places, attributes
+                // and ids found, and is refused.
+                let mut per_view: HashMap<&str, usize> = HashMap::new();
+                for (_, _, _, first, second) in &xml_constraints {
+                    let items: Vec<&str> = std::iter::once(*first).chain(*second).filter(|i| hidden.contains(i)).collect();
+                    if items.len() > 1 || (items.len() == 1 && *first != view_id && second.is_some_and(|s| s != view_id)) {
+                        return fail("a constraint between a subview the default variation leaves out and another subview is not supported by this ibtool");
+                    }
+                    for i in items {
+                        *per_view.entry(i).or_default() += 1;
+                    }
+                }
+                if per_view.values().any(|n| *n > 1) {
+                    return fail("several constraints on a subview the default variation leaves out are not supported by this ibtool");
                 }
                 xml_constraints.sort_by_key(|(_, _, _, first, second)| !on_hidden(first, *second));
             }

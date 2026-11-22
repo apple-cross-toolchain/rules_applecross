@@ -712,7 +712,19 @@ other values of the attributes these use, is refused. Observed:
   subview's, the device in or out of their size classes, and a corpus
   storyboard). In a table's footer and a xib's cells beside its view, a
   set whose keys cross ten is refused (three of 180 probes differed
-  there). When the document's
+  there). These sets are `NSSet`s, archived in their hash tables' order,
+  which follows ids Interface Builder assigns internally: the decimal
+  strings are its usual order, not a rule (24 random probes of left-out
+  subviews and their constraints break it), so the corpus harness compares
+  an `NSSet`'s members unordered. A prototype cell's records rank as a
+  view nib's (a probe with six withheld constraints). A subview the
+  default variation leaves out, with one constraint, with the root view,
+  has its constraints first among the root's (four probes); with several,
+  or with a sibling, Xcode's order is neither the installed views' (37 of
+  40 random probes differ) nor any order of their frames' places, the
+  lines Interface Builder draws, attributes, ids or document order found,
+  and such views, and any a cell's content view leaves out, are refused.
+  When the document's
   device has one of the size classes, the nib archives the device's state,
   that class's included constraints installed and its excluded ones
   withheld, the records unchanged (two probes); the device having several,
