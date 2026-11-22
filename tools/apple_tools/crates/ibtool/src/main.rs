@@ -132,8 +132,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             Err(e) => return skip(format!("{}: {e}", input.display())),
         }
-        return match xib::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable) {
-            Ok(nib) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
+        let compile = || xib::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), localizable);
+        // Below a version whose features it uses, a directory of the nib
+        // and its runtime nib (`runtime_nibs`).
+        return match storyboard::runtime_nibs(&xml, minimum_deployment_target.as_deref(), compile) {
+            Ok((nib, Some((bundle, runtime)))) => {
+                std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+                std::fs::write(out.join(bundle.objects()), nib).map_err(|e| format!("{}: {e}", out.display()))?;
+                std::fs::write(out.join("runtime.nib"), runtime).map_err(|e| format!("{}: {e}", out.display()))
+            }
+            Ok((nib, None)) => std::fs::write(&out, nib).map_err(|e| format!("{}: {e}", out.display())),
             Err(e) => skip(format!("{}: {e}", input.display())),
         };
     }
@@ -155,7 +163,25 @@ fn run(args: Vec<String>) -> Result<(), String> {
         } else if xml.contains("type=\"com.apple.InterfaceBuilder.WatchKit.Storyboard\"") {
             watch::compile(&xml, module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj")))
         } else {
-            storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files)
+            let compile = || storyboard::compile(&xml, minimum_deployment_target.as_deref(), module.as_deref(), input.parent().and_then(|d| d.file_name()) == Some(std::ffi::OsStr::new("Base.lproj"))).map(|c| c.files);
+            // Below a version whose features it uses, every nib a directory
+            // of it and its runtime nib (`runtime_nibs`).
+            storyboard::runtime_nibs(&xml, minimum_deployment_target.as_deref(), compile).and_then(|(files, bundle)| match bundle {
+                Some((bundle, runtime)) => {
+                    let mut versioned = Vec::new();
+                    for (name, data) in files {
+                        if !name.ends_with(".nib") {
+                            versioned.push((name, data));
+                            continue;
+                        }
+                        let (_, other) = runtime.iter().find(|r| r.0 == name).ok_or_else(|| format!("{name}: no runtime nib"))?;
+                        versioned.push((format!("{name}/{}", bundle.objects()), data));
+                        versioned.push((format!("{name}/runtime.nib"), other.clone()));
+                    }
+                    Ok(versioned)
+                }
+                None => Ok(files),
+            })
         };
         let files = match compiled {
             Ok(files) => files,
@@ -171,7 +197,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
         for (name, data) in files {
-            std::fs::write(out.join(name), data).map_err(|e| e.to_string())?;
+            let path = out.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(path, data).map_err(|e| e.to_string())?;
         }
     }
     Ok(())

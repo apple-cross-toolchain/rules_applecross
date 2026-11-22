@@ -790,6 +790,26 @@ other values of the attributes these use, is refused. Observed:
   defaults, `tests/ibtool_xib/cases/before-ios8-*`, and a corpus xib).
   Other colours Xcode names (white, black, clear), iPad xibs, cells and
   main window xibs deploying before iOS 8, and storyboards are refused.
+- A document deploying before iOS 12.3 that uses what 12.3 added (a
+  collection view cell's content view pinned to its edges by Xcode's
+  `UIIBSystemGenerated` constraints) has each nib compiled into a nib
+  directory of that name: `objects-12.3+.nib`, the nib as from 12.3, and
+  `runtime.nib`, the same without those constraints or the content view's
+  not translating its mask. That covers every nib of a storyboard, most of
+  them pairs of the same bytes (fifteen corpus xibs and a storyboard of 33
+  nibs at iOS 12). Deploying before iOS 13, a document referring to a
+  named colour has each nib as `objects-13.0+.nib` and `runtime.nib`,
+  whether or not they differ. `runtime.nib` adds the root's trait storage
+  list, a `_UIColorAttributeTraitStorage` (`UIObject`, `UIKeyPath`, empty
+  `UIRecords`, `UINamedColor`) for a view's own named background colour,
+  its descendants without the root view. A colour in a button's
+  background configuration adds nothing (a corpus xib and storyboard at
+  iOS 12). Deploying before iOS 14, a document using an SF Symbol (an
+  image of the `system` catalog, any of eleven symbols, in a button or an
+  image view) has each nib as `objects-14.0+.nib` and `runtime.nib`, the
+  same bytes (probes at iOS 12, 13 and 13.4; none at 14; a corpus
+  storyboard). Several such colours, other keys, and a document using
+  what two of these versions added, deploying before both, are refused.
 - A storyboard in a `Base.lproj` directory has its translatable strings
   archived as `NSLocalizableString`s: the string inline (`NS.bytes`),
   `NSKey` `<id>.<property>` and `NSDev` the string (shared as strings
@@ -870,10 +890,17 @@ other values of the attributes these use, is refused. Observed:
   not they translate their masks into constraints, and on a device whether
   or not they are constrained (eight probes, then six at iOS 16 and 18 and
   a corpus storyboard; on the generic canvas a constrained one kept its
-  frame in a probe and was resized in a corpus storyboard). Where the
-  root's size isn't its frame's, a subview whose mask has a flexible left
-  or top margin or a sizable width or height is refused; the rest keep
-  their frames, with or without a device.
+  frame in a probe and was resized in a corpus storyboard). Along each
+  axis (49 probed subviews at iOS 16, five corpus documents):
+  - a single flexible part takes the whole change, a size no less than 0;
+  - several share it in proportion to their lengths;
+  - both edges are then rounded down (floor, below 0 too), unless neither
+    moved; only a flexible right or bottom margin leaves the frame as it
+    is.
+
+  Several flexible parts one of which is empty, or that the change leaves
+  less than nothing, are refused: Xcode does something else there. So is
+  a resized subview's own autoresizing subviews' layout.
 - An image view's `<imageReference key="image" image="…"/>` naming only its
   image compiles as an `image` attribute (a probe).
 - An image view (`UIUserInteractionDisabled` when `userInteractionEnabled="NO"`;
