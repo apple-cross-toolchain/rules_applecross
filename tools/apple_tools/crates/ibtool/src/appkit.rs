@@ -2272,7 +2272,13 @@ pub fn compile_xib(xml: &str, module: Option<&str>, localizable: bool) -> Result
         match (o.tag_name().name(), o.attribute("id")) {
             ("customObject", Some("-2")) => owner = Some(o),
             ("customObject", Some("-1")) => {
-                only_attributes(o, &[("id", None), ("userLabel", None), ("customClass", Some("FirstResponder"))])?;
+                // Old documents name its class `NSResponder`: Xcode archives
+                // one the same (rules_apple's view_macos.xib against Xcode's
+                // View template, identical nibs).
+                if o.attribute("customClass") != Some("NSResponder") {
+                    only_attributes(o, &[("id", None), ("userLabel", None), ("customClass", Some("FirstResponder"))])?;
+                }
+                only_attributes(o, &[("id", None), ("userLabel", None), ("customClass", None)])?;
                 only_children(o, &[])?;
             }
             ("customObject", Some("-3")) => application = Some(o),
