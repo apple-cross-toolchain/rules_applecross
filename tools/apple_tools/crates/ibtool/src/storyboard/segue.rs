@@ -344,10 +344,9 @@ pub(super) fn templates(
     let mut outlets: Vec<(&'static str, String)> = Vec::new();
     let mut array = Vec::new();
     let mut objects = Vec::new();
+    // One without an identifier has none in its template (a corpus
+    // storyboard's push segue).
     for (i, s) in own_segues.iter().enumerate() {
-        if s.attribute("identifier").is_none() {
-            return fail("a controller's segue without an identifier is not supported by this ibtool");
-        }
         let name = format!("own segue {i}");
         let t = template(nib, module, *s, names)?;
         outlets.push((t.class, name.clone()));
