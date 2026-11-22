@@ -620,7 +620,13 @@ fn frames_agree(c: &Collected, n: Node, list: &[Node]) -> Result<(), String> {
             Some(id) if c.aligned.contains_key(id) => Ok(c.aligned[id].rect),
             Some(id) => {
                 let s = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).find(|s| s.attribute("id") == Some(id));
-                frame(s.ok_or("a constraint on a view other than its view or a subview is not supported by this ibtool")?, "frame")
+                let s = s.ok_or("a constraint on a view other than its view or a subview is not supported by this ibtool")?;
+                // Xcode lays out the others by where it lays a misplaced
+                // view out, not its document's frame (probe sv_f).
+                if s.attribute("misplaced") == Some("YES") {
+                    return fail("a misplaced view's constraints are laid out by Xcode, which this ibtool doesn't reproduce here; --config=relax_ibtool_layout compiles them with the document's frames");
+                }
+                frame(s, "frame")
             }
         }
     };
@@ -1438,7 +1444,12 @@ fn menu_item(nib: &mut Nib, c: &mut Collected, n: Node, menu_name: &str, popup_c
 /// A placeholder or custom object's class: `IBClassReference` and
 /// `NSClassName` (the class the runtime looks up).
 fn class_values(nib: &mut Nib, n: Node, module: Option<&str>, runtime: Option<&str>) -> Result<Vec<(&'static str, Value)>, String> {
-    let Some(class) = n.attribute("customClass") else {
+    // A File's Owner of `NSObject` with no module is Interface Builder's
+    // default, as if none were given; another AppKit class, or `NSObject`
+    // in a module, has its reference (probes ow_*), as the application
+    // placeholder's `NSObject` does (the corpus).
+    let default = n.attribute("id") == Some("-2") && n.attribute("customClass") == Some("NSObject") && n.attribute("customModule").is_none() && n.attribute("customModuleProvider").is_none();
+    let Some(class) = n.attribute("customClass").filter(|_| !default) else {
         return Ok(vec![("NSClassName", nib.string(runtime.unwrap_or("NSObject")))]);
     };
     let provider = n.attribute("customModuleProvider").filter(|p| !p.is_empty());
@@ -1677,20 +1688,6 @@ fn constrained(doc: &Document) -> std::collections::HashSet<String> {
     ids
 }
 
-/// Interface Builder's Auto Layout of constrained views as it compiles a
-/// document, for each plain or custom superview in the document's order
-/// (`layout_solver`): its constrained subviews' alignment rectangles are
-/// variables; the document's constraints among them and the superview
-/// hold at their priorities; a content-sized control hugs its content
-/// (`intrinsic`) at its hugging priority (250 unless given) and resists
-/// compression at its compression resistance (750); every view keeps its
-/// document's frame where nothing else decides it. A laid-out view's frame
-/// is its alignment rectangle outset by the control's insets, its origin
-/// rounded half up in AppKit's coordinates (probes of labels, push, check
-/// box and pop-up buttons, text fields and sliders in five fonts, 48
-/// centring labels in views of even and odd sizes, and corpus documents).
-/// A superview with anything else (margins, baselines, a control whose
-/// size isn't established, items elsewhere) is left to the refusal.
 /// A laid-out view's alignment rectangle and baselines (`Content`).
 #[derive(Clone, Copy)]
 struct Aligned {
@@ -1698,53 +1695,122 @@ struct Aligned {
     baselines: Option<(f64, f64)>,
 }
 
+/// Interface Builder's Auto Layout of constrained views as it compiles a
+/// document (`layout_solver`), one tree of them at a time: a plain, custom
+/// or stack view that isn't itself constrained in one, its constrained
+/// subviews, theirs, and so on, solved together. Each view's alignment
+/// rectangle is variables (left and top from its superview's top left,
+/// width, height); the document's constraints hold at their priorities, a
+/// stack view's own too (`stack_constraints`); a content-sized control
+/// hugs its content (`intrinsic`) at its hugging priority (250 unless
+/// given) and resists compression at its compression resistance (750);
+/// every view keeps its document's frame where nothing else decides it. A
+/// laid-out view's frame is its alignment rectangle outset by the control's
+/// insets, its origin rounded half up in AppKit's coordinates (probes of
+/// labels, push, check box and pop-up buttons, text fields and sliders in
+/// five fonts, 48 centring labels in views of even and odd sizes, and
+/// corpus documents). A misplaced view (`misplaced="YES"`) is laid out with
+/// the rest, which follow where it is laid out, but keeps its document's
+/// frame (probes sv_f to sv_h and st_*). A tree with anything else
+/// (margins, a control whose size isn't established, items elsewhere) is
+/// left to the refusal.
 fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Aligned)>, String> {
     use crate::layout_solver::{solve, Constraint, Relation};
     let mut out: HashMap<String, (Frame, Aligned)> = HashMap::new();
-    let content_sized = |n: Node| matches!(n.tag_name().name(), "textField" | "searchField" | "button" | "popUpButton" | "slider" | "imageView" | "progressIndicator" | "segmentedControl" | "stepper" | "datePicker" | "colorWell" | "levelIndicator" | "comboBox" | "textView" | "stackView" | "tableView" | "box");
-    'containers: for sup in doc.descendants().filter(|d| matches!(d.tag_name().name(), "view" | "customView")) {
-        let members: Vec<Node> = children(sup, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter(|c| c.attribute("translatesAutoresizingMaskIntoConstraints") == Some("NO")).collect();
-        if members.is_empty() || sup.attribute("flipped").is_some() {
+    let content_sized = |n: Node| matches!(n.tag_name().name(), "textField" | "searchField" | "button" | "popUpButton" | "slider" | "imageView" | "progressIndicator" | "segmentedControl" | "stepper" | "datePicker" | "colorWell" | "levelIndicator" | "comboBox" | "textView" | "tableView" | "box");
+    fn container(n: Node) -> bool {
+        matches!(n.tag_name().name(), "view" | "customView" | "stackView") && n.attribute("flipped").is_none()
+    }
+    fn gather<'a, 'i>(n: Node<'a, 'i>, at: Option<usize>, members: &mut Vec<Node<'a, 'i>>, parents: &mut Vec<Option<usize>>) {
+        for m in children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).filter(|c| c.attribute("translatesAutoresizingMaskIntoConstraints") == Some("NO")) {
+            members.push(m);
+            parents.push(at);
+            if container(m) {
+                gather(m, Some(members.len() - 1), members, parents);
+            }
+        }
+    }
+    let mut in_tree: std::collections::HashSet<roxmltree::NodeId> = std::collections::HashSet::new();
+    'trees: for root in doc.descendants().filter(|d| container(*d)) {
+        if in_tree.contains(&root.id()) {
             continue;
         }
-        let (Some(sid), Some(_)) = (sup.attribute("id"), frame_node_appkit(sup)) else { continue };
-        let bounds = match out.get(sid) {
+        // The tree's views in the document's order, each with its
+        // superview's index (`None`: the root).
+        let mut members: Vec<Node> = Vec::new();
+        let mut parents: Vec<Option<usize>> = Vec::new();
+        gather(root, None, &mut members, &mut parents);
+        in_tree.extend(members.iter().map(|m| m.id()));
+        if members.is_empty() {
+            continue;
+        }
+        let (Some(rid), Some(_)) = (root.attribute("id"), frame_node_appkit(root)) else { continue };
+        let bounds = match out.get(rid) {
             Some((f, _)) => *f,
-            None => frame(sup, "frame")?,
+            None => frame(root, "frame")?,
         };
         // A top-level view, or a view controller's, takes the size its
         // constraints give it, its top edge kept, where they decide it
         // (Xcode's templates: one grown by a pixel, one shrunk to a
         // wrapped label).
-        let resizable = out.get(sid).is_none() && sup.parent().is_some_and(|p| p.has_tag_name("objects") || (sup.attribute("key") == Some("view") && p.tag_name().name() == "viewController"));
+        let resizable = out.get(rid).is_none() && root.parent().is_some_and(|p| p.has_tag_name("objects") || (root.attribute("key") == Some("view") && p.tag_name().name() == "viewController"));
         let ids: Vec<&str> = members.iter().filter_map(|m| m.attribute("id")).collect();
         if ids.len() != members.len() {
             continue;
         }
-        // The constraints the superview or its subviews hold.
-        let holders: Vec<Node> = std::iter::once(sup).chain(members.iter().copied()).collect();
-        let constraints: Vec<Node> = holders.iter().flat_map(|h| children(*h, "constraints")).flat_map(|cs| children(cs, "constraint")).collect();
-        if constraints.is_empty() {
+        let expanded = |k: usize| container(members[k]);
+        // A view no constraint names (nor a stack view arranges) stays
+        // where the document has it, as Interface Builder pins one (a
+        // corpus xib's label).
+        let named: std::collections::HashSet<&str> = std::iter::once(root)
+            .chain(members.iter().copied())
+            .flat_map(|h| children(h, "constraints").flat_map(|cs| children(cs, "constraint")).flat_map(move |k| [k.attribute("firstItem").or(h.attribute("id")), k.attribute("secondItem")]))
+            .flatten()
+            .collect();
+        let pinned: Vec<bool> = (0..members.len()).map(|k| !named.contains(ids[k]) && !parents[k].is_some_and(|j| members[j].has_tag_name("stackView")) && !(parents[k].is_none() && root.has_tag_name("stackView"))).collect();
+        if pinned.iter().all(|p| *p) {
             continue;
         }
-        // Variables: each member's left, top (down from the superview's
-        // top), width and height; then the superview's width and height.
-        let var = |id: &str, a: usize| ids.iter().position(|i| *i == id).map(|k| 4 * k + a);
-        let root = 4 * members.len();
-        let mut rows: Vec<Constraint> = Vec::new();
+        // Variables: each view's left, top (down from its superview's
+        // top), width and height; then the root's width and height.
+        let root_var = 4 * members.len();
         let mut sizes = Vec::new();
+        // A control its own required width and height constants size
+        // needs no content size (a small square button 55 by 55).
+        let sized = |m: Node| {
+            let own = |a: &str| {
+                children(m, "constraints").flat_map(|cs| children(cs, "constraint")).any(|k| {
+                    k.attribute("firstItem").is_none_or(|i| Some(i) == m.attribute("id")) && k.attribute("firstAttribute") == Some(a) && k.attribute("secondItem").is_none() && k.attribute("secondAttribute").is_none() && k.attribute("relation").is_none() && k.attribute("priority").is_none() && k.attribute("constant").is_some()
+                })
+            };
+            own("width") && own("height")
+        };
         for m in &members {
-            let size = intrinsic(*m)?;
+            let mut size = intrinsic(*m)?;
             if size.is_none() && content_sized(*m) {
-                continue 'containers;
+                if !sized(*m) {
+                    continue 'trees;
+                }
+                // Its alignment insets, as AppKit gives a button's by bezel
+                // (`alignmentRectInsets` on a Mac).
+                let insets = match (m.tag_name().name(), child(*m, "buttonCell", "cell").and_then(|c| c.attribute("bezelStyle"))) {
+                    ("button", Some("smallSquare")) => (0.0, 1.0, 0.0, 1.0),
+                    ("button", Some("texturedRounded")) => (1.0, 1.0, 1.0, 2.0),
+                    ("button", Some("texturedSquare")) => (2.0, 2.0, 2.0, 3.0),
+                    ("button", Some(_)) => (0.0, 0.0, 0.0, 0.0),
+                    _ => continue 'trees,
+                };
+                size = Some(Content { size: (None, None), insets, baselines: None, wrap: None });
             }
             sizes.push(size);
         }
         let baselines: Vec<Option<(f64, f64)>> = sizes.iter().map(|c| c.as_ref().and_then(|c| c.baselines)).collect();
-        // An attribute of an item as coefficients and a constant.
+        let index = |id: &str| ids.iter().position(|i| *i == id);
+        // An attribute of a view as coefficients and a constant, in the
+        // root's coordinates.
         let term = |item: &str, a: &str| -> Option<(Vec<(usize, f64)>, f64)> {
-            if item == sid {
-                let (w, h) = if resizable { (vec![(root, 1.0)], vec![(root + 1, 1.0)]) } else { (Vec::new(), Vec::new()) };
+            if item == rid {
+                let (w, h) = if resizable { (vec![(root_var, 1.0)], vec![(root_var + 1, 1.0)]) } else { (Vec::new(), Vec::new()) };
                 let (cw, ch) = if resizable { (0.0, 0.0) } else { (bounds.w, bounds.h) };
                 let half = |v: Vec<(usize, f64)>| v.into_iter().map(|(i, a)| (i, a / 2.0)).collect();
                 return Some(match a {
@@ -1756,107 +1822,153 @@ fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Aligned)>, Stri
                     _ => return None,
                 });
             }
-            let (l, t, w, h) = (var(item, 0)?, var(item, 1)?, var(item, 2)?, var(item, 3)?);
-            match (a, baselines[ids.iter().position(|i| *i == item)?]) {
-                ("firstBaseline", Some((first, _))) => return Some((vec![(t, 1.0)], first)),
-                ("baseline" | "lastBaseline", Some((_, last))) => return Some((vec![(t, 1.0), (h, 1.0)], -last)),
+            let k = index(item)?;
+            let (mut left, mut top) = (Vec::new(), Vec::new());
+            let mut at = Some(k);
+            while let Some(j) = at {
+                left.push((4 * j, 1.0));
+                top.push((4 * j + 1, 1.0));
+                at = parents[j];
+            }
+            let (w, h) = (4 * k + 2, 4 * k + 3);
+            let with = |mut v: Vec<(usize, f64)>, extra: (usize, f64)| {
+                v.push(extra);
+                v
+            };
+            match (a, baselines[k]) {
+                ("firstBaseline", Some((first, _))) => return Some((top, first)),
+                ("baseline" | "lastBaseline", Some((_, last))) => return Some((with(top, (h, 1.0)), -last)),
                 _ => {}
             }
             Some((match a {
-                "leading" | "left" => vec![(l, 1.0)],
-                "trailing" | "right" => vec![(l, 1.0), (w, 1.0)],
-                "centerX" => vec![(l, 1.0), (w, 0.5)],
+                "leading" | "left" => left,
+                "trailing" | "right" => with(left, (w, 1.0)),
+                "centerX" => with(left, (w, 0.5)),
                 "width" => vec![(w, 1.0)],
-                "top" => vec![(t, 1.0)],
-                "bottom" => vec![(t, 1.0), (h, 1.0)],
-                "centerY" => vec![(t, 1.0), (h, 0.5)],
+                "top" => top,
+                "bottom" => with(top, (h, 1.0)),
+                "centerY" => with(top, (h, 0.5)),
                 "height" => vec![(h, 1.0)],
                 _ => return None,
             }, 0.0))
         };
-        for k in &constraints {
-            if k.attribute("placeholder").is_some() {
-                continue;
-            }
-            let holder = k.parent().and_then(|cs| cs.parent()).and_then(|v| v.attribute("id")).unwrap_or("");
-            let first = k.attribute("firstItem").unwrap_or(holder);
-            // A subview's constraints among its own subviews are its own
-            // superview's turn.
-            let known = |i: &str| i == sid || ids.contains(&i);
-            if holder != sid && !(known(first) && k.attribute("secondItem").is_none_or(known)) {
-                continue;
-            }
-            let a1 = k.attribute("firstAttribute").unwrap_or("");
-            let Some((mut coefficients, mut constant)) = term(first, a1) else { continue 'containers };
-            let multiplier = k.attribute("multiplier").map(multiplier).transpose()?.unwrap_or(1.0);
-            match (k.attribute("secondItem"), k.attribute("secondAttribute")) {
-                (Some(second), Some(a2)) => {
-                    let Some((c2, k2)) = term(second, a2) else { continue 'containers };
-                    coefficients.extend(c2.into_iter().map(|(v, a)| (v, -multiplier * a)));
-                    constant -= multiplier * k2;
+        let mut rows: Vec<Constraint> = Vec::new();
+        // The constraints the tree's views hold: the root's and those its
+        // subviews lay out by must hold; one a control holds about views
+        // outside the tree is its own.
+        let holders: Vec<(Node, bool)> = std::iter::once((root, true)).chain(members.iter().enumerate().map(|(k, m)| (*m, expanded(k)))).collect();
+        for (holder_node, must) in &holders {
+            let holder = holder_node.attribute("id").unwrap_or("");
+            for k in children(*holder_node, "constraints").flat_map(|cs| children(cs, "constraint")) {
+                if k.attribute("placeholder").is_some() {
+                    continue;
                 }
-                (None, None) => {}
-                // A second attribute of the holder's own.
-                (None, Some(a2)) => {
-                    let Some((c2, k2)) = term(holder, a2) else { continue 'containers };
-                    coefficients.extend(c2.into_iter().map(|(v, a)| (v, -multiplier * a)));
-                    constant -= multiplier * k2;
-                }
-                (Some(_), None) => continue 'containers,
+                let first = k.attribute("firstItem").unwrap_or(holder);
+                let a1 = k.attribute("firstAttribute").unwrap_or("");
+                let multiplier = k.attribute("multiplier").map(multiplier).transpose()?.unwrap_or(1.0);
+                let second = match (k.attribute("secondItem"), k.attribute("secondAttribute")) {
+                    (Some(second), Some(a2)) => Some((second, a2)),
+                    (None, None) => None,
+                    // A second attribute of the holder's own.
+                    (None, Some(a2)) => Some((holder, a2)),
+                    (Some(_), None) => continue 'trees,
+                };
+                let parts = term(first, a1).and_then(|(c1, k1)| match second {
+                    Some((second, a2)) => term(second, a2).map(|(c2, k2)| (c1.into_iter().chain(c2.into_iter().map(|(v, a)| (v, -multiplier * a))).collect::<Vec<_>>(), k1 - multiplier * k2)),
+                    None => Some((c1, k1)),
+                });
+                let Some((coefficients, mut constant)) = parts else {
+                    if *must {
+                        continue 'trees;
+                    }
+                    continue;
+                };
+                constant -= k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
+                let relation = match k.attribute("relation") {
+                    None => Relation::Equal,
+                    Some("lessThanOrEqual") => Relation::AtMost,
+                    Some("greaterThanOrEqual") => Relation::AtLeast,
+                    Some(_) => continue 'trees,
+                };
+                let priority = k.attribute("priority").map(number).transpose()?.unwrap_or(1000.0);
+                rows.push(Constraint { coefficients, constant, relation, priority });
             }
-            constant -= k.attribute("constant").map(number).transpose()?.unwrap_or(0.0);
-            let relation = match k.attribute("relation") {
-                None => Relation::Equal,
-                Some("lessThanOrEqual") => Relation::AtMost,
-                Some("greaterThanOrEqual") => Relation::AtLeast,
-                Some(_) => continue 'containers,
-            };
-            let priority = k.attribute("priority").map(number).transpose()?.unwrap_or(1000.0);
-            rows.push(Constraint { coefficients, constant, relation, priority });
+            if holder_node.has_tag_name("stackView") {
+                let Some(generated) = stack_constraints(*holder_node, &term)? else { continue 'trees };
+                rows.extend(generated);
+            }
         }
-        // The superview's own size, held just below 500: a label's
-        // hugging at 499 keeps it, at 500 shrinks it (probes rp_*).
+        // The root's own size, held just below 500: a label's hugging at
+        // 499 keeps it, at 500 shrinks it (probes rp_*).
         if resizable {
-            rows.push(Constraint { coefficients: vec![(root, 1.0)], constant: -bounds.w, relation: Relation::Equal, priority: 499.99 });
-            rows.push(Constraint { coefficients: vec![(root + 1, 1.0)], constant: -bounds.h, relation: Relation::Equal, priority: 499.99 });
+            rows.push(Constraint { coefficients: vec![(root_var, 1.0)], constant: -bounds.w, relation: Relation::Equal, priority: 499.99 });
+            rows.push(Constraint { coefficients: vec![(root_var + 1, 1.0)], constant: -bounds.h, relation: Relation::Equal, priority: 499.99 });
         }
-        // Content: hugging and compression resistance; the document's
-        // frames where nothing else decides.
+        // The document's frames where nothing else decides.
+        let doc_height = |p: Option<usize>| -> Result<f64, String> {
+            Ok(match p {
+                None => bounds.h,
+                Some(j) => frame(members[j], "frame")?.h,
+            })
+        };
         for (k, m) in members.iter().enumerate() {
             let doc_frame = frame(*m, "frame")?;
             let insets = sizes[k].as_ref().map_or((0.0, 0.0, 0.0, 0.0), |c| c.insets);
-            let aligned = (doc_frame.x + insets.0, bounds.h - (doc_frame.y + doc_frame.h) + insets.1, doc_frame.w - insets.0 - insets.2, doc_frame.h - insets.1 - insets.3);
+            let aligned = (doc_frame.x + insets.0, doc_height(parents[k])? - (doc_frame.y + doc_frame.h) + insets.1, doc_frame.w - insets.0 - insets.2, doc_frame.h - insets.1 - insets.3);
             for (a, v) in [aligned.0, aligned.1, aligned.2, aligned.3].into_iter().enumerate() {
-                rows.push(Constraint { coefficients: vec![(4 * k + a, 1.0)], constant: -v, relation: Relation::Equal, priority: 0.001 });
+                rows.push(Constraint { coefficients: vec![(4 * k + a, 1.0)], constant: -v, relation: Relation::Equal, priority: if pinned[k] { 1000.0 } else { 0.001 } });
             }
         }
         let fixed = rows.len();
+        // Arranged views equally weak along their stack view's axis give
+        // way first to last, as AppKit's engine has it (buttons and labels
+        // stretched and compressed in stacks on a Mac): each a ten
+        // thousandth weaker than the next.
+        let arranged: Vec<Option<(usize, f64)>> = (0..members.len())
+            .map(|k| {
+                let stack = match parents[k] {
+                    Some(j) => members[j],
+                    None => root,
+                };
+                if !stack.has_tag_name("stackView") {
+                    return None;
+                }
+                let siblings: Vec<usize> = (0..members.len()).filter(|i| parents[*i] == parents[k]).collect();
+                let at = siblings.iter().position(|i| *i == k).expect("itself");
+                Some((if stack.attribute("orientation") == Some("vertical") { 3 } else { 2 }, (siblings.len() - at) as f64 * 1e-4))
+            })
+            .collect();
         // The simplex's floating point, to a millionth of a point.
         let snap = |v: f64| (v * 1e6).round() / 1e6;
-        // A wrapping label narrower than its text: as many lines tall as it
-        // wraps into at the width it gets, laid out again.
+        // Content: hugging and compression resistance. A wrapping label
+        // narrower than its text is as many lines tall as it wraps into at
+        // the width it gets, laid out again.
         let mut values = Vec::new();
         for pass in 0..3 {
             rows.truncate(fixed);
             for (k, m) in members.iter().enumerate() {
+                if pinned[k] {
+                    continue;
+                }
                 if let Some(Content { size: (w, h), .. }) = sizes[k] {
                     let priority = |key: &str, default: f64| m.attribute(key).map(number).transpose().map(|p| p.unwrap_or(default));
                     for (axis, size, hug, resist) in [(2, w, priority("horizontalHuggingPriority", 250.0)?, priority("horizontalCompressionResistancePriority", 750.0)?), (3, h, priority("verticalHuggingPriority", 250.0)?, priority("verticalCompressionResistancePriority", 750.0)?)] {
                         if let Some(size) = size {
-                            rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtMost, priority: hug });
-                            rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtLeast, priority: resist });
+                            let weaker = arranged[k].filter(|(a, _)| *a == axis).map_or(0.0, |(_, by)| by);
+                            rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtMost, priority: hug - weaker });
+                            rows.push(Constraint { coefficients: vec![(4 * k + axis, 1.0)], constant: -size, relation: Relation::AtLeast, priority: resist - weaker });
                         }
                     }
                 }
             }
-            let Some(v) = solve(root + 2, &rows) else { continue 'containers };
+            let Some(v) = solve(root_var + 2, &rows) else { continue 'trees };
             values = v.into_iter().map(snap).collect();
             let mut again = false;
             for (k, size) in sizes.iter_mut().enumerate() {
                 let Some(Content { size: (Some(w), h), wrap: Some(wrap), .. }) = size else { continue };
                 if values[4 * k + 2] < *w - 1e-6 {
-                    let Some(lines) = crate::font_metrics::wrapped_lines(wrap.0, wrap.1, &wrap.2, values[4 * k + 2]) else { continue 'containers };
-                    let Some((_, line)) = crate::font_metrics::measure(wrap.0, wrap.1, "") else { continue 'containers };
+                    let Some(lines) = crate::font_metrics::wrapped_lines(wrap.0, wrap.1, &wrap.2, values[4 * k + 2]) else { continue 'trees };
+                    let Some((_, line)) = crate::font_metrics::measure(wrap.0, wrap.1, "") else { continue 'trees };
                     let wrapped = Some(lines as f64 * line);
                     if *h != wrapped {
                         *h = wrapped;
@@ -1868,32 +1980,127 @@ fn auto_layout(doc: &Document) -> Result<HashMap<String, (Frame, Aligned)>, Stri
                 break;
             }
             if pass == 2 {
-                continue 'containers;
+                continue 'trees;
             }
         }
-        let height = if resizable { values[root + 1] } else { bounds.h };
-        if resizable && (values[root], height) != (bounds.w, bounds.h) {
-            let laid = Frame { x: bounds.x, y: bounds.y + bounds.h - height, w: values[root], h: height };
-            out.insert(sid.to_string(), (laid, Aligned { rect: laid, baselines: None }));
+        let root_height = if resizable { values[root_var + 1] } else { bounds.h };
+        if resizable && (values[root_var], root_height) != (bounds.w, bounds.h) {
+            let laid = Frame { x: bounds.x, y: bounds.y + bounds.h - root_height, w: values[root_var], h: root_height };
+            out.insert(rid.to_string(), (laid, Aligned { rect: laid, baselines: None }));
         }
         for (k, m) in members.iter().enumerate() {
             let [left, top, w, h] = [0, 1, 2, 3].map(|a| values[4 * k + a]);
+            let height = match parents[k] {
+                None => root_height,
+                Some(j) => values[4 * j + 3] + sizes[j].as_ref().map_or(0.0, |c| c.insets.1 + c.insets.3),
+            };
             let insets = sizes[k].as_ref().map_or((0.0, 0.0, 0.0, 0.0), |c| c.insets);
             let (fw, fh) = (w + insets.0 + insets.2, h + insets.1 + insets.3);
             let x = left - insets.0;
             let y = height - (top - insets.1) - fh;
+            // Each edge to a whole point, half up (a corpus storyboard's
+            // 449.99975 wide view 450).
             let round = |v: f64| (v + 0.5).floor();
-            let laid = Frame { x: round(x), y: round(y), w: fw, h: fh };
+            let doc_frame = frame(*m, "frame")?;
+            let misplaced = m.attribute("misplaced") == Some("YES");
+            let laid = if misplaced || pinned[k] { doc_frame } else { Frame { x: round(x), y: round(y), w: round(snap(x + fw)) - round(x), h: round(snap(y + fh)) - round(y) } };
             // Before rounding, as the constraints have it.
             let aligned = Aligned { rect: Frame { x: left, y: height - top - h, w, h }, baselines: baselines[k] };
-            let doc_frame = frame(*m, "frame")?;
             let moved = (laid.x, laid.y, laid.w, laid.h) != (doc_frame.x, doc_frame.y, doc_frame.w, doc_frame.h);
-            if sizes[k].is_some() || moved {
+            if sizes[k].is_some() || moved || misplaced || expanded(k) || content_sized(*m) {
                 out.insert(m.attribute("id").expect("checked").to_string(), (laid, aligned));
             }
         }
+        if root.has_tag_name("stackView") {
+            out.entry(rid.to_string()).or_insert((bounds, Aligned { rect: bounds, baselines: None }));
+        }
     }
     Ok(out)
+}
+
+/// The constraints a stack view lays its arranged views out by, as AppKit
+/// makes them (its own constraints, listed on a Mac for each orientation,
+/// alignment and distribution, with insets and a custom spacing): along
+/// its orientation, the first view its inset from its leading or top edge,
+/// each next its spacing (or custom spacing) after, its far edge the last
+/// view's end and inset (all required); across it, each view within its
+/// edges (required, insets aside), held to both edges with their insets at
+/// the stack view's hugging priority on that axis (below 250, under the
+/// document's frames), and aligned at priority
+/// 260: its leading, top or trailing edge with the inset (a trailing one's
+/// literally `view.trailing == stack.trailing + inset`, so at the edge), or
+/// its centre with the stack view's. Filling proportionally is filling
+/// when no arranged view has a size of its own. `None` where it has
+/// anything else (another distribution or alignment, views it detaches).
+fn stack_constraints(n: Node, term: &dyn Fn(&str, &str) -> Option<(Vec<(usize, f64)>, f64)>) -> Result<Option<Vec<crate::layout_solver::Constraint>>, String> {
+    use crate::layout_solver::{Constraint, Relation};
+    let Some(id) = n.attribute("id") else { return Ok(None) };
+    let views: Vec<Node> = children(n, "subviews").flat_map(|s| s.children().filter(|c| c.is_element())).collect();
+    if views.is_empty() || views.iter().any(|v| v.attribute("hidden").is_some() || v.attribute("translatesAutoresizingMaskIntoConstraints") != Some("NO")) {
+        return Ok(None);
+    }
+    match n.attribute("distribution") {
+        Some("fill") => {}
+        Some("fillProportionally") if views.iter().all(|v| matches!(v.tag_name().name(), "view" | "customView" | "containerView")) => {}
+        _ => return Ok(None),
+    }
+    let vertical = n.attribute("orientation") == Some("vertical");
+    let spacing = n.attribute("spacing").map(number).transpose()?.unwrap_or(8.0);
+    let custom: Vec<Option<f64>> = children(n, "customSpacing")
+        .flat_map(|l| l.children().filter(|c| c.is_element()))
+        .map(|r| r.attribute("value").map(number).transpose().map(|v| v.filter(|v| *v < 3.0e38)))
+        .collect::<Result<_, _>>()?;
+    let (left, top, right, bottom) = match child(n, "edgeInsets", "edgeInsets") {
+        None => (0.0, 0.0, 0.0, 0.0),
+        Some(e) => {
+            let side = |k: &str| e.attribute(k).map(number).transpose().map(|v| v.unwrap_or(0.0));
+            (side("left")?, side("top")?, side("right")?, side("bottom")?)
+        }
+    };
+    // Along and across: (start, end) attributes and their insets.
+    let (along, along_insets, across, across_insets, hugging_key) = if vertical {
+        (("top", "bottom"), (top, bottom), ("leading", "trailing"), (left, right), "horizontalStackHuggingPriority")
+    } else {
+        (("leading", "trailing"), (left, right), ("top", "bottom"), (top, bottom), "verticalStackHuggingPriority")
+    };
+    // Below 250 (Interface Builder's 249.99998), weaker than a view's
+    // document frame, deciding only among frames that tie (probes hs_*,
+    // cv_*).
+    let hugging = n.attribute(hugging_key).map(number).transpose()?.unwrap_or(250.0);
+    let hugging = if hugging < 250.0 { 0.0005 } else { hugging };
+    // The alignment: (attribute, inset) of `view.a == stack.a + inset`.
+    let align = match (vertical, n.attribute("alignment")) {
+        (true, Some("leading")) => ("leading", left),
+        (true, Some("trailing")) => ("trailing", right),
+        (true, Some("centerX")) => ("centerX", 0.0),
+        (false, Some("top")) => ("top", top),
+        (false, Some("centerY")) => ("centerY", 0.0),
+        _ => return Ok(None),
+    };
+    let Some(ids) = views.iter().map(|v| v.attribute("id")).collect::<Option<Vec<&str>>>() else { return Ok(None) };
+    let mut rows = Vec::new();
+    // i1.a1 == i2.a2 + constant (relation) at a priority.
+    let mut relate = |i1: &str, a1: &str, i2: &str, a2: &str, constant: f64, relation: Relation, priority: f64| -> Option<()> {
+        let (c1, k1) = term(i1, a1)?;
+        let (c2, k2) = term(i2, a2)?;
+        rows.push(Constraint { coefficients: c1.into_iter().chain(c2.into_iter().map(|(v, a)| (v, -a))).collect(), constant: k1 - k2 - constant, relation, priority });
+        Some(())
+    };
+    let required = 1000.0;
+    let mut ok = relate(ids[0], along.0, id, along.0, along_insets.0, Relation::Equal, required).is_some();
+    for (i, pair) in ids.windows(2).enumerate() {
+        let gap = custom.get(i).copied().flatten().unwrap_or(spacing);
+        ok &= relate(pair[1], along.0, pair[0], along.1, gap, Relation::Equal, required).is_some();
+    }
+    ok &= relate(id, along.1, ids[ids.len() - 1], along.1, along_insets.1, Relation::Equal, required).is_some();
+    for v in &ids {
+        ok &= relate(v, across.0, id, across.0, 0.0, Relation::AtLeast, required).is_some();
+        ok &= relate(id, across.1, v, across.1, 0.0, Relation::AtLeast, required).is_some();
+        ok &= relate(v, across.0, id, across.0, across_insets.0, Relation::Equal, hugging).is_some();
+        ok &= relate(id, across.1, v, across.1, across_insets.1, Relation::Equal, hugging).is_some();
+        ok &= relate(v, align.0, id, align.0, align.1, Relation::Equal, 260.0).is_some();
+    }
+    Ok(ok.then_some(rows))
 }
 
 /// Whether an AppKit view has a frame rectangle.
@@ -5252,8 +5459,8 @@ fn stack_view(nib: &mut Nib, c: &mut Collected, n: Node, module: Option<&str>, p
             return fail("a stack view's visibility priority other than 1000 is not supported by this ibtool");
         }
     }
-    // It lays its views out, so only relax_ibtool_layout compiles it.
-    if !layout_relaxed() {
+    // One `auto_layout` laid out (its own constraints, `stack_constraints`).
+    if !layout_relaxed() && !c.aligned.contains_key(attr(n, "id")?) {
         return fail("a stack view lays its views out as Xcode compiles, which this ibtool doesn't reproduce; --config=relax_ibtool_layout compiles it with the document's frames");
     }
     let id = attr(n, "id")?;

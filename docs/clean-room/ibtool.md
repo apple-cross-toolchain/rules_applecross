@@ -2942,16 +2942,38 @@ Layout measures left to right and down from the view's top);
 `--config=relax_ibtool_layout` compiles them with the document's frames,
 which only their first layout at run time uses.
 
-It does lay out the constrained subviews of an unflipped plain or custom
-view as Auto Layout does: required constraints hold, then each priority's
-constraints are violated as little as they can be from the highest down
-(the sum of their violations least, without giving up what higher ones
-got); a content-sized control hugs its content at its hugging priority
-(250 unless given) and resists compression at its compression resistance
-(750); and every view keeps its document's frame where nothing else
-decides it (204 probes, 29 corpus documents, equal widths and
-inequalities among them). A superview with margins, a control whose size
-isn't established or items elsewhere is refused.
+It does lay out constrained views as Auto Layout does, a tree at a time:
+an unflipped plain, custom or stack view, its constrained subviews,
+theirs and so on, solved together. Required constraints hold, then each
+priority's constraints are violated as little as they can be from the
+highest down (the sum of their violations least, without giving up what
+higher ones got); a content-sized control hugs its content at its
+hugging priority (250 unless given) and resists compression at its
+compression resistance (750), unless its own required width and height
+fix it; and every view keeps its document's frame where nothing else
+decides it, more weakly than any constraint (a width at priority 1 wins:
+nine probes; 204 probes, 29 corpus documents, equal widths and
+inequalities among them). A view no constraint names keeps its frame, as
+Interface Builder pins one; a misplaced one (`misplaced="YES"`) is laid
+out with the rest, which follow where it lands, but keeps its document's
+frame (eight probes). Each edge is then rounded to a whole point, half
+up. A tree with margins, a control whose size isn't established or items
+elsewhere is refused.
+
+A stack view adds the constraints AppKit gives its arranged views
+(listed on a Mac for each orientation, alignment and distribution):
+along it, the first its inset from the leading or top edge, each next its
+spacing (or custom spacing) after the last, the far edge the last one's
+end and inset, all required; across it, each view within its edges
+(required, insets aside), held to both with their insets at its hugging
+priority for that axis, and aligned at priority 260 (its leading, top or
+trailing edge, the trailing one at the edge whatever its inset, or its
+centre). Interface Builder's hugging below 250 is weaker than a view's
+document frame and only settles frames that tie (probes). Views equally
+weak along the stack give way first to last, as AppKit does (stretching
+and compressing buttons and labels). Filling proportionally is filling
+when no arranged view has a size of its own; other distributions,
+alignments by size or baseline and hidden views are refused.
 
 A top-level view, or a view controller's, takes the size its constraints
 give it, its top edge kept: its own size is held just below priority 500
@@ -3006,6 +3028,10 @@ The frame is the alignment rectangle outset, its origin rounded half up
 in AppKit's coordinates (48 probes centring labels in views of even and
 odd sizes). Constraints are then measured on the alignment rectangle,
 before rounding.
+
+A File's Owner of class `NSObject` with no module is archived as one
+without a class (six probes of owner classes); the Application
+placeholder's `NSObject` keeps its reference.
 
 **Menus.** An `NSMenu`: title, items, and a system menu's name
 (`_NSMainMenu`, `_NSAppleMenu`, `_NSServicesMenu`, `_NSRecentDocumentsMenu`,
@@ -3174,9 +3200,9 @@ isn't archived. Each stack view adds an `NSNibConnector` asking to be
 decoded early, first among the connections by the stack's id and without
 an object id. A view's next responder and superview are conditional
 references, so a stack reached first through its connector has its
-superview defined later. A stack lays its views out, so only
-`relax_ibtool_layout` compiles it; gravity areas and visibility priorities
-other than 1000 are refused.
+superview defined later. A stack lays its views out (Layout, below); one
+Auto Layout doesn't lay out here is refused strict, as are gravity areas
+and visibility priorities other than 1000.
 
 **Image views** (about 15 probes). An `NSImageView`'s view keys, with
 `NSDragTypes` before its frame: a set of eight pasteboard types (PDF,
