@@ -152,6 +152,9 @@ const SYSTEM_COLORS: &[(&str, SystemColor)] = &[
     ("placeholderTextColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.2980392157])),
     ("quaternaryLabelColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.1764705882])),
     ("quaternarySystemFillColor", SystemColor::Rgb([0.4549019608, 0.4549019608, 0.5019607843, 0.08])),
+    // UIKit's deprecated textured background, 111, 113, 121 (a corpus
+    // storyboard).
+    ("scrollViewTexturedBackgroundColor", SystemColor::Rgb([0.4352941176, 0.4431372549, 0.4745098039, 1.0])),
     ("secondaryLabelColor", SystemColor::Rgb([0.2352941176, 0.2352941176, 0.262745098, 0.6])),
     ("secondarySystemBackgroundColor", SystemColor::Rgb([0.9490196078, 0.9490196078, 0.968627451, 1.0])),
     ("secondarySystemFillColor", SystemColor::Rgb([0.4705882353, 0.4705882353, 0.5019607843, 0.16])),
