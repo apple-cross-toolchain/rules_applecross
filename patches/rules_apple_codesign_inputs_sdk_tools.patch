@@ -18,6 +18,12 @@ it changes directories: the toolchain bin directory is provided as an
 execroot-relative PATH entry, which stops resolving once the script
 pushd's into the archive root to zip the bundle.
 
+Also run where the executor has no userland, as in actiond's sandbox, which
+holds only glibc and bash: an archive that needs no processing is linked
+rather than copied with cp, in an action with no inputs to bring a cp along,
+and the script lists the bundles to archive without sed, which the toolchain
+doesn't stage.
+
 Also feed sdk_tool_files to every xcrun-based resource action (actool,
 ibtool, momc, coremlc, copypng, TextureAtlas, metal and metallib,
 xcstringstool) via resources_support and to IntentGenerate.
@@ -70,7 +76,26 @@ diff --git a/apple/internal/codesigning_support.bzl b/apple/internal/codesigning
 index 8f76654..f129d0c 100644
 --- a/apple/internal/codesigning_support.bzl
 +++ b/apple/internal/codesigning_support.bzl
-@@ -748,11 +748,12 @@ def _post_process_and_sign_archive_action(
+@@ -683,14 +683,12 @@ def _post_process_and_sign_archive_action(
+     progress_message = "Processing and signing %s" % label_name
+ 
+     # If there is no work to be done, skip the processing/signing action, just
+-    # copy the file over.
++    # link the file over.
+     has_work = any([signing_command_lines, ipa_post_processor_path, should_compress])
+     if not has_work:
+-        actions.run_shell(
+-            command = "cp -p '%s' '%s'" % (input_archive.path, output_archive.path),
+-            inputs = [input_archive],
+-            mnemonic = mnemonic,
+-            outputs = [output_archive],
++        actions.symlink(
++            output = output_archive,
++            target_file = input_archive,
+             progress_message = progress_message,
+         )
+         return
+@@ -748,11 +746,12 @@ def _post_process_and_sign_archive_action(
              arguments = arguments,
              env = shared_environment.default_env,
              executable = process_and_sign_expanded_template,
@@ -698,6 +723,15 @@ index ec387373..d1c69491 100644
  # The path where the archive should be created, including the name of the
  # archive itself.
  readonly OUTPUT_PATH=%output_path%
+@@ -73,7 +84,7 @@
+ # frameworks (which contain relative symbolic links).
+ (
+   find . -type f -or -type l && \
+-  find . -path "*/Info.plist" | sed -E 's|(/Contents)?/Info.plist$||g' \
++  find . -path "*/Info.plist" | while IFS= read -r p; do p="${p%/Info.plist}"; echo "${p%/Contents}"; done \
+ ) \
+   | sort \
+   | zip -qX \
 diff --git a/apple/internal/partials/framework_import.bzl b/apple/internal/partials/framework_import.bzl
 --- a/apple/internal/partials/framework_import.bzl
 +++ b/apple/internal/partials/framework_import.bzl
