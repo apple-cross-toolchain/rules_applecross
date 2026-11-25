@@ -73,8 +73,8 @@ one fails:
   ([docs/clean-room/actool.md](docs/clean-room/actool.md#vector-images)).
 - Symbol sets (custom SF Symbols): Xcode keeps the glyph as SVG, which this
   actool writes as Xcode does, and draws it into bitmaps with CoreGraphics.
-  `--config=relax_actool_vector` accepts its own drawing for a single
-  Regular-M glyph on iOS and macOS
+  `--config=relax_actool_vector` accepts its own drawing on iOS and
+  macOS
   ([docs/clean-room/actool.md](docs/clean-room/actool.md#symbol-sets)).
 
 A target with Metal shaders builds correctly with its bundling on a macOS

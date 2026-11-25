@@ -1,7 +1,8 @@
-//! Symbol sets: custom SF Symbols templates, as Xcode compiles one with a
-//! single Regular-M glyph (docs/clean-room/actool.md "Symbol sets"). Xcode
-//! stores the glyph again as a small SVG of its own, with its metrics, and
-//! draws it with CoreGraphics into a bitmap per size and scale; this actool
+//! Symbol sets: custom SF Symbols templates, as Xcode compiles them
+//! (docs/clean-room/actool.md "Symbol sets"). Xcode stores each of the
+//! template's glyphs (a weight at a size) again as a small SVG of its own,
+//! with its metrics, and draws the Regular-M one with CoreGraphics into a
+//! bitmap per size and scale; this actool
 //! writes the SVG and metrics as Xcode does and draws the bitmaps with
 //! resvg, which isn't CoreGraphics: compiled only relaxed, as vector images
 //! are (`--config=relax_actool_vector`).
@@ -13,12 +14,18 @@ use std::path::PathBuf;
 /// The glyph a template's paths make: its SVG as Xcode stores it, its
 /// size in points at the medium size and its depth below the baseline.
 struct Glyph {
+    /// Its weight and size attributes (1 to 9, Ultralight to Black; 1 to
+    /// 3, small to large).
+    weight: u16,
+    size: u16,
     svg: String,
     width: f64,
     height: f64,
     /// The template's lowest point, in its units (positive below the
     /// baseline).
     max_y: f64,
+    /// Its size's distance from baseline to capline, in template units.
+    cap_height: f64,
 }
 
 /// A platform's glyph sizes: (scales, small, medium and large point sizes).
@@ -30,12 +37,20 @@ fn sizes(platform: &str) -> Option<(&'static [u32], [u32; 3])> {
     }
 }
 
-/// The deployment attribute of a symbol's renditions, and its weight
-/// (regular) and size (medium), on every platform and deployment target
-/// probed (iOS 13 to 18, macOS 14).
+/// The deployment attribute of a symbol's renditions, and its bitmaps'
+/// weight (regular) and size (medium), on every platform and deployment
+/// target probed (iOS 13 to 18, macOS 14).
 const DEPLOYMENT: u16 = 5;
 const WEIGHT_REGULAR: u16 = 4;
 const SIZE_MEDIUM: u16 = 2;
+
+/// The template's weights, by the glyph weight attribute's value less one.
+const WEIGHTS: [&str; 9] = ["Ultralight", "Thin", "Light", "Regular", "Medium", "Semibold", "Bold", "Heavy", "Black"];
+
+/// The template's sizes (the glyph size attribute's value less one) and the
+/// distance between each one's Baseline and Capline guides in the SF Symbols
+/// app's templates; others aren't established.
+const SIZES: [(&str, f64); 3] = [("S", 70.459), ("M", 70.46), ("L", 70.46)];
 const PART_GLYPH: u16 = 59;
 const LAYOUT_GLYPH: u16 = 1017;
 
@@ -69,13 +84,20 @@ pub fn compile(sets: &[(String, PathBuf)], platform: &str, relax_vector: bool, i
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let text = std::str::from_utf8(&bytes).map_err(|_| format!("{}: not UTF-8", path.display()))?;
         let medium = points[1] as f64;
-        let glyph = glyph(text, medium / 100.0).map_err(|e| format!("{}: {e}", path.display()))?;
+        let glyphs = glyphs(text, medium / 100.0).map_err(|e| format!("{}: {e}", path.display()))?;
         let id = identifier(name);
         facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id), (car::ATTR_DEPLOYMENT, DEPLOYMENT)] });
-        let glyph_attrs = |part: u16| vec![(car::ATTR_GLYPH_WEIGHT, WEIGHT_REGULAR), (car::ATTR_GLYPH_SIZE, SIZE_MEDIUM), (car::ATTR_DEPLOYMENT, DEPLOYMENT), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, part)];
-        let mut attrs = glyph_attrs(PART_GLYPH);
-        attrs.push((car::ATTR_SCALE, 1));
-        renditions.push(Rendition { attrs, csi: glyph_csi(filename, &glyph, medium, points) });
+        let glyph_attrs = |part: u16, weight: u16, size: u16| vec![(car::ATTR_GLYPH_WEIGHT, weight), (car::ATTR_GLYPH_SIZE, size), (car::ATTR_DEPLOYMENT, DEPLOYMENT), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, part)];
+        // Each glyph is stored as it is, none interpolated; only Regular-M's
+        // lists the platform's point sizes, and only it is drawn (probes of
+        // three to five glyphs of six weights and all three sizes).
+        for glyph in &glyphs {
+            let mut attrs = glyph_attrs(PART_GLYPH, glyph.weight, glyph.size);
+            attrs.push((car::ATTR_SCALE, 1));
+            let regular = glyph.weight == WEIGHT_REGULAR && glyph.size == SIZE_MEDIUM;
+            renditions.push(Rendition { attrs, csi: glyph_csi(filename, glyph, medium, regular.then_some(points)) });
+        }
+        let glyph = glyphs.iter().find(|g| g.weight == WEIGHT_REGULAR && g.size == SIZE_MEDIUM).expect("checked");
         for &scale in scales {
             for (size, &pt) in points.iter().enumerate() {
                 let f = pt as f64 / medium;
@@ -85,7 +107,7 @@ pub fn compile(sets: &[(String, PathBuf)], platform: &str, relax_vector: bool, i
                 let pixels = |v: f64| (v * ((pt * scale) as f64 / medium)).ceil() as u32;
                 let (w, h) = (pixels(glyph.width), pixels(glyph.height));
                 let image = crate::vector::render(crate::vector::Kind::Svg, glyph.svg.as_bytes(), (glyph.width * f, glyph.height * f), scale as f64, (w, h)).map_err(|e| format!("{}: {e}", path.display()))?;
-                let mut attrs = glyph_attrs(car::PART_IMAGE);
+                let mut attrs = glyph_attrs(car::PART_IMAGE, WEIGHT_REGULAR, SIZE_MEDIUM);
                 attrs.push((car::ATTR_SCALE, scale as u16));
                 if size > 0 {
                     attrs.push((car::ATTR_DIMENSION2, size as u16));
@@ -99,8 +121,9 @@ pub fn compile(sets: &[(String, PathBuf)], platform: &str, relax_vector: bool, i
 
 /// The glyph rendition (layout 1017, part 59): flags 4, scale 100, `SVG `,
 /// the composition, 0x3ee, its metrics (0x3fa) and 0x3fb, then the SVG as
-/// a vector image's is stored (LZFSE-compressed when smaller).
-fn glyph_csi(name: &str, glyph: &Glyph, medium: f64, points: [u32; 3]) -> Vec<u8> {
+/// a vector image's is stored (LZFSE-compressed when smaller). `points`:
+/// the platform's point sizes, which Regular-M's metrics list.
+fn glyph_csi(name: &str, glyph: &Glyph, medium: f64, points: Option<[u32; 3]>) -> Vec<u8> {
     let s = medium / 100.0;
     let mut t = Vec::new();
     let tlv = |t: &mut Vec<u8>, kind: u32, data: &[u8]| {
@@ -113,18 +136,21 @@ fn glyph_csi(name: &str, glyph: &Glyph, medium: f64, points: [u32; 3]) -> Vec<u8
     tlv(&mut t, 0x3ec, &composition);
     tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
     // Three sizes, the medium point size; the glyph's depth below the
-    // baseline, the cap height (the template's 70.46 units), 0, half a
-    // unit and 35/512 of the point size, twice; then each size's point
-    // size (probes of iOS's and macOS's).
+    // baseline, its size's cap height (its guides'), 0, half a unit and
+    // 35/512 of the point size, twice; then the number of point sizes
+    // listed and each one's (Regular-M's alone; probes of iOS's and
+    // macOS's).
     let mut m = Vec::new();
     for v in [3u32, medium as u32] {
         m.extend_from_slice(&v.to_le_bytes());
     }
-    for v in [glyph.max_y * s, CAP_HEIGHT * s, 0.0, 0.5 * s, medium * 35.0 / 512.0, 0.5 * s, medium * 35.0 / 512.0] {
+    for v in [glyph.max_y * s, glyph.cap_height * s, 0.0, 0.5 * s, medium * 35.0 / 512.0, 0.5 * s, medium * 35.0 / 512.0] {
         m.extend_from_slice(&(v as f32).to_le_bytes());
     }
-    m.extend_from_slice(&3u32.to_le_bytes());
-    for (k, p) in points.iter().enumerate() {
+    let points = points.unwrap_or_default();
+    let listed = points.iter().filter(|&&p| p > 0).count() as u32;
+    m.extend_from_slice(&listed.to_le_bytes());
+    for (k, p) in points.iter().enumerate().take(listed as usize) {
         m.extend_from_slice(&(k as u32).to_le_bytes());
         m.extend_from_slice(&p.to_le_bytes());
     }
@@ -147,35 +173,48 @@ fn glyph_csi(name: &str, glyph: &Glyph, medium: f64, points: [u32; 3]) -> Vec<u8
     crate::icon::data_csi(name, LAYOUT_GLYPH, 4, 0, 100, b" GVS", &t, &payload)
 }
 
-/// The distance between the template's Baseline-M and Capline-M guides in
-/// the SF Symbols app's templates; another isn't established.
-const CAP_HEIGHT: f64 = 70.46;
-
-/// The glyph of a template with a single Regular-M group of paths, at
-/// `scale` (points per template unit): its paths rewritten (each command's
-/// letter, then its numbers as %g writes them, a space between numbers but
-/// before a minus), its view box their bounds (SVG's, arcs' radii scaled
-/// up to reach), the group moved to its corner (probes of paths, margins,
-/// offsets and commands).
-fn glyph(text: &str, scale: f64) -> Result<Glyph, String> {
+/// The glyphs of a template, a group of paths for each weight and size it
+/// has, Regular-M among them (Xcode requires it), at `scale` (points per
+/// template unit, the medium size's for every size).
+fn glyphs(text: &str, scale: f64) -> Result<Vec<Glyph>, String> {
     let doc = roxmltree::Document::parse(text).map_err(|e| format!("not an SVG: {e}"))?;
     let group = |id: &str| doc.descendants().find(|n| n.has_tag_name("g") && n.attribute("id") == Some(id));
     let guides = group("Guides").ok_or("an SF Symbols template without guides is not supported by this actool")?;
     let guide = |id: &str| -> Option<f64> { guides.children().find(|n| n.attribute("id") == Some(id)).and_then(|n| n.attribute("y1")).and_then(|v| v.parse().ok()) };
-    match (guide("Baseline-M"), guide("Capline-M")) {
-        (Some(b), Some(c)) if ((b - c) - CAP_HEIGHT).abs() < 1e-6 => {}
-        _ => return Err("an SF Symbols template whose medium guides aren't the SF Symbols app's is not supported by this actool".into()),
+    let mut cap_heights = [0.0; 3];
+    for (i, (size, standard)) in SIZES.iter().enumerate() {
+        match (guide(&format!("Baseline-{size}")), guide(&format!("Capline-{size}"))) {
+            (Some(b), Some(c)) if ((b - c) - standard).abs() < 1e-6 => cap_heights[i] = b - c,
+            _ => return Err(format!("an SF Symbols template whose {size} guides aren't the SF Symbols app's is not supported by this actool")),
+        }
     }
     let symbols = group("Symbols").ok_or("an SF Symbols template without symbols is not supported by this actool")?;
-    let glyphs: Vec<roxmltree::Node> = symbols.children().filter(|n| n.is_element()).collect();
-    let [regular] = glyphs.as_slice() else {
-        return Err("an SF Symbols template of more than one weight or size (which Xcode interpolates) is not supported by this actool".into());
-    };
-    if !regular.has_tag_name("g") || regular.attribute("id") != Some("Regular-M") {
-        return Err("an SF Symbols template whose glyph isn't Regular-M is not supported by this actool".into());
+    let mut glyphs = Vec::new();
+    for node in symbols.children().filter(|n| n.is_element()) {
+        let id = node.attribute("id").unwrap_or("");
+        let parsed = id.split_once('-').and_then(|(w, s)| Some((WEIGHTS.iter().position(|&x| x == w)? as u16 + 1, SIZES.iter().position(|&(x, _)| x == s)? as u16 + 1)));
+        let Some((weight, size)) = parsed.filter(|_| node.has_tag_name("g")) else {
+            return Err(format!("an SF Symbols template's <{} id=\"{id}\"> other than a glyph of a weight and size is not supported by this actool", node.tag_name().name()));
+        };
+        if glyphs.iter().any(|g: &Glyph| (g.weight, g.size) == (weight, size)) {
+            return Err(format!("an SF Symbols template with two {id} glyphs is not supported by this actool"));
+        }
+        glyphs.push(glyph(node, weight, size, cap_heights[size as usize - 1], scale)?);
     }
+    if !glyphs.iter().any(|g| g.weight == WEIGHT_REGULAR && g.size == SIZE_MEDIUM) {
+        return Err("an SF Symbols template without a Regular-M glyph, which Xcode requires, is not supported by this actool".into());
+    }
+    Ok(glyphs)
+}
+
+/// A glyph's group of paths at `scale`: its paths rewritten (each
+/// command's letter, then its numbers as %g writes them, a space between
+/// numbers but before a minus), its view box their bounds (SVG's, arcs'
+/// radii scaled up to reach), the group moved to its corner (probes of
+/// paths, margins, offsets and commands).
+fn glyph(group: roxmltree::Node, weight: u16, size: u16, cap_height: f64, scale: f64) -> Result<Glyph, String> {
     // Its position on the template's canvas doesn't count (a probe).
-    for a in regular.attributes() {
+    for a in group.attributes() {
         let translation = a.name() == "transform" && a.value().strip_prefix("matrix(1 0 0 1 ").is_some_and(|r| r.ends_with(')'));
         if a.name() != "id" && !translation {
             return Err(format!("the glyph group's {} attribute is not supported by this actool", a.name()));
@@ -183,7 +222,7 @@ fn glyph(text: &str, scale: f64) -> Result<Glyph, String> {
     }
     let mut paths = Vec::new();
     let mut bounds = Bounds::default();
-    for p in regular.children().filter(|n| n.is_element()) {
+    for p in group.children().filter(|n| n.is_element()) {
         if !p.has_tag_name("path") || p.attributes().any(|a| a.name() != "d") {
             return Err(format!("a glyph's <{}> other than a path with its data alone is not supported by this actool", p.tag_name().name()));
         }
@@ -208,7 +247,7 @@ fn glyph(text: &str, scale: f64) -> Result<Glyph, String> {
         svg += &format!("<path d=\"{p}\"/>");
     }
     svg += "</g></svg>\n";
-    Ok(Glyph { svg, width, height, max_y })
+    Ok(Glyph { weight, size, svg, width, height, max_y, cap_height })
 }
 
 /// A number as C's `%g` writes it (six significant digits, no trailing
@@ -242,8 +281,10 @@ impl Bounds {
     }
 }
 
-/// A path's data rewritten, its points (curves' and arcs' extremes too)
-/// added to `bounds`.
+/// A path's data rewritten, its points added to `bounds`: a curve's control
+/// points with its ends, and an arc's as the cubics it is drawn with (probes
+/// of each command with control points beyond the curve, and of arcs
+/// starting off an axis, 90 to 200 degrees, circular and elliptical).
 fn rewrite(d: &str, bounds: &mut Bounds) -> Result<String, String> {
     use svgtypes::PathSegment as S;
     let mut out = String::new();
@@ -308,17 +349,19 @@ fn rewrite(d: &str, bounds: &mut Bounds) -> Result<String, String> {
                 } else {
                     (last_cubic.map_or((cx, cy), |(lx, ly)| (2.0 * cx - lx, 2.0 * cy - ly)), p(0), p(2))
                 };
-                cubic_bounds(bounds, (cx, cy), c1, c2, end);
+                for (x, y) in [(cx, cy), c1, c2, end] {
+                    bounds.add(x, y);
+                }
                 last_cubic = Some(c2);
                 last_quad = None;
                 (cx, cy) = end;
             }
             'q' | 't' => {
                 let (c, end) = if letter == 'q' { (p(0), p(2)) } else { (last_quad.map_or((cx, cy), |(lx, ly)| (2.0 * cx - lx, 2.0 * cy - ly)), p(0)) };
-                // A quadratic as the cubic it is.
-                let c1 = (cx + 2.0 / 3.0 * (c.0 - cx), cy + 2.0 / 3.0 * (c.1 - cy));
-                let c2 = (end.0 + 2.0 / 3.0 * (c.0 - end.0), end.1 + 2.0 / 3.0 * (c.1 - end.1));
-                cubic_bounds(bounds, (cx, cy), c1, c2, end);
+                // Its own control point, not its cubic's.
+                for (x, y) in [(cx, cy), c, end] {
+                    bounds.add(x, y);
+                }
                 last_quad = Some(c);
                 last_cubic = None;
                 (cx, cy) = end;
@@ -340,47 +383,10 @@ fn rewrite(d: &str, bounds: &mut Bounds) -> Result<String, String> {
     Ok(out)
 }
 
-/// A cubic's end points and extremes.
-fn cubic_bounds(b: &mut Bounds, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64), p3: (f64, f64)) {
-    b.add(p0.0, p0.1);
-    b.add(p3.0, p3.1);
-    let at = |t: f64, a: f64, b1: f64, c: f64, d: f64| {
-        let u = 1.0 - t;
-        u * u * u * a + 3.0 * u * u * t * b1 + 3.0 * u * t * t * c + t * t * t * d
-    };
-    for axis in 0..2 {
-        let pick = |p: (f64, f64)| if axis == 0 { p.0 } else { p.1 };
-        let (a, b1, c, d) = (pick(p0), pick(p1), pick(p2), pick(p3));
-        // The derivative's roots: qa t² + qb t + qc.
-        let (qa, qb, qc) = (3.0 * (-a + 3.0 * b1 - 3.0 * c + d), 6.0 * (a - 2.0 * b1 + c), 3.0 * (b1 - a));
-        let mut roots = Vec::new();
-        if qa.abs() < 1e-12 {
-            if qb.abs() > 1e-12 {
-                roots.push(-qc / qb);
-            }
-        } else {
-            let disc = qb * qb - 4.0 * qa * qc;
-            if disc >= 0.0 {
-                let r = disc.sqrt();
-                roots.push((-qb + r) / (2.0 * qa));
-                roots.push((-qb - r) / (2.0 * qa));
-            }
-        }
-        for t in roots.into_iter().filter(|t| *t > 0.0 && *t < 1.0) {
-            let v = at(t, a, b1, c, d);
-            let other = |p: (f64, f64)| if axis == 0 { p.1 } else { p.0 };
-            let w = at(t, other(p0), other(p1), other(p2), other(p3));
-            if axis == 0 {
-                b.add(v, w);
-            } else {
-                b.add(w, v);
-            }
-        }
-    }
-}
-
-/// An elliptical arc's end points and extremes (SVG's endpoint to centre
-/// conversion, radii scaled up when too small to reach).
+/// An elliptical arc's points as the cubics it is drawn with: SVG's
+/// endpoint to centre conversion (radii scaled up when too small to reach),
+/// then a cubic for each 90 degrees from its start and one for the rest,
+/// their control points 4/3 tan(a/4) of a radius along the tangents.
 #[allow(clippy::too_many_arguments)]
 fn arc_bounds(b: &mut Bounds, p0: (f64, f64), rx: f64, ry: f64, rotation: f64, large: bool, sweep: bool, p1: (f64, f64)) {
     b.add(p0.0, p0.1);
@@ -414,20 +420,40 @@ fn arc_bounds(b: &mut Bounds, p0: (f64, f64), rx: f64, ry: f64, rotation: f64, l
     } else if sweep && delta < 0.0 {
         delta += std::f64::consts::TAU;
     }
-    let point = |t: f64| (cx + rx * t.cos() * cos - ry * t.sin() * sin, cy + rx * t.cos() * sin + ry * t.sin() * cos);
-    // The angles where x or y turns.
-    let tx = (-ry * sin).atan2(rx * cos);
-    let ty = (ry * cos).atan2(rx * sin);
-    for base in [tx, ty] {
-        for k in -2..=2 {
-            let t = base + k as f64 * std::f64::consts::PI;
-            let rel = if delta >= 0.0 { t - theta1 } else { theta1 - t };
-            let span = delta.abs();
-            let rel = rel.rem_euclid(std::f64::consts::TAU);
-            if rel > 0.0 && rel < span {
-                let (x, y) = point(t);
-                b.add(x, y);
-            }
+    // Sines and cosines exact at a quarter turn, as Xcode's are: where a
+    // cubic meets an axis, its control point lies on the bounds, not a
+    // rounding error beyond them (probes of 180 and 270 degree arcs).
+    let exact = |v: f64| {
+        if v.abs() < 1e-12 {
+            0.0
+        } else if (v.abs() - 1.0).abs() < 1e-12 {
+            v.signum()
+        } else {
+            v
         }
+    };
+    let sin_cos = |t: f64| (exact(t.sin()), exact(t.cos()));
+    let point = |t: f64| {
+        let (st, ct) = sin_cos(t);
+        (cx + rx * ct * cos - ry * st * sin, cy + rx * ct * sin + ry * st * cos)
+    };
+    let tangent = |t: f64| {
+        let (st, ct) = sin_cos(t);
+        (-rx * st * cos - ry * ct * sin, -rx * st * sin + ry * ct * cos)
+    };
+    let quarter = std::f64::consts::FRAC_PI_2.copysign(delta);
+    let mut from = theta1;
+    let mut left = delta.abs();
+    while left > 0.0 {
+        let step = if left > std::f64::consts::FRAC_PI_2 { quarter } else { left.copysign(delta) };
+        let to = from + step;
+        let k = 4.0 / 3.0 * (step / 4.0).tan();
+        let (a, d) = (point(from), point(to));
+        let (ta, td) = (tangent(from), tangent(to));
+        for (x, y) in [a, (a.0 + k * ta.0, a.1 + k * ta.1), (d.0 - k * td.0, d.1 - k * td.1), d] {
+            b.add(x, y);
+        }
+        left -= step.abs();
+        from = to;
     }
 }
