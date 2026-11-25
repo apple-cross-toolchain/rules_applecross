@@ -62,7 +62,7 @@ class MomcTest(unittest.TestCase):
                     strict += 1
                 else:
                     self.assertEqual(result.returncode, 1, result.stdout)
-                    self.assertRegex(result.stderr, "several versions|derived attribute")
+                    self.assertRegex(result.stderr, "several versions|derived attribute|current version")
                     self.assertIn("--config=relax_momc", result.stderr)
                     result = run(*args, env=RELAXED)
                     self.assertEqual(result.returncode, 0, result.stderr)

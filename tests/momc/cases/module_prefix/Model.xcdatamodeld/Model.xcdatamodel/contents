@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788" systemVersion="24F74" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="CurrentModule" representedClassName=".CurrentModule" syncable="YES" codeGenerationType="class">
+        <attribute name="title" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="Dotted" representedClassName=".Outer.Inner" syncable="YES"/>
+    <entity name="Other" representedClassName="OtherModule.Other" syncable="YES"/>
+    <entity name="Plain" representedClassName="Plain" syncable="YES" codeGenerationType="class"/>
+</model>
