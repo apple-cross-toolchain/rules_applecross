@@ -109,13 +109,14 @@ else the block count plus one rounded up to 8) and an empty free list.
 Variables, in order: `CARHEADER`, `RENDITIONS`, `FACETKEYS`,
 `APPEARANCEKEYS`, `KEYFORMAT`, `EXTENDED_METADATA`, `BITMAPKEYS`.
 
-Trees are a 29-byte header (`tree`, version 1, page block, block size, entry
-count, an inline-keys flag, the longest key) and one leaf page: entries
+Trees are a 29-byte header (`tree`, version 1, root page block, block size,
+entry count, an inline-keys flag, the longest key) and leaf pages: entries
 (value block, key block), four zero bytes, then a copy of every key; the
 page's length is the block size plus the keys' lengths. When the keys
 differ in length the header records 0xffffffff and the page holds no
 copies (FACETKEYS with names of different lengths). `BITMAPKEYS` stores
-its keys (name identifiers) inline in a 1024-byte page; their value blocks
+its keys (name identifiers) inline in 1024-byte pages, the others in
+4096-byte ones (see "Paged trees" below for trees of more than one page); their value blocks
 are allocated in the order a CoreFoundation hash table enumerates the
 identifiers (the integer CFNumber hash: the value times 2654435761, 64
 bits) when filled with the identifiers in the order their renditions are
@@ -438,9 +439,11 @@ and every icon set in the examples:
   catalogs of the 350-catalog comparison with BITMAPKEYS. The 14 of them
   that CoreFoundation's own growth missed all have atlases, identifiers
   sharing a bucket, and a count at or past a capacity, so where the table
-  grew shows. 52 entries,
-  85 to 88 and 119 or more aren't pinned (the 71- and 127-bucket tables'
-  growth), and catalogs with those counts are refused.
+  grew shows. The same holds through every growth up to 1,000 entries
+  (41 catalogs of random names at 51 to 673 entries, three at each
+  growth, the 52 and 85 to 88 this comparison left open among them, and 18
+  of 126 to 1,000 colour sets); more than 1,000 aren't pinned and are
+  refused.
 - Per (scale, idiom, subtype), images are taken largest area first, equal
   areas by name identifier. One of more than 18,050 px² × scale is not
   packed; neither is the only packable image of a group.
@@ -484,13 +487,37 @@ that are refused without it. The four others, tall images at 1x, are packed
 otherwise. tests/actool_catalog's RS219 and RS229 are two of those 82:
 refused strictly, and Xcode's with the config.
 
+## Paged trees
+
+A tree whose entries don't fit one page (126 at `BITMAPKEYS`' 1024 bytes,
+510 at the others' 4096: the block size less 16, over eight) is a B+tree.
+Entries are inserted one at a time in the order their blocks are allocated
+(above): each into the leaf whose last key is the first not below it (the
+last leaf past them all), in key order. A leaf one entry over its capacity
+splits, the left keeping the larger half (64 of 127, 256 of 511); the new
+leaf is the next block allocated, right after the entry's own, and at the
+first split the index page is the one after that. Leaves link forward and
+backward (fields 2 and 3 of a page's header). The index page (its header's
+first field 0) lists each leaf but the last as (page, its last key), then
+the last leaf's page where a leaf's four zero bytes are, then copies of
+those keys when the tree copies keys; the tree's header names it as the
+root. Reproduced, page by page and block by block, for every tree of 41
+probe catalogs of 127 to 1,000 colour sets (`RENDITIONS` and `FACETKEYS`
+paged from 511 entries, `BITMAPKEYS` from 127). More than one index page
+isn't established and is refused.
+
+Names whose identifiers (CoreUI's hash, above) are alike: Xcode gives the
+later in byte order another identifier (45 such pairs in random catalogs;
+`dv` keeps its own, `f4` doesn't), by a rule not yet established. Such a
+catalog is refused, rather than written with both identifiers alike.
+
 ## Sprite atlases
 
 A sprite atlas (`.spriteatlas`, SpriteKit's texture atlas in a catalog)
 packs its image sets' images into atlases of its own, explicitly, whatever
 their size. Established over 44 probe catalogs (trimming from each side, a
 clear image, grey, colour and opaque images, one to three scales, 40 images
-of 300 by 300, one of 3,000 by 10, atlases in plain and namespacing folders,
+of 300 by 300 and one of 3,000 by 10 (both refused now, being past 2048 a side: below), atlases in plain and namespacing folders,
 beside plain image sets, and 30 random atlases) and Xcode's four SpriteKit
 templates, byte-identical for iOS, macOS, tvOS and watchOS:
 
@@ -510,7 +537,7 @@ templates, byte-identical for iOS, macOS, tvOS and watchOS:
   name always 0. Images are taken largest trimmed area first, equal areas
   by identifier, and packed as image sets' atlases are (the binary-tree
   packer, 2 px in, each side the root's plus one, rounded up to even), into
-  one atlas with no cap. After `0x3e9` it lists its images as an icon
+  one atlas (up to 2048 pixels a side; below). After `0x3e9` it lists its images as an icon
   stack lists its layers (`0x3f4`, `0x3fc` to `0x3fe`), by identifier: an
   empty rectangle, blend 0, opacity 1 and the image's key; no flag, blur or
   fill; no effects.
@@ -527,7 +554,11 @@ templates, byte-identical for iOS, macOS, tvOS and watchOS:
 Refused, not established: images other than PNGs, images for an
 appearance or an idiom, resizable images, colours beyond sRGB, image set
 names other than ASCII, anything but image sets in a sprite atlas, keys in
-its `Contents.json` but `info`, and an atlas without images.
+its `Contents.json` but `info`, an atlas without images, and an atlas that
+packs to more than 2048 pixels a side. Past that Xcode may split it into
+several atlases (`dimension1` 1, 2, ...) by a rule not established: 15 and
+16 images of 512 by 512 split, 17 didn't, and Xcode's grid tile set
+template's 400 tiles take two.
 
 ## dmp2
 

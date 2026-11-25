@@ -78,11 +78,12 @@ pub fn number_table_order(values: &[i64]) -> Vec<usize> {
     hashed_table_order(&hashes)
 }
 
-/// Whether [`number_table_order`] is established for `n` identifiers: the
-/// growth of the 71-bucket table (at 52 or 53 entries), of the 127-bucket
-/// one (85 to 88) and from 119 on aren't pinned by the catalogs examined.
+/// Whether [`number_table_order`] is established for `n` identifiers: up to
+/// 1,000, through every growth on the way (41 catalogs at 51 to 673, three
+/// at each growth, and 18 of 126 to 1,000 entries; the 52 and 85 to 88 the
+/// first comparison left open among them). Beyond that it isn't pinned.
 pub fn number_table_order_established(n: usize) -> bool {
-    n != 52 && !(85..=88).contains(&n) && n < 119
+    n <= 1000
 }
 
 fn hashed_table_order(hashes: &[u64]) -> Vec<usize> {

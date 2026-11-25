@@ -71,51 +71,95 @@ impl Bom {
     }
 }
 
-/// One B+tree as CoreUI stores its tables: a header block and a single leaf
-/// page. Entries are (key, value) with the key either a block of its own or,
-/// for inline trees, a 32-bit value stored in the page.
+/// One B+tree as CoreUI stores its tables: a header block, leaf pages and,
+/// once a leaf has split, an index page. Entries are (key, value) with the
+/// key either a block of its own or, for inline trees, a 32-bit value
+/// stored in the page.
+///
+/// Entries are inserted one at a time, in the order Xcode inserts them,
+/// right after their blocks are allocated: a leaf holds (block size − 16) / 8
+/// entries; one more splits it, the left leaf keeping the larger half, and
+/// the new leaf is the next block allocated, followed, at the first split,
+/// by the index page (docs/clean-room/actool.md "Paged trees": every tree of
+/// 23 probe catalogs of 127 to 1,000 entries).
 pub struct Tree {
     pub header: u32,
-    pub page: u32,
-    pub block_size: u32,
-    pub inline_keys: bool,
+    block_size: u32,
+    inline_keys: bool,
+    /// Leaves in key order: their pages and entries (key block or inline
+    /// key, value block, key bytes).
+    leaves: Vec<(u32, Vec<(u32, u32, Vec<u8>)>)>,
+    index: Option<u32>,
 }
 
 impl Tree {
-    /// Allocates the header and page blocks, to be filled by [`Tree::finish`].
+    /// Allocates the header and the first leaf page.
     pub fn reserve(bom: &mut Bom, block_size: u32, inline_keys: bool) -> Tree {
         let header = bom.alloc(Vec::new());
         let page = bom.alloc(Vec::new());
-        Tree { header, page, block_size, inline_keys }
+        Tree { header, block_size, inline_keys, leaves: vec![(page, Vec::new())], index: None }
     }
 
-    /// Writes the header and the leaf page for `entries` of (key block or
-    /// inline key, value block, key bytes), in the order given. The page
-    /// holds the entries, four zero bytes, and then, when every key has the
-    /// same length (which the header records), a copy of every key; keys
-    /// of different lengths are recorded as length 0xffffffff, uncopied.
-    /// Entries that don't fit one page (Xcode's trees then have several,
-    /// not established here) are refused.
-    pub fn finish(&self, bom: &mut Bom, entries: &[(u32, u32, Vec<u8>)]) -> Result<(), String> {
-        if 12 + 8 * entries.len() + 4 > self.block_size as usize {
-            return Err(format!(
-                "a catalog whose Assets.car needs more than one {}-byte page for a tree ({} entries) is not supported by this actool",
-                self.block_size,
-                entries.len()
-            ));
+    fn capacity(&self) -> usize {
+        (self.block_size as usize - 16) / 8
+    }
+
+    fn order(&self, a: &(u32, u32, Vec<u8>), b: &(u32, u32, Vec<u8>)) -> std::cmp::Ordering {
+        if self.inline_keys {
+            a.0.cmp(&b.0)
+        } else {
+            a.2.cmp(&b.2)
         }
-        let fixed = entries.windows(2).all(|w| w[0].2.len() == w[1].2.len());
+    }
+
+    /// Inserts an entry whose key (or inline key) and value blocks were just
+    /// allocated, splitting a full leaf. More than one index page (a tree of
+    /// some 16,000 entries at 1 KB pages) isn't established and is refused.
+    pub fn insert(&mut self, bom: &mut Bom, key: u32, value: u32, key_bytes: Vec<u8>) -> Result<(), String> {
+        let e = (key, value, key_bytes);
+        let last = self.leaves.len() - 1;
+        let at = self.leaves.iter().position(|(_, es)| es.last().is_some_and(|l| self.order(l, &e) != std::cmp::Ordering::Less)).unwrap_or(last);
+        let pos = self.leaves[at].1.iter().position(|x| self.order(x, &e) == std::cmp::Ordering::Greater).unwrap_or(self.leaves[at].1.len());
+        self.leaves[at].1.insert(pos, e);
+        if self.leaves[at].1.len() > self.capacity() {
+            let keep = self.leaves[at].1.len().div_ceil(2);
+            let right = self.leaves[at].1.split_off(keep);
+            let page = bom.alloc(Vec::new());
+            self.leaves.insert(at + 1, (page, right));
+            if self.index.is_none() {
+                self.index = Some(bom.alloc(Vec::new()));
+            }
+            if self.leaves.len() - 1 > self.capacity() {
+                return Err(format!("a catalog whose Assets.car needs more than one {}-byte index page for a tree is not supported by this actool", self.block_size));
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes the header, the leaves and the index page. A leaf holds its
+    /// entries (value, then key), four zero bytes and then, when every key
+    /// has the same length (which the header records), a copy of each key;
+    /// keys of different lengths are recorded as length 0xffffffff,
+    /// uncopied. Leaves link to the next (forward) and previous (backward).
+    /// The index page lists each leaf but the last with its last key, then
+    /// the last leaf, then the copies of those keys.
+    pub fn finish(&self, bom: &mut Bom) -> Result<(), String> {
+        let all = || self.leaves.iter().flat_map(|(_, es)| es.iter());
+        let count = all().count();
+        let first = all().next().map(|e| e.2.len());
+        let fixed = all().all(|e| Some(e.2.len()) == first);
         let copied = !self.inline_keys && fixed;
         let key_length = if self.inline_keys {
             0
         } else if fixed {
-            entries.first().map_or(0, |e| e.2.len() as u32)
+            first.unwrap_or(0) as u32
         } else {
             u32::MAX
         };
+        let root = self.index.unwrap_or(self.leaves[0].0);
         let mut h = Vec::with_capacity(29);
         h.extend_from_slice(b"tree");
-        for v in [1u32, self.page, self.block_size, entries.len() as u32] {
+        for v in [1u32, root, self.block_size, count as u32] {
             h.extend_from_slice(&v.to_be_bytes());
         }
         h.push(self.inline_keys as u8);
@@ -123,23 +167,46 @@ impl Tree {
         h.extend_from_slice(&0u32.to_be_bytes());
         bom.set(self.header, h);
 
-        let key_bytes: usize = if copied { entries.iter().map(|e| e.2.len()).sum() } else { 0 };
-        let mut p = vec![0u8; self.block_size as usize + key_bytes];
-        p[0..2].copy_from_slice(&1u16.to_be_bytes());
-        p[2..4].copy_from_slice(&(entries.len() as u16).to_be_bytes());
-        for (n, (key, value, _)) in entries.iter().enumerate() {
-            let o = 12 + 8 * n;
-            p[o..o + 4].copy_from_slice(&value.to_be_bytes());
-            p[o + 4..o + 8].copy_from_slice(&key.to_be_bytes());
-        }
-        if copied {
-            let mut o = 12 + 8 * entries.len() + 4;
-            for (_, _, k) in entries {
-                p[o..o + k.len()].copy_from_slice(k);
-                o += k.len();
+        let page = |leaf: bool, entries: &[(u32, u32, &[u8])], forward: u32, backward: u32, trailing: u32| -> Vec<u8> {
+            let key_bytes: usize = if copied { entries.iter().map(|e| e.2.len()).sum() } else { 0 };
+            let mut p = vec![0u8; self.block_size as usize + key_bytes];
+            p[0..2].copy_from_slice(&(leaf as u16).to_be_bytes());
+            p[2..4].copy_from_slice(&(entries.len() as u16).to_be_bytes());
+            p[4..8].copy_from_slice(&forward.to_be_bytes());
+            p[8..12].copy_from_slice(&backward.to_be_bytes());
+            for (n, (key, value, _)) in entries.iter().enumerate() {
+                let o = 12 + 8 * n;
+                p[o..o + 4].copy_from_slice(&value.to_be_bytes());
+                p[o + 4..o + 8].copy_from_slice(&key.to_be_bytes());
             }
+            let o = 12 + 8 * entries.len();
+            p[o..o + 4].copy_from_slice(&trailing.to_be_bytes());
+            if copied {
+                let mut o = o + 4;
+                for (_, _, k) in entries {
+                    p[o..o + k.len()].copy_from_slice(k);
+                    o += k.len();
+                }
+            }
+            p
+        };
+        for (n, (leaf, es)) in self.leaves.iter().enumerate() {
+            let forward = self.leaves.get(n + 1).map_or(0, |l| l.0);
+            let backward = if n > 0 { self.leaves[n - 1].0 } else { 0 };
+            let entries: Vec<(u32, u32, &[u8])> = es.iter().map(|(k, v, b)| (*k, *v, b.as_slice())).collect();
+            bom.set(*leaf, page(true, &entries, forward, backward, 0));
         }
-        bom.set(self.page, p);
+        if let Some(index) = self.index {
+            // Each leaf but the last, by its last key; the last after them.
+            let entries: Vec<(u32, u32, &[u8])> = self.leaves[..self.leaves.len() - 1]
+                .iter()
+                .map(|(leaf, es)| {
+                    let (k, _, b) = es.last().expect("a split leaf has entries");
+                    (*k, *leaf, b.as_slice())
+                })
+                .collect();
+            bom.set(index, page(false, &entries, 0, 0, self.leaves[self.leaves.len() - 1].0));
+        }
         Ok(())
     }
 }
@@ -148,16 +215,20 @@ impl Tree {
 mod tests {
     use super::*;
 
-    /// A tree's entries fill one page; one entry more is refused rather
-    /// than written past it (Xcode's trees then have several pages).
+    /// A full 1 KB leaf (126 entries) and one more split into 64 and 63, the
+    /// new leaf and the index page the next blocks allocated.
     #[test]
-    fn a_tree_that_needs_two_pages_is_refused() {
-        let fits = (1024 - 16) / 8;
-        let entries = |n: usize| (0..n as u32).map(|i| (i, i, Vec::new())).collect::<Vec<_>>();
+    fn a_full_leaf_splits() {
         let mut bom = Bom::new();
-        let tree = Tree::reserve(&mut bom, 1024, true);
-        assert!(tree.finish(&mut bom, &entries(fits)).is_ok());
-        let error = tree.finish(&mut bom, &entries(fits + 1)).unwrap_err();
-        assert!(error.contains("more than one 1024-byte page"), "{error}");
+        let mut tree = Tree::reserve(&mut bom, 1024, true);
+        for i in 0..127u32 {
+            let v = bom.alloc(Vec::new());
+            tree.insert(&mut bom, i, v, Vec::new()).unwrap();
+        }
+        tree.finish(&mut bom).unwrap();
+        assert_eq!(tree.leaves.iter().map(|l| l.1.len()).collect::<Vec<_>>(), vec![64, 63]);
+        // Header 1, first leaf 2, values 3 to 129: the split at the last.
+        assert_eq!(tree.leaves[1].0, 130);
+        assert_eq!(tree.index, Some(131));
     }
 }

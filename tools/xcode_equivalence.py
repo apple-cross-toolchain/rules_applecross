@@ -330,15 +330,22 @@ def _store(data):
 
 
 def _tree_entries(blocks, header):
-    """A single-leaf tree's entries: (value block, key block) pairs."""
+    """A tree's entries, in key order: (value block, key block) pairs, from
+    its leftmost leaf along the leaves' forward links (an index page's first
+    entry names its leftmost child)."""
     h = blocks[header]
     if h[:4] != b"tree":
         raise ValueError("not a tree")
-    leaf = blocks[struct.unpack_from(">I", h, 8)[0]]
-    is_leaf, count, forward = struct.unpack_from(">HHI", leaf, 0)
-    if not is_leaf or forward:
-        raise ValueError("a tree of more than one leaf")
-    return [struct.unpack_from(">II", leaf, 12 + 8 * k) for k in range(count)]
+    page = struct.unpack_from(">I", h, 8)[0]
+    while not struct.unpack_from(">H", blocks[page], 0)[0]:
+        page = struct.unpack_from(">I", blocks[page], 12)[0]
+    entries = []
+    while page:
+        leaf = blocks[page]
+        _, count, forward = struct.unpack_from(">HHI", leaf, 0)
+        entries += [struct.unpack_from(">II", leaf, 12 + 8 * k) for k in range(count)]
+        page = forward
+    return entries
 
 
 def _key_attributes(blocks, variables, key):
