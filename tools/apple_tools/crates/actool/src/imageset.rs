@@ -55,180 +55,9 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
 /// opaque colour images (crate::iconset::compile_deferring).
 #[allow(clippy::too_many_arguments)]
 pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platform: &str, reserved: &[(u32, usize)], relax_vector: bool, identifier: impl Fn(&str) -> u16, icons: Vec<crate::iconset::DeferredIcon>) -> Result<Compiled, String> {
-    let own = crate::colorset::own_idiom(platform);
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
-    for (name, dir) in sets {
-        let contents = read_json(&dir.join("Contents.json"))?;
-        for key in contents.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default() {
-            if !["images", "info", "properties"].contains(&key.as_str()) {
-                return Err(format!("{}: the {key} key of an image set is not supported by this actool", dir.display()));
-            }
-        }
-        // CSI flags: the rendering intent, automatic by default; Xcode also
-        // reads it from `info` (WebRTC's web_view shell icons).
-        let mut flags = match contents["info"]["template-rendering-intent"].as_str() {
-            None => 16,
-            Some("template") => 8,
-            Some("original") => 0,
-            Some(v) => return Err(format!("{}: the image set info template-rendering-intent = {v} is not supported by this actool", dir.display())),
-        };
-        let mut preserves = false;
-        if let Some(props) = contents["properties"].as_object() {
-            for (k, v) in props {
-                match (k.as_str(), v.as_str()) {
-                    ("template-rendering-intent", Some("template")) => flags = 8,
-                    ("template-rendering-intent", Some("original")) => flags = 0,
-                    ("preserves-vector-representation", None) if v.is_boolean() => preserves = v.as_bool() == Some(true),
-                    _ => return Err(format!("{}: the image set property {k} = {v} is not supported by this actool", dir.display())),
-                }
-            }
-        }
-        let id = identifier(name);
-        let mut scales = Vec::new();
-        let listed = contents["images"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let vector = |e: &serde_json::Value| e["filename"].as_str().is_some_and(|f| crate::vector::Kind::of(f).is_some() && dir.join(f).is_file());
-        if listed.iter().any(vector) {
-            if !relax_vector {
-                return Err(format!("{}: vector images (PDF, SVG) are compiled only relaxed: Xcode also draws them into bitmaps with CoreGraphics, which this actool doesn't reproduce; --config=relax_actool_vector accepts its own drawing", dir.display()));
-            }
-            vector_set(dir, listed, platform, phone_and_pad, flags, preserves, id, &mut out, &mut images)?;
-            out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
-            continue;
-        }
-        if preserves {
-            return Err(format!("{}: preserves-vector-representation without vector images is not supported by this actool", dir.display()));
-        }
-        let present = |e: &&serde_json::Value| e["filename"].as_str().is_some_and(|f| dir.join(f).is_file());
-        // Images without a scale (Any) beside images with one: Xcode reports
-        // an error, which fails rules_apple's build. It reports it whatever
-        // the images' idioms and appearances for iOS, macOS and tvOS (369 of
-        // 369 sets of the holdouts); for watchOS and visionOS only for some,
-        // not established: refused for every platform. For iOS and tvOS an
-        // iPad or TV image at 3x and a vision one at 1x don't count (80
-        // random sets on each, with and without appearances, where they
-        // decided it; other idioms' other scales count, as before).
-        let bitmaps: Vec<&serde_json::Value> = listed.iter().filter(present).collect();
-        let ios_or_tv = own.is_none() || platform == "atv";
-        let counts = |e: &&serde_json::Value| {
-            let exempt = (e["scale"] == "3x" && (e["idiom"] == "ipad" || e["idiom"] == "tv")) || (e["scale"] == "1x" && e["idiom"] == "vision");
-            e["scale"].is_string() && !(ios_or_tv && exempt)
-        };
-        if bitmaps.iter().any(|e| !e["scale"].is_string()) && bitmaps.iter().any(counts) {
-            return Err(format!("{}: error: Image set has a child with bitmap content and the \"Any\" scale. The image set also has children with specific scales and content. Please remove the content with specific scales or change the content of the \"Any\" scale to vector content.", dir.display()));
-        }
-        // Left out: images at 3x but for iOS (any idiom; five probes), what
-        // crate::colorset::own_leaves_out leaves out, and watchOS's and
-        // visionOS's own images at 1x (one without a scale is kept; eight).
-        // For iOS, iPad images at 3x and CarPlay ones at 1x, scales those
-        // devices don't have (a probe of every idiom and scale against the
-        // set without it, and eleven random sets).
-        let left_out = |e: &serde_json::Value| {
-            (own.is_some() && e["scale"] == "3x")
-                || (own.is_none() && ((e["idiom"] == "ipad" && e["scale"] == "3x") || (e["idiom"] == "car" && e["scale"] == "1x")))
-                || crate::colorset::own_leaves_out(platform, e)
-                || (own.is_some_and(|(name, _)| ["watch", "vision"].contains(&name) && e["idiom"] == name) && e["scale"] == "1x")
-        };
-        // The platform's own images' slots, and whether each names its scale.
-        let own_slots = match own {
-            Some((name, _)) => listed.iter().filter(present).filter(|e| e["idiom"] == name && !left_out(e)).map(|e| Ok((slot(dir, e)?, e["scale"].is_string()))).collect::<Result<Vec<_>, String>>()?,
-            None => Vec::new(),
-        };
-        // No images list is as an empty one (two probes).
-        for entry in listed {
-            let Some(filename) = entry["filename"].as_str() else { continue };
-            // An image whose file is missing is left out, without a word
-            // (one probe: rules_apple's imageset_missing_child).
-            if !dir.join(filename).is_file() {
-                continue;
-            }
-            for k in entry.as_object().unwrap().keys() {
-                if !["filename", "idiom", "scale", "appearances", "resizing"].contains(&k.as_str()) {
-                    return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
-                }
-            }
-            if left_out(entry) {
-                out.dropped_3x |= own.is_some() && entry["scale"] == "3x";
-                continue;
-            }
-            let here = if own.is_some() { Some(slot(dir, entry)?) } else { None };
-            let idiom = match (entry["idiom"].as_str(), own) {
-                (Some(n), Some((name, value))) if n == name => value,
-                (Some("universal"), Some((name, _))) if own_slots.iter().any(|(s, _)| Some(*s) == here) => {
-                    // One of them with a scale and one without: Xcode takes
-                    // either, from run to run (one of the holdout's catalogs).
-                    if own_slots.iter().any(|(s, named)| Some(*s) == here && *named != entry["scale"].is_string()) {
-                        return Err(format!("{}: a {name} and a universal image for one scale and appearance, one naming the scale and one not, is not supported by this actool (Xcode takes either at random)", dir.display()));
-                    }
-                    continue;
-                }
-                (Some("universal"), _) => 0,
-                (_, Some(_)) => continue,
-                (Some("iphone"), None) => 1,
-                (Some("ipad"), None) => 2,
-                (Some("car"), None) => 4,
-                // Other platforms' images, visionOS's too (seven catalogs, the
-                // same without them).
-                (Some("watch" | "mac" | "tv" | "vision"), None) => continue,
-                _ => return Err(format!("{}: images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"])),
-            };
-            if idiom != 0 && own.is_none() && !phone_and_pad {
-                return Err(format!("{}: images for a device idiom without both --target-device iphone and ipad are not supported by this actool", dir.display()));
-            }
-            let lower = filename.to_ascii_lowercase();
-            let jpeg = lower.ends_with(".jpg") || lower.ends_with(".jpeg");
-            if !lower.ends_with(".png") && !jpeg {
-                return Err(format!("{}/{filename}: image sets of images other than PNG and JPEG are not supported by this actool", dir.display()));
-            }
-            let scale = match entry["scale"].as_str() {
-                None => 1,
-                Some(s) => s.strip_suffix('x').and_then(|n| n.parse::<u32>().ok()).filter(|n| (1..=3).contains(n)).ok_or_else(|| format!("{}: scale {s} is not supported by this actool", dir.display()))?,
-            };
-            let appearance = crate::colorset::appearance_for(entry, platform)
-                .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
-            if platform == "watch" && appearance != 0 {
-                continue;
-            }
-            if scales.contains(&(scale, appearance, idiom)) {
-                return Err(format!("{}: two images at scale {scale}x for one appearance and idiom", dir.display()));
-            }
-            scales.push((scale, appearance, idiom));
-            let path = dir.join(filename);
-            let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            // A JPEG is stored on its own, as it is but for its comments.
-            if jpeg {
-                if entry.get("resizing").is_some() {
-                    return Err(format!("{}: a resizable JPEG is not supported by this actool", dir.display()));
-                }
-                let (stored, width, height, orientation) = stored_jpeg(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-                let mut attrs = vec![(car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
-                if appearance != 0 {
-                    attrs.push((car::ATTR_APPEARANCE, appearance));
-                }
-                if idiom != 0 {
-                    attrs.push((car::ATTR_IDIOM, idiom));
-                }
-                out.renditions.push(Rendition { attrs, csi: car::jpeg_csi(filename, width, height, scale, flags, orientation, &stored) });
-                continue;
-            }
-            let (img, extended) = image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-            if extended.is_some() && img.is_gray() {
-                return Err(format!("{}: a grey image with colours outside sRGB is not supported by this actool", path.display()));
-            }
-            let (img, slicing) = match entry.get("resizing") {
-                None => (img, None),
-                Some(_) if extended.is_some() => return Err(format!("{}: a resizable image with colours outside sRGB is not supported by this actool", path.display())),
-                Some(r) => {
-                    let (img, slicing) = resizing(r, &img).map_err(|e| format!("{}: {e}", path.display()))?;
-                    (img, Some(slicing))
-                }
-            };
-            images.push(SetImage { scale, appearance, idiom, identifier: id, flags, filename: filename.to_string(), image: img, extended, slicing, attrs: None });
-        }
-        if !scales.is_empty() {
-            out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
-        }
-    }
+    read_sets(sets, phone_and_pad, platform, relax_vector, &identifier, &mut out, &mut images)?;
     for icon in icons {
         images.push(SetImage { scale: icon.scale, appearance: 0, idiom: icon.idiom, identifier: icon.identifier, flags: 0, filename: icon.filename, image: icon.image, extended: None, slicing: None, attrs: Some(icon.attrs) });
     }
@@ -1153,6 +982,184 @@ fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &st
     Ok(())
 }
 
+/// Image sets' images, read for packing (`images`), and what they store
+/// otherwise: their facets, JPEGs and vector images' renditions (`out`).
+fn read_sets(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platform: &str, relax_vector: bool, identifier: &impl Fn(&str) -> u16, out: &mut Compiled, images: &mut Vec<SetImage>) -> Result<(), String> {
+    let own = crate::colorset::own_idiom(platform);
+    for (name, dir) in sets {
+        let contents = read_json(&dir.join("Contents.json"))?;
+        for key in contents.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default() {
+            if !["images", "info", "properties"].contains(&key.as_str()) {
+                return Err(format!("{}: the {key} key of an image set is not supported by this actool", dir.display()));
+            }
+        }
+        // CSI flags: the rendering intent, automatic by default; Xcode also
+        // reads it from `info` (WebRTC's web_view shell icons).
+        let mut flags = match contents["info"]["template-rendering-intent"].as_str() {
+            None => 16,
+            Some("template") => 8,
+            Some("original") => 0,
+            Some(v) => return Err(format!("{}: the image set info template-rendering-intent = {v} is not supported by this actool", dir.display())),
+        };
+        let mut preserves = false;
+        if let Some(props) = contents["properties"].as_object() {
+            for (k, v) in props {
+                match (k.as_str(), v.as_str()) {
+                    ("template-rendering-intent", Some("template")) => flags = 8,
+                    ("template-rendering-intent", Some("original")) => flags = 0,
+                    ("preserves-vector-representation", None) if v.is_boolean() => preserves = v.as_bool() == Some(true),
+                    _ => return Err(format!("{}: the image set property {k} = {v} is not supported by this actool", dir.display())),
+                }
+            }
+        }
+        let id = identifier(name);
+        let mut scales = Vec::new();
+        let listed = contents["images"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let vector = |e: &serde_json::Value| e["filename"].as_str().is_some_and(|f| crate::vector::Kind::of(f).is_some() && dir.join(f).is_file());
+        if listed.iter().any(vector) {
+            if !relax_vector {
+                return Err(format!("{}: vector images (PDF, SVG) are compiled only relaxed: Xcode also draws them into bitmaps with CoreGraphics, which this actool doesn't reproduce; --config=relax_actool_vector accepts its own drawing", dir.display()));
+            }
+            vector_set(dir, listed, platform, phone_and_pad, flags, preserves, id, out, images)?;
+            out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
+            continue;
+        }
+        if preserves {
+            return Err(format!("{}: preserves-vector-representation without vector images is not supported by this actool", dir.display()));
+        }
+        let present = |e: &&serde_json::Value| e["filename"].as_str().is_some_and(|f| dir.join(f).is_file());
+        // Images without a scale (Any) beside images with one: Xcode reports
+        // an error, which fails rules_apple's build. It reports it whatever
+        // the images' idioms and appearances for iOS, macOS and tvOS (369 of
+        // 369 sets of the holdouts); for watchOS and visionOS only for some,
+        // not established: refused for every platform. For iOS and tvOS an
+        // iPad or TV image at 3x and a vision one at 1x don't count (80
+        // random sets on each, with and without appearances, where they
+        // decided it; other idioms' other scales count, as before).
+        let bitmaps: Vec<&serde_json::Value> = listed.iter().filter(present).collect();
+        let ios_or_tv = own.is_none() || platform == "atv";
+        let counts = |e: &&serde_json::Value| {
+            let exempt = (e["scale"] == "3x" && (e["idiom"] == "ipad" || e["idiom"] == "tv")) || (e["scale"] == "1x" && e["idiom"] == "vision");
+            e["scale"].is_string() && !(ios_or_tv && exempt)
+        };
+        if bitmaps.iter().any(|e| !e["scale"].is_string()) && bitmaps.iter().any(counts) {
+            return Err(format!("{}: error: Image set has a child with bitmap content and the \"Any\" scale. The image set also has children with specific scales and content. Please remove the content with specific scales or change the content of the \"Any\" scale to vector content.", dir.display()));
+        }
+        // Left out: images at 3x but for iOS (any idiom; five probes), what
+        // crate::colorset::own_leaves_out leaves out, and watchOS's and
+        // visionOS's own images at 1x (one without a scale is kept; eight).
+        // For iOS, iPad images at 3x and CarPlay ones at 1x, scales those
+        // devices don't have (a probe of every idiom and scale against the
+        // set without it, and eleven random sets).
+        let left_out = |e: &serde_json::Value| {
+            (own.is_some() && e["scale"] == "3x")
+                || (own.is_none() && ((e["idiom"] == "ipad" && e["scale"] == "3x") || (e["idiom"] == "car" && e["scale"] == "1x")))
+                || crate::colorset::own_leaves_out(platform, e)
+                || (own.is_some_and(|(name, _)| ["watch", "vision"].contains(&name) && e["idiom"] == name) && e["scale"] == "1x")
+        };
+        // The platform's own images' slots, and whether each names its scale.
+        let own_slots = match own {
+            Some((name, _)) => listed.iter().filter(present).filter(|e| e["idiom"] == name && !left_out(e)).map(|e| Ok((slot(dir, e)?, e["scale"].is_string()))).collect::<Result<Vec<_>, String>>()?,
+            None => Vec::new(),
+        };
+        // No images list is as an empty one (two probes).
+        for entry in listed {
+            let Some(filename) = entry["filename"].as_str() else { continue };
+            // An image whose file is missing is left out, without a word
+            // (one probe: rules_apple's imageset_missing_child).
+            if !dir.join(filename).is_file() {
+                continue;
+            }
+            for k in entry.as_object().unwrap().keys() {
+                if !["filename", "idiom", "scale", "appearances", "resizing"].contains(&k.as_str()) {
+                    return Err(format!("{}: the {k} key of an image is not supported by this actool", dir.display()));
+                }
+            }
+            if left_out(entry) {
+                out.dropped_3x |= own.is_some() && entry["scale"] == "3x";
+                continue;
+            }
+            let here = if own.is_some() { Some(slot(dir, entry)?) } else { None };
+            let idiom = match (entry["idiom"].as_str(), own) {
+                (Some(n), Some((name, value))) if n == name => value,
+                (Some("universal"), Some((name, _))) if own_slots.iter().any(|(s, _)| Some(*s) == here) => {
+                    // One of them with a scale and one without: Xcode takes
+                    // either, from run to run (one of the holdout's catalogs).
+                    if own_slots.iter().any(|(s, named)| Some(*s) == here && *named != entry["scale"].is_string()) {
+                        return Err(format!("{}: a {name} and a universal image for one scale and appearance, one naming the scale and one not, is not supported by this actool (Xcode takes either at random)", dir.display()));
+                    }
+                    continue;
+                }
+                (Some("universal"), _) => 0,
+                (_, Some(_)) => continue,
+                (Some("iphone"), None) => 1,
+                (Some("ipad"), None) => 2,
+                (Some("car"), None) => 4,
+                // Other platforms' images, visionOS's too (seven catalogs, the
+                // same without them).
+                (Some("watch" | "mac" | "tv" | "vision"), None) => continue,
+                _ => return Err(format!("{}: images for the idiom {} are not supported by this actool", dir.display(), entry["idiom"])),
+            };
+            if idiom != 0 && own.is_none() && !phone_and_pad {
+                return Err(format!("{}: images for a device idiom without both --target-device iphone and ipad are not supported by this actool", dir.display()));
+            }
+            let lower = filename.to_ascii_lowercase();
+            let jpeg = lower.ends_with(".jpg") || lower.ends_with(".jpeg");
+            if !lower.ends_with(".png") && !jpeg {
+                return Err(format!("{}/{filename}: image sets of images other than PNG and JPEG are not supported by this actool", dir.display()));
+            }
+            let scale = match entry["scale"].as_str() {
+                None => 1,
+                Some(s) => s.strip_suffix('x').and_then(|n| n.parse::<u32>().ok()).filter(|n| (1..=3).contains(n)).ok_or_else(|| format!("{}: scale {s} is not supported by this actool", dir.display()))?,
+            };
+            let appearance = crate::colorset::appearance_for(entry, platform)
+                .ok_or_else(|| format!("{}: the appearances {} are not supported by this actool", dir.display(), entry["appearances"]))?;
+            if platform == "watch" && appearance != 0 {
+                continue;
+            }
+            if scales.contains(&(scale, appearance, idiom)) {
+                return Err(format!("{}: two images at scale {scale}x for one appearance and idiom", dir.display()));
+            }
+            scales.push((scale, appearance, idiom));
+            let path = dir.join(filename);
+            let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            // A JPEG is stored on its own, as it is but for its comments.
+            if jpeg {
+                if entry.get("resizing").is_some() {
+                    return Err(format!("{}: a resizable JPEG is not supported by this actool", dir.display()));
+                }
+                let (stored, width, height, orientation) = stored_jpeg(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+                let mut attrs = vec![(car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id), (car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE)];
+                if appearance != 0 {
+                    attrs.push((car::ATTR_APPEARANCE, appearance));
+                }
+                if idiom != 0 {
+                    attrs.push((car::ATTR_IDIOM, idiom));
+                }
+                out.renditions.push(Rendition { attrs, csi: car::jpeg_csi(filename, width, height, scale, flags, orientation, &stored) });
+                continue;
+            }
+            let (img, extended) = image::decode_png_extended(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+            if extended.is_some() && img.is_gray() {
+                return Err(format!("{}: a grey image with colours outside sRGB is not supported by this actool", path.display()));
+            }
+            let (img, slicing) = match entry.get("resizing") {
+                None => (img, None),
+                Some(_) if extended.is_some() => return Err(format!("{}: a resizable image with colours outside sRGB is not supported by this actool", path.display())),
+                Some(r) => {
+                    let (img, slicing) = resizing(r, &img).map_err(|e| format!("{}: {e}", path.display()))?;
+                    (img, Some(slicing))
+                }
+            };
+            images.push(SetImage { scale, appearance, idiom, identifier: id, flags, filename: filename.to_string(), image: img, extended, slicing, attrs: None });
+        }
+        if !scales.is_empty() {
+            out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
+        }
+    }
+    Ok(())
+}
+
 fn image_attrs(i: &SetImage) -> Vec<(u16, u16)> {
     if let Some(attrs) = &i.attrs {
         return attrs.clone();
@@ -1322,5 +1329,133 @@ fn pack16(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, index: u16,
     let name = format!("ZZZZPackedAsset-{scale}.{}.0-gamut1", opaque as u8);
     let data = dmp2::encode16(aw as usize, ah as usize, &halves, &alpha, opaque).map_err(|e| format!("{name}: {e}"))?;
     renditions.push(Rendition { attrs: key, csi: car::packed_dmp2_csi(&name, aw, ah, scale, car::Pixels::Half, opaque, &data) });
+    Ok(())
+}
+
+/// A sprite atlas (`.spriteatlas`): its name (a namespacing folder's prefix
+/// included), its directory and its image sets by name (the folder's prefix
+/// too, not the atlas's).
+pub struct Atlas {
+    pub name: String,
+    pub dir: std::path::PathBuf,
+    pub members: Vec<(String, std::path::PathBuf)>,
+}
+
+/// Element and part of an atlas's list of its images (layout 1005).
+const PART_ATLAS_CONTENTS: u16 = 127;
+
+/// Sprite atlases, packed as Xcode packs them explicitly (probes, Xcode
+/// 27.2; docs/clean-room/actool.md "Sprite atlases"): each image trimmed
+/// to its pixels that aren't fully transparent; per scale, one atlas
+/// (`ZZZZExplicitlyPackedAsset-<scale>.0.0-gamut0`, keyed by the sprite
+/// atlas's identifier), ARGB whatever its images, with no cap on its size,
+/// packed as image sets' atlases are; and, at 1x, the list of its image
+/// sets' names. Images other than PNGs, for an appearance or an idiom,
+/// resizable or beyond sRGB, aren't established and are refused.
+pub fn compile_atlases(atlases: &[Atlas], phone_and_pad: bool, platform: &str, identifier: impl Fn(&str) -> u16) -> Result<Compiled, String> {
+    let mut out = Compiled::default();
+    for atlas in atlases {
+        let contents = read_json(&atlas.dir.join("Contents.json"))?;
+        for key in contents.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default() {
+            if key != "info" {
+                return Err(format!("{}: the {key} key of a sprite atlas is not supported by this actool", atlas.dir.display()));
+            }
+        }
+        let mut own = Compiled::default();
+        let mut images: Vec<SetImage> = Vec::new();
+        read_sets(&atlas.members, phone_and_pad, platform, false, &identifier, &mut own, &mut images)?;
+        if !own.renditions.is_empty() {
+            return Err(format!("{}: images other than PNGs in a sprite atlas are not supported by this actool", atlas.dir.display()));
+        }
+        if let Some(i) = images.iter().find(|i| i.appearance != 0 || i.idiom != 0 || i.slicing.is_some() || i.extended.is_some()) {
+            return Err(format!("{}: {}: an image for an appearance or an idiom, resizable or beyond sRGB, in a sprite atlas is not supported by this actool", atlas.dir.display(), i.filename));
+        }
+        if images.is_empty() {
+            return Err(format!("{}: a sprite atlas without images is not supported by this actool", atlas.dir.display()));
+        }
+        let id = identifier(&atlas.name);
+        // Its image sets' names, ignoring case as ASCII lower case does
+        // (`_x` first, `a10`, `A2`, `a9`, `alpha`, `Beta`: a probe of 13
+        // names); other names' order isn't established.
+        let mut names: Vec<&str> = own.facets.iter().map(|f| f.name.as_str()).collect();
+        if let Some(n) = names.iter().find(|n| !n.is_ascii()) {
+            return Err(format!("{}: the name {n} (not ASCII) in a sprite atlas is not supported by this actool", atlas.dir.display()));
+        }
+        names.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()).then(a.cmp(b)));
+        out.renditions.push(Rendition {
+            attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, PART_ATLAS_CONTENTS), (car::ATTR_SCALE, 1), (car::ATTR_IDENTIFIER, id)],
+            csi: car::atlas_contents_csi(&names),
+        });
+        out.facets.extend(own.facets);
+        out.facets.push(Facet { name: atlas.name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_IDENTIFIER, id)] });
+        let mut scales: Vec<u32> = images.iter().map(|i| i.scale).collect();
+        scales.sort();
+        scales.dedup();
+        for scale in scales {
+            let mut group: Vec<(&SetImage, Trim)> = images.iter().filter(|i| i.scale == scale).map(|i| (i, trim(&i.image))).collect();
+            group.sort_by_key(|(i, t)| (std::cmp::Reverse(t.w * t.h), i.identifier));
+            explicit_pack(scale, id, &group, &mut out.renditions)?;
+        }
+    }
+    Ok(out)
+}
+
+/// An image trimmed to the rectangle of its pixels that aren't fully
+/// transparent (x and y from the top left); a fully transparent one to its
+/// top-left pixel (a probe each of every side and all four, and of a clear
+/// image).
+struct Trim {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+}
+
+fn trim(img: &image::Rgba) -> Trim {
+    let (w, h) = (img.width, img.height);
+    let seen = |x: usize, y: usize| img.data[(y * w + x) * 4 + 3] != 0;
+    let rows: Vec<usize> = (0..h).filter(|&y| (0..w).any(|x| seen(x, y))).collect();
+    let cols: Vec<usize> = (0..w).filter(|&x| (0..h).any(|y| seen(x, y))).collect();
+    match (rows.first(), rows.last(), cols.first(), cols.last()) {
+        (Some(&t), Some(&b), Some(&l), Some(&r)) => Trim { x: l, y: t, w: r - l + 1, h: b - t + 1 },
+        _ => Trim { x: 0, y: 0, w: 1, h: 1 },
+    }
+}
+
+/// One scale's explicit atlas and its images' links.
+fn explicit_pack(scale: u32, id: u16, group: &[(&SetImage, Trim)], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+    let blocks: Vec<(u32, u32)> = group.iter().map(|(_, t)| (t.w as u32, t.h as u32)).collect();
+    let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
+    let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
+    let stride = aw as usize * 4;
+    let mut pixels = vec![0u8; stride * ah as usize];
+    let key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id)];
+    for ((i, t), (x, y)) in group.iter().zip(&positions) {
+        let bgra = i.image.premultiplied_bgra();
+        let iw = i.image.width;
+        let cropped: Vec<u8> = (t.y..t.y + t.h).flat_map(|r| bgra[(r * iw + t.x) * 4..(r * iw + t.x + t.w) * 4].to_vec()).collect();
+        crate::iconset::place(&mut pixels, stride, ah, &cropped, *x, *y, t.w as u32, t.h as u32);
+        let trimmed = (t.w, t.h) != (iw, i.image.height);
+        let format = if is_gray(i) { car::Pixels::Gray } else { car::Pixels::Bgra };
+        renditions.push(Rendition {
+            attrs: image_attrs(i),
+            csi: car::explicit_link_csi(
+                &i.filename,
+                (*x, *y, t.w as u32, t.h as u32),
+                (iw as u32, i.image.height as u32),
+                trimmed.then_some((t.x as u32, t.y as u32)),
+                scale,
+                i.flags,
+                format,
+                &key,
+            ),
+        });
+    }
+    // Its images' keys, by identifier.
+    let mut members: Vec<Vec<(u16, u16)>> = group.iter().map(|(i, _)| image_attrs(i)).collect();
+    members.sort_by_key(|k| k.iter().find(|a| a.0 == car::ATTR_IDENTIFIER).map(|a| a.1));
+    let name = format!("ZZZZExplicitlyPackedAsset-{scale}.0.0-gamut0");
+    let data = dmp2::encode(aw as usize, ah as usize, &pixels, false).map_err(|e| format!("{name}: {e}"))?;
+    renditions.push(Rendition { attrs: key, csi: car::explicit_packed_csi(&name, aw, ah, scale, &members, &data) });
     Ok(())
 }

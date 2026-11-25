@@ -151,6 +151,8 @@ struct Scan {
     launch_images: Vec<(String, PathBuf)>,
     /// Messages extensions' sticker icon sets by name.
     sticker_icons: Vec<(String, PathBuf)>,
+    /// Sprite atlases.
+    atlases: Vec<imageset::Atlas>,
 }
 
 /// Whether Xcode stores a legacy rendition beside each image, for a
@@ -280,6 +282,28 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             // SF Symbols template isn't compiled as Xcode compiles it.
             Some((_, "symbolset")) if !p.join("Contents.json").is_file() || !has_entries(&read_json(&p.join("Contents.json"))?, "symbols", "filename") => {}
             Some((_, "symbolset")) => return Err(format!("{}: a symbol set with a symbol (an SF Symbols template) is not supported by this actool yet", p.display())),
+            // A sprite atlas holds image sets, named with its folder's prefix
+            // but not its own name (a probe in a namespacing folder).
+            Some((stem, "spriteatlas")) => {
+                let mut members = Vec::new();
+                let mut inner: Vec<PathBuf> = std::fs::read_dir(&p)
+                    .map_err(|e| format!("{}: {e}", p.display()))?
+                    .map(|e| e.map(|e| e.path()).map_err(|e| e.to_string()))
+                    .collect::<Result<_, _>>()?;
+                inner.sort();
+                for m in inner {
+                    let n = m.file_name().unwrap().to_string_lossy().into_owned();
+                    if n.starts_with('.') || m.is_file() {
+                        continue;
+                    }
+                    match n.rsplit_once('.') {
+                        Some((s, "imageset")) if m.join("Contents.json").is_file() => members.push((format!("{prefix}{s}"), m)),
+                        Some((_, "imageset")) => {}
+                        _ => return Err(format!("{}: anything but image sets in a sprite atlas is not supported by this actool", m.display())),
+                    }
+                }
+                found.atlases.push(imageset::Atlas { name: format!("{prefix}{stem}"), dir: p, members });
+            }
             // A complication set compiles to nothing, its images too, for
             // every platform (two probes of empty sets, watchOS; rules_apple's
             // set of images for iOS, tvOS, watchOS and macOS).
@@ -466,7 +490,8 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             || document_inputs(o)
             || !scan.launch_images.is_empty()
             || !scan.brand_assets.is_empty()
-            || !scan.solid_stacks.is_empty();
+            || !scan.solid_stacks.is_empty()
+            || !scan.atlases.is_empty();
         if any_images {
             return Err(format!("images for a deployment target before iOS 13, tvOS 13, watchOS 6 or macOS 10.15 ({}), where Xcode adds legacy renditions, are not supported by this actool", o.minimum_deployment_target));
         }
@@ -538,6 +563,9 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             *o.sticker_icon.borrow_mut() = Some(name.clone());
         }
     }
+    let atlases = imageset::compile_atlases(&scan.atlases, phone && pad, platform, name_identifier)?;
+    images.facets.extend(atlases.facets);
+    images.renditions.extend(atlases.renditions);
     let (color_facets, colors) = colorset::compile(&scan.color_sets, phone && pad, platform, name_identifier)?;
     images.facets.extend(color_facets);
     images.renditions.extend(colors);

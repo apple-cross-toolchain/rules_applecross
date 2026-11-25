@@ -484,6 +484,51 @@ that are refused without it. The four others, tall images at 1x, are packed
 otherwise. tests/actool_catalog's RS219 and RS229 are two of those 82:
 refused strictly, and Xcode's with the config.
 
+## Sprite atlases
+
+A sprite atlas (`.spriteatlas`, SpriteKit's texture atlas in a catalog)
+packs its image sets' images into atlases of its own, explicitly, whatever
+their size. Established over 44 probe catalogs (trimming from each side, a
+clear image, grey, colour and opaque images, one to three scales, 40 images
+of 300 by 300, one of 3,000 by 10, atlases in plain and namespacing folders,
+beside plain image sets, and 30 random atlases) and Xcode's four SpriteKit
+templates, byte-identical for iOS, macOS, tvOS and watchOS:
+
+- **Its images.** Each image set is read as any other (its facet, its
+  rendering intent). Each image is trimmed to the rectangle of its pixels
+  that aren't fully transparent; a fully transparent one to its top-left
+  pixel. Its rendition (layout 1003) is a link, as a packed image's, at
+  its trimmed size: its whole size in `0x3e9`, the trimmed size in `0x3eb`
+  and the header, its place in the atlas in `0x3f2` (the atlas's key
+  includes the sprite atlas's identifier), and, when trimmed, `0x3f3` last:
+  `0x3f3` itself, a zero, its whole width and height, then the rectangle
+  kept, from the top left. It keeps its own pixel format, GA8 for a grey
+  image.
+- **Its atlas per scale** (`ZZZZExplicitlyPackedAsset-<scale>.0.0-gamut0`,
+  element 9, part 181, the sprite atlas's identifier): ARGB and sRGB for
+  every image, grey and opaque ones too, the opacity and greyness in its
+  name always 0. Images are taken largest trimmed area first, equal areas
+  by identifier, and packed as image sets' atlases are (the binary-tree
+  packer, 2 px in, each side the root's plus one, rounded up to even), into
+  one atlas with no cap. After `0x3e9` it lists its images as an icon
+  stack lists its layers (`0x3f4`, `0x3fc` to `0x3fe`), by identifier: an
+  empty rectangle, blend 0, opacity 1 and the image's key; no flag, blur or
+  fill; no effects.
+- **Its list of names** (element 9, part 127, scale 1, its identifier;
+  layout 1005, named `CoreStructuredImage`, no size or pixels): `0x3ec`
+  (eight zero bytes), `0x3ee` 1, and `0x3f5`, a count, a zero, then each
+  image set's name's length and bytes, ignoring case as ASCII lower case
+  does (`_x`, `a b`, `a-b`, `a.b`, `a10`, `A2`, `a9`, `alpha`, `Beta`: one
+  probe of 13 names). One list, at 1x, for every scale.
+- **Its facet:** its name (a namespacing folder's prefix included), element
+  9 and its identifier. Its image sets are named with that folder's prefix
+  but not the sprite atlas's.
+
+Refused, not established: images other than PNGs, images for an
+appearance or an idiom, resizable images, colours beyond sRGB, image set
+names other than ASCII, anything but image sets in a sprite atlas, keys in
+its `Contents.json` but `info`, and an atlas without images.
+
 ## dmp2
 
 Image sets, and tvOS's and visionOS's image layers, are stored as `MLEC`

@@ -1085,3 +1085,118 @@ mod tests {
         assert!(library_versions("26.6").is_none());
     }
 }
+
+/// A sprite atlas's list of its image sets' names (layout 1005, element 9,
+/// part 127): a count, a zero, then each name's length and bytes.
+pub fn atlas_contents_csi(names: &[&str]) -> Vec<u8> {
+    let mut t = Vec::new();
+    tlv(&mut t, 0x3ec, &[0u8; 8]);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    let mut list = Vec::new();
+    le32(&mut list, names.len() as u32);
+    le32(&mut list, 0);
+    for n in names {
+        le32(&mut list, n.len() as u32);
+        list.extend_from_slice(n.as_bytes());
+    }
+    tlv(&mut t, 0x3f5, &list);
+    csi(&CsiHeader { flags: 0, width: 0, height: 0, scale: 100, pixel_format: &[0; 4], color_space: 0, layout: 1005, name: "CoreStructuredImage" }, &t, &[])
+}
+
+/// A sprite atlas's packed atlas at a scale (layout 1004, ARGB): its
+/// images as layers, by identifier, in the four lists an icon stack has
+/// (0x3f4, 0x3fc to 0x3fe), with empty rectangles and full opacity.
+pub fn explicit_packed_csi(name: &str, width: u32, height: u32, scale: u32, members: &[Vec<(u16, u16)>], payload: &[u8]) -> Vec<u8> {
+    let n = members.len() as u32;
+    let list = |each: &dyn Fn(&[(u16, u16)], &mut Vec<u8>)| {
+        let mut v = Vec::new();
+        le32(&mut v, n);
+        le32(&mut v, 0);
+        for m in members {
+            each(m, &mut v);
+        }
+        v
+    };
+    let mut t = Vec::new();
+    let mut slices = Vec::new();
+    for v in [1u32, 0, 0, 0, 0] {
+        le32(&mut slices, v);
+    }
+    tlv(&mut t, 0x3e9, &slices);
+    tlv(
+        &mut t,
+        0x3f4,
+        &list(&|m, v| {
+            for x in [0u32; 6] {
+                le32(v, x);
+            }
+            v.extend_from_slice(&1.0f32.to_le_bytes());
+            let mut key = m.to_vec();
+            key.sort_by_key(|a| a.0);
+            le32(v, 4 * key.len() as u32 + 4);
+            for (a, x) in key {
+                le16(v, a);
+                le16(v, x);
+            }
+            le32(v, 0);
+        }),
+    );
+    tlv(
+        &mut t,
+        0x3fc,
+        &list(&|_, v| {
+            le32(v, 0);
+            v.extend_from_slice(&0f32.to_le_bytes());
+            le32(v, 1);
+            v.push(0);
+        }),
+    );
+    tlv(&mut t, 0x3fd, &list(&|_, v| v.extend_from_slice(&[0; 20])));
+    tlv(&mut t, 0x3fe, &list(&|_, v| v.extend_from_slice(&[0; 12])));
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    tlv(&mut t, 0x3ef, &Pixels::Bgra.row(width, false).to_le_bytes());
+    let (pixel_format, color_space) = Pixels::Bgra.format();
+    csi(&CsiHeader { flags: 0, width, height, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_PACKED_IMAGE, name }, &t, payload)
+}
+
+/// An image in a sprite atlas (layout 1003): its whole image's size first
+/// (0x3e9), then as a link is, at its trimmed size; when trimmed, where
+/// (0x3f3: the whole image's size, then the rectangle kept from the top
+/// left).
+#[allow(clippy::too_many_arguments)]
+pub fn explicit_link_csi(name: &str, rect: (u32, u32, u32, u32), whole: (u32, u32), trimmed: Option<(u32, u32)>, scale: u32, flags: u32, pixels: Pixels, atlas: &[(u16, u16)]) -> Vec<u8> {
+    let (x, y, w, h) = rect;
+    let mut t = Vec::new();
+    slices_tlv(&mut t, whole.0, whole.1, None);
+    let mut metrics = Vec::new();
+    for v in [1u32, 0, 0, 0, 0, w, h] {
+        le32(&mut metrics, v);
+    }
+    tlv(&mut t, 0x3eb, &metrics);
+    let mut link = b"KLNI".to_vec();
+    for v in [0u32, x, y, w, h] {
+        le32(&mut link, v);
+    }
+    le16(&mut link, LAYOUT_ICON_IMAGE);
+    let mut key: Vec<(u16, u16)> = atlas.to_vec();
+    key.sort_by_key(|a| a.0);
+    le32(&mut link, 4 * key.len() as u32 + 4);
+    for (a, v) in key {
+        le16(&mut link, a);
+        le16(&mut link, v);
+    }
+    le32(&mut link, 0);
+    tlv(&mut t, 0x3f2, &link);
+    composition(&mut t);
+    tlv(&mut t, 0x3ee, &1u32.to_le_bytes());
+    if let Some((tx, ty)) = trimmed {
+        let mut trim = Vec::new();
+        for v in [0x3f3u32, 0, whole.0, whole.1, tx, ty, w, h] {
+            le32(&mut trim, v);
+        }
+        tlv(&mut t, 0x3f3, &trim);
+    }
+    let (pixel_format, color_space) = pixels.format();
+    csi(&CsiHeader { flags, width: w, height: h, scale: scale * 100, pixel_format, color_space, layout: LAYOUT_INTERNAL_LINK, name }, &t, &[])
+}
