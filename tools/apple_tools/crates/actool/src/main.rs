@@ -274,6 +274,12 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
             Some((stem, "launchimage")) if top => found.launch_images.push((stem.to_string(), p)),
             Some((stem, "stickersiconset")) if top => found.sticker_icons.push((stem.to_string(), p)),
+            // A symbol set without a symbol (Xcode's Accessory Setup
+            // Extension template's) compiles to nothing, beside other assets
+            // too (two probes, with and without a symbols list); one with an
+            // SF Symbols template isn't compiled as Xcode compiles it.
+            Some((_, "symbolset")) if !p.join("Contents.json").is_file() || !has_entries(&read_json(&p.join("Contents.json"))?, "symbols", "filename") => {}
+            Some((_, "symbolset")) => return Err(format!("{}: a symbol set with a symbol (an SF Symbols template) is not supported by this actool yet", p.display())),
             // A complication set compiles to nothing, its images too, for
             // every platform (two probes of empty sets, watchOS; rules_apple's
             // set of images for iOS, tvOS, watchOS and macOS).

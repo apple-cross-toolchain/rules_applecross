@@ -94,6 +94,13 @@ the partial Info.plist, with or without `--app-icon`
 `Contents.json` has no `images` list at all is as one with an empty list
 (two probes, one of them a Flutter catalog with both).
 
+A symbol set without a symbol (no `filename` in its `symbols`, or no
+`symbols` list: Xcode's Accessory Setup Extension template has one)
+compiles to nothing, beside other assets too; the catalog's `Assets.car` is
+the same without it (`tests/actool_catalog` SY001). A symbol set with an SF
+Symbols template is refused: Xcode stores its glyphs as rewritten SVG with
+their metrics and draws them into bitmaps with CoreGraphics.
+
 ## Assets.car
 
 A BOM store (big-endian): 512-byte header area, blocks 16-byte aligned in
