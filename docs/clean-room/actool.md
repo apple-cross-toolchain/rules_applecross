@@ -1292,35 +1292,51 @@ visionOS:
 ### Symbol sets
 
 A symbol set's SF Symbols template (`.symbolset`, an SVG made by the SF
-Symbols app, template v.3.0) with a single glyph, Regular-M, on iOS and
-macOS. Xcode 27.2, 14 probe catalogs (rectangles, tall and wide glyphs, a
+Symbols app, template v.3.0), a glyph for each weight and size it has,
+Regular-M among them, on iOS and macOS. Xcode 27.2, 19 probe catalogs
+(rectangles, tall and wide glyphs, a
 glyph off its margin, absolute and relative path commands, curves and arcs,
 two paths, two symbol sets, a symbol beside an image set, one 10 units
-square), a real one and the tests' three, deployment targets iOS 13 to 18
+square, three to five glyphs of six weights and all three sizes), a real
+one and the tests' four, deployment targets iOS 13 to 18
 and 26 and macOS 14 and 26. The SVG and its metrics are byte-identical; the bitmaps
 are drawn with resvg rather than CoreGraphics, so a symbol set is compiled
 only with `--config=relax_actool_vector`, as vector images are
-(`tests/actool_vector` symbol, symbol-small, symbols-and-image):
+(`tests/actool_vector` symbol, symbol-small, symbols-and-image,
+symbol-weights):
 
-- **The glyph's sizes.** The template's medium guides are 70.46 units apart
-  (Capline-M above Baseline-M). The glyph is drawn at the platform's small,
+- **The glyphs.** The template's `Symbols` group holds a group for each
+  glyph, named by its weight (Ultralight, Thin, Light, Regular, Medium,
+  Semibold, Bold, Heavy, Black: glyph weight 1 to 9) and size (S, M, L:
+  glyph size 1 to 3), such as `Black-S`. Xcode requires Regular-M and
+  stores every glyph there is as it is: none is interpolated or derived
+  from another, and only Regular-M is drawn. The guides are the SF
+  Symbols app's: each size's Capline above its Baseline, 70.459 units for
+  S and 70.46 for M and L. Regular-M is drawn at the platform's small,
   medium and large sizes: 15, 17 and 20 points at 1x to 3x on iOS; 11, 13
-  and 17 at 1x and 2x on macOS. A unit is the medium size over 100 points.
-- **Its SVG** (element 85, part 59, scale 1, layout 1017, flags 4, scale
+  and 17 at 1x and 2x on macOS. A unit is the medium size over 100 points,
+  for every glyph whatever its size.
+- **Each glyph's SVG** (element 85, part 59, scale 1, layout 1017, flags 4, scale
   100, pixel format `SVG `): `<?xml version="1.0" encoding="UTF-8"?>`, a
   line feed, then `<svg version="1.1" viewBox="0 0 W H"><g id="s"
   transform="matrix(s 0 0 s tx ty)">` and the glyph's paths, `<path
   d=".."/>` each, then `</g></svg>` and a line feed. W and H are the paths'
-  bounds (their curves' and arcs' extremes, not their control points) times
-  the unit s, and (tx, ty) moves the bounds' top-left corner to the origin.
-  A path is written again in absolute commands, its numbers as C's `%g`
-  writes them. Stored with `DWAR` as an SVG layer is, LZFSE-compressed when
+  bounds times the unit s, and (tx, ty) moves the bounds' top-left corner
+  to the origin. The bounds are of the paths' points and their curves'
+  control points (a quadratic's own, and a smooth curve's reflected one),
+  not of the curves themselves; an arc counts as the cubics it is drawn
+  with, one for each 90 degrees from its start and one for the rest, their
+  control points 4/3 tan(a/4) of a radius along its tangents (probes of
+  each command, and of arcs of 90 to 200 degrees starting off an axis,
+  circular and elliptical). Each command keeps its letter, absolute or
+  relative, and its numbers are written as C's `%g` writes them. Stored with `DWAR` as an SVG layer is, LZFSE-compressed when
   that is smaller. Its TLVs: `0x3ec`, `0x3ee` 1, `0x3fa` (its metrics) and
   `0x3fb` (1, 0, 0). The metrics: 3, the medium size, then as floats the
-  depth below the baseline times s, 70.46 times s, 0, then twice 0.5 times
-  s and the medium size times 35/512; then 3 and each size's index and
-  points (0 small, 1 medium, 2 large).
-- **Its bitmaps:** one per size and scale (part 181, `dimension2` 0 to 2 for
+  depth below the baseline times s, its size's guides' distance times s,
+  0, then twice 0.5 times s and the medium size times 35/512; then, for
+  Regular-M, 3 and each size's index and points (0 small, 1 medium, 2
+  large), and for the others 0.
+- **Regular-M's bitmaps:** one per size and scale (part 181, `dimension2` 0 to 2 for
   small to large), each `ceil(W x points x scale / medium)` by the same of
   H, computed in doubles. They are grey with alpha (GA8) whatever the
   glyph, flags 4, and packed as image sets' images are, into atlases of
@@ -1328,15 +1344,14 @@ only with `--config=relax_actool_vector`, as vector images are
   bitmaps. Equal areas are taken by identifier, then the smaller size
   first. Their links name the SVG's file and have a layout of 0 as their
   own.
-- **Their keys** add the deployment (5), glyph weight (4, regular) and glyph
-  size (2, medium) attributes, and the key format orders them as the
+- **Their keys** add the deployment (5), glyph weight and glyph size
+  attributes (the bitmaps' 4 and 2: Regular-M's), and the key format orders them as the
   platform's does: on iOS 7, 13, 12, 15, 16, 26, 27, 9, 25, 17, 1, 2; on
   macOS 7, 13, 1, 2, 3, 17, 9, 11, 12, 25, 26, 27. Its facet is element 85,
   part 181, its identifier and the deployment.
 
-Refused, not established: more than one weight or size (Xcode interpolates
-the others from them), a glyph other than Regular-M, a template whose
-medium guides are another distance apart, glyph elements other than paths
+Refused, not established: a template whose guides are another distance
+apart, two glyphs of one weight and size, glyph elements other than paths
 with only their data, attributes on the glyph group beyond a translation,
 more than one symbol or an idiom other than universal in a set, keys other
 than `info` and `symbols`, tvOS, watchOS and visionOS, symbols beside images

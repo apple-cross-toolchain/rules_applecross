@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A custom symbol in SF Symbols' template v.3.0: several weights and sizes. -->
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="3300" height="2200">
+ <g id="Notes"><text x="263" y="292">Weights and sizes</text><text x="263" y="322">Template v.3.0</text></g>
+ <g id="Guides">
+  <line id="Baseline-S" x1="263" x2="3036" y1="696" y2="696" stroke="#27AAE1" stroke-width="0.5"/>
+  <line id="Capline-S" x1="263" x2="3036" y1="625.541" y2="625.541" stroke="#27AAE1" stroke-width="0.5"/>
+  <line id="Baseline-M" x1="263" x2="3036" y1="1126" y2="1126" stroke="#27AAE1" stroke-width="0.5"/>
+  <line id="Capline-M" x1="263" x2="3036" y1="1055.54" y2="1055.54" stroke="#27AAE1" stroke-width="0.5"/>
+  <line id="Baseline-L" x1="263" x2="3036" y1="1556" y2="1556" stroke="#27AAE1" stroke-width="0.5"/>
+  <line id="Capline-L" x1="263" x2="3036" y1="1485.54" y2="1485.54" stroke="#27AAE1" stroke-width="0.5"/>
+  <line id="left-margin-Ultralight-S" x1="300.0" x2="300.0" y1="596" y2="716" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="right-margin-Ultralight-S" x1="380.0" x2="380.0" y1="596" y2="716" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="left-margin-Regular-S" x1="700.0" x2="700.0" y1="596" y2="716" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="right-margin-Regular-S" x1="780.0" x2="780.0" y1="596" y2="716" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="left-margin-Black-S" x1="1100.0" x2="1100.0" y1="596" y2="716" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="right-margin-Black-S" x1="1180.0" x2="1180.0" y1="596" y2="716" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="left-margin-Regular-M" x1="1391.17" x2="1391.17" y1="1026" y2="1146" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="right-margin-Regular-M" x1="1471.17" x2="1471.17" y1="1026" y2="1146" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="left-margin-Heavy-M" x1="2000.0" x2="2000.0" y1="1026" y2="1146" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="right-margin-Heavy-M" x1="2080.0" x2="2080.0" y1="1026" y2="1146" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="left-margin-Bold-L" x1="2400.0" x2="2400.0" y1="1456" y2="1576" stroke="#00AEEF" stroke-width="0.5"/>
+  <line id="right-margin-Bold-L" x1="2480.0" x2="2480.0" y1="1456" y2="1576" stroke="#00AEEF" stroke-width="0.5"/>
+ </g>
+ <g id="Symbols">
+  <g id="Ultralight-S" transform="matrix(1 0 0 1 300.0 696)">
+   <path d="M0 -40 L12 -40 L12 10 L0 10 Z"/>
+  </g>
+  <g id="Regular-S" transform="matrix(1 0 0 1 700.0 696)">
+   <path d="M0 -45 L30 -45 L30 0 L0 0 Z"/>
+  </g>
+  <g id="Black-S" transform="matrix(1 0 0 1 1100.0 696)">
+   <path d="M0 -50 L48 -50 L48 0 L0 0 Z"/>
+  </g>
+  <g id="Regular-M" transform="matrix(1 0 0 1 1391.17 1126)">
+   <path d="M0 -50 L40 -50 L40 0 L0 0 Z"/>
+   <path d="m50,-10 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 z"/>
+  </g>
+  <g id="Heavy-M" transform="matrix(1 0 0 1 2000.0 1126)">
+   <path d="M0 -50 L56 -50 L56 5 L0 5 Z"/>
+  </g>
+  <g id="Bold-L" transform="matrix(1 0 0 1 2400.0 1556)">
+   <path d="M0 -60 C10 -70 30 -70 44 -60 L44 0 L0 0 Z"/>
+  </g>
+ </g>
+</svg>
