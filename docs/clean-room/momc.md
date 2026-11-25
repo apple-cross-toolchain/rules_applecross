@@ -4,21 +4,27 @@ Core Data models (`.xcdatamodeld`, `.xcdatamodel`) compile off a Mac: each
 model version to the `.mom` Xcode 27.2's `momc` writes, byte for byte, and a
 model with one version to Xcode's `VersionInfo.plist` too, its entities'
 version hashes and checksum included (below). A model with several versions,
-whose current version also gets an `.omo`, or with a derived attribute,
+or one whose `.xccurrentversion` names its version (both get an `.omo`
+beside the current version), or with a derived attribute,
 compiles with `--config=relax_momc`, with a `VersionInfo.plist` that leaves
 out what isn't established. `toolchain/stubs/momc.py` is the implementation,
-pure Python; `tests/momc` compares it with Xcode's own output for 106 models
-(100 of their `VersionInfo.plist`s), and refuses 7 more. Generated classes (`momc --action generate`) are Xcode's
+pure Python; `tests/momc` compares it with Xcode's own output for 109 models
+(102 of their `VersionInfo.plist`s), and refuses 12 more. Generated classes (`momc --action generate`) are Xcode's
 but for their header's dated line, with `--config=relax_momc`; mapping models
 (`mapc`) aren't reproduced.
 
 ## What momc writes
 
 `momc` compiles a model bundle to `<Model>.momd/`: a `.mom` for each
-version, `VersionInfo.plist` and, beside a versioned model's current version,
-an `.omo` (a `momv2` binary of its own, which Core Data reads instead of
-the `.mom` when it's there). A single `.xcdatamodel` compiles to one `.mom`.
-The deployment target, platform and `--module` don't change any of them.
+version, `VersionInfo.plist` and, beside the current version a
+`.xccurrentversion` names, an `.omo` (a `momv2` binary of its own, which Core
+Data reads instead of the `.mom` when it's there). Xcode writes the
+`.xccurrentversion` when a model gets a second version, and its templates
+ship one; with it, even a model of one version gets the `.omo` and its
+version's name in `VersionInfo.plist` (Xcode's Document App template, and
+four models given one), and its `.mom` is the same. A single `.xcdatamodel`
+compiles to one `.mom`. The deployment target and platform don't change any
+of them, and `--module` only the class names that start with a dot (below).
 
 A `.mom` is an `NSKeyedArchiver` archive of an `NSManagedObjectModel`, its
 `NSEntityDescription`s, their `NSAttributeDescription`s and
@@ -65,7 +71,10 @@ numbers they hold.
 
 ### The model
 
-- **Entities.** An entity records its name, class name (`$null` without one),
+- **Entities.** An entity records its name, class name (`$null` without one;
+  one starting with a dot, "the current module", as `M.Last` for `--module M`,
+  where `Last` is its last dotted part, and as written without `--module`:
+  probes of `.A`, `.D.E` and plain names with two modules and none),
   superentity, subentities, properties, user info (one empty dictionary
   shared by those without), version hash modifier, renaming identifier (its
   name without one), uniqueness constraints and abstractness.
@@ -189,6 +198,24 @@ Compiling refuses these, relaxed or not:
 - names other than ASCII, which Xcode orders by a collation of its own;
 - an Xcode other than 27.2 unless `--config=relax_xcode_version`, since
   every model records momc's version (27.2's is 25436) and Xcode's.
+
+### Models used with CloudKit
+
+`usedWithCloudKit="YES"` on the model changes nothing Xcode writes (three
+models compiled with it, `NO` and without it gave the same bytes), but Xcode
+then refuses what CloudKit can't sync, and so does this momc, with Xcode's
+words (a probe of each rule):
+- a required attribute without a default value, transient or in an entity
+  not synced too (`A.k must have a default value`);
+- a required relationship (`must be optional`), an ordered one (`must not be
+  ordered`), one with the Deny delete rule (`cannot specify the "Deny"
+  delete rule`) and one without an inverse, to-one or to-many (`must specify
+  an inverse relationship`).
+
+Uniqueness constraints, abstract entities, fetched properties and optional
+derived attributes compile as without CloudKit. A required derived
+attribute in such a model isn't established and is refused, as is any value
+of `usedWithCloudKit` but `YES` and `NO`.
 
 ## VersionInfo.plist
 

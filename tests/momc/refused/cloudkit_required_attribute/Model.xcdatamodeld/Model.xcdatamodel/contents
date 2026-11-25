@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788" systemVersion="24F74" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithCloudKit="YES" userDefinedModelVersionIdentifier="">
+    <entity name="A" representedClassName="A" syncable="YES">
+        <attribute name="when" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="b" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="B" inverseName="a" inverseEntity="B"/>
+    </entity>
+    <entity name="B" representedClassName="B" syncable="YES">
+        <relationship name="a" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="A" inverseName="b" inverseEntity="A"/>
+    </entity>
+</model>

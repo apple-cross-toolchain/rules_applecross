@@ -97,6 +97,10 @@ def fresh():
     return ("fresh", _fresh[0])
 
 
+# The module `--module` names, the one a class name with a leading dot means.
+MODULE = None
+
+
 class Str:
     def __init__(self, value, ident=None):
         self.value = value
@@ -1220,7 +1224,13 @@ class Entity(Archived):
         self.name = xml_str(element.get("name"))
         if self.name is None:
             unestablished("an entity without a name")
-        self.class_name_value = xml_str(element.get("representedClassName"))
+        # A leading dot names the current module: with --module M, Xcode
+        # archives `.A` as `M.A`, and `.D.E` as `M.E`; without it, as written
+        # (probes, Xcode 27.2).
+        class_name = element.get("representedClassName")
+        if class_name is not None and class_name.startswith(".") and MODULE:
+            class_name = "%s.%s" % (MODULE, class_name.rpartition(".")[2])
+        self.class_name_value = xml_str(class_name)
         self.parent_name = element.get("parentEntity")
         self.abstract = yes(element, "isAbstract")
         modifier = element.get("versionHashModifier")
@@ -1296,7 +1306,7 @@ class FetchRequest(Archived):
 class Model(Archived):
     class_name = "NSManagedObjectModel"
     ATTRIBUTES = {"type", "documentVersion", "lastSavedToolsVersion", "systemVersion", "minimumToolsVersion",
-                  "sourceLanguage", "userDefinedModelVersionIdentifier", "iOSVersion", "macOSVersion"}
+                  "sourceLanguage", "userDefinedModelVersionIdentifier", "iOSVersion", "macOSVersion", "usedWithCloudKit"}
 
     def __init__(self, root, versions):
         super().__init__()
@@ -1328,6 +1338,34 @@ class Model(Archived):
                     if not inverse or not isinstance(inverse[0], Relationship):
                         unestablished("the inverse relationship %s.%s" % (r.inverse_entity, r.inverse_name))
                     r.inverse = inverse[0]
+        # Used with CloudKit, a model compiles the same, but Xcode refuses
+        # what CloudKit can't sync (probes of each rule, Xcode 27.2): a
+        # required attribute without a default (transient or in an entity
+        # not synced too), and a relationship that is required, ordered,
+        # denies deletion or has no inverse. Uniqueness constraints, abstract
+        # entities, fetched properties and optional derived attributes pass.
+        cloudkit = root.get("usedWithCloudKit")
+        if cloudkit not in (None, "YES", "NO"):
+            unestablished("usedWithCloudKit=%r" % cloudkit)
+        if cloudkit == "YES":
+            for e in self.entities:
+                for p in e.properties:
+                    where = "%s.%s" % (e.name.value, p.name.value)
+                    if isinstance(p, DerivedAttribute):
+                        if not p.optional:
+                            unestablished("a required derived attribute in a model used with CloudKit")
+                    elif isinstance(p, Attribute):
+                        if not p.optional and p.default is None:
+                            raise Invalid("%s must have a default value" % where)
+                    elif isinstance(p, Relationship):
+                        if not p.optional:
+                            raise Invalid("%s must be optional" % where)
+                        if p.ordered:
+                            raise Invalid("%s must not be ordered" % where)
+                        if p.delete_rule == DELETE_RULES["Deny"]:
+                            raise Invalid("%s cannot specify the \u201cDeny\u201d delete rule" % where)
+                        if p.inverse is None:
+                            raise Invalid("%s must specify an inverse relationship" % where)
         for e in self.entities:
             inherited = set()
             p = e.parent
@@ -1615,7 +1653,20 @@ def compile_models(source, output, versions):
     # A single version's VersionInfo.plist is Xcode's; several versions'
     # also need the .omo beside the current one, which isn't reproduced.
     info_bytes = None
-    if len(models) == 1:
+    # A .xccurrentversion makes Xcode name the current version in
+    # VersionInfo.plist and write an .omo beside it, even for one version
+    # (Xcode's Document App template; four probes adding one to models).
+    if current is not None and len(models) == 1:
+        if not RELAXED:
+            unestablished("a model with a current version (the .omo beside it)")
+        (name, (_, model)), = compiled.items()
+        try:
+            info = plistlib.loads(version_info(name, model))
+        except Unestablished:
+            info = {}
+        info["NSManagedObjectModel_CurrentVersionName"] = version_name(current)
+        info_bytes = plistlib.dumps(info, fmt=plistlib.FMT_BINARY)
+    elif len(models) == 1:
         try:
             (name, (_, model)), = compiled.items()
             info_bytes = version_info(name, model)
@@ -1807,6 +1858,7 @@ def generate(source, output):
 
 
 def main(argv):
+    global MODULE
     action = "compile"
     positional = []
     i = 0
@@ -1824,6 +1876,8 @@ def main(argv):
                 value = argv[i]
             if name == "--action":
                 action = value
+            elif name == "--module":
+                MODULE = value
         elif a in ("--no-warnings", "--no-inverse-relationship-warnings", "--no-max-property-count-warnings",
                    "--no-delete-rule-warnings"):
             pass
