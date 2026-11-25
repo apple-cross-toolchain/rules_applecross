@@ -21,6 +21,7 @@ mod launchimage;
 mod pdf;
 mod qsort;
 mod stack;
+mod symbol;
 mod vector;
 
 use cf::Value;
@@ -153,6 +154,8 @@ struct Scan {
     sticker_icons: Vec<(String, PathBuf)>,
     /// Sprite atlases.
     atlases: Vec<imageset::Atlas>,
+    /// Symbol sets with a symbol, by name.
+    symbol_sets: Vec<(String, PathBuf)>,
 }
 
 /// Whether Xcode stores a legacy rendition beside each image, for a
@@ -281,7 +284,7 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             // too (two probes, with and without a symbols list); one with an
             // SF Symbols template isn't compiled as Xcode compiles it.
             Some((_, "symbolset")) if !p.join("Contents.json").is_file() || !has_entries(&read_json(&p.join("Contents.json"))?, "symbols", "filename") => {}
-            Some((_, "symbolset")) => return Err(format!("{}: a symbol set with a symbol (an SF Symbols template) is not supported by this actool yet", p.display())),
+            Some((stem, "symbolset")) => found.symbol_sets.push((format!("{prefix}{stem}"), p)),
             // A sprite atlas holds image sets, named with its folder's prefix
             // but not its own name (a probe in a namespacing folder).
             Some((stem, "spriteatlas")) => {
@@ -491,7 +494,8 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             || !scan.launch_images.is_empty()
             || !scan.brand_assets.is_empty()
             || !scan.solid_stacks.is_empty()
-            || !scan.atlases.is_empty();
+            || !scan.atlases.is_empty()
+            || !scan.symbol_sets.is_empty();
         if any_images {
             return Err(format!("images for a deployment target before iOS 13, tvOS 13, watchOS 6 or macOS 10.15 ({}), where Xcode adds legacy renditions, are not supported by this actool", o.minimum_deployment_target));
         }
@@ -536,7 +540,8 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     // A macOS Icon Composer document's smallest flattened images take the
     // first atlas at 2x.
     let reserved: &[(u32, usize)] = if mac && document.is_some() { &[(2, 1)] } else { &[] };
-    let mut images = imageset::compile(&scan.image_sets, phone && pad, platform, reserved, o.relax_vector, name_identifier)?;
+    let (symbol_facets, glyphs, symbols) = symbol::compile(&scan.symbol_sets, platform, o.relax_vector, name_identifier)?;
+    let mut images = imageset::compile_all(&scan.image_sets, phone && pad, platform, reserved, o.relax_vector, name_identifier, Vec::new(), symbols.clone())?;
     // An app icon set of an image per size whose atlases would share a scale
     // and idiom with image sets' packed images: its icons pack with theirs.
     let deferred_icons = per_size_deferral(o, platform, &scan, document.is_some(), phone, pad, &images)?;
@@ -544,7 +549,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
         let watch = o.target_devices.iter().any(|d| d == "watch");
         let mac = o.target_devices.iter().any(|d| d == "mac");
         let icons = iconset::compile_deferring(name, name_identifier(name), slots, phone, pad, watch, mac, defer)?.deferred;
-        images = imageset::compile_with_icons(&scan.image_sets, phone && pad, platform, reserved, o.relax_vector, name_identifier, icons)?;
+        images = imageset::compile_all(&scan.image_sets, phone && pad, platform, reserved, o.relax_vector, name_identifier, icons, symbols)?;
     }
     let defer: Vec<(u32, u16)> = deferred_icons.map(|d| d.2).unwrap_or_default();
     // A sticker icon set compiles only when --app-icon names it (two
@@ -563,6 +568,8 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             *o.sticker_icon.borrow_mut() = Some(name.clone());
         }
     }
+    images.facets.extend(symbol_facets);
+    images.renditions.extend(glyphs);
     let atlases = imageset::compile_atlases(&scan.atlases, phone && pad, platform, name_identifier)?;
     images.facets.extend(atlases.facets);
     images.renditions.extend(atlases.renditions);
@@ -881,6 +888,13 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
     if has_gamut && mac {
         return Err("a 16-bit rendition of an image with colours outside sRGB in a macOS catalog is not supported by this actool".into());
     }
+    // Symbols bring their deployment, weight and size attributes (probes
+    // of iOS's and macOS's); beside an atlas's dimension1 or a gamut their
+    // order isn't established.
+    let has_symbols = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_DEPLOYMENT));
+    if has_symbols && (has_dimension1 || has_gamut) {
+        return Err("symbols beside a second atlas or a 16-bit rendition are not supported by this actool".into());
+    }
     let key_format = if mac {
         // dimension1 and dimension2 only when something uses them, as on
         // iOS (one probe and one of the holdout's catalogs).
@@ -892,14 +906,23 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
             k.push(car::ATTR_DIMENSION2);
         }
         k.extend([car::ATTR_LAYER, car::ATTR_SCALE]);
+        if has_symbols {
+            k.extend([car::ATTR_DEPLOYMENT, car::ATTR_GLYPH_WEIGHT, car::ATTR_GLYPH_SIZE]);
+        }
         k
     } else {
         let mut k = vec![car::ATTR_APPEARANCE, car::ATTR_LOCALIZATION, car::ATTR_SCALE, car::ATTR_IDIOM, car::ATTR_SUBTYPE];
+        if has_symbols {
+            k.extend([car::ATTR_GLYPH_WEIGHT, car::ATTR_GLYPH_SIZE]);
+        }
         if has_dimension2 {
             k.push(car::ATTR_DIMENSION2);
         }
         if has_dimension1 {
             k.push(car::ATTR_DIMENSION1);
+        }
+        if has_symbols {
+            k.push(car::ATTR_DEPLOYMENT);
         }
         if has_gamut {
             k.push(car::ATTR_GAMUT);

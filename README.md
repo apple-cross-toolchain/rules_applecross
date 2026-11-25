@@ -71,6 +71,11 @@ one fails:
   reproduce. `--config=relax_actool_vector` accepts its own drawing
   (resvg, hayro) for one file per appearance on iOS and macOS
   ([docs/clean-room/actool.md](docs/clean-room/actool.md#vector-images)).
+- Symbol sets (custom SF Symbols): Xcode keeps the glyph as SVG, which this
+  actool writes as Xcode does, and draws it into bitmaps with CoreGraphics.
+  `--config=relax_actool_vector` accepts its own drawing for a single
+  Regular-M glyph on iOS and macOS
+  ([docs/clean-room/actool.md](docs/clean-room/actool.md#symbol-sets)).
 
 A target with Metal shaders builds correctly with its bundling on a macOS
 execution platform (`--@rules_applecross//toolchain:apple_bundling=macos`:
@@ -292,7 +297,7 @@ draw the icon from its layers:
 | --- | --- | --- |
 | `relax_actool_icon_composer` | `RULES_APPLECROSS_RELAX_ACTOOL_ICON_COMPOSER` | Icon Composer documents whose flattened images are this actool's (their layers are Xcode's) |
 | `relax_actool_tvos_radiosity` | `RULES_APPLECROSS_RELAX_ACTOOL_TVOS_RADIOSITY` | tvOS radiosity images that may round apart from Xcode's |
-| `relax_actool_vector` | `RULES_APPLECROSS_RELAX_ACTOOL_VECTOR` | vector images (PDF, SVG) whose bitmaps are this actool's drawing, and whose PDFs, where this actool can't write them as CoreGraphics does, are stored as they are |
+| `relax_actool_vector` | `RULES_APPLECROSS_RELAX_ACTOOL_VECTOR` | vector images (PDF, SVG) and symbol sets whose bitmaps are this actool's drawing, and whose PDFs, where this actool can't write them as CoreGraphics does, are stored as they are |
 | `relax_actool_storage` | `RULES_APPLECROSS_RELAX_ACTOOL_STORAGE` | images stored as this actool chooses where Xcode's choice isn't established: atlases split next-fit, dmp2 streams near a margin or tied, bitmap keys for an identifier count whose order isn't pinned (the same images, packed or encoded perhaps otherwise) |
 | `relax_actool_xcbuild` | `RULES_APPLECROSS_RELAX_ACTOOL_XCBUILD` | asset catalogs this actool can't reproduce, compiled by xcbuild's actool |
 | `relax_docc` | `RULES_APPLECROSS_RELAX_DOCC` | DocC archives with swift.org's render template, where the SDK archive lacks Xcode's |

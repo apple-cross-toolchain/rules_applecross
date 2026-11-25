@@ -55,11 +55,42 @@ pub fn compile(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platf
 /// opaque colour images (crate::iconset::compile_deferring).
 #[allow(clippy::too_many_arguments)]
 pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platform: &str, reserved: &[(u32, usize)], relax_vector: bool, identifier: impl Fn(&str) -> u16, icons: Vec<crate::iconset::DeferredIcon>) -> Result<Compiled, String> {
+    compile_all(sets, phone_and_pad, platform, reserved, relax_vector, identifier, icons, Vec::new())
+}
+
+/// A symbol's bitmap (crate::symbol), packed as image sets' images are but
+/// apart from them, keyed by its deployment attribute.
+#[derive(Clone)]
+pub struct SymbolBitmap {
+    pub scale: u32,
+    pub identifier: u16,
+    pub attrs: Vec<(u16, u16)>,
+    pub deployment: u16,
+    pub filename: String,
+    pub image: image::Rgba,
+}
+
+/// [`compile_with_icons`], with symbols' bitmaps packed too.
+#[allow(clippy::too_many_arguments)]
+pub fn compile_all(
+    sets: &[(String, std::path::PathBuf)],
+    phone_and_pad: bool,
+    platform: &str,
+    reserved: &[(u32, usize)],
+    relax_vector: bool,
+    identifier: impl Fn(&str) -> u16,
+    icons: Vec<crate::iconset::DeferredIcon>,
+    symbols: Vec<SymbolBitmap>,
+) -> Result<Compiled, String> {
     let mut out = Compiled::default();
     let mut images: Vec<SetImage> = Vec::new();
     read_sets(sets, phone_and_pad, platform, relax_vector, &identifier, &mut out, &mut images)?;
+    // Drawn from a vector glyph (flag 4), as a vector image's bitmaps.
+    for s in symbols {
+        images.push(SetImage { scale: s.scale, appearance: 0, idiom: 0, identifier: s.identifier, flags: 4, filename: s.filename, image: s.image, extended: None, slicing: None, deployment: s.deployment, attrs: Some(s.attrs) });
+    }
     for icon in icons {
-        images.push(SetImage { scale: icon.scale, appearance: 0, idiom: icon.idiom, identifier: icon.identifier, flags: 0, filename: icon.filename, image: icon.image, extended: None, slicing: None, attrs: Some(icon.attrs) });
+        images.push(SetImage { scale: icon.scale, appearance: 0, idiom: icon.idiom, identifier: icon.identifier, flags: 0, filename: icon.filename, image: icon.image, extended: None, slicing: None, deployment: 0, attrs: Some(icon.attrs) });
     }
     // Per scale, appearance and idiom (each with atlases of its own, keyed
     // by them),
@@ -71,28 +102,34 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
     // factor, or a group's only packable one, stored on their own, the rest
     // packed into an atlas, as app icons are. An atlas's dimension1 is its
     // index at its scale.
-    let mut scales: Vec<(u32, u16, u16)> = images.iter().map(|i| (i.scale, i.appearance, i.idiom)).collect();
+    let mut scales: Vec<(u32, u16, u16, u16)> = images.iter().map(|i| (i.scale, i.appearance, i.idiom, i.deployment)).collect();
     scales.sort();
     scales.dedup();
-    for (scale, appearance, idiom) in scales {
+    for (scale, appearance, idiom, deployment) in scales {
         let mut planned: Vec<(usize, bool, bool, Vec<&SetImage>)> = Vec::new();
         for (gamut, opaque, gray) in [(0, false, false), (0, false, true), (0, true, false), (0, true, true), (1, false, false), (1, true, false)] {
             let mut group: Vec<&SetImage> = images
                 .iter()
                 .filter(|i| {
-                    (i.scale, i.appearance, i.idiom) == (scale, appearance, idiom) && is_opaque(i) == opaque && is_gray(i) == gray && (gamut == 0 || i.extended.is_some())
+                    // A symbol's bitmaps pack as translucent grey ones, opaque
+                    // or not (a probe of a rectangle filling its bitmap).
+                    let (o, g) = if i.deployment != 0 { (false, true) } else { (is_opaque(i), is_gray(i)) };
+                    (i.scale, i.appearance, i.idiom, i.deployment) == (scale, appearance, idiom, deployment) && o == opaque && g == gray && (gamut == 0 || i.extended.is_some())
                 })
                 .collect();
             // Equal areas by identifier (12 probes of equal-area shapes).
-            group.sort_by_key(|i| (std::cmp::Reverse(i.image.width * i.image.height), i.identifier));
+            // A symbol's equal areas, the smaller size first (two ties of a
+            // probe).
+            let size = |i: &SetImage| i.attrs.as_ref().and_then(|a| a.iter().find(|x| x.0 == car::ATTR_DIMENSION2)).map_or(0, |x| x.1);
+            group.sort_by_key(|i| (std::cmp::Reverse(i.image.width * i.image.height), i.identifier, size(i)));
             let cap = crate::stack::PACKING_AREA * scale as usize;
             let (standalone, packable): (Vec<&SetImage>, Vec<&SetImage>) = group.into_iter().partition(|i| i.image.width * i.image.height > cap);
-            if gamut == 0 && !packable.is_empty() {
+            if gamut == 0 && !packable.is_empty() && deployment == 0 {
                 out.packable.push((scale, appearance, idiom, opaque, gray));
             }
             let (standalone, packable) = if packable.len() < 2 { (standalone.into_iter().chain(packable).collect::<Vec<_>>(), Vec::new()) } else { (standalone, packable) };
             if !packable.is_empty() {
-                if packable.windows(2).any(|w| w[0].image.width * w[0].image.height == w[1].image.width * w[1].image.height && w[0].identifier == w[1].identifier) {
+                if packable.windows(2).any(|w| w[0].image.width * w[0].image.height == w[1].image.width * w[1].image.height && w[0].identifier == w[1].identifier && w[0].deployment == 0) {
                     return Err(format!("image sets with equal identifiers and areas in one {scale}x atlas are not supported by this actool"));
                 }
                 // Next-fit atlases: one is closed once its area reaches the
@@ -132,7 +169,7 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
                     planned.last_mut().unwrap().3.push(i);
                 }
             }
-            if standalone.iter().any(|i| i.attrs.is_some()) {
+            if standalone.iter().any(|i| i.attrs.is_some() && i.deployment == 0) {
                 return Err("an app icon packed with image sets but stored on its own is not supported by this actool".into());
             }
             for i in standalone {
@@ -146,14 +183,17 @@ pub fn compile_with_icons(sets: &[(String, std::path::PathBuf)], phone_and_pad: 
         // 3rd is 11 (a catalog of 19, all else identical).
         for gamut in [0, 1] {
             let atlases: Vec<&(usize, bool, bool, Vec<&SetImage>)> = planned.iter().filter(|a| a.0 == gamut).collect();
-            let before = if gamut == 0 && appearance == 0 && idiom == 0 { reserved.iter().filter(|r| r.0 == scale).map(|r| r.1).sum() } else { 0 };
+            let before = if gamut == 0 && appearance == 0 && idiom == 0 && deployment == 0 { reserved.iter().filter(|r| r.0 == scale).map(|r| r.1).sum() } else { 0 };
             let mut names: Vec<String> = (0..before + atlases.len()).map(|k| k.to_string()).collect();
             names.sort();
             for (k, (_, opaque, gray, atlas)) in atlases.into_iter().enumerate() {
                 let index = names.iter().position(|n| *n == (before + k).to_string()).unwrap() as u16;
                 if gamut == 0 {
-                    crate::dmp2::tolerant(atlas.iter().any(|i| drawn(i)), || pack(scale, (appearance, idiom), *opaque, *gray, index, atlas, &mut out.renditions))?;
+                    crate::dmp2::tolerant(atlas.iter().any(|i| drawn(i)), || pack(scale, (appearance, idiom, deployment), *opaque, *gray, index, atlas, &mut out.renditions))?;
                 } else {
+                    if deployment != 0 {
+                        return Err("a symbol's 16-bit bitmap is not supported by this actool".into());
+                    }
                     pack16(scale, (appearance, idiom), *opaque, index, atlas, &mut out.renditions)?;
                 }
             }
@@ -775,6 +815,9 @@ struct SetImage {
     extended: Option<Vec<u16>>,
     /// A resizable image's slicing.
     slicing: Option<car::Slicing>,
+    /// A symbol's bitmaps' deployment attribute (its atlases' key too; 0
+    /// for every other image), packed apart from other images.
+    deployment: u16,
     /// An app icon's own key, for an icon packed with image sets' images
     /// (crate::iconset::DeferredIcon).
     attrs: Option<Vec<(u16, u16)>>,
@@ -804,7 +847,7 @@ pub fn sticker_icon(name: &str, dir: &std::path::Path, id: u16) -> Result<Option
         return Err(format!("{}: a sticker icon with colours outside sRGB, or not 1024x768, is not supported by this actool", path.display()));
     }
     // No template rendering intent (flags 0), unlike an image set's.
-    let image = SetImage { scale: 1, appearance: 0, idiom: car::IDIOM_MARKETING, identifier: id, flags: 0, filename: filename.to_string(), image: img, extended: None, slicing: None, attrs: None };
+    let image = SetImage { scale: 1, appearance: 0, idiom: car::IDIOM_MARKETING, identifier: id, flags: 0, filename: filename.to_string(), image: img, extended: None, slicing: None, deployment: 0, attrs: None };
     Ok(Some(Compiled {
         facets: vec![Facet { name: name.to_string(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] }],
         renditions: vec![standalone_rendition(&image).map_err(|e| format!("{}: {e}", path.display()))?],
@@ -917,7 +960,7 @@ fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &st
         if extended.is_some() {
             return Err(format!("{}: a PNG with colours outside sRGB beside vector images is not supported by this actool", path.display()));
         }
-        images.push(SetImage { scale: *scale, appearance: 0, idiom: 0, identifier: id, flags, filename: name.clone(), image, extended: None, slicing: None, attrs: None });
+        images.push(SetImage { scale: *scale, appearance: 0, idiom: 0, identifier: id, flags, filename: name.clone(), image, extended: None, slicing: None, deployment: 0, attrs: None });
     }
     for ((appearance, idiom), files) in groups {
         // The platform's: a file without a scale is its 1x.
@@ -976,7 +1019,7 @@ fn vector_set(dir: &std::path::Path, listed: &[serde_json::Value], platform: &st
             // corner (y counting from the bottom).
             let slice = (crate::vector::slice_pixels(size.0, scale as f64), crate::vector::slice_pixels(size.1, scale as f64));
             let slicing = (slice != pixels).then(|| car::Slicing { layout: car::LAYOUT_ICON_IMAGE, slices: vec![[0, pixels.1 - slice.1, slice.0, slice.1]] });
-            images.push(SetImage { scale, appearance, idiom, identifier: id, flags: flags | 4 | if preserves { 256 } else { 0 }, filename: name.to_string(), image, extended: None, slicing, attrs: None });
+            images.push(SetImage { scale, appearance, idiom, identifier: id, flags: flags | 4 | if preserves { 256 } else { 0 }, filename: name.to_string(), image, extended: None, slicing, deployment: 0, attrs: None });
         }
     }
     Ok(())
@@ -1151,7 +1194,7 @@ fn read_sets(sets: &[(String, std::path::PathBuf)], phone_and_pad: bool, platfor
                     (img, Some(slicing))
                 }
             };
-            images.push(SetImage { scale, appearance, idiom, identifier: id, flags, filename: filename.to_string(), image: img, extended, slicing, attrs: None });
+            images.push(SetImage { scale, appearance, idiom, identifier: id, flags, filename: filename.to_string(), image: img, extended, slicing, deployment: 0, attrs: None });
         }
         if !scales.is_empty() {
             out.facets.push(Facet { name: name.clone(), attrs: vec![(car::ATTR_ELEMENT, car::ELEMENT_ICON), (car::ATTR_PART, car::PART_IMAGE), (car::ATTR_IDENTIFIER, id)] });
@@ -1226,7 +1269,7 @@ fn is_opaque(i: &SetImage) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pack(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, gray: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+fn pack(scale: u32, (appearance, idiom, deployment): (u16, u16, u16), opaque: bool, gray: bool, index: u16, images: &[&SetImage], renditions: &mut Vec<Rendition>) -> Result<(), String> {
     let blocks: Vec<(u32, u32)> = images.iter().map(|i| (i.image.width as u32, i.image.height as u32)).collect();
     let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
     let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
@@ -1255,16 +1298,24 @@ fn pack(scale: u32, (appearance, idiom): (u16, u16), opaque: bool, gray: bool, i
     if idiom != 0 {
         key.push((car::ATTR_IDIOM, idiom));
     }
+    // Symbols' atlases: keyed by their deployment attribute too (probes).
+    if deployment != 0 {
+        if index > 0 {
+            return Err(format!("more than one {scale}x atlas of symbols is not supported by this actool"));
+        }
+        key.push((car::ATTR_DEPLOYMENT, deployment));
+    }
     for (i, (x, y)) in images.iter().zip(&positions) {
         let (w, h) = (i.image.width as u32, i.image.height as u32);
         crate::iconset::place(&mut pixels, stride, ah, &i.image.premultiplied_bgra(), *x, *y, w, h);
         let pixels = if gray { car::Pixels::Gray } else { car::Pixels::Bgra };
-        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_format(&i.filename, (*x, *y, w, h), scale, i.flags, pixels, &key, i.slicing.as_ref()) });
+        let own = if i.deployment != 0 { 0 } else { i.slicing.as_ref().map_or(car::LAYOUT_ICON_IMAGE, |s| s.layout) };
+        renditions.push(Rendition { attrs: image_attrs(i), csi: car::link_csi_layout(&i.filename, (*x, *y, w, h), scale, i.flags, pixels, &key, i.slicing.as_ref(), own) });
     }
     let name = format!("ZZZZPackedAsset-{scale}.{}.{}-gamut0", opaque as u8, gray as u8);
     // An atlas of an icon set's icons alone is encoded as the icon set's
     // own atlases are (a probe; beside image sets' images, as theirs, two).
-    if !gray && images.iter().all(|i| i.attrs.is_some()) {
+    if !gray && images.iter().all(|i| i.attrs.is_some() && i.deployment == 0) {
         let padded = car::stride(aw as usize);
         let mut rows = vec![0u8; padded * ah as usize];
         for (row, src) in rows.chunks_exact_mut(padded).zip(pixels.chunks_exact(stride)) {

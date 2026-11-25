@@ -493,14 +493,15 @@ def _drawn_signature(block):
 
 
 def vector_car_digest(data):
-    """A catalog with vector images (PDF, SVG): what an equivalent one must
-    share when the relaxed actool draws their bitmaps itself
-    (--config=relax_actool_vector) and stores a PDF as it is, where Xcode
-    draws them with CoreGraphics and writes the PDF again. Laid out as actool
-    lays out its stores, the same variables and block count, and block by
-    block the same bytes but for the drawn bitmaps' and their atlases'
+    """A catalog with vector images (PDF, SVG) or symbol sets: what an
+    equivalent one must share when the relaxed actool draws their bitmaps
+    itself (--config=relax_actool_vector) and stores a PDF as it is, where
+    Xcode draws them with CoreGraphics and writes the PDF again. Laid out as
+    actool lays out its stores, the same variables and block count, and block
+    by block the same bytes but for the drawn bitmaps' and their atlases'
     pixels (_drawn_signature) and a PDF's bytes, the appearances as
-    _appearances allows."""
+    _appearances allows. A symbol's glyph (its SVG and metrics) and the
+    links to its bitmaps in their atlases are the same bytes."""
     blocks, variables, capacity = _store(data)
     names = dict(variables)
     signature, drawn = {}, False
@@ -517,7 +518,7 @@ def vector_car_digest(data):
         elif layout == 12 and flags & 4:
             signature[value] = _drawn_signature(block)
             drawn = True
-        elif layout == 9 and block[24:28] == b" GVS":
+        elif (layout == 9 and block[24:28] == b" GVS") or layout == 1017:
             drawn = True
     if not drawn:
         raise ValueError("no vector images")
