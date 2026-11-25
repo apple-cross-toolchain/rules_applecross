@@ -1427,6 +1427,12 @@ fn explicit_pack(scale: u32, id: u16, group: &[(&SetImage, Trim)], renditions: &
     let blocks: Vec<(u32, u32)> = group.iter().map(|(_, t)| (t.w as u32, t.h as u32)).collect();
     let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
     let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
+    // Past 2048 a side Xcode may split the atlas into several (dimension1
+    // 1, 2, ...) by a rule not established: 15 and 16 images of 512 by 512
+    // split, 17 didn't (probes); within it, one atlas always (every probe).
+    if aw > 2048 || ah > 2048 {
+        return Err(format!("a sprite atlas whose {scale}x images pack to more than 2048 pixels a side ({aw} by {ah}), where Xcode may split it by a rule not established, is not supported by this actool"));
+    }
     let stride = aw as usize * 4;
     let mut pixels = vec![0u8; stride * ah as usize];
     let key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id)];

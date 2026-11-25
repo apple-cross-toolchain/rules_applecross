@@ -185,19 +185,35 @@ impl Catalog {
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        // Two names whose identifiers (name_identifier's hash) are alike:
+        // Xcode gives the later in byte order another identifier, by a rule
+        // not established (45 such pairs in random catalogs); refused rather
+        // than written with the hash.
+        let mut seen: Vec<(u16, &str)> = Vec::new();
+        for f in &self.facets {
+            if let Some(id) = f.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map(|a| a.1) {
+                match seen.iter().find(|s| s.0 == id) {
+                    Some((_, other)) if *other != f.name => {
+                        return Err(format!("the names \"{other}\" and \"{}\" share an identifier, for which Xcode gives one of them another by a rule not established for this actool", f.name));
+                    }
+                    Some(_) => {}
+                    None => seen.push((id, &f.name)),
+                }
+            }
+        }
         let mut bom = Bom::new();
         let header = bom.alloc(Vec::new());
-        let renditions_tree = Tree::reserve(&mut bom, 4096, false);
-        let facets_tree = Tree::reserve(&mut bom, 4096, false);
-        let appearances_tree = (!self.appearances.is_empty()).then(|| Tree::reserve(&mut bom, 4096, false));
+        let mut renditions_tree = Tree::reserve(&mut bom, 4096, false);
+        let mut facets_tree = Tree::reserve(&mut bom, 4096, false);
+        let mut appearances_tree = (!self.appearances.is_empty()).then(|| Tree::reserve(&mut bom, 4096, false));
 
-        let mut appearance_entries = Vec::new();
         for (name, value) in &self.appearances {
             let k = bom.alloc(name.as_bytes().to_vec());
             let v = bom.alloc(value.to_le_bytes().to_vec());
-            appearance_entries.push((k, v, name.as_bytes().to_vec()));
+            if let Some(t) = appearances_tree.as_mut() {
+                t.insert(&mut bom, k, v, name.as_bytes().to_vec())?;
+            }
         }
-        let mut facet_entries = Vec::new();
         let mut facets: Vec<&Facet> = self.facets.iter().collect();
         facets.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
         for f in facets {
@@ -211,7 +227,7 @@ impl Catalog {
                 le16(&mut v, *x);
             }
             let vi = bom.alloc(v);
-            facet_entries.push((k, vi, f.name.as_bytes().to_vec()));
+            facets_tree.insert(&mut bom, k, vi, f.name.as_bytes().to_vec())?;
         }
 
         let mut kf = b"tmfk".to_vec();
@@ -229,7 +245,6 @@ impl Catalog {
         let values = |r: &Rendition| -> Vec<u16> { self.key_format.iter().map(|a| r.attrs.iter().find(|(x, _)| x == a).map_or(0, |p| p.1)).collect() };
         let mut sorted: Vec<&Rendition> = self.renditions.iter().collect();
         sorted.sort_by_key(|r| values(r));
-        let mut slots: Vec<Option<(u32, u32, Vec<u8>)>> = vec![None; sorted.len()];
         let mut allocated_ids: Vec<u16> = Vec::new();
         let mut pending = vec![(0, sorted.len())];
         while let Some((lo, hi)) = pending.pop() {
@@ -244,12 +259,10 @@ impl Catalog {
             let key = self.key(sorted[mid]);
             let k = bom.alloc(key.clone());
             let v = bom.alloc(sorted[mid].csi.clone());
-            slots[mid] = Some((k, v, key));
+            renditions_tree.insert(&mut bom, k, v, key)?;
             pending.push((mid + 1, hi));
             pending.push((lo, mid));
         }
-        let mut rendition_entries: Vec<(u32, u32, Vec<u8>)> = slots.into_iter().map(|s| s.expect("every rendition allocated")).collect();
-        rendition_entries.sort_by(|a, b| a.2.cmp(&b.2));
 
         let mut meta = b"META".to_vec();
         meta.extend(fixed("", 256));
@@ -259,8 +272,7 @@ impl Catalog {
         meta.extend(fixed(&versions.authoring_tool(&self.platform), 256));
         let extended = bom.alloc(meta);
 
-        let bitmap_tree = Tree::reserve(&mut bom, 1024, true);
-        let mut bitmap_entries = Vec::new();
+        let mut bitmap_tree = Tree::reserve(&mut bom, 1024, true);
         let mut identifiers: Vec<u16> = Vec::new();
         for r in &self.renditions {
             let id = r.attrs.iter().find(|a| a.0 == ATTR_IDENTIFIER).map_or(0, |a| a.1);
@@ -298,7 +310,7 @@ impl Catalog {
                 le32(&mut v, mask);
             }
             let vi = bom.alloc(v);
-            bitmap_entries.push((id as u32, vi, Vec::new()));
+            bitmap_tree.insert(&mut bom, id as u32, vi, Vec::new())?;
         }
 
         let mut h = b"RATC".to_vec();
@@ -315,13 +327,12 @@ impl Catalog {
         le32(&mut h, self.key_semantics);
         bom.set(header, h);
 
-        renditions_tree.finish(&mut bom, &rendition_entries)?;
-        facets_tree.finish(&mut bom, &facet_entries)?;
+        renditions_tree.finish(&mut bom)?;
+        facets_tree.finish(&mut bom)?;
         if let Some(t) = &appearances_tree {
-            t.finish(&mut bom, &appearance_entries)?;
+            t.finish(&mut bom)?;
         }
-        bitmap_entries.sort_by_key(|e| e.0);
-        bitmap_tree.finish(&mut bom, &bitmap_entries)?;
+        bitmap_tree.finish(&mut bom)?;
 
         bom.var("CARHEADER", header);
         bom.var("RENDITIONS", renditions_tree.header);
