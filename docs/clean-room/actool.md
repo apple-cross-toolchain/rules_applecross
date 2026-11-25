@@ -98,8 +98,7 @@ A symbol set without a symbol (no `filename` in its `symbols`, or no
 `symbols` list: Xcode's Accessory Setup Extension template has one)
 compiles to nothing, beside other assets too; the catalog's `Assets.car` is
 the same without it (`tests/actool_catalog` SY001). A symbol set with an SF
-Symbols template is refused: Xcode stores its glyphs as rewritten SVG with
-their metrics and draws them into bitmaps with CoreGraphics.
+Symbols template is compiled only relaxed ([Symbol sets](#symbol-sets)).
 
 ## Assets.car
 
@@ -1289,6 +1288,59 @@ visionOS:
 - **Device idioms** (`iphone`, `ipad`) are keyed by idiom, the Vector
   renditions too; a universal file beside an iPad one is kept for the
   universal idiom.
+
+### Symbol sets
+
+A symbol set's SF Symbols template (`.symbolset`, an SVG made by the SF
+Symbols app, template v.3.0) with a single glyph, Regular-M, on iOS and
+macOS. Xcode 27.2, 14 probe catalogs (rectangles, tall and wide glyphs, a
+glyph off its margin, absolute and relative path commands, curves and arcs,
+two paths, two symbol sets, a symbol beside an image set, one 10 units
+square), a real one and the tests' three, deployment targets iOS 13 to 18
+and 26 and macOS 14 and 26. The SVG and its metrics are byte-identical; the bitmaps
+are drawn with resvg rather than CoreGraphics, so a symbol set is compiled
+only with `--config=relax_actool_vector`, as vector images are
+(`tests/actool_vector` symbol, symbol-small, symbols-and-image):
+
+- **The glyph's sizes.** The template's medium guides are 70.46 units apart
+  (Capline-M above Baseline-M). The glyph is drawn at the platform's small,
+  medium and large sizes: 15, 17 and 20 points at 1x to 3x on iOS; 11, 13
+  and 17 at 1x and 2x on macOS. A unit is the medium size over 100 points.
+- **Its SVG** (element 85, part 59, scale 1, layout 1017, flags 4, scale
+  100, pixel format `SVG `): `<?xml version="1.0" encoding="UTF-8"?>`, a
+  line feed, then `<svg version="1.1" viewBox="0 0 W H"><g id="s"
+  transform="matrix(s 0 0 s tx ty)">` and the glyph's paths, `<path
+  d=".."/>` each, then `</g></svg>` and a line feed. W and H are the paths'
+  bounds (their curves' and arcs' extremes, not their control points) times
+  the unit s, and (tx, ty) moves the bounds' top-left corner to the origin.
+  A path is written again in absolute commands, its numbers as C's `%g`
+  writes them. Stored with `DWAR` as an SVG layer is, LZFSE-compressed when
+  that is smaller. Its TLVs: `0x3ec`, `0x3ee` 1, `0x3fa` (its metrics) and
+  `0x3fb` (1, 0, 0). The metrics: 3, the medium size, then as floats the
+  depth below the baseline times s, 70.46 times s, 0, then twice 0.5 times
+  s and the medium size times 35/512; then 3 and each size's index and
+  points (0 small, 1 medium, 2 large).
+- **Its bitmaps:** one per size and scale (part 181, `dimension2` 0 to 2 for
+  small to large), each `ceil(W x points x scale / medium)` by the same of
+  H, computed in doubles. They are grey with alpha (GA8) whatever the
+  glyph, flags 4, and packed as image sets' images are, into atlases of
+  their own keyed with the deployment attribute 5, beside other symbols'
+  bitmaps. Equal areas are taken by identifier, then the smaller size
+  first. Their links name the SVG's file and have a layout of 0 as their
+  own.
+- **Their keys** add the deployment (5), glyph weight (4, regular) and glyph
+  size (2, medium) attributes, and the key format orders them as the
+  platform's does: on iOS 7, 13, 12, 15, 16, 26, 27, 9, 25, 17, 1, 2; on
+  macOS 7, 13, 1, 2, 3, 17, 9, 11, 12, 25, 26, 27. Its facet is element 85,
+  part 181, its identifier and the deployment.
+
+Refused, not established: more than one weight or size (Xcode interpolates
+the others from them), a glyph other than Regular-M, a template whose
+medium guides are another distance apart, glyph elements other than paths
+with only their data, attributes on the glyph group beyond a translation,
+more than one symbol or an idiom other than universal in a set, keys other
+than `info` and `symbols`, tvOS, watchOS and visionOS, symbols beside images
+with a `dimension1` or a gamut, and an atlas of symbols past the first.
 
 ## Data sets
 

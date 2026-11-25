@@ -17,6 +17,9 @@ pub const ATTR_SUBTYPE: u16 = 16;
 pub const ATTR_IDENTIFIER: u16 = 17;
 /// 0 for sRGB renditions, 1 for a wide-gamut image's 16-bit ones (P3).
 pub const ATTR_GAMUT: u16 = 24;
+pub const ATTR_DEPLOYMENT: u16 = 25;
+pub const ATTR_GLYPH_WEIGHT: u16 = 26;
+pub const ATTR_GLYPH_SIZE: u16 = 27;
 
 pub const IDIOM_PHONE: u16 = 1;
 pub const IDIOM_PAD: u16 = 2;
@@ -294,7 +297,7 @@ impl Catalog {
             le32(&mut v, 4 + 4 * self.key_format.len() as u32);
             le32(&mut v, self.key_format.len() as u32);
             for a in &self.key_format {
-                let tracked = matches!(*a, ATTR_LOCALIZATION | ATTR_SCALE | ATTR_IDIOM | ATTR_SUBTYPE | ATTR_DIMENSION2 | ATTR_DIMENSION1 | ATTR_SIZE | ATTR_LAYER | ATTR_GAMUT);
+                let tracked = matches!(*a, ATTR_LOCALIZATION | ATTR_SCALE | ATTR_IDIOM | ATTR_SUBTYPE | ATTR_DIMENSION2 | ATTR_DIMENSION1 | ATTR_SIZE | ATTR_LAYER | ATTR_GAMUT | ATTR_DEPLOYMENT | ATTR_GLYPH_WEIGHT | ATTR_GLYPH_SIZE);
                 let mask = if tracked {
                     self.renditions
                         .iter()
@@ -772,6 +775,13 @@ fn slices_tlv(t: &mut Vec<u8>, width: u32, height: u32, slicing: Option<&Slicing
 /// it is resizable.
 #[allow(clippy::too_many_arguments)]
 pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, pixels: Pixels, atlas: &[(u16, u16)], slicing: Option<&Slicing>) -> Vec<u8> {
+    link_csi_layout(name, rect, scale, flags, pixels, atlas, slicing, slicing.map_or(LAYOUT_ICON_IMAGE, |s| s.layout))
+}
+
+/// The same with the image's own layout given: a symbol's bitmap's is 0
+/// (probes).
+#[allow(clippy::too_many_arguments)]
+pub fn link_csi_layout(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags: u32, pixels: Pixels, atlas: &[(u16, u16)], slicing: Option<&Slicing>, own: u16) -> Vec<u8> {
     let (x, y, w, h) = rect;
     let mut t = Vec::new();
     slices_tlv(&mut t, w, h, slicing);
@@ -784,8 +794,8 @@ pub fn link_csi_format(name: &str, rect: (u32, u32, u32, u32), scale: u32, flags
     for v in [0u32, x, y, w, h] {
         le32(&mut link, v);
     }
-    // The image's own layout: a resizable one's, else 12.
-    le16(&mut link, slicing.map_or(LAYOUT_ICON_IMAGE, |s| s.layout));
+    // The image's own layout: a resizable one's, else 12 (`own`).
+    le16(&mut link, own);
     // By attribute, but an appearance last (one probe).
     let mut key: Vec<(u16, u16)> = atlas.iter().copied().filter(|a| a.1 != 0).collect();
     key.sort_by_key(|a| (a.0 == ATTR_APPEARANCE, a.0));
