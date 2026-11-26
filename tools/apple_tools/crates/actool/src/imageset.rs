@@ -1445,7 +1445,7 @@ pub fn compile_atlases(atlases: &[Atlas], phone_and_pad: bool, platform: &str, i
         for scale in scales {
             let mut group: Vec<(&SetImage, Trim)> = images.iter().filter(|i| i.scale == scale).map(|i| (i, trim(&i.image))).collect();
             group.sort_by_key(|(i, t)| (std::cmp::Reverse(t.w * t.h), i.identifier));
-            explicit_pack(scale, id, &group, &mut out.renditions)?;
+            explicit_packs(scale, id, &group, &mut out.renditions)?;
         }
     }
     Ok(out)
@@ -1473,21 +1473,73 @@ fn trim(img: &image::Rgba) -> Trim {
     }
 }
 
-/// One scale's explicit atlas and its images' links.
-fn explicit_pack(scale: u32, id: u16, group: &[(&SetImage, Trim)], renditions: &mut Vec<Rendition>) -> Result<(), String> {
-    let blocks: Vec<(u32, u32)> = group.iter().map(|(_, t)| (t.w as u32, t.h as u32)).collect();
-    let (positions, (rw, rh)) = crate::iconset::pack::pack(&blocks);
-    let (aw, ah) = ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2);
-    // Past 2048 a side Xcode may split the atlas into several (dimension1
-    // 1, 2, ...) by a rule not established: 15 and 16 images of 512 by 512
-    // split, 17 didn't (probes); within it, one atlas always (every probe).
-    if aw > 2048 || ah > 2048 {
-        return Err(format!("a sprite atlas whose {scale}x images pack to more than 2048 pixels a side ({aw} by {ah}), where Xcode may split it by a rule not established, is not supported by this actool"));
+/// An explicit atlas's packing of `blocks` (in order): their positions
+/// and its size, each side the root's plus one, rounded up to even.
+fn explicit_layout(blocks: &[(u32, u32)]) -> (Vec<(u32, u32)>, (u32, u32)) {
+    let (positions, (rw, rh)) = crate::iconset::pack::pack(blocks);
+    (positions, ((rw + 1).div_ceil(2) * 2, (rh + 1).div_ceil(2) * 2))
+}
+
+/// The runs of `blocks` (in order) each atlas holds when they don't fit in
+/// one: each the longest that packs within 2048 pixels a side.
+fn atlas_runs(blocks: &[(u32, u32)]) -> Result<Vec<std::ops::Range<usize>>, String> {
+    let fits = |run: &[(u32, u32)]| {
+        let (_, (aw, ah)) = explicit_layout(run);
+        aw <= 2048 && ah <= 2048
+    };
+    let mut runs = Vec::new();
+    let mut start = 0;
+    while start < blocks.len() {
+        if !fits(&blocks[start..start + 1]) {
+            let (w, h) = blocks[start];
+            return Err(format!("a sprite atlas image of {w} by {h} pixels, past 2048 a side with its border, is not supported by this actool"));
+        }
+        let mut end = start + 1;
+        while end < blocks.len() && fits(&blocks[start..end + 1]) {
+            end += 1;
+        }
+        runs.push(start..end);
+        start = end;
     }
+    Ok(runs)
+}
+
+/// One scale's images packed into its explicit atlases and their links.
+fn explicit_packs(scale: u32, id: u16, group: &[(&SetImage, Trim)], renditions: &mut Vec<Rendition>) -> Result<(), String> {
+    let blocks: Vec<(u32, u32)> = group.iter().map(|(_, t)| (t.w as u32, t.h as u32)).collect();
+    let (positions, (aw, ah)) = explicit_layout(&blocks);
+    if aw <= 2048 && ah <= 2048 {
+        // Within 2048 a side, one atlas always (every probe).
+        return explicit_pack(scale, id, 0, group, &positions, (aw, ah), renditions);
+    }
+    // Past it Xcode splits the atlas into several (dimension1 1, 2, ...),
+    // each holding a run of the images in order, laid out as one atlas
+    // would be (Xcode's grid tile set template: its largest 291 tiles at
+    // the places this packer gives them, then its other 109), but where it
+    // cuts isn't established: not at the longest run that fits (316
+    // tiles), nor at an area; 15 and 16 images of 512 by 512 split, 17
+    // didn't (probes). With --config=relax_actool_storage each atlas takes
+    // the longest run that fits.
+    if !dmp2::storage_relaxed() {
+        return Err(format!("a sprite atlas whose {scale}x images pack to more than 2048 pixels a side ({aw} by {ah}), where Xcode splits it where it isn't established, is not supported by this actool (--config=relax_actool_storage splits it as this actool chooses)"));
+    }
+    for (index, run) in atlas_runs(&blocks)?.into_iter().enumerate() {
+        let (positions, dims) = explicit_layout(&blocks[run.clone()]);
+        explicit_pack(scale, id, index as u16, &group[run], &positions, dims, renditions)?;
+    }
+    Ok(())
+}
+
+/// One explicit atlas, `index` among its scale's, and its images' links.
+#[allow(clippy::too_many_arguments)]
+fn explicit_pack(scale: u32, id: u16, index: u16, group: &[(&SetImage, Trim)], positions: &[(u32, u32)], (aw, ah): (u32, u32), renditions: &mut Vec<Rendition>) -> Result<(), String> {
     let stride = aw as usize * 4;
     let mut pixels = vec![0u8; stride * ah as usize];
-    let key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id)];
-    for ((i, t), (x, y)) in group.iter().zip(&positions) {
+    let mut key = vec![(car::ATTR_ELEMENT, car::ELEMENT_PACKED), (car::ATTR_PART, car::PART_PACKED), (car::ATTR_SCALE, scale as u16), (car::ATTR_IDENTIFIER, id)];
+    if index > 0 {
+        key.push((car::ATTR_DIMENSION1, index));
+    }
+    for ((i, t), (x, y)) in group.iter().zip(positions) {
         let bgra = i.image.premultiplied_bgra();
         let iw = i.image.width;
         let cropped: Vec<u8> = (t.y..t.y + t.h).flat_map(|r| bgra[(r * iw + t.x) * 4..(r * iw + t.x + t.w) * 4].to_vec()).collect();
@@ -1515,4 +1567,17 @@ fn explicit_pack(scale: u32, id: u16, group: &[(&SetImage, Trim)], renditions: &
     let data = dmp2::encode(aw as usize, ah as usize, &pixels, false).map_err(|e| format!("{name}: {e}"))?;
     renditions.push(Rendition { attrs: key, csi: car::explicit_packed_csi(&name, aw, ah, scale, &members, &data) });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::atlas_runs;
+
+    #[test]
+    fn atlases_split_into_runs_that_fit() {
+        // 1000 by 1000 with their borders: two a side, four an atlas.
+        assert_eq!(atlas_runs(&[(1000, 1000); 9]).unwrap(), vec![0..4, 4..8, 8..9]);
+        assert_eq!(atlas_runs(&[(10, 10); 3]).unwrap(), vec![0..3]);
+        assert!(atlas_runs(&[(10, 10), (2047, 10)]).is_err());
+    }
 }

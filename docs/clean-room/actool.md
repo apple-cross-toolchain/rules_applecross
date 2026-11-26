@@ -564,10 +564,16 @@ Refused, not established: images other than PNGs, images for an
 appearance or an idiom, resizable images, colours beyond sRGB, image set
 names other than ASCII, anything but image sets in a sprite atlas, keys in
 its `Contents.json` but `info`, an atlas without images, and an atlas that
-packs to more than 2048 pixels a side. Past that Xcode may split it into
-several atlases (`dimension1` 1, 2, ...) by a rule not established: 15 and
-16 images of 512 by 512 split, 17 didn't, and Xcode's grid tile set
-template's 400 tiles take two.
+packs to more than 2048 pixels a side. Past that Xcode splits it into
+several atlases (`dimension1` 1, 2, ...), each holding a run of the images
+in their order, laid out as an atlas of that run alone would be (Xcode's
+grid tile set template: its largest 291 tiles at the places this packer
+gives them, then its other 109). Where it cuts isn't established: not after
+the longest run that fits (316 tiles there), nor at an area of the tiles,
+trimmed or whole; 15 and 16 images of 512 by 512 split, 17 didn't. With
+`--config=relax_actool_storage` this actool cuts after the longest run that
+fits, so such an atlas compiles, its images packed perhaps otherwise than
+Xcode's.
 
 ## dmp2
 
