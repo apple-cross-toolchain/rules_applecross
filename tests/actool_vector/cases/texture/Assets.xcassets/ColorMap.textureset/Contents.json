@@ -1,0 +1,16 @@
+{
+  "info": {
+    "author": "xcode",
+    "version": 1
+  },
+  "properties": {
+    "origin": "bottom-left",
+    "interpretation": "non-premultiplied-colors"
+  },
+  "textures": [
+    {
+      "filename": "Universal.mipmapset",
+      "idiom": "universal"
+    }
+  ]
+}

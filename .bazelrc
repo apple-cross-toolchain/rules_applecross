@@ -35,6 +35,7 @@ build:relax_actool_tvos_radiosity --action_env=RULES_APPLECROSS_RELAX_ACTOOL_TVO
 # Vector images (PDF, SVG): their bitmaps this actool's drawing, a PDF stored
 # as it is (Xcode draws them with CoreGraphics and writes the PDF again).
 build:relax_actool_vector --action_env=RULES_APPLECROSS_RELAX_ACTOOL_VECTOR=1
+build:relax_actool_texture --action_env=RULES_APPLECROSS_RELAX_ACTOOL_TEXTURE=1
 # Images stored as this actool chooses where Xcode's choice isn't established:
 # atlases split next-fit, dmp2 streams near a margin or tied, bitmap keys in
 # CoreFoundation's order for an identifier count whose growth isn't pinned.
@@ -81,6 +82,7 @@ build:relax_xcode_build --repo_env=RULES_APPLECROSS_RELAX_XCODE_BUILD=1
 build:relaxed --config=relax_actool_icon_composer
 build:relaxed --config=relax_actool_tvos_radiosity
 build:relaxed --config=relax_actool_vector
+build:relaxed --config=relax_actool_texture
 build:relaxed --config=relax_actool_storage
 build:relaxed --config=relax_actool_xcbuild
 build:relaxed --config=relax_docc

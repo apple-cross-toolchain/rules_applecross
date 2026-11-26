@@ -22,6 +22,7 @@ mod pdf;
 mod qsort;
 mod stack;
 mod symbol;
+mod texture;
 mod vector;
 
 use cf::Value;
@@ -46,6 +47,8 @@ struct Options {
     relax_tvos_radiosity: bool,
     /// Vector images' bitmaps drawn by this actool; see [`relaxed`].
     relax_vector: bool,
+    /// Texture sets' smaller levels and ASTC by this actool; see [`relaxed`].
+    relax_texture: bool,
     /// `--launch-image`: the launch image set the bundle gets.
     launch_image: Option<String>,
     /// That set's `UILaunchImages`, for the partial Info.plist.
@@ -73,6 +76,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         relax_icon_composer: relaxed("ACTOOL_ICON_COMPOSER"),
         relax_tvos_radiosity: relaxed("ACTOOL_TVOS_RADIOSITY"),
         relax_vector: relaxed("ACTOOL_VECTOR"),
+        relax_texture: relaxed("ACTOOL_TEXTURE"),
         ..Default::default()
     };
     crate::dmp2::relax_storage(relaxed("ACTOOL_STORAGE"));
@@ -156,6 +160,8 @@ struct Scan {
     atlases: Vec<imageset::Atlas>,
     /// Symbol sets with a symbol, by name.
     symbol_sets: Vec<(String, PathBuf)>,
+    /// Texture sets, by name.
+    texture_sets: Vec<(String, PathBuf)>,
 }
 
 /// Whether Xcode stores a legacy rendition beside each image, for a
@@ -285,6 +291,7 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             // SF Symbols template isn't compiled as Xcode compiles it.
             Some((_, "symbolset")) if !p.join("Contents.json").is_file() || !has_entries(&read_json(&p.join("Contents.json"))?, "symbols", "filename") => {}
             Some((stem, "symbolset")) => found.symbol_sets.push((format!("{prefix}{stem}"), p)),
+            Some((stem, "textureset")) => found.texture_sets.push((format!("{prefix}{stem}"), p)),
             // A sprite atlas holds image sets, named with its folder's prefix
             // but not its own name (a probe in a namespacing folder).
             Some((stem, "spriteatlas")) => {
@@ -530,7 +537,8 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             || !scan.brand_assets.is_empty()
             || !scan.solid_stacks.is_empty()
             || !scan.atlases.is_empty()
-            || !scan.symbol_sets.is_empty();
+            || !scan.symbol_sets.is_empty()
+            || !scan.texture_sets.is_empty();
         if any_images {
             return Err(format!("images for a deployment target before iOS 13, tvOS 13, watchOS 6 or macOS 10.15 ({}), where Xcode adds legacy renditions, are not supported by this actool", o.minimum_deployment_target));
         }
@@ -605,6 +613,9 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     }
     images.facets.extend(symbol_facets);
     images.renditions.extend(glyphs);
+    let (texture_facets, textures) = texture::compile(&scan.texture_sets, platform, o.relax_texture, name_identifier)?;
+    images.facets.extend(texture_facets);
+    images.renditions.extend(textures);
     let atlases = imageset::compile_atlases(&scan.atlases, phone && pad, platform, name_identifier)?;
     images.facets.extend(atlases.facets);
     images.renditions.extend(atlases.renditions);
@@ -885,10 +896,10 @@ fn mac_appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
 
 /// The catalog's table of appearances: those its images, colours and icons
 /// use, Any only when one has no appearance (a dark image alone gives Dark
-/// alone; data never counts), by name.
+/// alone; data and textures never count), by name.
 fn appearances(renditions: &[car::Rendition]) -> Vec<(String, u16)> {
     let mut values = Vec::new();
-    for r in renditions.iter().filter(|r| !r.is_data_set()) {
+    for r in renditions.iter().filter(|r| !r.is_data_set() && !r.is_texture_set()) {
         let v = r.attrs.iter().find(|a| a.0 == car::ATTR_APPEARANCE).map_or(0, |a| a.1);
         if !values.contains(&v) {
             values.push(v);
@@ -930,6 +941,12 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
     if has_symbols && (has_dimension1 || has_gamut) {
         return Err("symbols beside a second atlas or a 16-bit rendition are not supported by this actool".into());
     }
+    // iOS textures' GPU families follow dimension2 (probes); beside an
+    // atlas's dimension1, a gamut or symbols their order isn't established.
+    let has_graphics = renditions.iter().any(|r| r.attrs.iter().any(|a| a.0 == car::ATTR_GRAPHICS_CLASS));
+    if has_graphics && (has_dimension1 || has_gamut || has_symbols) {
+        return Err("textures beside a second atlas, a 16-bit rendition or symbols are not supported by this actool".into());
+    }
     let key_format = if mac {
         // dimension1 and dimension2 only when something uses them, as on
         // iOS (one probe and one of the holdout's catalogs).
@@ -952,6 +969,9 @@ fn finish(o: &Options, out_dir: &Path, platform: &str, icon_name: Option<&str>, 
         }
         if has_dimension2 {
             k.push(car::ATTR_DIMENSION2);
+        }
+        if has_graphics {
+            k.push(car::ATTR_GRAPHICS_CLASS);
         }
         if has_dimension1 {
             k.push(car::ATTR_DIMENSION1);

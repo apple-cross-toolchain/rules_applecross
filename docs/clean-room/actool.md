@@ -1373,6 +1373,56 @@ more than one symbol or an idiom other than universal in a set, keys other
 than `info` and `symbols`, tvOS, watchOS and visionOS, symbols beside images
 with a `dimension1` or a gamut, and an atlas of symbols past the first.
 
+### Texture sets
+
+A texture set (`.textureset`, a Metal texture: Xcode's Metal Game template
+has one) of a single universal mipmap set with only its base level, a PNG,
+on iOS and macOS. Xcode 27.2, the template and 10 probe catalogs (16 by 16,
+20 by 12, 8 by 8 and 1024 by 1024; each origin and interpretation, no
+properties, opaque and translucent) and the tests' two. The description,
+keys and storage are byte-identical; the smaller levels and the ASTC levels
+are this actool's, so a texture set is compiled only with
+`--config=relax_actool_texture` (`tests/actool_vector` texture,
+texture-kinds):
+
+- **For each GPU family:** on iOS, for none and for `graphics` 1 and 2 (an
+  attribute that follows `dimension2` in the key format and that BITMAPKEYS
+  tracks); on macOS, for none. Family 2's levels are ASTC 4x4, the others'
+  RGBA8.
+- **Its description** (element 41, scale 1, its identifier and family;
+  layout 1007, flags 0, the base level's size, scale 0, `BGRA`, colour space
+  1, named after the set): `0x3ec`, `0x3ee` 1 and `0x3f6` (0, the
+  interpretation: data 0, non-premultiplied colours 1, colours (the default)
+  2; then 1 when every pixel is opaque, else 0). Its payload: `RTXT`, 0,
+  Metal's pixel format (RGBA8Unorm 70 for data, RGBA8Unorm_sRGB 71 for
+  colours; ASTC_4x4_LDR 204 and ASTC_4x4_sRGB 186 for family 2), 1, 1, a
+  16-bit 1 and the number of levels, then each level's key: its length, 0,
+  the key's attribute and value pairs by attribute, and 0.
+- **Its levels** (part 181, `dimension2` the level after the base; layout
+  1008, flags 0, the level's size, scale 100, `BGRA`, colour space 0, named
+  after the PNG): `0x3ec`, `0x3ee` 1 and `0x3ef`, the bytes in a row (4 a
+  pixel, or 16 a block of 4). Each side is halved, rounded down, to 1 by 1.
+  Rows are in the PNG's order for a bottom-left origin (the template's) and
+  flipped for a top-left one; data is stored as it is, non-premultiplied
+  colours as they are but for a colour conversion, colours premultiplied.
+  Under 1024 pixels a level is stored raw (MLEC method 0); from there an
+  RGBA level as other bitmaps are (one LZFSE stream under 16 KiB, version
+  0; chunked from there, version 1), and an ASTC level in one stream.
+- **Its facet:** element 41 and its identifier. It doesn't count toward the
+  catalog's appearances.
+
+What this actool does instead of Xcode: its smaller levels average the area
+each pixel covers, where Xcode's filter isn't a plain average (0, 30, 0 and
+30 make 13; opaque alpha comes out 254) and its colours go through a
+conversion; its ASTC is a plain encoder (one partition, RGBA endpoints at 8
+bits along the block's principal axis, 2-bit weights on a 4x4 grid), where
+Xcode's encoder chooses otherwise.
+
+Refused, not established: textures for an idiom or a device, more than one
+texture, mipmap levels given rather than generated, cube and array
+textures, images other than PNGs, other properties, tvOS, watchOS and
+visionOS, and textures beside an atlas's `dimension1`, a gamut or symbols.
+
 ## Data sets
 
 A data set's file (one, universal, with its `universal-type-identifier`) is

@@ -501,7 +501,10 @@ def vector_car_digest(data):
     by block the same bytes but for the drawn bitmaps' and their atlases'
     pixels (_drawn_signature) and a PDF's bytes, the appearances as
     _appearances allows. A symbol's glyph (its SVG and metrics) and the
-    links to its bitmaps in their atlases are the same bytes."""
+    links to its bitmaps in their atlases are the same bytes. A texture
+    set's description is the same bytes, and its levels the same but for
+    their pixels (--config=relax_actool_texture: this actool's filter and
+    ASTC)."""
     blocks, variables, capacity = _store(data)
     names = dict(variables)
     signature, drawn = {}, False
@@ -519,6 +522,9 @@ def vector_car_digest(data):
             signature[value] = _drawn_signature(block)
             drawn = True
         elif (layout == 9 and block[24:28] == b" GVS") or layout == 1017:
+            drawn = True
+        elif layout == 1008:
+            signature[value] = _drawn_signature(block)
             drawn = True
     if not drawn:
         raise ValueError("no vector images")
