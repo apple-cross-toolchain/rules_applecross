@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Vector image sets (PDF, SVG) through this repository's actool, against
-Xcode 27.2's output (expected/, from update_expected.py): every file and
-every rendition the same, but for the pixels of the bitmaps it draws from
-them and a PDF's stored bytes (tools/xcode_equivalence.py
-vector_car_digest), with --config=relax_actool_vector; refused without it.
+"""Vector image sets (PDF, SVG), symbol sets and texture sets through this
+repository's actool, against Xcode 27.2's output (expected/, from
+update_expected.py): every file and every rendition the same, but for the
+pixels of the bitmaps it draws and a PDF's stored bytes
+(tools/xcode_equivalence.py vector_car_digest), with
+--config=relax_actool_vector and --config=relax_actool_texture; refused
+without them.
 
     python3 tests/actool_vector/actool_vector_test.py PATH/TO/actool
 """
@@ -20,7 +22,7 @@ def main(argv):
     if len(argv) != 1:
         sys.exit(__doc__)
     tool = [os.path.abspath(argv[0])]
-    relaxed = dict(os.environ, RULES_APPLECROSS_RELAX_ACTOOL_VECTOR="1")
+    relaxed = dict(os.environ, RULES_APPLECROSS_RELAX_ACTOOL_VECTOR="1", RULES_APPLECROSS_RELAX_ACTOOL_TEXTURE="1")
     strict = {k: v for k, v in os.environ.items() if not k.startswith("RULES_APPLECROSS_RELAX") and k != "RULES_APPLECROSS_RESOURCE_OUTPUT_MODE"}
     failures, count = [], 0
     for case, catalog in cases():

@@ -20,6 +20,8 @@ pub const ATTR_GAMUT: u16 = 24;
 pub const ATTR_DEPLOYMENT: u16 = 25;
 pub const ATTR_GLYPH_WEIGHT: u16 = 26;
 pub const ATTR_GLYPH_SIZE: u16 = 27;
+/// A Metal GPU family class (iOS texture sets: 1 and 2, beside none).
+pub const ATTR_GRAPHICS_CLASS: u16 = 23;
 
 pub const IDIOM_PHONE: u16 = 1;
 pub const IDIOM_PAD: u16 = 2;
@@ -118,6 +120,11 @@ impl Rendition {
     /// Whether it holds a data set's file (pixel format `DATA`).
     pub fn is_data(&self) -> bool {
         self.csi.get(24..28) == Some(b"ATAD")
+    }
+
+    /// A texture set's description or level (layouts 1007 and 1008).
+    pub fn is_texture_set(&self) -> bool {
+        matches!(self.csi.get(36..38), Some([0xef, 0x03]) | Some([0xf0, 0x03]))
     }
 
     /// A data set's file (layout 1000), as opposed to the other renditions
@@ -297,7 +304,7 @@ impl Catalog {
             le32(&mut v, 4 + 4 * self.key_format.len() as u32);
             le32(&mut v, self.key_format.len() as u32);
             for a in &self.key_format {
-                let tracked = matches!(*a, ATTR_LOCALIZATION | ATTR_SCALE | ATTR_IDIOM | ATTR_SUBTYPE | ATTR_DIMENSION2 | ATTR_DIMENSION1 | ATTR_SIZE | ATTR_LAYER | ATTR_GAMUT | ATTR_DEPLOYMENT | ATTR_GLYPH_WEIGHT | ATTR_GLYPH_SIZE);
+                let tracked = matches!(*a, ATTR_LOCALIZATION | ATTR_SCALE | ATTR_IDIOM | ATTR_SUBTYPE | ATTR_DIMENSION2 | ATTR_DIMENSION1 | ATTR_SIZE | ATTR_LAYER | ATTR_GAMUT | ATTR_DEPLOYMENT | ATTR_GLYPH_WEIGHT | ATTR_GLYPH_SIZE | ATTR_GRAPHICS_CLASS);
                 let mask = if tracked {
                     self.renditions
                         .iter()
@@ -500,6 +507,42 @@ fn lzfse_bitmap_chunks(bgra: &[u8], stride: usize, height: usize, versions: Mlec
         out.extend_from_slice(&data);
     }
     out
+}
+
+/// A texture level's bitmap (layout 1008): raw (MLEC method 0) under 1024
+/// pixels (32x24 raw, 32x32 not, RGBA and ASTC alike); from there an RGBA
+/// level is one LZFSE stream (version 0) under 16 KiB and chunked (version
+/// 1) from there, as other bitmaps are, and an ASTC level always one
+/// stream (Xcode's Metal Game template and probes, 1x1 to 1024x1024).
+pub fn texture_bitmap(data: &[u8], row: usize, width: usize, height: usize, astc: bool) -> Vec<u8> {
+    if width * height < 1024 {
+        let mut out = b"MLEC".to_vec();
+        le32(&mut out, 0);
+        le32(&mut out, 0);
+        le32(&mut out, data.len() as u32);
+        out.extend_from_slice(data);
+        return out;
+    }
+    let versions = MlecVersions { single: 0, chunked: 1 };
+    let rows = data.len() / row;
+    if astc {
+        lzfse_bitmap_chunks(data, row, rows, versions, 1)
+    } else {
+        lzfse_bitmap(data, row, rows, versions)
+    }
+}
+
+/// A texture's description (layout 1007): its size, named after the set,
+/// scale 0, colour space 1; `tlvs` its interpretation and `payload` its
+/// RTXT list of levels.
+pub fn texture_set_csi(name: &str, width: u32, height: u32, tlvs: &[u8], payload: &[u8]) -> Vec<u8> {
+    csi(&CsiHeader { flags: 0, width, height, scale: 0, pixel_format: b"BGRA", color_space: 1, layout: 1007, name }, tlvs, payload)
+}
+
+/// A texture's level (layout 1008): its size, named after its PNG, scale
+/// 100, colour space 0.
+pub fn texture_level_csi(name: &str, width: u32, height: u32, tlvs: &[u8], payload: &[u8]) -> Vec<u8> {
+    csi(&CsiHeader { flags: 0, width, height, scale: 100, pixel_format: b"BGRA", color_space: 0, layout: 1008, name }, tlvs, payload)
 }
 
 /// Pads tightly packed BGRA rows to the rendition stride.
