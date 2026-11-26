@@ -311,6 +311,14 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             // every platform (two probes of empty sets, watchOS; rules_apple's
             // set of images for iOS, tvOS, watchOS and macOS).
             Some((_, "complicationset")) => {}
+            // A sticker pack compiles to nothing with rules_apple's arguments
+            // (--include-sticker-content, --stickers-icon-role extension and
+            // a --sticker-pack-identifier-prefix), in a .xcstickers or
+            // .xcassets catalog, beside its icon set or not, for the
+            // simulator or a device, from iOS 10 (probes of Xcode's empty
+            // template and of two stickers). Xcode reads its stickers'
+            // Contents.json, warning when one isn't JSON: refused here.
+            Some((_, "stickerpack")) => sticker_pack(&p)?,
             None if p.is_dir() => {
                 // A folder: its Contents.json may say it provides a namespace.
                 let contents = p.join("Contents.json");
@@ -337,6 +345,33 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             }
             _ => return Err(format!("{}: this kind of asset is not supported by this actool yet", p.display())),
         }
+    }
+    Ok(())
+}
+
+/// A sticker pack, which compiles to nothing: its Contents.json and its
+/// stickers' are JSON (Xcode warns about one that isn't), and it holds
+/// stickers alone (sequences and others aren't established).
+fn sticker_pack(pack: &Path) -> Result<(), String> {
+    let json = |dir: &Path| -> Result<(), String> {
+        let contents = dir.join("Contents.json");
+        if contents.is_file() {
+            read_json(&contents)?;
+        }
+        Ok(())
+    };
+    json(pack)?;
+    let mut inner: Vec<PathBuf> = std::fs::read_dir(pack).map_err(|e| format!("{}: {e}", pack.display()))?.map(|e| e.map(|e| e.path()).map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    inner.sort();
+    for s in inner {
+        let n = s.file_name().unwrap().to_string_lossy().into_owned();
+        if n.starts_with('.') || s.is_file() {
+            continue;
+        }
+        if !n.ends_with(".sticker") {
+            return Err(format!("{}: anything but stickers in a sticker pack is not supported by this actool", s.display()));
+        }
+        json(&s)?;
     }
     Ok(())
 }
