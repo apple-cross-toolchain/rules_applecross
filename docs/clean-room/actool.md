@@ -100,6 +100,16 @@ compiles to nothing, beside other assets too; the catalog's `Assets.car` is
 the same without it (`tests/actool_catalog` SY001). A symbol set with an SF
 Symbols template is compiled only relaxed ([Symbol sets](#symbol-sets)).
 
+A sticker pack compiles to nothing, its stickers too, with the arguments
+rules_apple passes for a Messages extension (`--include-sticker-content`,
+`--stickers-icon-role extension`, `--sticker-pack-identifier-prefix`): in a
+`.xcstickers` or `.xcassets` catalog, beside its sticker icon set or not,
+for the simulator or a device, from iOS 10 (probes of Xcode's Sticker Pack
+Extension template and of a pack of two stickers; `tests/actool_catalog`
+ST001). Xcode reads its stickers' `Contents.json` all the same, warning
+when one isn't JSON, which this actool refuses; and anything but stickers
+in a pack (sequences among them) is refused, not established.
+
 ## Assets.car
 
 A BOM store (big-endian): 512-byte header area, blocks 16-byte aligned in
