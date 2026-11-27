@@ -81,7 +81,9 @@ pub fn render(kind: Kind, data: &[u8], points: (f64, f64), scale: f64, pixels: (
             // Opaque fills, drawn as CoreGraphics draws a PDF of them (Xcode
             // draws the two the same: probes of a PDF and an SVG of one
             // drawing at 1x, 2x and 3x).
-            if let Some(fills) = svg_fills(tree.root(), fit, tree.size().height() as f64) {
+            // Read in double precision where this actool can (crate::svgfills),
+            // else from usvg's float32 paths.
+            if let Some(fills) = crate::svgfills::fills(data, fit, tree.size().height() as f64).or_else(|| svg_fills(tree.root(), fit, tree.size().height() as f64)) {
                 return Ok(straight(draw_fills(&fills, 1.0, width as usize, height as usize), width, height));
             }
             let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or("an empty image")?;

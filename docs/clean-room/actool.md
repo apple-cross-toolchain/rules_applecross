@@ -1271,6 +1271,15 @@ strictly. With `--config=relax_actool_vector` they compile:
     `floor((c · a + d · (255 − a)) / 255)` per premultiplied channel, a
     its coverage (384 of 384 channels probed, over clear, opaque and
     translucent pixels).
+  - **SVGs in double precision:** CoreSVG keeps an SVG's numbers as
+    doubles, so where it can this actool reads the SVG itself
+    (`crates/actool/src/svgfills.rs`: groups, transforms, paths of lines
+    and cubics, rectangles, circles and ellipses as four cubics, polygons,
+    fills and fill rules) rather than from usvg's float32 paths. A circle
+    drawn at 2x and 3x then matches Xcode's, as it did at 1x only. Xcode
+    draws a circle the same whichever quadrant its cubics start in and
+    whichever way they turn (a probe of all eight). Arcs and quadratic
+    curves, whose conversion isn't established, use usvg's paths.
   - **Placement:** the page or SVG is drawn from the bitmap's lower left
     corner, so where a side's pixels are rounded up, the slack is at the
     top (pages of 200.5 x 150.75 and 200.25 x 150.5 points, PDFs and SVGs,

@@ -22,6 +22,7 @@ mod launchimage;
 mod pdf;
 mod qsort;
 mod stack;
+mod svgfills;
 mod symbol;
 mod texture;
 mod vector;
