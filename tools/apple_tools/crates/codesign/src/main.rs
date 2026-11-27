@@ -118,12 +118,16 @@ fn bundle(path: &Path) -> Option<Bundle> {
         return None;
     }
     // A macOS bundle keeps its Info.plist in Contents, a versioned framework
-    // in its current version's Resources, sealed with the macOS rules.
+    // in its current version's Resources, sealed with the macOS rules; a
+    // framework's version directory (Versions/A) is signed as that version.
+    let in_versions = path.parent().and_then(Path::file_name).is_some_and(|n| n == "Versions");
     let (root, layout, framework, info_path) = if path.join("Contents/Info.plist").is_file() {
         (path.join("Contents"), resources::Layout::Deep, false, path.join("Contents/Info.plist"))
     } else if path.join("Versions/Current/Resources/Info.plist").is_file() {
         let root = path.join("Versions/Current");
         (root.clone(), resources::Layout::Deep, true, root.join("Resources/Info.plist"))
+    } else if in_versions && path.join("Resources/Info.plist").is_file() {
+        (path.to_path_buf(), resources::Layout::Deep, true, path.join("Resources/Info.plist"))
     } else {
         (path.to_path_buf(), resources::Layout::Shallow, false, path.join("Info.plist"))
     };
@@ -325,4 +329,32 @@ fn main() -> ExitCode {
         }
     }
     status
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INFO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleExecutable</key><string>Demo</string><key>CFBundleIdentifier</key><string>org.example.Demo</string></dict></plist>"#;
+
+    #[test]
+    fn a_frameworks_version_directory_is_signed_as_that_version() {
+        let dir = std::env::temp_dir().join(format!("codesign-versions-{}", std::process::id()));
+        let version = dir.join("Demo.framework/Versions/A");
+        std::fs::create_dir_all(version.join("Resources")).unwrap();
+        std::fs::write(version.join("Resources/Info.plist"), INFO).unwrap();
+        // Apple's codesign seals Versions/A as it does the framework (a probe
+        // of both, byte-identical); a Resources/Info.plist elsewhere is not one.
+        let b = bundle(&version).unwrap();
+        assert!(b.framework && b.layout == resources::Layout::Deep);
+        assert_eq!((b.executable_path().as_deref(), b.root), (Some("Demo"), version));
+        let other = dir.join("Other.bundle");
+        std::fs::create_dir_all(other.join("Resources")).unwrap();
+        std::fs::write(other.join("Resources/Info.plist"), INFO).unwrap();
+        assert!(bundle(&other).is_none());
+        std::fs::remove_dir_all(dir.join("Demo.framework")).unwrap();
+        std::fs::remove_dir_all(other).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
 }
