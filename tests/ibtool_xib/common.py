@@ -27,8 +27,8 @@ def compile_xib(tool, xib, out, env=None):
     """Runs `tool` (a command list) on `xib` as rules_apple's compile_xib
     does (on a storyboard, as its compile_storyboard does, into `out`'s
     directory), for an iPhone and iPad app of the case's target, or an
-    AppKit one for a Mac app of macOS 14, a WatchKit one for a watch app;
-    returns (status, output)."""
+    AppKit one for a Mac app of macOS 14, a WatchKit one for a watch app, a
+    tvOS one for a TV app of tvOS 17; returns (status, output)."""
     case = os.path.splitext(os.path.basename(xib))[0]
     output = ["--compilation-directory", os.path.dirname(out)] if xib.endswith(".storyboard") else ["--compile", out]
     # An AppKit document compiles for a Mac app of macOS 14, a WatchKit one
@@ -39,6 +39,8 @@ def compile_xib(tool, xib, out, env=None):
         devices = ["--minimum-deployment-target", "14.0", "--target-device", "mac"]
     elif 'targetRuntime="watchKit"' in text:
         devices = ["--minimum-deployment-target", "8.0", "--target-device", "watch"]
+    elif 'targetRuntime="AppleTV"' in text:
+        devices = ["--minimum-deployment-target", "17.0", "--target-device", "tv"]
     else:
         devices = ["--minimum-deployment-target", target(case), "--target-device", "iphone", "--target-device", "ipad"]
     args = tool + output + devices + ["--module", "App", "--output-format", "human-readable-text", xib]

@@ -141,6 +141,11 @@ fn table_values(
     nib: &mut Nib, scene: &mut Scene, name: &str, table: Node, f: &Frame, cells: &[(&str, Node, Option<String>)], mask_default: i64,
     layout: Vec<(&'static str, Value)>, refresh: Option<Value>,
 ) -> Result<Vec<(&'static str, Value)>, String> {
+    // tvOS's table views archive another background, scroll indicator and
+    // separator style, not established.
+    if nib.platform == Platform::Tvos {
+        return fail("a tvOS table view is not supported by this ibtool");
+    }
     let (style, ui_style) = match attr(table, "style")? {
         "plain" => (0, 0),
         "grouped" => (1, 1),

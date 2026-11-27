@@ -485,7 +485,9 @@ other values of the attributes these use, is refused. Observed:
   neither a safe-area guide nor legacy ones (the document not using safe
   areas) gets the legacy guides as if listed when the document uses Auto
   Layout (three probes, one of the corpus's), and no guides without it
-  (one of the corpus's). There a subview without an autoresizing mask has
+  (one of the corpus's). On tvOS a root view gets them beside a safe-area
+  guide too (17 probes, Xcode's TV App template's launch screen among
+  them). There a subview without an autoresizing mask has
   mask 40, not 36 (one probe), which this ibtool refuses.
 - The document's constraints follow, whatever their order or ids in the
   document. They are grouped by item: a constraint with the root view by
@@ -1189,6 +1191,15 @@ other values of the attributes these use, is refused. Observed:
   `UIRoundedRectBackgroundCornerRadius`, and a tvOS control's segue
   performs on its primary action (`perform:` with mask 8192, not 64):
   three corpus storyboards.
+- A tvOS xib (`com.apple.InterfaceBuilder.AppleTV.XIB`) compiles as an iOS
+  one does, with tvOS's rules above: its view, or its table or collection
+  view cell, which is compiled with tvOS's rules too (the 12 xibs of
+  Xcode's tvOS file templates without a table view). A tvOS flow layout
+  writes its spacings and item size even at 10 and 50x50, and a spacing it
+  doesn't name is 0, not 10 (five probes). A tvOS table view archives
+  another background colour and scroll indicator and no separator style,
+  which aren't established, so it is refused (two of those templates), as
+  is a tvOS main window xib.
 
 ## Stack views, content modes, named colours and gesture recognizers
 

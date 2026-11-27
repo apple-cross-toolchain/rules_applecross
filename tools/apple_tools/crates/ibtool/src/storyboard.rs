@@ -8151,7 +8151,7 @@ pub fn compile_xib_collection_cell(xml: &str, minimum_deployment_target: Option<
     let root = doc.root_element();
     let cell = children(root, "objects").flat_map(|o| children(o, "collectionViewCell")).next().ok_or("a xib without a cell")?;
     let target = target_major(minimum_deployment_target)?;
-    let settings = Settings { platform: Platform::Ios, color_matched: root.attribute("colorMatched") == Some("YES"), localizable, target };
+    let settings = Settings { platform: xib_platform(root), color_matched: root.attribute("colorMatched") == Some("YES"), localizable, target };
     let xib = collection::XibCell { safe_area, before_17: target.map(|t| t < 17) };
     collection::cell_nib(settings, module, cell, false, Some(xib))
 }
@@ -8160,8 +8160,13 @@ pub fn compile_xib_cell(xml: &str, minimum_deployment_target: Option<&str>, modu
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     let cell = children(root, "objects").flat_map(|o| children(o, "tableViewCell")).next().ok_or("a xib without a cell")?;
-    let settings = Settings { platform: Platform::Ios, color_matched: root.attribute("colorMatched") == Some("YES"), localizable, target: target_major(minimum_deployment_target)? };
+    let settings = Settings { platform: xib_platform(root), color_matched: root.attribute("colorMatched") == Some("YES"), localizable, target: target_major(minimum_deployment_target)? };
     table::cell_nib(settings, module, cell, false, Some(safe_area))
+}
+
+/// A xib's platform, by its document type: tvOS's or iOS's.
+fn xib_platform(root: Node) -> Platform {
+    if root.attribute("type") == Some("com.apple.InterfaceBuilder.AppleTV.XIB") { Platform::Tvos } else { Platform::Ios }
 }
 
 /// Refuses a document deploying before iOS 8 (`<deployment version>`
@@ -8750,7 +8755,10 @@ fn compile_document(xml: &str, minimum_deployment_target: Option<&str>, module: 
         // A document saved for iOS 6 and earlier gets none either (two
         // corpus storyboards).
         let ios6 = view.document().root_element().attribute("variant") == Some("6xAndEarlier");
-        if !is_list && !has_safe_area && scene.guides.is_empty() && autolayout && !xib && !scenekit && !ios6 {
+        // On tvOS a view gets them beside a safe-area guide too (17
+        // probes, the TV App template's launch screen among them).
+        let tv = platform == Platform::Tvos;
+        if !is_list && (!has_safe_area || tv) && scene.guides.is_empty() && autolayout && !xib && !scenekit && !ios6 {
             scene.guides = vec![("implicit top guide", "top"), ("implicit bottom guide", "bottom")];
         }
         // Without Auto Layout a subview's default mask isn't the usual one
