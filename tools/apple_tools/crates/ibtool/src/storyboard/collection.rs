@@ -566,6 +566,29 @@ fn cell_nib_varied(settings: Settings, module: Option<&str>, cell: Node, has_seg
     // format) aren't among its subviews: encoded where something first
     // refers to them, as a root view's.
     let left_out = default_excluded_subviews(if old { cell } else { content })?;
+    // Their constraints' order is established for one constraint each with
+    // the cell, as a root view's (`compile_document`); with more, or between
+    // such a subview and another, it isn't, and is refused (a corpus
+    // storyboard's old-format cell, the same in Xcode's repeated compiles).
+    if !left_out.is_empty() {
+        let holder = if old { cell } else { content };
+        let holder_id = holder.attribute("id");
+        let mut per_view: HashMap<&str, usize> = HashMap::new();
+        for c in children(holder, "constraints").flat_map(|cs| children(cs, "constraint")) {
+            let first = c.attribute("firstItem").or(holder_id);
+            let second = c.attribute("secondItem");
+            let items: Vec<&str> = first.into_iter().chain(second).filter(|i| left_out.contains(i)).collect();
+            if items.len() > 1 || (items.len() == 1 && first != holder_id && second.is_some_and(|s| Some(s) != holder_id)) {
+                return fail("a constraint between a subview a cell's default variation leaves out and another subview is not supported by this ibtool");
+            }
+            for i in items {
+                *per_view.entry(i).or_default() += 1;
+            }
+        }
+        if per_view.values().any(|n| *n > 1) {
+            return fail("several constraints on a subview a cell's default variation leaves out are not supported by this ibtool");
+        }
+    }
     let mut deferred = Vec::new();
     for s in children(content, "subviews") {
         for c in s.children().filter(|c| c.is_element()) {
