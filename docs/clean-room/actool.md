@@ -1596,6 +1596,19 @@ An iOS build leaves tvOS brand assets and visionOS solid image stacks out
 unless `--app-icon` names them: the Assets.car is the same as without them
 (two probes; a catalog of nothing else compiles to nothing).
 
+Xcode checks every stack first, though, on every platform and whether or
+not `--app-icon` names it: a stack listing fewer than two layers is an
+error, "The image stack “Icon” must have at least 2 layers." (for visionOS,
+"The visionOS App Icon “Solid” must have at least 2 layers."), which fails
+rules_apple's build. That covers a stack at a catalog's top level and one in
+brand assets that their Contents.json doesn't list. It counts the layers
+listed: two without images are no error. This actool reports the same
+error (16 probes on iOS, tvOS and visionOS; tests/actool_catalog's
+brand-stack-one-layer and solid-stack-one-layer). Xcode also reports an
+error when the last layer with content doesn't fill the stack exactly,
+which this actool doesn't yet. A stack at the top level with two layers or
+more is refused.
+
 tvOS brand assets' primary app icon (an `.imagestack` of
 `.imagestacklayer`s, one 1x tv image each, on a 400x240 stack) and
 visionOS's `.solidimagestack` (`.solidimagestacklayer`s, one 1024 px

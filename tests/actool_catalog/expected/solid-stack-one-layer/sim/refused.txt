@@ -1,0 +1,2 @@
+Cat.xcassets:./Solid.solidimagestack: error: The visionOS App Icon “Solid” must have at least 2 layers.
+Cat.xcassets:./Solid.solidimagestack: error: The visionOS App Icon “Solid” must have at least 2 layers.

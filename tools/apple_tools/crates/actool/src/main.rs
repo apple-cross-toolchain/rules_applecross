@@ -146,6 +146,9 @@ struct Scan {
     /// tvOS brand assets and visionOS solid image stacks, by name.
     brand_assets: Vec<(String, PathBuf)>,
     solid_stacks: Vec<(String, PathBuf)>,
+    /// tvOS image stacks Xcode checks: those at the top level and those in
+    /// brand assets, whether or not the brand assets list them.
+    image_stacks: Vec<PathBuf>,
     /// Image sets by name.
     image_sets: Vec<(String, PathBuf)>,
     /// Colour sets with colours, by name.
@@ -255,6 +258,25 @@ fn warning_line(catalogs: &[PathBuf], set: &Path, name: &str) -> String {
     format!("{}:./{}: warning: The image set name \"{name}\" is used by multiple image sets.", catalog.display(), inner.display())
 }
 
+/// Image stacks listing fewer than two layers: Xcode reports an error for
+/// each, which fails rules_apple's build, on every platform and whether or
+/// not --app-icon names it or its brand assets list it. It counts the layers
+/// listed, with or without images (16 probes on iOS, tvOS and visionOS).
+fn stack_layers(scan: &Scan) -> Result<(), String> {
+    let stacks = scan.image_stacks.iter().map(|d| (d, "image stack")).chain(scan.solid_stacks.iter().map(|(_, d)| (d, "visionOS App Icon")));
+    for (dir, kind) in stacks {
+        let name = dir.file_stem().unwrap().to_string_lossy();
+        let contents = read_json(&dir.join("Contents.json"))?;
+        if contents["layers"].as_array().map_or(0, Vec::len) < 2 {
+            return Err(format!("{}: error: The {kind} “{name}” must have at least 2 layers.", dir.display()));
+        }
+    }
+    if let Some(dir) = scan.image_stacks.iter().find(|d| !d.parent().is_some_and(|p| p.extension().is_some_and(|e| e == "brandassets"))) {
+        return Err(format!("{}: this kind of asset is not supported by this actool yet", dir.display()));
+    }
+    Ok(())
+}
+
 /// A catalog's directory, or a folder in it: image sets in folders are named
 /// with the folder's name and a slash when it provides a namespace.
 fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(), String> {
@@ -281,7 +303,17 @@ fn scan_dir(dir: &Path, prefix: &str, top: bool, found: &mut Scan) -> Result<(),
             Some((stem, "colorset")) => found.color_sets.push((format!("{prefix}{stem}"), p)),
             Some((stem, "dataset")) => found.data_sets.push((format!("{prefix}{stem}"), p)),
             Some((stem, "appiconset")) if top => found.icon_sets.push((stem.to_string(), p)),
-            Some((stem, "brandassets")) if top => found.brand_assets.push((stem.to_string(), p)),
+            Some((stem, "brandassets")) if top => {
+                let mut stacks: Vec<PathBuf> = std::fs::read_dir(&p)
+                    .map_err(|e| format!("{}: {e}", p.display()))?
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|s| s.extension().is_some_and(|e| e == "imagestack") && s.is_dir())
+                    .collect();
+                stacks.sort();
+                found.image_stacks.extend(stacks);
+                found.brand_assets.push((stem.to_string(), p));
+            }
+            Some((_, "imagestack")) if top => found.image_stacks.push(p),
             Some((stem, "solidimagestack")) if top => found.solid_stacks.push((stem.to_string(), p)),
             Some((stem, "launchimage")) if top => found.launch_images.push((stem.to_string(), p)),
             Some((stem, "stickersiconset")) if top => found.sticker_icons.push((stem.to_string(), p)),
@@ -525,6 +557,7 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
     let is_document = |p: &PathBuf| p.extension().is_some_and(|e| e == "icon");
     let catalogs: Vec<PathBuf> = o.inputs.iter().filter(|p| !is_document(p)).cloned().collect();
     let mut scan = scan(&catalogs)?;
+    stack_layers(&scan)?;
     one_image_set_per_name(&catalogs, &mut scan.image_sets, &mut o.warnings.borrow_mut())?;
     // Below 2019's systems Xcode stores each image twice, a legacy rendition
     // beside one keyed by deployment target (`legacy_images`).

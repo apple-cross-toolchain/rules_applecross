@@ -1,0 +1,2 @@
+Cat.xcassets:./Brand.brandassets/Icon.imagestack: error: The image stack “Icon” must have at least 2 layers.
+Cat.xcassets:./Brand.brandassets/Icon.imagestack: error: The image stack “Icon” must have at least 2 layers.
