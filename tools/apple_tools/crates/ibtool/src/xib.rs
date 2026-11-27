@@ -69,8 +69,8 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     let root = doc.root_element();
     // An iPad xib compiles as any other (one probe).
     let kind = root.attribute("type");
-    if !matches!(kind, Some("com.apple.InterfaceBuilder3.CocoaTouch.XIB" | "com.apple.InterfaceBuilder3.CocoaTouch.iPad.XIB")) {
-        return fail("only iOS xibs are supported by this ibtool");
+    if !matches!(kind, Some("com.apple.InterfaceBuilder3.CocoaTouch.XIB" | "com.apple.InterfaceBuilder3.CocoaTouch.iPad.XIB" | "com.apple.InterfaceBuilder.AppleTV.XIB")) {
+        return fail("only iOS and tvOS xibs are supported by this ibtool");
     }
     if idiom.is_none() {
         crate::storyboard::refuse_before_ios8(root)?;
@@ -84,6 +84,9 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     if elements(objects).any(|o| o.has_tag_name("window")) {
         if idiom.is_some() {
             return fail("a main window xib deploying before iOS 8 is not supported by this ibtool");
+        }
+        if kind == Some("com.apple.InterfaceBuilder.AppleTV.XIB") {
+            return fail("a tvOS main window xib is not supported by this ibtool");
         }
         return crate::storyboard::compile_xib_window(xml, minimum_deployment_target, module, localizable);
     }
@@ -244,7 +247,8 @@ fn compile_with(xml: &str, minimum_deployment_target: Option<&str>, module: Opti
     // its initial controller.
     let head_end = xml[root.range().start..].find('>').map(|i| root.range().start + i).ok_or("a xib's document element")?;
     let mut head = xml[root.range().start..head_end].trim_end_matches('/').to_string();
-    head = head.replacen(&format!("type=\"{}\"", kind.unwrap_or_default()), "type=\"com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB\"", 1);
+    let storyboard_kind = if kind == Some("com.apple.InterfaceBuilder.AppleTV.XIB") { "com.apple.InterfaceBuilder.AppleTV.Storyboard" } else { "com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" };
+    head = head.replacen(&format!("type=\"{}\"", kind.unwrap_or_default()), &format!("type=\"{storyboard_kind}\""), 1);
     if root.attribute("initialViewController").is_some() {
         return fail("a xib's initialViewController is not supported by this ibtool");
     }

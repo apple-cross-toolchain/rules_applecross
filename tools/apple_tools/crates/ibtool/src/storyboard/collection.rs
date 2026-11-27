@@ -377,19 +377,21 @@ fn flow_layout(nib: &mut Nib, module: Option<&str>, cv: Node) -> Result<(Object,
         }
     }
     let mut values = Vec::new();
-    // Spacings of 10 are the default, left out; others are floats.
-    let spacing = |key: &str| -> Result<f64, String> { layout.attribute(key).map_or(Ok(10.0), number) };
+    // Spacings of 10 are the default, left out; others are floats. tvOS
+    // leaves none out, and its default is 0 (five probes).
+    let tv = nib.platform == Platform::Tvos;
+    let spacing = |key: &str| -> Result<f64, String> { layout.attribute(key).map_or(Ok(if tv { 0.0 } else { 10.0 }), number) };
     let interitem = spacing("minimumInteritemSpacing")?;
-    if interitem != 10.0 {
+    if tv || interitem != 10.0 {
         values.push(("UIInteritemSpacing", Value::Float(interitem as f32)));
     }
     let line = spacing("minimumLineSpacing")?;
-    if line != 10.0 {
+    if tv || line != 10.0 {
         values.push(("UILineSpacing", Value::Float(line as f32)));
     }
     // An item size of 50x50 is the default, left out.
     let (w, h) = item.ok_or("a flow layout without an item size is not supported by this ibtool")?;
-    if (w, h) != (50.0, 50.0) {
+    if tv || (w, h) != (50.0, 50.0) {
         values.push(("UIItemSize", doubles(&[w, h])));
     }
     // Its header and footer reference sizes, unless zero, after its item
