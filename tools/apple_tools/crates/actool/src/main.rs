@@ -6,6 +6,7 @@
 
 mod bom;
 mod car;
+mod cgraster;
 mod colorset;
 mod colour;
 mod data_utis;
