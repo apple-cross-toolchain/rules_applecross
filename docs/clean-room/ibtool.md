@@ -16,9 +16,14 @@ Byte-identical is the measure wherever Xcode's own output is. Where it
 isn't, Xcode differing from run to run on the same document, this ibtool
 makes one fixed output with Xcode's shape: the same objects, classes and
 keys, differing only in values Xcode's own runs disagree on (a
-compile-time date), or only in the order of arrays Xcode's own runs order
-differently (a hash table's order). Two corpus storyboards are matched
-this way; the cases are under date pickers and outlet collections.
+compile-time date, a window controller's UUID), or only in the order of
+arrays Xcode's own runs order differently (a nib's connections).
+`tools/nib_equivalence.py` decides it, allowing only variations seen
+between Xcode's own compiles of the same document (with a fresh ibtoold
+each time); the cases are under date pickers, outlet collections and Mac
+storyboards. Of the corpus, 29 Mac documents and two iOS ones (one at
+three deployment targets) match this way, each varying in Xcode's own runs
+too.
 
 ## Xibs
 
@@ -717,8 +722,9 @@ other values of the attributes these use, is refused. Observed:
   there). These sets are `NSSet`s, archived in their hash tables' order,
   which follows ids Interface Builder assigns internally: the decimal
   strings are its usual order, not a rule (24 random probes of left-out
-  subviews and their constraints break it), so the corpus harness compares
-  an `NSSet`'s members unordered. A prototype cell's records rank as a
+  subviews and their constraints break it). That order is the same in
+  Xcode's own repeated compiles, so it isn't matched loosely; no corpus
+  document needs it. A prototype cell's records rank as a
   view nib's (a probe with six withheld constraints). A subview the
   default variation leaves out has its constraints first among the
   root's, in an order established for one constraint each with the root
@@ -726,9 +732,10 @@ other values of the attributes these use, is refused. Observed:
   neither the installed views' (37 of 40 random probes differ) nor any
   order of their frames' places, the lines Interface Builder draws,
   attributes, ids or document order found (moving the frames permutes
-  blocks of them), so this ibtool keeps the installed views' order there
-  and the corpus harness compares those constraints unordered among
-  themselves, the rest exact. A prototype cell's content view, an
+  blocks of them), so this ibtool keeps the installed views' order there.
+  Xcode's own repeated compiles keep one order, so that isn't matched
+  loosely: one corpus storyboard (at iOS 18, 16 and 12) differs there and
+  is still to be fixed. A prototype cell's content view, an
   old-format collection view cell (its masks and constraints on the cell,
   for its synthesized content view, which isn't among the descendants)
   and a collection view's section header leave subviews out the same

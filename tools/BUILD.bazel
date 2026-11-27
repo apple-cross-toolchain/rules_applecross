@@ -47,7 +47,10 @@ py_binary(
 # (docs/clean-room/README.md#determinism).
 py_library(
     name = "xcode_equivalence",
-    srcs = ["xcode_equivalence.py"],
+    srcs = [
+        "nib_equivalence.py",
+        "xcode_equivalence.py",
+    ],
     imports = ["."],
     visibility = ["//tests:__subpackages__"],
 )

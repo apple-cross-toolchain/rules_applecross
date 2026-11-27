@@ -1,5 +1,6 @@
 """Xcode's own run-to-run variations are equivalent; any other change isn't."""
 
+import re
 import struct
 import unittest
 
@@ -93,6 +94,44 @@ class DoccJsonTest(unittest.TestCase):
     def test_outside_an_archive_order_counts(self):
         first, second = read("greeter.1.json"), read("greeter.2.json")
         self.assertFalse(equivalent("data/greeter.json", first, second))
+
+
+class NibTest(unittest.TestCase):
+    """ibtool gives a Mac storyboard's window controller a new UUID each run
+    (data/Window.storyboard, compiled twice for macOS 14): in its nib and in
+    the storyboard's Info.plist."""
+
+    NIB = "W.storyboardc/NSWindowController-wnc-aa-bbb.nib"
+    PLIST = "W.storyboardc/Info.plist"
+    UUID = re.compile(rb"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
+
+    def test_two_xcode_runs_are_equivalent(self):
+        for path, name in ((self.NIB, "WindowController.%d.nib"), (self.PLIST, "Window.%d.plist")):
+            first, second = read(name % 1), read(name % 2)
+            self.assertNotEqual(first, second, name)
+            self.assertTrue(equivalent(path, first, second), name)
+
+    def test_any_changed_byte_but_the_uuids_is_not(self):
+        for path, name in ((self.NIB, "WindowController.%d.nib"), (self.PLIST, "Window.%d.plist")):
+            first, second = read(name % 1), read(name % 2)
+            uuids = {i for m in self.UUID.finditer(second) for i in range(m.start(), m.end())}
+            for at in range(len(second)):
+                if at in uuids:
+                    continue
+                changed = bytearray(second)
+                changed[at] ^= 1
+                self.assertFalse(equivalent(path, first, bytes(changed)), (name, at))
+
+    def test_one_uuid_for_two_is_not(self):
+        first, second = read("WindowController.1.nib"), read("WindowController.2.nib")
+        found = self.UUID.findall(second)
+        self.assertEqual(len(set(found)), 2)
+        # The window controller's UUID and its class swapper's made one.
+        self.assertFalse(equivalent(self.NIB, first, second.replace(found[1], found[0])))
+
+    def test_outside_a_storyboard_uuids_count(self):
+        first, second = read("Window.1.plist"), read("Window.2.plist")
+        self.assertFalse(equivalent("Info.plist", first, second))
 
 
 if __name__ == "__main__":
