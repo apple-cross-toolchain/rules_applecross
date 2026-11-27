@@ -141,10 +141,12 @@ fn table_values(
     nib: &mut Nib, scene: &mut Scene, name: &str, table: Node, f: &Frame, cells: &[(&str, Node, Option<String>)], mask_default: i64,
     layout: Vec<(&'static str, Value)>, refresh: Option<Value>,
 ) -> Result<Vec<(&'static str, Value)>, String> {
-    // tvOS's table views archive another background, scroll indicator and
-    // separator style, not established.
-    if nib.platform == Platform::Tvos {
-        return fail("a tvOS table view is not supported by this ibtool");
+    // tvOS's table views: a clear background without one of their own, no
+    // vertical scroll indicator whatever the document says, and separator
+    // keys of their own (nine probes of a lone table, plain and grouped).
+    let tv = nib.platform == Platform::Tvos;
+    if tv && (table.attribute("bounces").is_some() || table.attribute("showsHorizontalScrollIndicator").is_some()) {
+        return fail("a tvOS table view that doesn't bounce or hides its horizontal indicator is not supported by this ibtool");
     }
     let (style, ui_style) = match attr(table, "style")? {
         "plain" => (0, 0),
@@ -194,8 +196,11 @@ fn table_values(
     if !inner.is_empty() {
         values.push(("UISubviews", nib.array("NSMutableArray", inner)));
     }
-    if let Some(c) = child(table, "color", "backgroundColor") {
-        values.push(("UIBackgroundColor", table_background(nib, c, plain)?));
+    match child(table, "color", "backgroundColor") {
+        Some(c) if tv => values.push(("UIBackgroundColor", color(nib, c)?)),
+        Some(c) => values.push(("UIBackgroundColor", table_background(nib, c, plain)?)),
+        None if tv => values.push(("UIBackgroundColor", nib.system_color("clearColor", &SystemColor::Gray([0.0, 0.0]))?)),
+        None => {}
     }
     values.push(("UIDeepDrawRect", Value::Bool(true)));
     if table.attribute("opaque").is_none() {
@@ -228,6 +233,9 @@ fn table_values(
     values.push(("UIViewSemanticContentAttribute", Value::Int(0)));
     nib.large_content(&mut values);
     values.push(("UIScrollViewIndicatorInsetAdjustmentBehavior", Value::Int(1)));
+    if tv {
+        values.push(("UIShowsVerticalScrollIndicator", Value::Bool(false)));
+    }
     // Not bouncing, before its indicators as a text view's (one probe).
     if table.attribute("bounces").is_some() {
         values.push(("UIBounceEnabled", Value::Bool(false)));
@@ -265,12 +273,25 @@ fn table_values(
         "singleLineEtched" => 2,
         other => return fail(format!("separator style {other} is not supported by this ibtool")),
     };
-    if separator != 0 {
-        values.push(("UISeparatorStyle", Value::Int(separator)));
-        values.push(("UISeparatorStyleIOS5AndLater", Value::Int(separator)));
-    }
-    if separator != 1 {
-        values.push(("UISeparatorStyleIOS9AndLater", Value::Int(separator)));
+    if tv {
+        // tvOS: the default and none write nothing, a single line (or no
+        // style) all three keys.
+        if separator == 2 {
+            return fail("a tvOS table view's etched separator is not supported by this ibtool");
+        }
+        if matches!(table.attribute("separatorStyle"), Some("singleLine") | None) {
+            for key in ["UISeparatorStyle", "UISeparatorStyleIOS5AndLater", "UISeparatorStyleIOS9AndLater"] {
+                values.push((key, Value::Int(1)));
+            }
+        }
+    } else {
+        if separator != 0 {
+            values.push(("UISeparatorStyle", Value::Int(separator)));
+            values.push(("UISeparatorStyleIOS5AndLater", Value::Int(separator)));
+        }
+        if separator != 1 {
+            values.push(("UISeparatorStyleIOS9AndLater", Value::Int(separator)));
+        }
     }
     values.push(("UIPrefetchingEnabled", Value::Bool(true)));
     // Left out, a plain table's section heights are 22, the estimates 0.

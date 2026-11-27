@@ -1205,10 +1205,15 @@ other values of the attributes these use, is refused. Observed:
   view cell, which is compiled with tvOS's rules too (the 12 xibs of
   Xcode's tvOS file templates without a table view). A tvOS flow layout
   writes its spacings and item size even at 10 and 50x50, and a spacing it
-  doesn't name is 0, not 10 (five probes). A tvOS table view archives
-  another background colour and scroll indicator and no separator style,
-  which aren't established, so it is refused (two of those templates), as
-  is a tvOS main window xib.
+  doesn't name is 0, not 10 (five probes). A tvOS table view has
+  `clearColor` as its background unless it names one (a white, as
+  `whiteColor`), `UIShowsVerticalScrollIndicator` false after
+  `UIScrollViewIndicatorInsetAdjustmentBehavior` whatever the document
+  says, and for a single-line separator (or none named) all three
+  separator keys at 1, for `default` or `none` none (nine probes of a lone
+  table, plain and grouped; the two table templates). One that doesn't
+  bounce, hides its horizontal indicator or has etched separators is
+  refused, as is a tvOS main window xib.
 
 ## Stack views, content modes, named colours and gesture recognizers
 
