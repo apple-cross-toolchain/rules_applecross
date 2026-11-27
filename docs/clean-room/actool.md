@@ -1255,7 +1255,29 @@ Matching the bitmaps needs CoreGraphics' and CoreSVG's drawing, pixel for
 pixel, which this actool doesn't reproduce. So vector images are refused
 strictly. With `--config=relax_actool_vector` they compile:
 
-- **The bitmaps:** resvg draws SVGs and hayro draws PDFs.
+- **The bitmaps:** a PDF page or an SVG that only fills paths with
+  opaque colours is drawn as CoreGraphics draws it
+  (`crates/actool/src/cgraster.rs`; Xcode draws the two kinds the same: a
+  PDF and an SVG of one drawing give byte-identical bitmaps). Others are
+  drawn by resvg (SVGs) and hayro (PDFs).
+  - **Fills:** CoreGraphics' fixed-point scan converter, found black-box
+    by drawing paths through CoreGraphics' public API into bitmaps on a Mac
+    and reading the pixels back (the research is on the branch
+    `coregraphics-fills-research`). It is exact for random edges, wedges
+    and rectangles, and ±1 in some rows holding a vertex of triangles and
+    curves, so these bitmaps stay relaxed.
+  - **Colour and compositing:** a grey or RGB colour becomes sRGB bytes as
+    `floor(v · 255 + 0.5)`, and each fill composites over the bitmap as
+    `floor((c · a + d · (255 − a)) / 255)` per premultiplied channel, a
+    its coverage (384 of 384 channels probed, over clear, opaque and
+    translucent pixels).
+  - **Placement:** the page or SVG is drawn from the bitmap's lower left
+    corner, so where a side's pixels are rounded up, the slack is at the
+    top (pages of 200.5 x 150.75 and 200.25 x 150.5 points, PDFs and SVGs,
+    1x to 3x).
+  - Of the corpus's 26 vector catalogs, 21 compile byte-identical to
+    Xcode's with the config; the others hold strokes, SVG circles, or PDF
+    features beyond opaque fills.
 - **The PDF:** as CoreGraphics writes it (below, "Exact PDFs") where the
   page is within what this actool replays, else stored as it is, which
   CoreUI reads all the same.

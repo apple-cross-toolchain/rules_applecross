@@ -319,7 +319,19 @@ impl Resources {
 }
 
 /// The content CoreGraphics writes, as tokens.
+/// A fill of a page this actool can draw as CoreGraphics does
+/// (crate::cgraster): its path in page space (the CTM applied), its rule
+/// and its colour as sRGB bytes, `floor(v · 255 + 0.5)`.
+pub struct Fill {
+    pub path: Vec<crate::cgraster::Element>,
+    pub even_odd: bool,
+    pub colour: [u8; 3],
+}
+
 struct Writer {
+    /// The page's paintings while they are all opaque fills of a grey or
+    /// RGB colour with no clip; None once one isn't.
+    fills: Option<Vec<Fill>>,
     out: Vec<String>,
     /// What the written content has set, inside its `q`.
     written: State,
@@ -462,6 +474,40 @@ impl Writer {
         self.written.clip = clip.to_vec();
     }
 
+    /// Keeps a painting for drawing, while every one is an opaque fill of a
+    /// grey or RGB colour without a clip.
+    fn record(&mut self, state: &State, path: &[Segment], op: &str) {
+        let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0 + 0.5).floor() as u8;
+        let colour = match state.fill.0 {
+            Colour::Gray(g) => Some([byte(g); 3]),
+            Colour::Rgb([r, g, b]) => Some([byte(r), byte(g), byte(b)]),
+            Colour::Cmyk(_) => None,
+        };
+        let drawable = matches!(op, "f" | "f*") && state.fill.1 == 1.0 && state.clips().is_empty();
+        let (Some(fills), Some(colour), true) = (self.fills.as_mut(), colour, drawable) else {
+            self.fills = None;
+            return;
+        };
+        use crate::cgraster::{Element, Point};
+        let mut elements = Vec::new();
+        for s in transformed(path, &state.ctm) {
+            match s {
+                Segment::Move(x, y) => elements.push(Element::Move(Point { x, y })),
+                Segment::Line(x, y) => elements.push(Element::Line(Point { x, y })),
+                Segment::Curve(c) => elements.push(Element::Cubic(Point { x: c[0], y: c[1] }, Point { x: c[2], y: c[3] }, Point { x: c[4], y: c[5] })),
+                Segment::Close => elements.push(Element::Close),
+                Segment::Rect(x, y, w, h) => {
+                    elements.push(Element::Move(Point { x, y }));
+                    elements.push(Element::Line(Point { x: x + w, y }));
+                    elements.push(Element::Line(Point { x: x + w, y: y + h }));
+                    elements.push(Element::Line(Point { x, y: y + h }));
+                    elements.push(Element::Close);
+                }
+            }
+        }
+        fills.push(Fill { path: elements, even_odd: op == "f*", colour });
+    }
+
     fn paint(&mut self, state: &State, path: &[Segment], op: &str) {
         if path.is_empty() {
             return;
@@ -471,6 +517,7 @@ impl Writer {
             self.open = true;
         }
         self.clip(&state.clips());
+        self.record(state, path, op);
         let fills = matches!(op, "f" | "f*" | "B" | "B*");
         let strokes = matches!(op, "S" | "B" | "B*");
         if strokes {
@@ -581,13 +628,19 @@ fn profile(gray: bool) -> Result<Vec<u8>, String> {
 
 /// The PDF Xcode stores for a vector set's `data`.
 pub fn rewrite(data: &[u8]) -> Result<Vec<u8>, String> {
-    let (content, resources, size) = draw(data)?;
+    let (content, resources, size, _) = draw(data)?;
     assemble(&content, &resources, size, &profile)
 }
 
+/// The page of `data` as fills this actool draws as CoreGraphics does, when
+/// that's all it holds, and its height; None otherwise.
+pub fn fills(data: &[u8]) -> Option<(Vec<Fill>, f64)> {
+    draw(data).ok().and_then(|(_, _, (_, height), fills)| fills.map(|f| (f, height)))
+}
+
 /// The page of `data` drawn again: the content stream, the resources it
-/// names and the page's size.
-fn draw(data: &[u8]) -> Result<(String, Resources, (f64, f64)), String> {
+/// names, the page's size and its fills (`Writer::fills`).
+fn draw(data: &[u8]) -> Result<(String, Resources, (f64, f64), Option<Vec<Fill>>), String> {
     let pdf = Pdf::new(data.to_vec()).map_err(|e| format!("not a PDF Xcode could read ({e:?})"))?;
     let pages = pdf.pages();
     let [page] = pages.as_ref() else {
@@ -604,7 +657,7 @@ fn draw(data: &[u8]) -> Result<(String, Resources, (f64, f64)), String> {
     let content = page.page_stream().ok_or("a PDF page without content")?;
     let resources = page.resources();
 
-    let mut w = Writer { out: vec!["q".into(), "Q".into()], written: State::initial(), open: false, painted: false, error: None, resources: Resources::default() };
+    let mut w = Writer { fills: Some(Vec::new()), out: vec!["q".into(), "Q".into()], written: State::initial(), open: false, painted: false, error: None, resources: Resources::default() };
     let mut state = State::initial();
     let mut stack: Vec<State> = Vec::new();
     let mut path: Vec<Segment> = Vec::new();
@@ -808,7 +861,7 @@ fn draw(data: &[u8]) -> Result<(String, Resources, (f64, f64)), String> {
         content.push_str(t);
         column += t.len();
     }
-    Ok((content, w.resources, (media.x1, media.y1)))
+    Ok((content, w.resources, (media.x1, media.y1), w.fills))
 }
 
 /// The file CoreGraphics writes for a content stream, with `profile`'s ICC
@@ -997,7 +1050,7 @@ mod tests {
              "q Q q /Cs1 CS 0 0 1 SC q 1 0 0 1 11.6 22.313 cm 21.465 26 m 0.10 27.197 29\n17.1 11.5 5.885 c S Q Q"),
         ];
         for (content, resources, want) in cases {
-            let (got, _, _) = draw(&pdf(content, resources)).unwrap_or_else(|e| panic!("{content}: {e}"));
+            let (got, _, _, _) = draw(&pdf(content, resources)).unwrap_or_else(|e| panic!("{content}: {e}"));
             assert_eq!(&got, want, "{content}");
         }
     }
@@ -1023,7 +1076,7 @@ mod tests {
     fn files_are_xcode_s() {
         let no_profile = |_: bool| -> Result<Vec<u8>, String> { panic!("no profile is needed") };
         for (content, length, crc) in [("0 g 1 1 30 30 re f", 682, 0x23b6e06au32), ("0 1 1 0 k 1 1 30 30 re f", 689, 0xfe77bc9f)] {
-            let (c, res, size) = draw(&pdf(content, "")).unwrap();
+            let (c, res, size, _) = draw(&pdf(content, "")).unwrap();
             let file = assemble(&c, &res, size, &no_profile).unwrap();
             assert_eq!((file.len(), crate::image::crc32_of(&file)), (length, crc), "{content}");
         }
