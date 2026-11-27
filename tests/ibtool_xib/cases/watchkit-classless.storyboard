@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder.WatchKit.Storyboard" version="3.0" toolsVersion="23504" targetRuntime="watchKit" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" colorMatched="YES">
+    <device id="watch38"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBWatchKitPlugin" version="23504"/>
+    </dependencies>
+    <scenes>
+        <scene sceneID="sc1-cc-ddd">
+            <objects>
+                <controller identifier="Detail" id="ctl-cc-ddd">
+                    <items>
+                        <label alignment="left" text="Detail" id="lbl-cc-ddd"/>
+                    </items>
+                </controller>
+            </objects>
+        </scene>
+        <scene sceneID="sc2-cc-ddd">
+            <objects>
+                <controller id="ctl-ee-fff">
+                    <items>
+                        <label alignment="left" text="Never loaded" id="lbl-ee-fff"/>
+                    </items>
+                </controller>
+            </objects>
+        </scene>
+    </scenes>
+</document>

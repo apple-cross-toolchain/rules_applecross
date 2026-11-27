@@ -2773,9 +2773,13 @@ Xcode does.
 `controller-<id>`; its class is its runtime name, a Swift class of a custom
 module mangled (`_TtC5Other19InterfaceController`), the target's module
 (`customModuleProvider="target"`) being `--module`'s. A controller without
-items has no `items`. A SwiftUI `hostingController` is listed as a
-controller of its class. A controller nothing loads (not initial, without
-an identifier, no page leading to it) is left out. Controllers linked by
+items has no `items`, and one without a custom class no class. A SwiftUI
+`hostingController` is listed as a controller of its class. A controller
+nothing loads (not initial, without an identifier, no page leading to it)
+is left out, items and all; one with connections is refused. Without an
+initial controller there is no `root`, and with nothing to load no
+`Interface.plist` at all, the `.storyboardc` empty, as for Xcode's
+WatchKit storyboard template (eight probes). Controllers linked by
 `nextPage` segues make the root an array: the chain of pages from the
 initial controller, whatever the document's order; other page graphs are
 refused.
