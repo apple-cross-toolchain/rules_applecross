@@ -305,7 +305,8 @@ fn controller_items(controller: Node, cx_outlets: &mut Vec<(String, String)>, se
 pub fn compile(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec<(String, Vec<u8>)>, String> {
     let doc = Document::parse(xml).map_err(|e| e.to_string())?;
     let root = doc.root_element();
-    let initial = attr(root, "initialViewController")?;
+    // Without an initial controller the interface has no root (probes).
+    let initial = root.attribute("initialViewController");
     let scenes = elements(root).find(|c| c.has_tag_name("scenes")).ok_or("storyboard has no scenes")?;
     let members: Vec<Node> = elements(scenes)
         .map(|scene| elements(scene).find(|c| c.has_tag_name("objects")).ok_or("scene without objects"))
@@ -323,13 +324,11 @@ pub fn compile(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec
     // A controller is named by its identifier, else `controller-<id>`
     // (rules_apple's Buttons example, a corpus storyboard).
     let name = |c: Node| -> Result<String, String> { Ok(c.attribute("identifier").map(str::to_string).unwrap_or(format!("controller-{}", attr(c, "id")?))) };
-    let class = |c: Node| -> Result<String, String> {
-        if c.attribute("customClass").is_none() {
-            return fail("controllers without a custom class are not supported by this ibtool");
-        }
-        // Its class as the runtime names it: a Swift class of a module
-        // (the target's, given by --module) mangled (a corpus storyboard).
-        crate::storyboard::runtime_class_name(c, module, "")
+    // Its class as the runtime names it: a Swift class of a module (the
+    // target's, given by --module) mangled (a corpus storyboard); without
+    // one, none is listed (two probes, with and without items).
+    let class = |c: Node| -> Result<Option<String>, String> {
+        c.attribute("customClass").map(|_| crate::storyboard::runtime_class_name(c, module, "")).transpose()
     };
     let mut controllers = Vec::new();
     let mut pages: Vec<(String, String)> = Vec::new();
@@ -340,17 +339,19 @@ pub fn compile(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec
             // A SwiftUI hosting controller is listed as a controller of its
             // class (a corpus storyboard).
             // A controller nothing loads (not initial, unnamed, no page
-            // leads to it) is left out (probes).
-            "controller" | "hostingController" if !dynamic.contains(&id) && id != initial && controller.attribute("identifier").is_none() && !doc.descendants().any(|d| d.has_tag_name("segue") && d.attribute("relationship") == Some("nextPage") && d.attribute("destination") == Some(id)) => {
-                if elements(*controller).next().is_some() {
-                    return fail("a controller nothing loads, with items or connections, is not supported by this ibtool");
+            // leads to it) is left out, its items too (probes, with and
+            // without a class); with none left the .storyboardc is empty
+            // (Xcode's WatchKit storyboard template).
+            "controller" | "hostingController" if !dynamic.contains(&id) && Some(id) != initial && controller.attribute("identifier").is_none() && !doc.descendants().any(|d| d.has_tag_name("segue") && d.attribute("relationship") == Some("nextPage") && d.attribute("destination") == Some(id)) => {
+                if elements(*controller).any(|e| e.has_tag_name("connections")) {
+                    return fail("a controller nothing loads, with connections, is not supported by this ibtool");
                 }
             }
             "controller" | "hostingController" if !dynamic.contains(&id) => {
                 let mut outlets = Vec::new();
                 let mut segues = Vec::new();
                 let items = controller_items(*controller, &mut outlets, &mut segues, localizable, &["nextPage"])?;
-                let mut values = vec![("controllerClass", Value::string(class(*controller)?))];
+                let mut values: Vec<(&'static str, Value)> = class(*controller)?.map(|c| ("controllerClass", Value::string(c))).into_iter().collect();
                 // A controller without items has none listed (a probe).
                 if !items.is_empty() {
                     values.push(("items", Value::Array(items)));
@@ -386,12 +387,12 @@ pub fn compile(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec
                     static_values.push(("items", Value::Array(items)));
                 }
                 if controller.attribute("customClass").is_some() {
-                    static_values.push(("controllerClass", Value::string(class(*controller)?)));
+                    static_values.push(("controllerClass", Value::string(class(*controller)?.ok_or("a notification's controller without a custom class is not supported by this ibtool")?)));
                 }
                 let mut values = Vec::new();
                 if let [(_, destination)] = segues.as_slice() {
                     let target = members.iter().find(|m| m.attribute("id") == Some(destination.as_str())).ok_or("a dynamic notification's controller")?;
-                    values.push(("dynamic", Value::dict([("controllerClass", Value::string(class(*target)?))])));
+                    values.push(("dynamic", Value::dict([("controllerClass", Value::string(class(*target)?.ok_or("a notification's controller without a custom class is not supported by this ibtool")?))])));
                 } else if !segues.is_empty() {
                     return fail("a notification with more than one dynamic interface is not supported by this ibtool");
                 }
@@ -401,12 +402,17 @@ pub fn compile(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec
             other => return fail(format!("<{other}> in a WatchKit scene is not supported by this ibtool")),
         }
     }
-    let initial_node = members.iter().find(|m| m.attribute("id") == Some(initial)).ok_or("the initial controller")?;
     // Pages: the root is the chain of nextPage segues from the initial
     // controller (a corpus storyboard), which must hold them all.
-    let root = if pages.is_empty() {
-        Value::string(name(*initial_node)?)
-    } else {
+    let root = match initial {
+        None if pages.is_empty() => None,
+        None => return fail("pages without an initial controller are not supported by this ibtool"),
+        Some(initial) => Some((initial, members.iter().find(|m| m.attribute("id") == Some(initial)).ok_or("the initial controller")?)),
+    };
+    let root = match root {
+        None => None,
+        Some((_, initial_node)) if pages.is_empty() => Some(Value::string(name(*initial_node)?)),
+        Some((initial, initial_node)) => {
         let mut chain = vec![name(*initial_node)?];
         let mut at = initial.to_string();
         let mut seen = 0;
@@ -422,10 +428,18 @@ pub fn compile(xml: &str, module: Option<&str>, localizable: bool) -> Result<Vec
         if seen != pages.len() {
             return fail("pages other than one chain from the initial controller are not supported by this ibtool");
         }
-        Value::Array(chain.into_iter().map(Value::string).collect())
+        Some(Value::Array(chain.into_iter().map(Value::string).collect()))
+        }
     };
-    let plist = Value::dict([("controllers", Value::Dictionary(controllers)), ("root", root)]);
-    let mut out = vec![("Interface.plist".into(), cf::binary::to_bytes_scoped(&plist, &scope, cf::binary::Dictionaries::Grown))];
+    // Nothing to load, nothing is written (Xcode's WatchKit storyboard
+    // template, and probes).
+    let mut out = Vec::new();
+    if !controllers.is_empty() || root.is_some() {
+        let mut entries = vec![("controllers", Value::Dictionary(controllers))];
+        entries.extend(root.map(|r| ("root", r)));
+        let plist = Value::dict(entries);
+        out.push(("Interface.plist".into(), cf::binary::to_bytes_scoped(&plist, &scope, cf::binary::Dictionaries::Grown)));
+    }
     if !categories.is_empty() {
         let plist = Value::dict([("categories", Value::Dictionary(categories))]);
         out.push(("Interface-notification.plist".into(), cf::binary::to_bytes_scoped(&plist, &scope, cf::binary::Dictionaries::Grown)));
