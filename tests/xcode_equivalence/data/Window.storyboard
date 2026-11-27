@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.Storyboard.XIB" version="3.0" toolsVersion="23504" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" initialViewController="wnc-aa-bbb">
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="23504"/>
+    </dependencies>
+    <scenes>
+        <scene sceneID="sw1-aa-bbb">
+            <objects>
+                <windowController id="wnc-aa-bbb" sceneMemberID="viewController">
+                    <window key="window" title="Window" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" releasedWhenClosed="NO" animationBehavior="default" id="win-aa-bbb">
+                        <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES"/>
+                        <rect key="contentRect" x="196" y="240" width="480" height="270"/>
+                        <rect key="screenRect" x="0.0" y="0.0" width="1440" height="875"/>
+                        <connections>
+                            <outlet property="delegate" destination="wnc-aa-bbb" id="dlg-aa-bbb"/>
+                        </connections>
+                    </window>
+                    <connections>
+                        <segue destination="vco-aa-bbb" kind="relationship" relationship="window.shadowedContentViewController" id="seg-aa-bbb"/>
+                    </connections>
+                </windowController>
+                <customObject id="frs-aa-bbb" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="0.0" y="0.0"/>
+        </scene>
+        <scene sceneID="sv1-aa-bbb">
+            <objects>
+                <viewController id="vco-aa-bbb" customClass="PanelController" customModule="App" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" id="vwr-aa-bbb">
+                        <rect key="frame" x="0.0" y="0.0" width="480" height="270"/>
+                        <autoresizingMask key="autoresizingMask"/>
+                        <subviews>
+                            <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="btn-aa-bbb">
+                                <rect key="frame" x="20" y="20" width="100" height="32"/>
+                                <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                                <buttonCell key="cell" type="push" title="Go" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="bcl-aa-bbb">
+                                    <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                    <font key="font" metaFont="system"/>
+                                </buttonCell>
+                                <connections>
+                                    <action selector="go:" target="vco-aa-bbb" id="act-aa-bbb"/>
+                                </connections>
+                            </button>
+                        </subviews>
+                    </view>
+                    <connections>
+                        <outlet property="goButton" destination="btn-aa-bbb" id="out-aa-bbb"/>
+                    </connections>
+                </viewController>
+                <customObject id="frs-cc-ddd" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="0.0" y="400"/>
+        </scene>
+    </scenes>
+</document>

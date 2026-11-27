@@ -6,7 +6,7 @@ Each such variation is listed here, with how to put both sides in one order
 before comparing them byte for byte; everything else must match exactly.
 Our own tools are deterministic: where Xcode varies, they keep one order.
 
-  python3 tools/xcode_equivalence.py [--approximate-icon-rasters] XCODE OURS
+  python3 tools/xcode_equivalence.py [--approximate-icon-rasters] [--document=PATH] [--compile-time-dates] XCODE OURS
 
 compares two directories (or two files), prints each file that differs
 beyond those variations, and exits 1 if any do.
@@ -34,6 +34,12 @@ Known variations (docs/clean-room/README.md#determinism):
   (`NAME1024x1024_UIAppearanceAny_<UUID>-<pid>-<16 hex digits>.png`, cut to
   127 bytes), and gives the icon's facet in FACETKEYS the part of its icon
   images (220) or of its icon stacks (245), at random.
+- ibtool varies the order of a nib's connections, among others
+  (tools/nib_equivalence.py, which compares .nib
+  files; with --document, the xib or storyboard they were compiled from,
+  and with --compile-time-dates, a date picker's date below iOS 14), and
+  gives a Mac storyboard's window controllers a new UUID each run, in its
+  Info.plist too.
 - docc writes each JSON object of a DocC archive (`.doccarchive`: its pages'
   data, index, metadata) with its keys in a randomly seeded order. Ours sets
   SWIFT_DETERMINISTIC_HASHING (toolchain/stubs/docc.sh), so it writes one.
@@ -45,6 +51,11 @@ import os
 import re
 import struct
 import sys
+
+# Beside this file, also when run with `python3 -I`, which leaves its
+# directory off the path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nib_equivalence  # noqa: E402
 
 
 # --- Protobuf -------------------------------------------------------------------
@@ -665,13 +676,24 @@ def is_icon_document_catalog(data):
         return False
 
 
-def equivalent(path, xcode, ours, approximate_icon_rasters=False):
+_PLIST_UUID = re.compile(rb"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
+
+
+def equivalent(path, xcode, ours, approximate_icon_rasters=False, document=None, compile_time_dates=False):
     """Whether `ours` is Xcode's output at `path`, up to Xcode's variations;
     with `approximate_icon_rasters`, `path` (an Assets.car, a PNG or an
     .icns) being an Icon Composer document's output, also up to its
-    flattened images' pixels."""
+    flattened images' pixels. A nib is compared by nib_equivalence, with
+    `document` and `compile_time_dates`."""
     if xcode == ours:
         return True
+    if path.endswith(".nib"):
+        try:
+            return nib_equivalence.equivalent(xcode, ours, document, compile_time_dates)
+        except (ValueError, IndexError, KeyError, struct.error):
+            return False
+    if path.endswith(".plist") and ".storyboardc" in path:
+        return _PLIST_UUID.sub(b"UUID", xcode) == _PLIST_UUID.sub(b"UUID", ours)
     if os.path.basename(path) == "Assets.car":
         try:
             if _car_equivalent(xcode, ours):
@@ -716,11 +738,12 @@ def tree(root):
     return out
 
 
-def differences(xcode_root, ours_root, approximate_icon_rasters=False):
+def differences(xcode_root, ours_root, approximate_icon_rasters=False, document=None, compile_time_dates=False):
     """The files of two directories that differ beyond Xcode's variations.
     With `approximate_icon_rasters`, a directory whose Assets.car (Xcode's)
     holds an Icon Composer document may differ in its flattened images'
-    pixels, there and in the PNG and .icns files beside it."""
+    pixels, there and in the PNG and .icns files beside it. `document` and
+    `compile_time_dates` are for nibs (`equivalent`)."""
     xcode, ours = tree(xcode_root), tree(ours_root)
     icon_dirs = {os.path.dirname(p) for p, data in xcode.items()
                  if approximate_icon_rasters and os.path.basename(p) == "Assets.car" and is_icon_document_catalog(data)}
@@ -729,23 +752,25 @@ def differences(xcode_root, ours_root, approximate_icon_rasters=False):
         if path not in xcode or path not in ours:
             out.append("only in %s: %s" % (xcode_root if path in xcode else ours_root, path))
         elif not equivalent(os.path.join(os.path.abspath(xcode_root), path), xcode[path], ours[path],
-                            os.path.dirname(path) in icon_dirs):
+                            os.path.dirname(path) in icon_dirs, document, compile_time_dates):
             out.append("different: %s" % path)
     return out
 
 
 def main(argv):
     approximate = "--approximate-icon-rasters" in argv
-    argv = [a for a in argv if a != "--approximate-icon-rasters"]
+    dates = "--compile-time-dates" in argv
+    document = next((a.split("=", 1)[1] for a in argv if a.startswith("--document=")), None)
+    argv = [a for a in argv if not a.startswith("--")]
     if len(argv) != 2:
-        print("usage: xcode_equivalence.py [--approximate-icon-rasters] XCODE OURS", file=sys.stderr)
+        print("usage: xcode_equivalence.py [--approximate-icon-rasters] [--document=PATH] [--compile-time-dates] XCODE OURS", file=sys.stderr)
         return 2
     if os.path.isfile(argv[0]) and os.path.isfile(argv[1]):
         with open(argv[0], "rb") as a, open(argv[1], "rb") as b:
-            same = equivalent(os.path.abspath(argv[0]), a.read(), b.read(), approximate)
+            same = equivalent(os.path.abspath(argv[0]), a.read(), b.read(), approximate, document, dates)
         diffs = [] if same else ["different: %s" % argv[1]]
     else:
-        diffs = differences(argv[0], argv[1], approximate)
+        diffs = differences(argv[0], argv[1], approximate, document, dates)
     for line in diffs:
         print(line)
     return 1 if diffs else 0

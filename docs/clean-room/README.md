@@ -120,6 +120,14 @@ Known variations:
 - `docc` writes each JSON object of a DocC archive with its keys in a
   random order; ours sets `SWIFT_DETERMINISTIC_HASHING=1`, and the
   comparison sorts them ([docc.md](docc.md)).
+- `ibtool` varies the order of a nib's connections and of an AppKit nib's
+  accessibility connectors, a Mac storyboard's window controllers' UUIDs
+  (in their nibs and the storyboard's Info.plist), the frames of a resized
+  root view's subviews, an AppKit scroller's layer and tiling in an ssh
+  session's first compile, and below iOS 14 a date picker's date (the
+  compile time). `tools/nib_equivalence.py` puts both nibs in one canonical
+  form and compares them whole, allowing only those; each is seen in
+  Xcode's own repeated compiles ([ibtool.md](ibtool.md)).
 - `appintentsmetadataprocessor` varies the order of some arrays unless
   `SWIFT_DETERMINISTIC_HASHING=1` is set, as rules_apple sets it
   ([appintentsmetadataprocessor.md](appintentsmetadataprocessor.md)).
