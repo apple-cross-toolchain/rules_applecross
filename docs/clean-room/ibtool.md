@@ -734,8 +734,10 @@ other values of the attributes these use, is refused. Observed:
   attributes, ids or document order found (moving the frames permutes
   blocks of them), so this ibtool keeps the installed views' order there.
   Xcode's own repeated compiles keep one order, so that isn't matched
-  loosely: one corpus storyboard (at iOS 18, 16 and 12) differs there and
-  is still to be fixed. A prototype cell's content view, an
+  loosely. The same goes for a collection view cell's subviews its default
+  variation leaves out: one constraint each with the cell compiles, more
+  are refused (a corpus storyboard's old-format cell, at iOS 18, 16 and
+  12). A prototype cell's content view, an
   old-format collection view cell (its masks and constraints on the cell,
   for its synthesized content view, which isn't among the descendants)
   and a collection view's section header leave subviews out the same
