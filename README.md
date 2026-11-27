@@ -62,9 +62,12 @@ one fails:
 - `.xib` files other than an iOS one holding a view, a table view cell or a
   collection view cell
   ([docs/clean-room/ibtool.md](docs/clean-room/ibtool.md#xibs));
-- tvOS app icons, and Icon Composer icons, whose layers (all iOS and macOS
-  26 and later draw) are Xcode's but whose flattened images aren't
-  (`--config=relax_actool_icon_composer` accepts them;
+- tvOS app icons, and Icon Composer icons without their flattened images
+  pre-rendered: their layers (all iOS and macOS 26 and later draw) are
+  Xcode's, and their flattened images are Xcode's when
+  `tools/icon_flattened.py` (on a Mac with Xcode) has written them into the
+  document's `Flattened/` folder, else this actool's own
+  (`--config=relax_actool_icon_composer` accepts those;
   [docs/clean-room/actool.md](docs/clean-room/actool.md)).
 - Vector images (PDF, SVG) in image sets: Xcode keeps the file and draws it
   into a bitmap at each scale with CoreGraphics, which this actool doesn't

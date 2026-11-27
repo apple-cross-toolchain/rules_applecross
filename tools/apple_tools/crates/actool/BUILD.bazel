@@ -23,6 +23,7 @@ rust_binary(
         "@crates//:resvg",
         "@crates//:roxmltree",
         "@crates//:serde_json",
+        "@crates//:sha2",
         "@crates//:svgtypes",
         "@crates//:tiny-skia",
         "@crates//:usvg",

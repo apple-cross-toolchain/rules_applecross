@@ -18,6 +18,7 @@ png = "0.17"
 resvg = { version = "0.45", default-features = false }
 roxmltree = "0.20"
 serde_json = "1"
+sha2 = "0.10"
 svgtypes = "0.15"
 tiny-skia = "0.11"
 usvg = { version = "0.45", default-features = false }

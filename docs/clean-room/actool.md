@@ -232,11 +232,35 @@ flattened images' pixels. The flattened images (1024 px per appearance for
 iOS, 16 to 1024 px for macOS, the smallest packed together) are this actool's own: the
 document's appearance rendered flat (the fill, then each group's layers back
 to front with a blurred, downward-offset shadow; no glass, specular or
-translucency), stored as Xcode stores its. Strict (the default), this
-actool refuses Icon Composer documents, since those pixels can't be
-Xcode's; `--config=relax_actool_icon_composer` accepts them. An app built
-that way shows the document's light, dark, tinted and clear icons as Xcode's
-does on iOS and macOS 26 and later, which draw them from the layers.
+translucency), stored as Xcode stores its. An app built that way shows the
+document's light, dark, tinted and clear icons as Xcode's does on iOS and
+macOS 26 and later, which draw them from the layers.
+
+Xcode's own flattened images make the output Xcode's, byte for byte:
+`tools/icon_flattened.py DOC.icon`, run on a Mac with Xcode, compiles the
+document with Xcode's actool for iOS and macOS and writes them into the
+document's `Flattened/` folder (an `index.json` and lossless PNGs): the
+1024 px Any, Dark and Tintable images and the bundle's `60x60@2x` and
+`76x76@2x~ipad` icons, which Xcode draws from its 16-bit rendering; and for
+macOS the System appearance at 16 to 512 pt @2x and 1024 pt @1x (each size
+drawn anew, premultiplied as the catalog stores them) and the icon family's
+members. The index names a SHA-256 of the document's other files (each
+path, a NUL, its length and its bytes, in byte order of the paths), and
+this actool uses the images only while the document still has it: strict
+(the default), it compiles a document with a current `Flattened/` folder
+and refuses one without, or with a stale one (run the script again after
+editing the document). Xcode ignores the folder (its output is the same
+with it), and the folder's images are the document's own output, made by
+Xcode, not anything of Xcode's. `--config=relax_actool_icon_composer`
+accepts a document without them, its rasters this actool's own.
+
+Checked on Xcode 27.2: Visor's, Shireworks', Applications', Monitor's,
+Overcast's, Convo's, Nimbus' three and VisorIsomer's documents and a solid
+fill, each with its `Flattened/` folder, compiled for the simulator, for
+devices (CgBI icons) and for macOS give Xcode's output byte for byte: every
+file, and every rendition with its pixels. `tests/actool_icon` checks, off
+a Mac, that a folder's images (made up there) are what the output holds and
+that a stale one is refused.
 
 `tests/actool_icon` compiles 55 of these documents (Visor's, Isomer's,
 rules_apple's, and a sample of the probes and random batches) for the
@@ -278,9 +302,12 @@ pixel for pixel from outputs alone. Xcode's own are deterministic on a Mac
 Tintable raster came out different on a macOS VM with the same Xcode, while
 the Any and Dark ones and the bundle PNGs matched: perhaps because the VM's
 graphics are virtualized, so which is "Xcode's" may depend on the machine.
-Reproducing them exactly is left for later. Until then a document's rasters
-are this actool's own, and accepting them takes
-`--config=relax_actool_icon_composer`.
+Reproducing them exactly is left for later (black-box research has
+reproduced the stages after the GPU and a solid fill's three appearances;
+layers, glass and macOS's sizes not yet).
+Until then a document's rasters are Xcode's only from its `Flattened/`
+folder, else this actool's own, which `--config=relax_actool_icon_composer`
+accepts.
 
 ## Dark and tinted app icons
 

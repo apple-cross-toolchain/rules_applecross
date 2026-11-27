@@ -13,6 +13,7 @@ mod data_utis;
 mod dataset;
 mod directions;
 mod dmp2;
+mod flattened;
 mod icon;
 mod iconset;
 mod md5;
@@ -689,12 +690,14 @@ fn run(o: &Options) -> Result<Vec<PathBuf>, String> {
             if scan.icon_sets.iter().any(|(n, _)| n == name) {
                 return Err(format!("{name}: both an Icon Composer document and an app icon set; this actool compiles one"));
             }
-            if !o.relax_icon_composer {
-                // The layers are Xcode's, but the rasters beside them are
-                // this actool's own renderings: never Xcode's pixels.
-                return Err(format!("{}: Icon Composer documents' flattened images are this actool's own renderings, not Xcode's (docs/clean-room/actool.md); --config=relax_actool_icon_composer accepts them", doc.display()));
+            // Xcode's own flattened images, pre-rendered beside the document
+            // (tools/icon_flattened.py), make the output Xcode's; without
+            // them the rasters are this actool's own renderings.
+            let flat = flattened::read(doc)?;
+            if flat.is_none() && !o.relax_icon_composer {
+                return Err(format!("{}: Icon Composer documents' flattened images are Xcode's only when pre-rendered beside the document (tools/icon_flattened.py, on a Mac with Xcode, writes its Flattened folder); else this actool's own renderings, which --config=relax_actool_icon_composer accepts (docs/clean-room/actool.md)", doc.display()));
             }
-            return document_icon(o, &out_dir, platform, name, doc, outputs, images);
+            return document_icon(o, &out_dir, platform, name, doc, outputs, images, flat.as_ref());
         }
         (Some(name), None) if scan.sticker_icons.iter().any(|(n, _)| n == name) => None,
         (Some(name), None) => {
@@ -1187,7 +1190,8 @@ fn per_size_icon(o: &Options, out_dir: &Path, platform: &str, icon_name: &str, s
 /// An Icon Composer document, relaxed: its layers as Xcode compiles them,
 /// beside this actool's own renderings where Xcode writes its flattened
 /// images (docs/clean-room/actool.md#icon-composer-documents).
-fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &Path, mut outputs: Vec<PathBuf>, images: imageset::Compiled) -> Result<Vec<PathBuf>, String> {
+#[allow(clippy::too_many_arguments)]
+fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &Path, mut outputs: Vec<PathBuf>, images: imageset::Compiled, flat: Option<&flattened::Flattened>) -> Result<Vec<PathBuf>, String> {
     let mac = o.target_devices.iter().any(|d| d == "mac");
     let phone = o.target_devices.iter().any(|d| d == "iphone");
     let pad = o.target_devices.iter().any(|d| d == "ipad");
@@ -1214,19 +1218,34 @@ fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &
     if mac {
         // macOS: the light appearance at 16 to 512 pt @2x and 1024 pt @1x,
         // packed as an icon set's images are, and the icon family.
-        let flat = document.render_mac()?.to_bgra();
-        let at = |px: usize| image::resize(&flat, px, px).unpremultiplied_rgba();
+        // Xcode's, pre-rendered (each size drawn anew), else this actool's
+        // own rendering resampled to each.
+        let own = match flat {
+            Some(_) => None,
+            None => Some(document.render_mac()?.to_bgra()),
+        };
+        let at = |px: usize| own.as_ref().map(|own| image::resize(own, px, px).unpremultiplied_rgba());
         let mut slots = Vec::new();
         for (size, scale) in [(16, 2), (32, 2), (64, 2), (128, 2), (256, 2), (512, 2), (1024, 1)] {
             let filename = icon::raster_name(name, size, "NSAppearanceNameSystem");
-            slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file: PathBuf::new(), filename, image: Some(at((size * scale) as usize)), universal: false });
+            let image = match flat {
+                Some(f) => f.get(&format!("mac/{size}@{scale}x"))?.clone(),
+                None => at((size * scale) as usize).unwrap(),
+            };
+            slots.push(iconset::Slot { idiom: "mac", subtype: 0, size: size as f64, scale, file: PathBuf::new(), filename, image: Some(image), universal: false });
         }
         let rasters = iconset::compile_with(name, id, &slots, false, false, false, true, false)?;
+        let member = |kind: &str, px: usize| -> Result<image::Rgba, String> {
+            match flat {
+                Some(f) => Ok(f.get(&format!("mac/icns/{kind}"))?.clone()),
+                None => Ok(at(px).unwrap().premultiplied_round_trip()),
+            }
+        };
         let icns = image::icns(&[
-            (b"ic13", image::plain_png(&at(256).premultiplied_round_trip(), false)),
-            (b"ic11", image::plain_png(&at(32).premultiplied_round_trip(), false)),
-            (b"ic04", image::icns_argb(&at(16).premultiplied_round_trip())),
-            (b"ic07", image::plain_png(&at(128).premultiplied_round_trip(), false)),
+            (b"ic13", image::plain_png(&member("ic13", 256)?, false)),
+            (b"ic11", image::plain_png(&member("ic11", 32)?, false)),
+            (b"ic04", image::icns_argb(&member("ic04", 16)?)),
+            (b"ic07", image::plain_png(&member("ic07", 128)?, false)),
         ]);
         let p = out_dir.join(format!("{name}.icns"));
         std::fs::write(&p, icns).map_err(|e| e.to_string())?;
@@ -1238,11 +1257,17 @@ fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &
     // BGRA even when grey) and the index of its sizes; the bundle's icons
     // from the default appearance's, as an icon set's.
     let mut renditions = Vec::new();
-    let any = document.render(icon::Appearance::Light)?;
+    let raster = |label: &str, appearance: icon::Appearance| -> Result<image::Rgba, String> {
+        match flat {
+            Some(f) => Ok(f.get(&format!("ios/{label}"))?.clone()),
+            None => document.render(appearance),
+        }
+    };
+    let any = raster("any", icon::Appearance::Light)?;
     let rasters = [
         (None, "UIAppearanceAny", any.clone()),
-        (Some(icon::Appearance::Dark.value(false)), "UIAppearanceDark", document.render(icon::Appearance::Dark)?),
-        (Some(TINTED), "ISAppearanceTintable", document.render(icon::Appearance::Tinted)?),
+        (Some(icon::Appearance::Dark.value(false)), "UIAppearanceDark", raster("dark", icon::Appearance::Dark)?),
+        (Some(TINTED), "ISAppearanceTintable", raster("tintable", icon::Appearance::Tinted)?),
     ];
     for (wanted, idiom) in [(phone, car::IDIOM_PHONE), (pad, car::IDIOM_PAD)] {
         if !wanted {
@@ -1263,8 +1288,13 @@ fn document_icon(o: &Options, out_dir: &Path, platform: &str, name: &str, doc: &
     }
     let bgra = any.to_bgra();
     let cgbi = !o.platform.ends_with("simulator") && o.compress_pngs;
-    for (file, size) in [(format!("{name}60x60@2x.png"), 120), (format!("{name}76x76@2x~ipad.png"), 152)] {
-        let resized = image::resize(&bgra, size, size);
+    for (file, label, size) in [(format!("{name}60x60@2x.png"), "60x60@2x", 120), (format!("{name}76x76@2x~ipad.png"), "76x76@2x~ipad", 152)] {
+        // Xcode draws these from its 16-bit rendering: its own, pre-rendered,
+        // else this actool's resampled.
+        let resized = match flat {
+            Some(f) => f.get(&format!("ios/{label}"))?.to_bgra(),
+            None => image::resize(&bgra, size, size),
+        };
         let png = if cgbi { image::cgbi_png(&resized) } else { image::plain_png(&resized.opaque_rgba().ok_or("a translucent rendering")?, true) };
         let p = out_dir.join(file);
         std::fs::write(&p, png).map_err(|e| e.to_string())?;
