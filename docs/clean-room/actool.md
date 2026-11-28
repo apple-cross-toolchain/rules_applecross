@@ -252,7 +252,13 @@ and refuses one without, or with a stale one (run the script again after
 editing the document). Xcode ignores the folder (its output is the same
 with it), and the folder's images are the document's own output, made by
 Xcode, not anything of Xcode's. `--config=relax_actool_icon_composer`
-accepts a document without them, its rasters this actool's own.
+accepts a document without them, its rasters this actool's own. The
+pixels are Xcode's on the host that drew them: they come from the GPU
+(Metal, through RenderBox) and the host's vImage, so another macOS build or
+machine can move a few channels by one (Visor's icons drawn on a Nimbus
+macOS VM against its release from GitHub's xcode-27 image: 4 of 57,600
+channels of one bundle icon), while one host gives the same pixels every
+time. The index records the Xcode, machine model and macOS build.
 
 Checked on Xcode 27.2: Visor's, Shireworks', Applications', Monitor's,
 Overcast's, Convo's, Nimbus' three and VisorIsomer's documents and a solid

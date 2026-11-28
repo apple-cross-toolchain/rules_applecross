@@ -20,6 +20,10 @@ otherwise. Run it again whenever the document changes.
 
 Each image is a lossless 8-bit RGBA PNG holding exactly the bytes named in
 the index (`rgba`, or `bgra-premultiplied` for what the catalog stores).
+The index also records the Xcode, machine model and macOS build that drew
+them: the pixels come from the host's GPU (Metal) and vImage, so another
+macOS build or machine can differ by one in a few channels; Xcode on one
+host is deterministic. Render on the host whose output you mean to match.
 Nothing here is checked by this script beyond Xcode's own output: compare a
 build with `tools/xcode_equivalence.py`.
 """
@@ -265,9 +269,10 @@ def flatten(doc):
             images["mac/icns/" + kind] = ("rgba", w, h, rgba)
     version = subprocess.run(["xcodebuild", "-version"], check=True, capture_output=True, text=True).stdout.split()
     machine = subprocess.run(["sysctl", "-n", "hw.model"], capture_output=True, text=True).stdout.strip()
+    macos = subprocess.run(["sw_vers", "-buildVersion"], capture_output=True, text=True).stdout.strip()
     out = os.path.join(doc, SIDECAR)
     os.makedirs(out, exist_ok=True)
-    index = {"format": FORMAT, "document": key, "xcode": " ".join(version), "machine": machine, "images": {}}
+    index = {"format": FORMAT, "document": key, "xcode": " ".join(version), "machine": machine, "macos": macos, "images": {}}
     for label, (layout, w, h, data) in sorted(images.items()):
         file = label.replace("/", "_") + ".png"
         write_png(os.path.join(out, file), w, h, data)
