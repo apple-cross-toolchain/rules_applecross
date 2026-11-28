@@ -116,7 +116,8 @@ Known variations:
   Xcode also names its flattened images with a fresh UUID, process id and
   time, and gives the icon's facet part 220 or 245 at random; the
   comparison allows those too (and, accepting
-  `--config=relax_actool_icon_composer`, those images' pixels).
+  `--config=relax_actool_icon_composer` without a `Flattened/` folder,
+  those images' pixels).
 - `docc` writes each JSON object of a DocC archive with its keys in a
   random order; ours sets `SWIFT_DETERMINISTIC_HASHING=1`, and the
   comparison sorts them ([docc.md](docc.md)).
